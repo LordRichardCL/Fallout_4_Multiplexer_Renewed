@@ -26,8 +26,6 @@ jobs:
   windows:
     name: Windows (MSVC, Qt 6)
     runs-on: windows-2022
-    env:
-      VCPKG_ROOT: C:/vcpkg
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
@@ -37,10 +35,25 @@ jobs:
           version: '6.7.3'
           arch: win64_msvc2019_64
           cache: true
+      - name: Locate vcpkg
+        shell: pwsh
+        run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
       - name: Configure
-        run: cmake --preset windows-msvc
+        shell: pwsh
+        run: |
+          cmake --preset windows-msvc *>&1 | Tee-Object -FilePath configure.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content configure.log -Tail 40 | ForEach-Object { Write-Output "::error::$_" }
+            exit 1
+          }
       - name: Build
-        run: cmake --build --preset windows-msvc
+        shell: pwsh
+        run: |
+          cmake --build --preset windows-msvc *>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            Select-String -Path build.log -Pattern 'error' | Select-Object -First 40 | ForEach-Object { Write-Output "::error::$($_.Line)" }
+            exit 1
+          }
       - name: Test
         run: ctest --preset windows-msvc
       - name: Package
