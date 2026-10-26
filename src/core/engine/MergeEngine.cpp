@@ -1,6 +1,7 @@
 #include "engine/MergeEngine.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <map>
 #include <set>
 

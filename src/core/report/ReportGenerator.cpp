@@ -4,6 +4,7 @@
 #include "util/Text.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -61,39 +62,90 @@ tr:hover td{background:#1a221e}
 .note{color:var(--muted);font-size:12px;margin-top:6px}
 )CSS";
 
+struct Palette {
+    const char* bg;
+    const char* panel;
+    const char* header;
+    const char* text;
+    const char* muted;
+    const char* accent;
+};
+
 class Html {
 public:
-    explicit Html(const std::string& title, const std::string& subtitle)
+    Html(const std::string& title, const std::string& subtitle, ReportStyle style = ReportStyle::Rich) : style_(style)
     {
-        out_ = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" "
-               "content=\"width=device-width,initial-scale=1\"><title>" +
-               htmlEscape(title) + "</title><style>" + kCss + "</style></head><body><header><h1>" + htmlEscape(title) +
-               "</h1><p>" + htmlEscape(subtitle) + "</p></header><main>";
+        pal_ = style == ReportStyle::Print ? Palette{"#ffffff", "#f3f6f4", "#e3ebe6", "#1b2420", "#5b6b63", "#1f8a52"}
+                                           : Palette{"#0f1311", "#161c19", "#1b231f", "#d7e4dc", "#8aa196", "#3ddc84"};
+        if (style == ReportStyle::Rich) {
+            out_ = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" "
+                   "content=\"width=device-width,initial-scale=1\"><title>" +
+                   htmlEscape(title) + "</title><style>" + kCss + "</style></head><body><header><h1>" + htmlEscape(title) +
+                   "</h1><p>" + htmlEscape(subtitle) + "</p></header><main>";
+        } else {
+            out_ = std::string("<html><head><meta charset=\"utf-8\"><title>") + htmlEscape(title) +
+                   "</title></head><body style=\"color:" + pal_.text + ";background-color:" + pal_.bg + "\">" +
+                   "<h1 style=\"color:" + pal_.accent + "\">" + htmlEscape(title) + "</h1><p style=\"color:" + pal_.muted +
+                   "\">" + htmlEscape(subtitle) + "</p>";
+        }
     }
-    void h2(const std::string& s) { out_ += "<h2>" + htmlEscape(s) + "</h2>"; }
-    void note(const std::string& s) { out_ += "<p class=\"note\">" + htmlEscape(s) + "</p>"; }
+    void h2(const std::string& s)
+    {
+        if (style_ == ReportStyle::Rich)
+            out_ += "<h2>" + htmlEscape(s) + "</h2>";
+        else
+            out_ += std::string("<h3 style=\"color:") + pal_.text + "\">" + htmlEscape(s) + "</h3>";
+    }
+    void note(const std::string& s)
+    {
+        if (style_ == ReportStyle::Rich)
+            out_ += "<p class=\"note\">" + htmlEscape(s) + "</p>";
+        else
+            out_ += std::string("<p style=\"color:") + pal_.muted + "\">" + htmlEscape(s) + "</p>";
+    }
     void cards(const std::vector<std::pair<std::string, std::string>>& items)
     {
-        out_ += "<div class=\"cards\">";
+        if (style_ == ReportStyle::Rich) {
+            out_ += "<div class=\"cards\">";
+            for (const auto& [l, v] : items)
+                out_ += "<div class=\"card\"><div class=\"v\">" + htmlEscape(v) + "</div><div class=\"l\">" + htmlEscape(l) +
+                        "</div></div>";
+            out_ += "</div>";
+            return;
+        }
+        out_ += "<table cellspacing=\"6\" cellpadding=\"8\"><tr>";
         for (const auto& [l, v] : items)
-            out_ += "<div class=\"card\"><div class=\"v\">" + htmlEscape(v) + "</div><div class=\"l\">" + htmlEscape(l) +
-                    "</div></div>";
-        out_ += "</div>";
+            out_ += std::string("<td style=\"background-color:") + pal_.panel + "\"><span style=\"font-size:16pt;color:" +
+                    pal_.accent + "\">" + htmlEscape(v) + "</span><br><span style=\"color:" + pal_.muted + "\">" +
+                    htmlEscape(l) + "</span></td>";
+        out_ += "</tr></table>";
     }
     void tableStart(const std::vector<std::string>& headers)
     {
-        out_ += "<table><thead><tr>";
+        if (style_ == ReportStyle::Rich)
+            out_ += "<table><thead><tr>";
+        else
+            out_ += std::string("<table width=\"100%\" cellspacing=\"0\" cellpadding=\"4\" style=\"background-color:") +
+                    pal_.panel + "\"><thead><tr>";
         for (const auto& h : headers)
-            out_ += "<th>" + htmlEscape(h) + "</th>";
+            out_ += style_ == ReportStyle::Rich
+                        ? "<th>" + htmlEscape(h) + "</th>"
+                        : std::string("<th align=\"left\" style=\"background-color:") + pal_.header + ";color:" + pal_.muted +
+                              "\">" + htmlEscape(h) + "</th>";
         out_ += "</tr></thead><tbody>";
     }
-    // Cells prefixed with "class:" set a CSS class: {"Error", "class:Error"}.
+    // classes: CSS class per cell (Error, Warning, ok, mono, ...).
     void row(const std::vector<std::string>& cells, const std::vector<std::string>& classes = {})
     {
         out_ += "<tr>";
         for (size_t i = 0; i < cells.size(); ++i) {
             std::string cls = i < classes.size() ? classes[i] : std::string();
-            out_ += cls.empty() ? "<td>" : "<td class=\"" + cls + "\">";
+            if (style_ == ReportStyle::Rich) {
+                out_ += cls.empty() ? "<td>" : "<td class=\"" + cls + "\">";
+            } else {
+                std::string color = colorFor(cls);
+                out_ += color.empty() ? "<td>" : "<td style=\"color:" + color + "\">";
+            }
             out_ += htmlEscape(cells[i]) + "</td>";
         }
         out_ += "</tr>";
@@ -106,11 +158,28 @@ public:
     }
     std::string finish()
     {
-        out_ += "<p class=\"note\">Generated by Fallout 4 Multiplexer Renewed on " + now() + ".</p></main></body></html>";
+        note("Generated by Fallout 4 Multiplexer Renewed on " + now() + ".");
+        out_ += style_ == ReportStyle::Rich ? "</main></body></html>" : "</body></html>";
         return out_;
     }
 
 private:
+    std::string colorFor(const std::string& cls) const
+    {
+        bool print = style_ == ReportStyle::Print;
+        if (cls == "Error" || cls == "High" || cls == "Critical" || cls == "Replaced")
+            return print ? "#c62828" : "#ff5c5c";
+        if (cls == "Warning" || cls == "Medium" || cls == "Merged")
+            return print ? "#a66b00" : "#f5c542";
+        if (cls == "ok" || cls == "Winning")
+            return pal_.accent;
+        if (cls == "Info" || cls == "Low")
+            return print ? "#1565c0" : "#5cb8ff";
+        return {};
+    }
+
+    ReportStyle style_;
+    Palette pal_;
     std::string out_;
 };
 
@@ -125,7 +194,7 @@ std::string subtitle(const ReportContext& ctx)
 
 std::string conflictHtml(const ReportContext& ctx)
 {
-    Html h("Conflict Report", subtitle(ctx));
+    Html h("Conflict Report", subtitle(ctx), ctx.style);
     const auto& s = *ctx.session;
     const auto& c = *ctx.conflicts;
     h.cards({{"Total Conflicts", formatCount(c.conflictCount())},
@@ -175,7 +244,7 @@ std::string conflictHtml(const ReportContext& ctx)
 
 std::string assetHtml(const ReportContext& ctx)
 {
-    Html h("Asset Report", subtitle(ctx));
+    Html h("Asset Report", subtitle(ctx), ctx.style);
     const auto& s = *ctx.session;
     const auto& a = s.assets;
     std::map<std::string, std::pair<size_t, size_t>> byType;
@@ -233,7 +302,7 @@ std::string assetHtml(const ReportContext& ctx)
 
 std::string dependencyHtml(const ReportContext& ctx)
 {
-    Html h("Dependency Report", subtitle(ctx));
+    Html h("Dependency Report", subtitle(ctx), ctx.style);
     const auto& s = *ctx.session;
     std::map<Eligibility, size_t> counts;
     for (const auto& p : s.plugins)
@@ -276,7 +345,7 @@ std::string dependencyHtml(const ReportContext& ctx)
 
 std::string compilationHtml(const ReportContext& ctx)
 {
-    Html h("Compilation Report", subtitle(ctx));
+    Html h("Compilation Report", subtitle(ctx), ctx.style);
     const auto& s = *ctx.session;
     const auto& c = *ctx.compiled;
     size_t used = 0;
@@ -325,7 +394,7 @@ std::string compilationHtml(const ReportContext& ctx)
 
 std::string validationHtml(const ReportContext& ctx)
 {
-    Html h("Validation Report", subtitle(ctx));
+    Html h("Validation Report", subtitle(ctx), ctx.style);
     const auto& v = *ctx.validation;
     h.cards({{"Checks", formatCount(v.checks)},
              {"Passed", formatCount(v.passed)},

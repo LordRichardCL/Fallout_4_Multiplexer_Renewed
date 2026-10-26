@@ -10,6 +10,8 @@
 #include <atomic>
 #include <cstdio>
 #include <fstream>
+#include <iterator>
+#include <optional>
 #include <map>
 #include <numeric>
 #include <set>
@@ -277,9 +279,16 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 mo.forcedWinner = c.forced;
                 MergeResult mr = MergeEngine::merge(chain, mo);
 
-                if (c.retainedWinner && c.forced < 0 && sameRecord(mr.fields, chain.back())) {
-                    mergeIssues[ci].push_back({Severity::Info, "Identical", "", inst[0].key, {}});
-                    return; // the retained winner already produces this state
+                // Once compiled plugins are disabled, the last retained instance is what the game
+                // loads. If the result equals it, an override would only be an ITM.
+                for (size_t i = inst.size(); i-- > 0;) {
+                    if (out.compiledFlag_[inst[i].plugin])
+                        continue;
+                    if (sameRecord(mr.fields, chain[i])) {
+                        mergeIssues[ci].push_back({Severity::Info, "Identical", "", inst[0].key, {}});
+                        return;
+                    }
+                    break;
                 }
                 if (c.isNew && (mr.fields.flags() & RecordFlags::Deleted)) {
                     mergeIssues[ci].push_back({Severity::Info, "Deleted",

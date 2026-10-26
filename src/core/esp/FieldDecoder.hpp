@@ -35,7 +35,7 @@ struct LocalizedField {
 };
 
 struct DecodedLayout {
-    std::vector<FormIdSlot> slots;
+    std::vector<FormIdSlot> formIdSlots;
     std::vector<LocalizedField> localized;
     std::vector<HeuristicSpan> heuristic;
     std::vector<DecodeIssue> issues;

@@ -4,6 +4,7 @@
 #include "util/Text.hpp"
 
 #include <set>
+#include <algorithm>
 
 #include <spdlog/spdlog.h>
 

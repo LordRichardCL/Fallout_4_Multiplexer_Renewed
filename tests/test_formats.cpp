@@ -126,9 +126,9 @@ TEST(decoder_vmad_condition_lists)
     auto layout = decodeLayout(defs, Signature("WEAP"), subs);
     CHECK(layout.issues.empty());
     // VMAD: 1 object + 2 array objects, KWDA: 2, CTDA: HasPerk param.
-    CHECK_EQ(layout.slots.size(), size_t(6));
+    CHECK_EQ(layout.formIdSlots.size(), size_t(6));
     size_t vmadSlots = 0;
-    for (const auto& s : layout.slots)
+    for (const auto& s : layout.formIdSlots)
         if (s.sub == 1) {
             ++vmadSlots;
             uint32_t v = loadLE<uint32_t>(subs[1].data.data() + s.offset);
@@ -136,7 +136,7 @@ TEST(decoder_vmad_condition_lists)
         }
     CHECK_EQ(vmadSlots, size_t(3));
     bool perk = false;
-    for (const auto& s : layout.slots)
+    for (const auto& s : layout.formIdSlots)
         if (s.sub == 3 && s.offset == 12)
             perk = true;
     CHECK(perk);
@@ -174,7 +174,7 @@ TEST(decoder_object_template_and_omod)
     t.write<float>(0);
     auto layout = decodeLayout(defs, Signature("WEAP"), {Subrecord(Signature("OBTS"), t.take())});
     CHECK(layout.issues.empty());
-    CHECK_EQ(layout.slots.size(), size_t(3));
+    CHECK_EQ(layout.formIdSlots.size(), size_t(3));
 
     BinaryWriter d;
     d.write<uint32_t>(1); // includes
@@ -203,12 +203,12 @@ TEST(decoder_object_template_and_omod)
     d.write<float>(0);
     auto omod = decodeLayout(defs, Signature("OMOD"), {Subrecord(Signature("DATA"), d.take())});
     CHECK(omod.issues.empty());
-    CHECK_EQ(omod.slots.size(), size_t(4));
+    CHECK_EQ(omod.formIdSlots.size(), size_t(4));
 
     // A malformed OBTS is reported and scanned heuristically, never trusted.
     auto bad = decodeLayout(defs, Signature("WEAP"), {raw("OBTS", {1, 2, 3, 4, 5, 6, 7, 8, 9})});
     CHECK(!bad.issues.empty());
-    CHECK(bad.slots.empty());
+    CHECK(bad.formIdSlots.empty());
     CHECK(!bad.heuristic.empty());
 }
 

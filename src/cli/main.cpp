@@ -267,7 +267,7 @@ int cmdDump(const Args& a)
         for (uint32_t i = 0; i < rec.subrecords.size(); ++i) {
             const auto& sr = rec.subrecords[i];
             std::string refs;
-            for (const auto& slot : layout.slots)
+            for (const auto& slot : layout.formIdSlots)
                 if (slot.sub == i && slot.offset + 4 <= sr.data.size())
                     refs += " @" + std::to_string(slot.offset) + "=" +
                             formatFormId(loadLE<uint32_t>(sr.data.data() + slot.offset));

@@ -15,6 +15,10 @@ namespace fo4mx {
 enum class ReportKind : uint8_t { Conflict, Asset, Dependency, Compilation, Validation };
 const char* reportKindName(ReportKind k);
 
+// Rich: modern CSS for browsers. Preview/Print: the CSS subset Qt's rich text
+// engine understands (dark for the in-app preview, light for PDF output).
+enum class ReportStyle : uint8_t { Rich, Preview, Print };
+
 struct ReportContext {
     const Session* session = nullptr;
     const ConflictReport* conflicts = nullptr;
@@ -22,6 +26,7 @@ struct ReportContext {
     const CompiledOutput* compiled = nullptr;
     const ValidationReport* validation = nullptr;
     size_t maxRows = 5000; // per table in HTML output
+    ReportStyle style = ReportStyle::Rich;
 };
 
 class ReportGenerator {

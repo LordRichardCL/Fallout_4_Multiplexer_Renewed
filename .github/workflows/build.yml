@@ -1,0 +1,59 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux (build + tests)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build qt6-base-dev libqt6sql6-sqlite libspdlog-dev libsqlite3-dev zlib1g-dev libgl1-mesa-dev
+      - name: Configure
+        run: cmake --preset linux-dev
+      - name: Build
+        run: cmake --build --preset linux-dev
+      - name: Test
+        run: ctest --preset linux-dev
+
+  windows:
+    name: Windows (MSVC, Qt 6)
+    runs-on: windows-2022
+    env:
+      VCPKG_ROOT: C:/vcpkg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.3'
+          arch: win64_msvc2019_64
+          cache: true
+      - name: Configure
+        run: cmake --preset windows-msvc
+      - name: Build
+        run: cmake --build --preset windows-msvc
+      - name: Test
+        run: ctest --preset windows-msvc
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "package/Fallout4MultiplexerRenewed"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item build/windows-msvc/src/gui/Fallout4MultiplexerRenewed.exe $out
+          Copy-Item build/windows-msvc/src/cli/fo4mx.exe $out
+          Copy-Item build/windows-msvc/vcpkg_installed/x64-windows/bin/*.dll $out
+          windeployqt --release --no-translations --sql $out/Fallout4MultiplexerRenewed.exe
+          Copy-Item README.md, docs -Destination $out -Recurse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Fallout4MultiplexerRenewed-windows-x64
+          path: package/Fallout4MultiplexerRenewed

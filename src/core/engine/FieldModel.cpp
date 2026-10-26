@@ -3,6 +3,7 @@
 #include "util/Text.hpp"
 
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <map>
 

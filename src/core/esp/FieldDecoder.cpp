@@ -16,7 +16,7 @@ const char* severityName(Severity s)
 
 bool DecodedLayout::slotCovers(uint32_t sub, uint32_t offset) const
 {
-    for (const auto& s : slots)
+    for (const auto& s : formIdSlots)
         if (s.sub == sub && offset < s.offset + 4 && s.offset < offset + 4)
             return true;
     return false;
@@ -59,7 +59,7 @@ public:
     }
 
 private:
-    void slot(uint32_t sub, size_t offset) { out_.slots.push_back({sub, static_cast<uint32_t>(offset)}); }
+    void slot(uint32_t sub, size_t offset) { out_.formIdSlots.push_back({sub, static_cast<uint32_t>(offset)}); }
     void heuristic(uint32_t sub, uint32_t begin, uint32_t end)
     {
         if (end >= begin + 4)
@@ -238,7 +238,7 @@ private:
 
     void decodeVmad(uint32_t i, const Subrecord& sr)
     {
-        size_t slotsBefore = out_.slots.size();
+        size_t slotsBefore = out_.formIdSlots.size();
         try {
             BinaryReader r(sr.data);
             int16_t version = r.read<int16_t>();
@@ -254,7 +254,7 @@ private:
                 heuristic(i, static_cast<uint32_t>(r.position()), static_cast<uint32_t>(sr.data.size()));
             }
         } catch (const FormatError& e) {
-            out_.slots.resize(slotsBefore);
+            out_.formIdSlots.resize(slotsBefore);
             issue(Severity::Warning, sr.signature, std::string("script data not fully decoded: ") + e.what());
             heuristic(i, 0, static_cast<uint32_t>(sr.data.size()));
         }
@@ -310,7 +310,7 @@ private:
 
     void decodeObjectTemplate(uint32_t i, const Subrecord& sr)
     {
-        size_t slotsBefore = out_.slots.size();
+        size_t slotsBefore = out_.formIdSlots.size();
         try {
             BinaryReader r(sr.data);
             uint32_t includeCount = r.read<uint32_t>();
@@ -330,7 +330,7 @@ private:
             includes(r, i, includeCount);
             objectModProperties(r, i, propertyCount);
         } catch (const FormatError& e) {
-            out_.slots.resize(slotsBefore);
+            out_.formIdSlots.resize(slotsBefore);
             issue(Severity::Warning, sr.signature, std::string("object template not decoded: ") + e.what());
             heuristic(i, 0, static_cast<uint32_t>(sr.data.size()));
         }
@@ -338,7 +338,7 @@ private:
 
     void decodeOmodData(uint32_t i, const Subrecord& sr)
     {
-        size_t slotsBefore = out_.slots.size();
+        size_t slotsBefore = out_.formIdSlots.size();
         try {
             BinaryReader r(sr.data);
             uint32_t includeCount = r.read<uint32_t>();
@@ -364,7 +364,7 @@ private:
             if (!r.atEnd())
                 throw FormatError(std::to_string(r.remaining()) + " trailing bytes");
         } catch (const FormatError& e) {
-            out_.slots.resize(slotsBefore);
+            out_.formIdSlots.resize(slotsBefore);
             issue(Severity::Warning, sr.signature, std::string("OMOD data not decoded: ") + e.what());
             heuristic(i, 0, static_cast<uint32_t>(sr.data.size()));
         }

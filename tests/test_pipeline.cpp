@@ -222,7 +222,7 @@ TEST(pipeline_end_to_end)
     // Script properties were rewritten too.
     auto layout = decodeLayout(RecordDefinitions::get(), Signature("WEAP"), gun->record.subrecords);
     size_t vmadToKeyword = 0, vmadToBase = 0;
-    for (const auto& slot : layout.slots) {
+    for (const auto& slot : layout.formIdSlots) {
         const auto& sr = gun->record.subrecords[slot.sub];
         if (sr.signature != Signature("VMAD"))
             continue;
@@ -312,6 +312,29 @@ TEST(pipeline_allocation_strategies_respect_dependencies)
             CHECK_EQ(out.byEditorId("ModA_Keyword")->plugin, std::string("Dummy_Plugin_10.esp"));
         }
     }
+}
+
+TEST(pipeline_skips_overrides_identical_to_retained_state)
+{
+    auto root = buildInstall("itm");
+    // ModD only carries an identical copy of a Fallout4.esm record (an ITM) plus one new record.
+    writePlugin(root / "Game" / "Data" / "ModD.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x00000801, {zs("EDID", "BaseKeyword2")}),
+                 record("KYWD", 0x01000800, {zs("EDID", "ModD_Keyword")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModD.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto* c = p.compiledOutput();
+    FormKey itm{p.session().findPlugin("Fallout4.esm")->index, 0x801};
+    CHECK(c->indexByKey.count(itm) == 0); // not carried into the output
+    CHECK(c->identicalToRetained >= 1);
+    FormKey added{p.session().findPlugin("ModD.esp")->index, 0x800};
+    CHECK(c->indexByKey.count(added) == 1);
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
 }
 
 TEST(pipeline_no_merge_and_exclusions)

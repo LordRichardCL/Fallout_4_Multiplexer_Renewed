@@ -69,7 +69,7 @@ NormRecord Normalizer::normalize(const Record& rec, PluginIndex plugin)
     }
 
     // Described FormIDs: resolve and zero.
-    for (const auto& slot : layout.slots) {
+    for (const auto& slot : layout.formIdSlots) {
         auto& s = out.subs[slot.sub];
         if (slot.offset + 4 > s.bytes.size())
             continue;
