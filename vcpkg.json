@@ -1,0 +1,6 @@
+{
+  "name": "fallout4-multiplexer-renewed",
+  "version-string": "0.1.0",
+  "description": "Fallout 4 mod compilation, conflict resolution and load order intelligence platform",
+  "dependencies": [ "zlib", "sqlite3", "spdlog" ]
+}
