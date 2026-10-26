@@ -1,0 +1,28 @@
+# Build
+build/
+out/
+cmake-build-*/
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+CMakeUserPresets.json
+
+# Qt
+*.qm
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+
+# Generated data
+*.sqlite
+*.db
+Dummy_Plugin_*.esp
