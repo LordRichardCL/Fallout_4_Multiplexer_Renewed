@@ -6,6 +6,7 @@ add_executable(Fallout4MultiplexerRenewed WIN32
     main.cpp
     AppController.cpp
     MainWindow.cpp
+    SetupDialog.cpp
     Theme.cpp
     Format.cpp
     widgets/GraphView.cpp

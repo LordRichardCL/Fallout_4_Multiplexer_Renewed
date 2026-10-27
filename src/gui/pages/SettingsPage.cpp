@@ -1,6 +1,7 @@
 #include "pages/SettingsPage.hpp"
 
 #include "Format.hpp"
+#include "SetupDialog.hpp"
 #include "widgets/Widgets.hpp"
 
 #include "util/Platform.hpp"
@@ -39,8 +40,9 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     l->setContentsMargins(28, 24, 28, 24);
     l->setSpacing(12);
 
+    auto* setupBtn = makeButton("Open Setup Screen");
     auto* saveBtn = makeButton("Save Settings", "Primary");
-    l->addWidget(makePageHeader("Settings", "Where your game and mods are, and how analysis behaves.", {saveBtn}));
+    l->addWidget(makePageHeader("Settings", "Where your game and mods are, and how analysis behaves.", {setupBtn, saveBtn}));
 
     auto* installBox = new QGroupBox("Installation");
     auto* il = new QVBoxLayout(installBox);
@@ -116,6 +118,12 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     l->addStretch();
 
     connect(saveBtn, &QPushButton::clicked, this, [this] { save(); });
+    connect(setupBtn, &QPushButton::clicked, this, [this] {
+        SetupDialog setup(app_, this);
+        if (setup.exec() == QDialog::Accepted)
+            status_->setText("Setup saved. Run Scan to apply installation changes.");
+    });
+    connect(app_, &AppController::settingsChanged, this, [this] { load(); });
     connect(group, &QButtonGroup::buttonToggled, this, [this] { updateVisibility(); });
     connect(mo2Path_, &QLineEdit::editingFinished, this, [this] { reloadProfiles(); });
     connect(detect, &QPushButton::clicked, this, [this] {

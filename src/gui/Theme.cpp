@@ -28,6 +28,12 @@ QToolTip { background: #1c2420; color: #d7e4dc; border: 1px solid #2a3530; paddi
 #PageSubtitle { color: #8aa196; }
 #SectionTitle { font-size: 11pt; font-weight: 600; color: #cfe0d6; padding-top: 6px; }
 
+#SetupHero { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #13261c, stop:1 #0f1311); border-bottom: 1px solid #26302b; }
+#SetupTitle { color: #3ddc84; font-size: 20pt; font-weight: 600; }
+#SetupTagline { color: #8aa196; font-size: 9pt; letter-spacing: 1px; }
+#SetupFooter { background: #121815; border-top: 1px solid #26302b; }
+#LoadOrderPreview { font-family: "Consolas", "DejaVu Sans Mono", monospace; }
+
 #Card { background: #161c19; border: 1px solid #26302b; border-radius: 10px; }
 #CardValue { font-size: 20pt; font-weight: 600; color: #3ddc84; }
 #CardLabel { color: #8aa196; font-size: 8pt; letter-spacing: 1px; }
@@ -39,6 +45,7 @@ QPushButton:pressed { background: #1a2a21; }
 QPushButton:disabled { color: #5a6a62; border-color: #222b27; background: #151b18; }
 QPushButton#Primary { background: #1f6e45; border-color: #3ddc84; color: #eafff2; font-weight: 600; }
 QPushButton#Primary:hover { background: #26844f; }
+QPushButton#Primary:disabled { background: #151b18; border-color: #222b27; color: #5a6a62; }
 QPushButton#Danger { border-color: #ff5c5c; color: #ffb3b3; }
 QPushButton#Chip { border-radius: 12px; padding: 4px 12px; background: #161c19; }
 QPushButton#Chip:checked { background: #1a2a21; border-color: #3ddc84; color: #3ddc84; }

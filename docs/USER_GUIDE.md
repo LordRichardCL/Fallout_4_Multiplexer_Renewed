@@ -6,9 +6,23 @@
 - Work on a **new game** or a save you can afford to lose. Compiled records get new FormIDs.
 - Fallout 4 **1.10.163** (Old Gen) is the supported runtime.
 
-## 1. Settings
+## 1. Setup
 
-Open **Settings** and choose your installation type.
+![Setup](images/00-setup.png)
+
+The **Setup** screen opens when the app starts.
+
+1. **How are your mods installed?** Mod Organizer 2, Vortex, or manually.
+2. **Folders.** The Fallout 4 folder (**Find** reads it from the registry), the MO2 instance (**Find** looks in `%LOCALAPPDATA%\ModOrganizer`) and profile, and the output folder for the generated plugins. Leave the output folder empty to choose it automatically.
+3. **Load order.** Leave `plugins.txt` empty to use the one your mod manager uses, or select another file.
+
+The **Checks** list confirms that the game, the mod manager and the load order were found. The right-hand side shows the exact load order that will be used, with inactive plugins greyed out. **Save and Continue** is available once every check passes. **Skip for Now** opens the app without saving.
+
+Untick **Show this screen at start-up** to go straight to the Dashboard next time. The screen still appears if the saved folders stop working, for example after moving the game. **Settings → Open Setup Screen** opens it at any time.
+
+## 2. Settings
+
+**Settings** holds the same installation details plus everything else. Choose your installation type:
 
 | Type | What to enter |
 |---|---|
@@ -20,11 +34,11 @@ Optional overrides: a different `plugins.txt`, a different INI folder, and the s
 
 **Never compile these plugins** lets you keep plugins in the load order. For example, keep a patch you are still editing.
 
-## 2. Scan
+## 3. Scan
 
 **Dashboard → Scan** builds the virtual Data folder and reads every plugin, archive and loose file. The dashboard then shows mods, plugins (ESM/ESP/ESL), archives, loose files, records and eligibility.
 
-## 3. Analyse
+## 4. Analyse
 
 **Analyse** walks every override chain and classifies conflicts, builds the record reference graph and evaluates compilation eligibility.
 
@@ -58,7 +72,7 @@ Select a record to see the override chain and a grid of every field per plugin:
 - **Records**: search an Editor ID or FormID to see what a record references (green) and what references it (yellow). Double-click to re-centre.
 - **Missing Requirements & Breakages**: missing masters and references to records that do not exist.
 
-## 4. Compile
+## 5. Compile
 
 Open **Compilation**:
 
@@ -70,7 +84,7 @@ Open **Compilation**:
 
 Press **Compile**. Everything happens in memory and is then validated. The **Validation** page lists every finding. Errors block export.
 
-## 5. Export and switch over
+## 6. Export and switch over
 
 **Export Plugins** writes, to the output folder (by default an MO2 mod folder named `Fallout 4 Multiplexer Output`, otherwise `Data`):
 

@@ -40,8 +40,10 @@ It is **not** a mod manager, load order sorter, Bash Patch replacement or runtim
 
 ## Workflow
 
+![Setup](docs/images/00-setup.png)
+
 1. Install mods normally (MO2, Vortex or manually).
-2. Launch Fallout 4 Multiplexer Renewed and point **Settings** at your installation.
+2. Launch Fallout 4 Multiplexer Renewed. The **Setup** screen asks how your mods are installed, where the game, MO2 instance and output folder are, and which `plugins.txt` to use. It checks each folder and previews the load order before the main window opens.
 3. **Scan**: plugins, records, archives and loose files.
 4. **Analyse**: conflicts, dependencies and compilation eligibility.
 5. Review the **Plugins**, **Conflicts**, **Assets** and **Dependencies** pages; force winners where you disagree.

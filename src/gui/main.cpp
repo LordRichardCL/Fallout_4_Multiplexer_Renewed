@@ -3,6 +3,7 @@
 #include "AppController.hpp"
 #include "Format.hpp"
 #include "MainWindow.hpp"
+#include "SetupDialog.hpp"
 #include "Theme.hpp"
 
 #include "util/Log.hpp"
@@ -36,6 +37,15 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
 
     QDir outDir(args.value("screenshots"));
     outDir.mkpath(".");
+    {
+        gui::SetupDialog setup(&controller);
+        setup.show();
+        setup.validateNow();
+        QEventLoop settle;
+        QTimer::singleShot(300, &settle, &QEventLoop::quit);
+        settle.exec();
+        setup.grab().save(outDir.filePath("00-setup.png"));
+    }
     auto runAndWait = [&](void (gui::AppController::*fn)()) {
         QEventLoop loop;
         auto c = QObject::connect(&controller, &gui::AppController::taskFinished, &loop, [&] { loop.quit(); });
@@ -127,6 +137,11 @@ int main(int argc, char** argv)
     gui::theme::apply(app);
 
     gui::AppController controller;
+    if (!args.isSet("screenshots") && gui::SetupDialog::shouldShowAtStartup(&controller)) {
+        gui::SetupDialog setup(&controller);
+        if (setup.exec() != QDialog::Accepted)
+            return 0;
+    }
     gui::MainWindow window(&controller);
     window.show();
     if (args.isSet("screenshots"))
