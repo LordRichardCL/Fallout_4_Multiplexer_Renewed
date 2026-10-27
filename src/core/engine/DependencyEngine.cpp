@@ -313,7 +313,7 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
             if (!to.valid()) {
                 issues[i].push_back({Severity::Error, "Missing Reference", w.plugin, w.key,
                                      session.formLabel(w.key) + " references a FormID whose master is missing"});
-            } else if (!session.findGroup(to)) {
+            } else if (!session.exists(to)) {
                 issues[i].push_back({Severity::Warning, "Missing Reference", w.plugin, w.key,
                                      session.formLabel(w.key) + " (" + via.str() + ") references " +
                                          formatFormId(to.objectId) + " in " + session.pluginName(to.origin) +

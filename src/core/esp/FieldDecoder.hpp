@@ -36,6 +36,7 @@ struct LocalizedField {
 
 struct DecodedLayout {
     std::vector<FormIdSlot> formIdSlots;
+    std::vector<FormIdSlot> probableSlots; // FormIDs only if the value names an existing record
     std::vector<LocalizedField> localized;
     std::vector<HeuristicSpan> heuristic;
     std::vector<DecodeIssue> issues;

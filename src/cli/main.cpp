@@ -241,9 +241,10 @@ void printDashboard(const Pipeline& p)
         for (const auto& op : c->outputs)
             used += !op.patch && !op.records.empty();
         std::printf("  Output plugins      %zu\n", used);
-        if (const auto* patch = c->patchOutput())
-            std::printf("  Patch               %s (%s merged records)\n", patch->name.c_str(),
-                        formatCount(patch->records.size()).c_str());
+        for (const auto& op : c->outputs)
+            if (op.patch)
+                std::printf("  Patch               %s (%s merged records, %zu masters)\n", op.name.c_str(),
+                            formatCount(op.records.size()).c_str(), op.masterNames.size());
     }
     std::printf("\n");
 }

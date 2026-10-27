@@ -640,6 +640,32 @@ TEST(conflict_resolution_patch_merges_retained_chains)
     const auto* l = out.byEditorId("LootPistols");
     CHECK(l != nullptr);
     CHECK_EQ(l->record.findAll(Signature("LVLO")).size(), size_t(3));
+    // Above the master limit the patch is split; every record still lands in exactly one patch.
+    {
+        auto small = configFor(root);
+        small.databasePath.clear();
+        small.compile.patchOnly = true;
+        small.compile.patchMasterLimit = 2; // Fallout4.esm + one more
+        Pipeline q(small);
+        q.scan();
+        q.analyse();
+        CHECK(q.compile());
+        const auto* split = q.compiledOutput();
+        std::vector<std::string> names;
+        size_t inPatches = 0;
+        for (const auto& op : split->outputs)
+            if (op.patch) {
+                names.push_back(op.name);
+                inPatches += op.records.size();
+                CHECK(op.masterNames.size() <= 2);
+                CHECK(op.light);
+            }
+        CHECK(names.size() >= 2);
+        CHECK_EQ(names.at(0), std::string("Multiplexer_Patch.esp"));
+        CHECK_EQ(names.at(1), std::string("Multiplexer_Patch_2.esp"));
+        CHECK_EQ(inPatches, split->patchedRecords);
+        CHECK_EQ(q.validation()->errors, uint64_t(0));
+    }
     // Nothing was compiled, so nothing should be disabled.
     std::ifstream disable(result.disableList);
     std::string listed((std::istreambuf_iterator<char>(disable)), std::istreambuf_iterator<char>());
@@ -790,4 +816,119 @@ TEST(definition_check_flags_suspect_layouts)
     CHECK(wrongLayout);
     CHECK(undescribed);
     CHECK(!check.report.critical()); // findings never block export
+}
+
+namespace {
+
+// CTDA with any function: param 1, run on "reference" (2) with the given reference.
+Subrecord condition(uint16_t function, uint32_t param1, uint32_t reference)
+{
+    BinaryWriter w;
+    w.write<uint8_t>(0);
+    w.writeZeros(3);
+    w.write<float>(1.0f);
+    w.write<uint16_t>(function);
+    w.write<uint16_t>(0);
+    w.write<uint32_t>(param1);
+    w.write<uint32_t>(0);
+    w.write<uint32_t>(reference ? 2u : 0u);
+    w.write<uint32_t>(reference);
+    w.write<int32_t>(-1);
+    return Subrecord(Signature("CTDA"), w.take());
+}
+
+} // namespace
+
+TEST(conditions_with_unlisted_functions_and_hardcoded_forms)
+{
+    auto root = buildInstall("conditions");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("CELL", 0x01000800, {zs("EDID", "ModECell")})});
+    // ModC is master 2 here but will be master 1 in the output; the condition function is not in
+    // the definitions' table, and the condition runs on PlayerRef (hard-coded, not in Fallout4.esm).
+    writePlugin(data / "ModH.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
+                {record("COBJ", 0x03000800,
+                        {zs("EDID", "ModH_Recipe"), condition(9999, 0x02000800, 0x00000014), u32("CNAM", 0x00001000),
+                         u32("BNAM", 0x00000800)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModH.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    for (const auto& is : p.validation()->issues) {
+        CHECK(is.message.find("probably refers") == std::string::npos);
+        CHECK(is.message.find("00000014") == std::string::npos);
+    }
+    auto result = p.exportOutputs();
+    OutputSet out(result.pluginFiles);
+    const auto* recipe = out.byEditorId("ModH_Recipe");
+    CHECK(recipe != nullptr);
+    const auto* ctda = recipe->record.find(Signature("CTDA"));
+    // The parameter was recognised as a FormID and renumbered for the output's masters.
+    CHECK(out.resolve(*recipe, loadLE<uint32_t>(ctda->data.data() + 12)) == std::make_pair(std::string("ModC.esp"), 0x800u));
+    CHECK(out.resolve(*recipe, loadLE<uint32_t>(ctda->data.data() + 24)) == std::make_pair(std::string("Fallout4.esm"), 0x14u));
+}
+
+TEST(tier1_second_batch_references_rewritten)
+{
+    auto root = buildInstall("tier1b");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModS.esp", {"Fallout4.esm"},
+                {
+                    record("MATO", 0x01000800, {zs("EDID", "SnowMat"), zs("MODL", "Materials\\Snow.nif")}),
+                    record("STAT", 0x01000801,
+                           {zs("EDID", "Crate"), zs("MODL", "Props\\Crate.nif"), structWith("DNAM", 16, {{4, 0x01000800}})}),
+                    record("SCOL", 0x01000802,
+                           {zs("EDID", "CrateStack"), u32("ONAM", 0x01000801), raw("DATA", std::vector<uint8_t>(28, 0))}),
+                    record("SNDR", 0x01000803, {zs("EDID", "CrateSound"), zs("ANAM", "FX\\Crate.wav")}),
+                    record("SOUN", 0x01000804, {zs("EDID", "CrateSoundMarker"), u32("SDSC", 0x01000803)}),
+                    record("ACTI", 0x01000805,
+                           {zs("EDID", "CrateButton"), zs("MODL", "Props\\Button.nif"), u32("SNAM", 0x01000803),
+                            u32("KNAM", 0x00000800)}),
+                    // Projectile and explosion refer to each other.
+                    record("PROJ", 0x01000806,
+                           {zs("EDID", "CrateShot"), structWith("DNAM", 92, {{32, 0x01000807}, {36, 0x01000803}})}),
+                    record("EXPL", 0x01000807,
+                           {zs("EDID", "CrateBoom"), structWith("DATA", 72, {{4, 0x01000803}, {20, 0x01000806}})}),
+                    record("LSCR", 0x01000808, {zs("EDID", "CrateLoading"), u32("NNAM", 0x01000801)}),
+                    record("EQUP", 0x01000809, {zs("EDID", "CrateHand"), formIds("PNAM", {0x01000809}), u32("DATA", 0)}),
+                    record("ARTO", 0x0100080A, {zs("EDID", "CrateArt"), zs("MODL", "Art\\Crate.nif"), u32("DNAM", 0)}),
+                    record("EFSH", 0x0100080B, {zs("EDID", "CrateShader")}),
+                    record("RFCT", 0x0100080C, {zs("EDID", "CrateVisual"), structWith("DATA", 12, {{0, 0x0100080A}, {4, 0x0100080B}})}),
+                });
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModS.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    OutputSet out(p.exportOutputs().pluginFiles);
+    auto rec = [&](const char* edid) {
+        const auto* r = out.byEditorId(edid);
+        CHECK(r != nullptr);
+        return r;
+    };
+    auto refAt = [&](const OutputSet::Rec* r, const char* sig, size_t offset) {
+        const auto* s = r->record.find(Signature::fromString(sig));
+        CHECK(s != nullptr);
+        return out.resolve(*r, loadLE<uint32_t>(s->data.data() + offset));
+    };
+    CHECK(refAt(rec("Crate"), "DNAM", 4) == out.identity(*rec("SnowMat")));
+    CHECK(refAt(rec("CrateStack"), "ONAM", 0) == out.identity(*rec("Crate")));
+    CHECK(refAt(rec("CrateSoundMarker"), "SDSC", 0) == out.identity(*rec("CrateSound")));
+    CHECK(refAt(rec("CrateButton"), "SNAM", 0) == out.identity(*rec("CrateSound")));
+    CHECK(refAt(rec("CrateButton"), "KNAM", 0) == std::make_pair(std::string("Fallout4.esm"), 0x800u));
+    CHECK(refAt(rec("CrateShot"), "DNAM", 32) == out.identity(*rec("CrateBoom")));
+    CHECK(refAt(rec("CrateShot"), "DNAM", 36) == out.identity(*rec("CrateSound")));
+    CHECK(refAt(rec("CrateBoom"), "DATA", 20) == out.identity(*rec("CrateShot")));
+    CHECK(refAt(rec("CrateLoading"), "NNAM", 0) == out.identity(*rec("Crate")));
+    CHECK(refAt(rec("CrateHand"), "PNAM", 0) == out.identity(*rec("CrateHand")));
+    CHECK(refAt(rec("CrateVisual"), "DATA", 0) == out.identity(*rec("CrateArt")));
+    CHECK(refAt(rec("CrateVisual"), "DATA", 4) == out.identity(*rec("CrateShader")));
+    CHECK_EQ(text(rec("CrateSound")->record.find(Signature("ANAM"))), std::string("FX\\Crate.wav"));
 }

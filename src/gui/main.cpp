@@ -110,6 +110,25 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
             break;
         }
 
+    // Record definition check, filtered to its findings.
+    {
+        QEventLoop loop;
+        auto c = QObject::connect(&controller, &gui::AppController::taskFinished, &loop, [&] { loop.quit(); });
+        controller.runDefinitionCheck();
+        loop.exec();
+        QObject::disconnect(c);
+        window.showPage("Validation");
+        for (auto* b : window.findChildren<QPushButton*>())
+            if (b->isVisible() && b->text() == "Definitions") {
+                b->click();
+                break;
+            }
+        QEventLoop settle;
+        QTimer::singleShot(300, &settle, &QEventLoop::quit);
+        settle.exec();
+        window.grab().save(outDir.filePath("14-definition-check.png"));
+    }
+
     // Traceability: a compiled weapon traced back to its sources and original assets.
     window.showPage("Compilation");
     for (auto* tabs : window.findChildren<QTabWidget*>()) {

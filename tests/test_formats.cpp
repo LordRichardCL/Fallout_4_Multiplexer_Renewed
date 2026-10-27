@@ -135,6 +135,10 @@ TEST(decoder_vmad_condition_lists)
             CHECK(v == 0x01000800 || v == 0x00000014 || v == 0x02000900);
         }
     CHECK_EQ(vmadSlots, size_t(3));
+    // Object format 2 puts unused + alias first: those bytes must never be read as the FormID.
+    for (const auto& s : layout.formIdSlots)
+        if (s.sub == 1)
+            CHECK(loadLE<uint32_t>(subs[1].data.data() + s.offset) != 0xFFFF0000u);
     bool perk = false;
     for (const auto& s : layout.formIdSlots)
         if (s.sub == 3 && s.offset == 12)

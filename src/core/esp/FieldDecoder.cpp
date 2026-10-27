@@ -60,6 +60,7 @@ public:
 
 private:
     void slot(uint32_t sub, size_t offset) { out_.formIdSlots.push_back({sub, static_cast<uint32_t>(offset)}); }
+    void probable(uint32_t sub, size_t offset) { out_.probableSlots.push_back({sub, static_cast<uint32_t>(offset)}); }
     void heuristic(uint32_t sub, uint32_t begin, uint32_t end)
     {
         if (end >= begin + 4)
@@ -160,14 +161,16 @@ private:
 
     void vmadObject(BinaryReader& r, uint32_t i, int16_t objFormat)
     {
+        // Object format 1: FormID, alias i16, unused u16.
+        // Object format 2 (what Fallout 4 writes): unused u16, alias i16, FormID.
         size_t base = r.position();
         if (objFormat == 1) {
-            r.skip(4); // unused u16 + alias i16
+            slot(i, base);
+            r.skip(8);
+        } else {
+            r.skip(4);
             slot(i, r.position());
             r.skip(4);
-        } else {
-            slot(i, base);
-            r.skip(8); // formid, alias i16, unused u16
         }
     }
 
@@ -280,7 +283,11 @@ private:
             if (defs_.conditionParamIsForm(fn, 2))
                 slot(i, 16);
         } else {
-            heuristic(i, 12, 20);
+            // Parameters of other functions are FormIDs or numbers. A value that names an
+            // existing record is treated as a FormID (numbers rarely do, and values under
+            // master index 1 are written unchanged either way).
+            probable(i, 12);
+            probable(i, 16);
         }
         uint32_t runOn = loadLE<uint32_t>(d + 20);
         if (runOn == 2)

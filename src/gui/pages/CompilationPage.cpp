@@ -296,7 +296,8 @@ void CompilationPage::refresh()
     recordsModel_->setBytesColumns({7});
     recordsModel_->load(db,
                         "SELECT output_plugin AS Output, form_id AS FormID, signature AS Type, editor_id AS 'Editor ID', "
-                        "CASE WHEN is_new = 1 THEN 'New' WHEN output_plugin = ? THEN 'Patch' ELSE 'Override' END AS Kind, CASE merged WHEN 1 THEN 'Merged' ELSE "
+                        "CASE WHEN is_new = 1 THEN 'New' WHEN instr(',' || ? || ',', ',' || output_plugin || ',') > 0 THEN 'Patch' "
+                        "ELSE 'Override' END AS Kind, CASE merged WHEN 1 THEN 'Merged' ELSE "
                         "'' END AS Merge, p.name AS 'Source Winner', size_bytes AS Size, contributors AS Contributors "
                         "FROM GeneratedRecords g LEFT JOIN Plugins p ON p.id = g.winner_plugin_id ORDER BY output_index, "
                         "signature, form_id LIMIT 500000",
@@ -320,7 +321,8 @@ void CompilationPage::refresh()
     QString compiled = meta("compiled_plugins");
     QString patchText;
     if (!patchName.isEmpty())
-        patchText = QString(" · %1: %2 merged records").arg(patchName, formatCount(meta("patched_records").toLongLong()));
+        patchText = QString(" · %1: %2 merged records").arg(QString(patchName).replace(",", ", "),
+                                                               formatCount(meta("patched_records").toLongLong()));
     if (compiled.isEmpty()) {
         summary_->setText("Not compiled yet. Options on the left are saved with your settings.");
     } else {

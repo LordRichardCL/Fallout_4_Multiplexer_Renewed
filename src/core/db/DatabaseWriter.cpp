@@ -436,8 +436,11 @@ void DatabaseWriter::writeCompilation(const Session& session, const CompiledOutp
     size_t used = 0;
     for (const auto& op : compiled.outputs)
         used += op.patch || op.records.empty() ? 0 : 1;
-    const auto* patch = compiled.patchOutput();
-    setMeta("patch_name", patch ? patch->name : std::string());
+    std::vector<std::string> patches;
+    for (const auto& op : compiled.outputs)
+        if (op.patch)
+            patches.push_back(op.name);
+    setMeta("patch_name", join(patches, ","));
     setMeta("patched_records", std::to_string(compiled.patchedRecords));
     setMeta("compiled_plugins", std::to_string(compiled.compiledPlugins.size()));
     setMeta("merges_reused", std::to_string(compiled.mergesReused));

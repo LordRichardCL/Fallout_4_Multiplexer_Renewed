@@ -91,6 +91,15 @@ const FormGroup* Session::findGroup(FormKey key) const
     return &*it;
 }
 
+bool Session::exists(FormKey key) const
+{
+    if (!key.valid())
+        return false;
+    if (key.objectId < 0x800 && key.origin < plugins.size() && plugins[key.origin].key == "fallout4.esm")
+        return true;
+    return findGroup(key) != nullptr;
+}
+
 const RecordInstance* Session::winner(FormKey key) const
 {
     auto g = findGroup(key);

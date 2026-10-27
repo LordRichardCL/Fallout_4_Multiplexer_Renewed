@@ -20,6 +20,8 @@ public:
 
 private:
     void reload();
+    // The rows currently shown, as tab-separated text with a header line.
+    QString shownRowsAsText();
 
     StatCard* checks_;
     StatCard* passed_;

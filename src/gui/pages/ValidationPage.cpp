@@ -5,7 +5,12 @@
 #include "models/SqlModel.hpp"
 #include "widgets/Widgets.hpp"
 
+#include <QApplication>
+#include <QClipboard>
+#include <QFile>
+#include <QFileDialog>
 #include <QHBoxLayout>
+#include <QStandardPaths>
 #include <QHeaderView>
 #include <QLineEdit>
 #include <QTableView>
@@ -48,8 +53,26 @@ ValidationPage::ValidationPage(AppController* app, QWidget* parent) : Page(app, 
     search_ = new QLineEdit;
     search_->setPlaceholderText("Filter messages…");
     search_->setClearButtonEnabled(true);
+    auto* copy = makeButton("Copy");
+    copy->setToolTip("Copy the rows shown (with the current filter) to the clipboard");
+    auto* save = makeButton("Save…");
+    save->setToolTip("Save the rows shown (with the current filter) to a text file");
     filterRow->addWidget(chips_, 1);
     filterRow->addWidget(search_);
+    filterRow->addWidget(copy);
+    filterRow->addWidget(save);
+    connect(copy, &QPushButton::clicked, this, [this] { QApplication::clipboard()->setText(shownRowsAsText()); });
+    connect(save, &QPushButton::clicked, this, [this] {
+        QString name = chips_->current() == "Definitions" ? "DefinitionCheck.txt" : "Validation.txt";
+        QString path = QFileDialog::getSaveFileName(
+            this, "Save validation results",
+            QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/" + name, "Text (*.txt)");
+        if (path.isEmpty())
+            return;
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text))
+            f.write(shownRowsAsText().toUtf8());
+    });
     l->addLayout(filterRow);
 
     table_ = new QTableView;
@@ -83,6 +106,24 @@ void ValidationPage::refresh()
                        {"Warnings", double(warnings), theme::kYellow},
                        {"Errors", double(errors), theme::kRed}});
     reload();
+}
+
+QString ValidationPage::shownRowsAsText()
+{
+    while (model_->canFetchMore())
+        model_->fetchMore();
+    QStringList lines;
+    QStringList header;
+    for (int c = 0; c < model_->columnCount(); ++c)
+        header << model_->headerData(c, Qt::Horizontal).toString();
+    lines << header.join('\t');
+    for (int r = 0; r < model_->rowCount(); ++r) {
+        QStringList cells;
+        for (int c = 0; c < model_->columnCount(); ++c)
+            cells << model_->value(r, c).toString();
+        lines << cells.join('\t');
+    }
+    return lines.join('\n') + '\n';
 }
 
 void ValidationPage::reload()

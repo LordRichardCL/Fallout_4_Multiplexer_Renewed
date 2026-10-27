@@ -154,6 +154,9 @@ public:
         return std::span<const RecordInstance>(records.data() + g.begin, g.size());
     }
     const FormGroup* findGroup(FormKey key) const;
+    // True for records in the load order and for the engine's hard-coded forms
+    // (Fallout4.esm object IDs below 0x800, e.g. PlayerRef 0x14), which no plugin stores.
+    bool exists(FormKey key) const;
     const RecordInstance* winner(FormKey key) const;
 
     // Global identity of a FormID as written in plugin `p`.

@@ -77,6 +77,16 @@ uint32_t CompiledOutput::translate(const Session& session, FormKey key, int outp
     return makeRawFormId(static_cast<uint32_t>(pos - out.retainedMasters.begin()), key.objectId);
 }
 
+std::string CompilationEngine::patchFileName(const CompileOptions& options, int index)
+{
+    if (index == 0)
+        return options.patchName;
+    auto dot = options.patchName.rfind('.');
+    std::string stem = dot == std::string::npos ? options.patchName : options.patchName.substr(0, dot);
+    std::string ext = dot == std::string::npos ? std::string(".esp") : options.patchName.substr(dot);
+    return stem + "_" + std::to_string(index + 1) + ext;
+}
+
 std::string CompilationEngine::outputFileName(const CompileOptions& options, int index)
 {
     char buf[16];
@@ -438,17 +448,55 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     // ---- Allocation -------------------------------------------------------------
     progress.stage("Compile");
     const int N = options.outputCount;
-    const bool hasPatch = std::any_of(out.records.begin(), out.records.end(), [](const EmittedRecord& e) { return e.patch; });
-    out.outputs.resize(static_cast<size_t>(N + (hasPatch ? 1 : 0)));
+
+    // Patch records go to as many patch plugins as the master limit requires. Records are
+    // taken in load order and a new patch starts when the next record's masters would not fit.
+    std::vector<int> patchOutput(out.records.size(), -1);
+    int patchCount = 0;
+    {
+        size_t baseCount = 0;
+        for (auto pi : session.loadOrder)
+            baseCount += session.plugins[pi].baseGame ? 1 : 0;
+        const size_t cap = std::min<size_t>(options.patchMasterLimit, 254);
+        const size_t limit = cap > baseCount ? cap - baseCount : 1;
+        std::vector<uint32_t> patchRecords;
+        for (uint32_t v = 0; v < out.records.size(); ++v)
+            if (out.records[v].patch)
+                patchRecords.push_back(v);
+        std::stable_sort(patchRecords.begin(), patchRecords.end(), [&](uint32_t a, uint32_t b) {
+            return session.plugins[out.records[a].key.origin].loadOrder < session.plugins[out.records[b].key.origin].loadOrder;
+        });
+        std::set<PluginIndex> current;
+        for (auto v : patchRecords) {
+            const auto& e = out.records[v];
+            std::set<PluginIndex> need;
+            if (e.key.valid() && !session.plugins[e.key.origin].baseGame)
+                need.insert(e.key.origin);
+            for (const auto& [k, via] : collectRefs(e.fields, options.rewriteHeuristicReferences))
+                if (k.valid() && !session.plugins[k.origin].baseGame)
+                    need.insert(k.origin);
+            std::set<PluginIndex> merged = current;
+            merged.insert(need.begin(), need.end());
+            if (patchCount == 0 || merged.size() > limit) {
+                ++patchCount;
+                current = need;
+            } else {
+                current = std::move(merged);
+            }
+            patchOutput[v] = N + patchCount - 1;
+        }
+    }
+
+    out.outputs.resize(static_cast<size_t>(N + patchCount));
     for (int o = 0; o < N; ++o) {
         out.outputs[static_cast<size_t>(o)].index = o;
         out.outputs[static_cast<size_t>(o)].name = outputFileName(options, o);
     }
-    if (hasPatch) {
-        // The patch adds no records, so it never needs a full load order slot.
-        auto& patch = out.outputs.back();
-        patch.index = N;
-        patch.name = options.patchName;
+    for (int k = 0; k < patchCount; ++k) {
+        // Patches add no records, so they never need a full load order slot.
+        auto& patch = out.outputs[static_cast<size_t>(N + k)];
+        patch.index = N + k;
+        patch.name = patchFileName(options, k);
         patch.patch = true;
     }
 
@@ -601,7 +649,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     o = std::max(o, out.records[d].output);
         }
         for (auto v : comp)
-            out.records[v].output = out.records[v].patch ? N : o;
+            out.records[v].output = out.records[v].patch ? patchOutput[v] : o;
     }
 
     for (uint32_t v = 0; v < out.records.size(); ++v) {

@@ -147,7 +147,8 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
                 auto checkSub = [&](const NormSub& s) {
                     for (const auto& [off, k] : s.refs) {
                         auto& stat = slotStats[{e.sig, s.sig}];
-                        stat.second++;
+                        if (k.valid() || k.objectId)
+                            stat.second++; // empty (null) slots say nothing about the layout
                         if (!k.valid()) {
                             if (k.objectId)
                                 v.fail(Severity::Error, "Missing References",
@@ -156,7 +157,7 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
                                 v.pass();
                             continue;
                         }
-                        bool exists = session.findGroup(k) != nullptr;
+                        bool exists = session.exists(k);
                         if (exists)
                             stat.first++;
                         bool ok = true;
@@ -345,7 +346,7 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                         if (!k.valid() && k.objectId == 0)
                             continue; // null
                         st.formIds++;
-                        if (k.valid() && session.findGroup(k))
+                        if (session.exists(k))
                             st.resolved++;
                         else if (st.example.empty())
                             st.example = where;
@@ -434,7 +435,8 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
         auto [res, total] = perType[sig];
         v.fail(Severity::Info, "Definitions",
                sig.str() + " (" + session.defs.recordName(sig) + "): " + std::to_string(n) + " records decoded, " +
-                   std::to_string(total) + " FormIDs, " + pct(res, total) + " resolve");
+                   (total ? std::to_string(total) + " FormIDs, " + pct(res, total) + " resolve"
+                          : std::string("no FormIDs to check")));
     }
     spdlog::info("Definition check: {} record types, {} subrecord layouts, {} warnings", out.recordsByType.size(),
                  out.stats.size(), v.warnings);

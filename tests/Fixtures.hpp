@@ -106,7 +106,7 @@ inline std::vector<uint8_t> stringTable(const std::map<uint32_t, std::string>& s
     return out.take();
 }
 
-// VMAD with one script and object / object-array properties.
+// VMAD (version 6, object format 2 as Fallout 4 writes it) with one script and object / object-array properties.
 inline Subrecord vmad(const std::vector<uint32_t>& objects, const std::vector<uint32_t>& arrayObjects)
 {
     BinaryWriter w;
@@ -120,9 +120,10 @@ inline Subrecord vmad(const std::vector<uint32_t>& objects, const std::vector<ui
         w.writeWString("Obj" + std::to_string(i));
         w.write<uint8_t>(1);
         w.write<uint8_t>(1);
-        w.write<uint32_t>(objects[i]);
-        w.write<int16_t>(-1);
+        // Object format 2: unused, alias, FormID
         w.write<uint16_t>(0);
+        w.write<int16_t>(-1);
+        w.write<uint32_t>(objects[i]);
     }
     w.writeWString("Count");
     w.write<uint8_t>(3);
@@ -133,9 +134,9 @@ inline Subrecord vmad(const std::vector<uint32_t>& objects, const std::vector<ui
     w.write<uint8_t>(1);
     w.write<uint32_t>(static_cast<uint32_t>(arrayObjects.size()));
     for (auto id : arrayObjects) {
-        w.write<uint32_t>(id);
-        w.write<int16_t>(-1);
         w.write<uint16_t>(0);
+        w.write<int16_t>(-1);
+        w.write<uint32_t>(id);
     }
     return Subrecord(Signature("VMAD"), w.take());
 }

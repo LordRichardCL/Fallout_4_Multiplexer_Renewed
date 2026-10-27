@@ -87,7 +87,7 @@ A plugin is compiled only when the compiled output can reproduce it exactly. In 
 
 - all of its records are supported types:
   - **Phase One:** `WEAP ARMO AMMO OMOD COBJ KYWD LVLI FLST INGR ALCH MISC BOOK NOTE KEYM FACT PERK SPEL MESG`;
-  - **Tier 1, first batch:** `ARMA OTFT LVLN CONT CMPO GLOB TXST MSWP INNR ENCH MGEF IPDS AORU`;
+  - **Tier 1:** `ARMA OTFT LVLN CONT CMPO GLOB TXST MSWP INNR ENCH MGEF IPDS AORU STAT SCOL MSTT ACTI FURN DOOR LIGH TERM PROJ EXPL IPCT HAZD SNDR SOUN AVIF EQUP LSCR DMGT ZOOM AMDL ARTO EFSH MATO FLOR KSSM LCRT RFCT TRNS DFOB CLFM`;
 - no script or F4SE/MCM config refers to it by file name (`GetFormFromFile` etc.);
 - no FaceGen or voice folders are named after it;
 - it is not a master of a plugin that stays in the load order;

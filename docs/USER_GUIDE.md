@@ -104,6 +104,7 @@ Open **Compilation**:
   - It only overrides existing records, so it adds no FormIDs, is always ESL-flagged and takes no full load order slot.
   - It must load last. The proposed `plugins.txt` puts it there.
   - It covers the same record types as compilation. NPCs, quests and world data are not merged.
+  - A patch can have at most 254 masters. Larger load orders get `Multiplexer_Patch_2.esp`, `_3`, and so on. Every one is ESL-flagged, so they take no full slots.
   - **Patch only** writes just the patch and compiles nothing, so no FormIDs change and no plugins are disabled.
 
 Press **Compile**. Everything happens in memory and is then validated. The **Validation** page lists every finding. Errors block export.
@@ -128,6 +129,27 @@ Then:
 2. Disable the plugins listed in `Multiplexer_DisablePlugins.txt`, or press **Apply to MO2 Profile**. That rewrites the profile's `plugins.txt`/`loadorder.txt` after making timestamped backups.
 3. Copy the `[Archive]` line from `Multiplexer_Archives.ini` into `Fallout4Custom.ini` (or the profile's INI when MO2 uses profile-local INIs). Without this, textures and meshes from compiled mods' archives will be missing.
 4. Open the outputs in FO4Edit and spot-check a few records.
+
+## Checking the record definitions
+
+The app needs the exact layout of every record type it compiles. This check confirms those layouts against **your** game files. Run it once after installing a new version of the app, and send the result to the developer if it shows warnings.
+
+1. Start the app. On the **Setup** screen, check the folders and press **Save and Continue**.
+2. In the left sidebar, click **Validation**.
+3. At the top right, click **Check Record Definitions**.
+   - The status bar at the bottom shows progress. A large load order takes a few minutes.
+   - You do not need to Scan, Analyse or Compile first. The check scans by itself if needed.
+4. When the status bar says **Check Definitions complete**, click the **Definitions** filter above the table.
+5. Read the rows:
+   - **Info:** one line per record type, for example "ARMA (Armor Addon): 2,310 records decoded, 9,120 FormIDs, 99.9% resolve". Close to 100% is good.
+   - **Warning:** a layout that looks wrong (few FormIDs resolve, unexpected sizes) or a field the app does not describe yet. Records are still protected: a wrong layout can block an export, but it cannot produce a broken plugin.
+6. Click **Save…** to write the rows shown to a text file (default `DefinitionCheck.txt` in Documents), or **Copy** to put them on the clipboard.
+
+![Definition check](images/14-definition-check.png)
+
+The same **Copy** and **Save…** buttons work for any filter. For example, after a compile, click **Errors** and then **Save…** to send the errors that blocked an export.
+
+Command line: `fo4mx check-definitions --mo2 "C:\Modding\MO2"` prints the same results (exit code 4 if there are warnings).
 
 ## Keeping the build up to date
 

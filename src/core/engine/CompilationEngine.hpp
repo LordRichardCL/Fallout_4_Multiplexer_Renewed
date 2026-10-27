@@ -40,6 +40,7 @@ struct CompileOptions {
     bool buildPatch = false;
     bool patchOnly = false;
     std::string patchName = "Multiplexer_Patch.esp";
+    size_t patchMasterLimit = 254; // a patch is split into several plugins above this many masters
     std::string author = "Fallout 4 Multiplexer Renewed";
     std::filesystem::path previousFormMap; // reuse FormIDs from an earlier compilation
     std::unordered_map<uint64_t, PluginIndex> forcedWinners; // FormKey::packed() -> plugin
@@ -125,7 +126,7 @@ struct CompiledOutput {
     bool empty() const { return records.empty(); }
     bool isCompiled(PluginIndex p) const;
     std::string outputName(int index) const { return outputs.at(static_cast<size_t>(index)).name; }
-    const OutputPlugin* patchOutput() const;
+    const OutputPlugin* patchOutput() const; // the first patch plugin, if any
 
     // FormID of `key` as written in output `output`; 0 when it cannot be expressed.
     uint32_t translate(const Session& session, FormKey key, int output, bool* ok = nullptr) const;
@@ -144,6 +145,8 @@ public:
                                   ProgressSink& progress = nullProgress());
 
     static std::string outputFileName(const CompileOptions& options, int index);
+    // Multiplexer_Patch.esp, Multiplexer_Patch_2.esp, ...
+    static std::string patchFileName(const CompileOptions& options, int index);
     static std::vector<FormMapping> readFormMap(const std::filesystem::path& path);
 };
 

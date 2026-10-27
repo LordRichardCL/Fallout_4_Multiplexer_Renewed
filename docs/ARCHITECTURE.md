@@ -40,7 +40,7 @@ The scanner indexes every record of every active plugin as a compact `RecordInst
 
 ## Record definitions and the FormID decoder
 
-Rewriting references requires knowing exactly which bytes are FormIDs. `esp/RecordDefinitions.cpp` describes the supported record types for the 1.10.163 runtime profile (Phase One plus the first tier 1 batch: `ARMA OTFT LVLN CONT CMPO GLOB TXST MSWP INNR ENCH MGEF IPDS AORU`):
+Rewriting references requires knowing exactly which bytes are FormIDs. `esp/RecordDefinitions.cpp` describes the supported record types for the 1.10.163 runtime profile (Phase One plus tier 1 base objects, effects, sounds and UI data; see the README for the list):
 
 - simple kinds: `FormId`, `FormIdArray`, `Struct` (FormIDs at offsets), `StructArray`;
 - strings: `ZString`, and `LString`/`DLString`/`ILString` (localised);

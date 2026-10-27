@@ -459,6 +459,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("QNAM", formId()) // close sound
         .field("FTYP", formId()) // forced location ref type
         .field("NTRM", formId()) // native terminal
+        .field("ONAM", formId()) // filter list (workshop racks, sorters)
         .modelRegions();
 
     b.record("CMPO", "Component", true)
@@ -516,16 +517,190 @@ void buildOldGen(RecordDefinitions& d)
 
     b.record("AORU", "Attraction Rule", true).field("AOR2", noRefs());
 
+    // ---- Tier 1, second batch: placeable base objects, projectiles and effects, sounds, UI data.
+
+    b.record("STAT", "Static", true)
+        .field("FTYP", formId())               // forced location ref type
+        .field("DNAM", structAt({4}, 0, true)) // max angle, directional material, leaf amplitude/frequency
+        .field("MNAM", noRefs())               // distant LOD model names
+        .modelRegions();
+
+    b.record("SCOL", "Static Collection", true)
+        .field("ONAM", formId())  // part: base object
+        .field("DATA", noRefs()) // part: placements (position, rotation, scale)
+        .add(region("Part", {"ONAM"}, {"ONAM", "DATA"}))
+        .modelRegions();
+
+    b.record("MSTT", "Movable Static", true)
+        .field("DATA", noRefs()) // flags
+        .field("SNAM", formId()) // looping sound
+        .modelRegions();
+
+    b.record("ACTI", "Activator", true)
+        .field("FTYP", formId())                // forced location ref type
+        .field("NTRM", formId())                // native terminal
+        .field("PNAM", noRefs())                // marker colour
+        .field("SNAM", formId())                // looping sound
+        .field("VNAM", formId())                // activation sound
+        .field("WNAM", formId())                // water type
+        .field("FNAM", noRefs())                // flags
+        .field("KNAM", formId())                // interaction keyword
+        .field("RADR", structAt({0}, 0, true))  // radio: sound model, frequency, volume, flags
+        .modelRegions()
+        .conditionRegion();
+
+    b.record("FURN", "Furniture", true)
+        .field("FTYP", formId())
+        .field("NTRM", formId())
+        .field("PNAM", noRefs())
+        .field("FNAM", noRefs())
+        .field("KNAM", formId())
+        .field("MNAM", noRefs()) // active markers
+        .field("WBDT", noRefs()) // workbench type, skill
+        .field("FNMK", formId()) // marker keyword
+        .field("FNPR", noRefs()) // entry points
+        .field("XMRK", zstring()) // marker model
+        .modelRegions()
+        .conditionRegion();
+
+    b.record("DOOR", "Door", true)
+        .field("NTRM", formId())
+        .field("SNAM", formId()) // open sound
+        .field("ANAM", formId()) // close sound
+        .field("BNAM", formId()) // loop sound
+        .field("FNAM", noRefs()) // flags
+        .field("ONAM", lstring()) // alternate text: open
+        .field("CNAM", lstring()) // alternate text: close
+        .modelRegions();
+
+    b.record("LIGH", "Light", true)
+        .field("FNAM", noRefs())  // fade value
+        .field("NAM0", zstring()) // gobo texture
+        .field("LNAM", formId())  // lens flare
+        .field("WGDR", formId())  // god rays
+        .field("SNAM", formId())  // sound
+        .modelRegions();
+
+    b.record("TERM", "Terminal", true)
+        .field("PNAM", noRefs())
+        .field("FNAM", noRefs())
+        .field("BSIZ", noRefs())
+        .field("BTXT", lstring()) // body text
+        .field("ISIZ", noRefs())
+        .field("ITXT", lstring()) // menu item text
+        .field("RNAM", lstring()) // menu item response
+        .field("ANAM", noRefs())  // menu item type
+        .field("ITID", noRefs())  // menu item id
+        .field("TNAM", formId())  // submenu terminal
+        .field("WNAM", lstring()) // welcome text
+        .add(region("Body Text", {"BTXT"}, {"BTXT", "CTDA", "CIS1", "CIS2"}))
+        .add(region("Menu Items", {"ITXT"}, {"ITXT", "RNAM", "ANAM", "ITID", "TNAM", "CTDA", "CIS1", "CIS2"}))
+        .modelRegions();
+
+    // DNAM: flags, type, gravity, speed, range, light, muzzle flash light, alt-trigger proximity and
+    // timer, explosion, sound, muzzle flash duration, fade duration, impact force, countdown sound,
+    // disable sound, default weapon source, cone spread, collision radius, lifetime, relaunch
+    // interval, decal data, collision layer; later bytes are scanned.
+    b.record("PROJ", "Projectile", true)
+        .field("DNAM", structAt({16, 20, 32, 36, 52, 56, 60, 80, 84}, 0, true))
+        .field("NAM1", zstring()) // muzzle flash model
+        .modelRegions();
+
+    // DATA: light, sound 1, sound 2, impact data set, placed object, spawn projectile; then numbers.
+    b.record("EXPL", "Explosion", true)
+        .field("DATA", structAt({0, 4, 8, 12, 16, 20}, 0, true))
+        .field("MNAM", formId()) // image space modifier
+        .modelRegions();
+
+    b.record("IPCT", "Impact", true)
+        .field("DODT", noRefs()) // decal data
+        .field("DNAM", formId()) // texture set
+        .field("ENAM", formId()) // secondary texture set
+        .field("SNAM", formId()) // sound 1
+        .field("NAM1", formId()) // sound 2
+        .field("NAM2", formId()) // hazard
+        .modelRegions();
+
+    // DATA: limit, radius, lifetime, image space radius, target interval, flags, spell, light,
+    // impact data set, sound; later bytes are scanned.
+    b.record("HAZD", "Hazard", true)
+        .field("DATA", structAt({24, 28, 32, 36}, 0, true))
+        .field("MNAM", formId()) // image space modifier
+        .modelRegions();
+
+    b.record("SNDR", "Sound Descriptor", true)
+        .field("GNAM", formId()) // category
+        .field("SNAM", formId()) // alternate sound for
+        .field("ANAM", zstring()) // sound file
+        .field("ONAM", formId()) // output model
+        .conditionRegion();
+
+    b.record("SOUN", "Sound Marker", true).field("SDSC", formId()).field("REPT", noRefs());
+
+    b.record("AVIF", "Actor Value", true)
+        .field("ANAM", lstring()) // abbreviation
+        .field("NAM0", noRefs())  // default value
+        .field("AVFL", noRefs())  // flags
+        .field("NAM1", noRefs()); // type
+
+    b.record("EQUP", "Equip Type", true)
+        .field("PNAM", formIdArray(MergeMode::Set)) // slot parents
+        .field("DATA", noRefs())                   // flags
+        .field("ANAM", formId());                  // condition actor value
+
+    b.record("LSCR", "Load Screen", true)
+        .field("NNAM", formId()) // loading screen model (static)
+        .conditionRegion();
+
+    b.record("DMGT", "Damage Type", true).field("DNAM", structArray(8, {0, 4}, MergeMode::Scalar)); // actor value, spell
+
+    b.record("ZOOM", "Zoom", true).field("GNAM", structAt({8}, 24)); // FOV, overlay, image space, offset
+
+    b.record("AMDL", "Aim Model", true).field("DNAM", noRefs()); // cone of fire and recoil numbers
+
+    b.record("ARTO", "Art Object", true).field("DNAM", noRefs()).modelRegions(); // art type
+
+    b.record("EFSH", "Effect Shader", true)
+        .field("NAM7", zstring()) // holes texture
+        .field("NAM8", zstring()) // membrane palette
+        .field("NAM9", zstring()) // particle palette
+        .modelRegions();
+
+    b.record("MATO", "Material Object", true).modelRegions();
+
+    b.record("FLOR", "Flora", true)
+        .field("PNAM", noRefs())
+        .field("FNAM", noRefs())
+        .field("PFIG", formId()) // ingredient
+        .field("SNAM", formId()) // harvest sound
+        .field("PFPC", noRefs()) // seasonal ingredient chances
+        .modelRegions();
+
+    b.record("KSSM", "Sound Keyword Mapping", true)
+        .field("DNAM", formId())                  // primary descriptor
+        .field("ENAM", formId())                  // exterior tail
+        .field("VNAM", formId())                  // VATS descriptor
+        .field("TNAM", noRefs())                  // VATS threshold
+        .field("KNAM", formIdList(MergeMode::Set)); // keywords
+
+    b.record("LCRT", "Location Reference Type", true).field("CNAM", noRefs());
+
+    b.record("RFCT", "Visual Effect", true).field("DATA", structAt({0, 4}, 12)); // art object, effect shader, flags
+
+    b.record("TRNS", "Transform", true).field("DATA", noRefs()); // position, rotation, scale, zoom
+
+    b.record("DFOB", "Default Object", true).field("DATA", formId());
+
+    b.record("CLFM", "Color", true).field("CNAM", noRefs()).field("FNAM", noRefs()).conditionRegion();
+
     // Record types analysed for conflicts but not yet compiled (future phases).
     const std::pair<const char*, const char*> future[] = {
-        // Tier 1, still to describe
-        {"STAT", "Static"}, {"SCOL", "Static Collection"}, {"MSTT", "Movable Static"}, {"ACTI", "Activator"},
-        {"FURN", "Furniture"}, {"DOOR", "Door"}, {"LIGH", "Light"}, {"TERM", "Terminal"}, {"PROJ", "Projectile"},
-        {"EXPL", "Explosion"}, {"IPCT", "Impact"}, {"HAZD", "Hazard"}, {"SNDR", "Sound Descriptor"},
-        {"SOUN", "Sound Marker"}, {"AVIF", "Actor Value"}, {"EQUP", "Equip Type"}, {"LSCR", "Load Screen"},
-        {"DMGT", "Damage Type"}, {"ZOOM", "Zoom"}, {"AMDL", "Aim Model"}, {"ARTO", "Art Object"},
-        {"EFSH", "Effect Shader"}, {"MATO", "Material Object"}, {"FLOR", "Flora"},
-        {"KSSM", "Sound Keyword Mapping"}, {"LCRT", "Location Reference Type"}, {"OVIS", "Object Visibility"},
+        // Not described yet
+        {"OVIS", "Object Visibility"}, {"PKIN", "Pack-In"}, {"LGTM", "Lighting Template"}, {"IMGS", "Image Space"},
+        {"IMAD", "Image Space Modifier"}, {"DEBR", "Debris"}, {"COLL", "Collision Layer"}, {"SNCT", "Sound Category"},
+        {"SOPM", "Sound Output Model"}, {"ASPC", "Acoustic Space"}, {"ANIO", "Animated Object"}, {"ADDN", "Addon Node"},
+        {"BPTD", "Body Part Data"}, {"VTYP", "Voice Type"}, {"ECZN", "Encounter Zone"}, {"WATR", "Water"},
+        {"WTHR", "Weather"}, {"REGN", "Region"}, {"MUSC", "Music Type"}, {"SCCO", "Scene Collection"},
         // Tier 2-4
         {"NPC_", "Non-Player Character"}, {"RACE", "Race"}, {"CLAS", "Class"}, {"PACK", "Package"},
         {"QUST", "Quest"}, {"DIAL", "Dialogue Topic"}, {"INFO", "Dialogue Response"}, {"SCEN", "Scene"},

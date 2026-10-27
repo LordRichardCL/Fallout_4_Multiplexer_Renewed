@@ -32,6 +32,13 @@ const char* rootFor(Signature record, Signature sub)
     }
     if (record == Signature("MSWP") && (s == "BNAM" || s == "SNAM"))
         return "materials\\";
+    if (record == Signature("SNDR") && s == "ANAM")
+        return "sound\\";
+    if ((record == Signature("EFSH") && (s == "NAM7" || s == "NAM8" || s == "NAM9")) ||
+        (record == Signature("LIGH") && s == "NAM0"))
+        return "textures\\";
+    if (record == Signature("PROJ") && s == "NAM1")
+        return "meshes\\";
     if (icons.count(s))
         return "textures\\";
     if (record == sig::AMMO && s == "NAM1")

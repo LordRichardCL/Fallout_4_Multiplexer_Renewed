@@ -88,6 +88,19 @@ NormRecord Normalizer::normalize(const Record& rec, PluginIndex plugin)
         storeLE<uint32_t>(s.bytes.data() + slot.offset, 0);
         s.refs.emplace_back(slot.offset, key);
     }
+    for (const auto& slot : layout.probableSlots) {
+        auto& s = out.subs[slot.sub];
+        if (slot.offset + 4 > s.bytes.size())
+            continue;
+        uint32_t raw = loadLE<uint32_t>(s.bytes.data() + slot.offset);
+        if (raw == 0 || masterIndexOf(raw) > p.masters.size())
+            continue;
+        FormKey key = session_.resolve(p, raw);
+        if (!session_.exists(key))
+            continue;
+        storeLE<uint32_t>(s.bytes.data() + slot.offset, 0);
+        s.refs.emplace_back(slot.offset, key);
+    }
     for (auto& s : out.subs)
         std::sort(s.refs.begin(), s.refs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
 
@@ -102,7 +115,7 @@ NormRecord Normalizer::normalize(const Record& rec, PluginIndex plugin)
             if (objectIdOf(raw) < 0x800 || masterIndexOf(raw) > p.masters.size())
                 continue;
             FormKey key = session_.resolve(p, raw);
-            if (key.valid() && session_.findGroup(key))
+            if (session_.exists(key) && key.objectId >= 0x800)
                 s.softRefs.emplace_back(off, key);
         }
     }
