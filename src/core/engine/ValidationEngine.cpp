@@ -478,7 +478,8 @@ std::vector<ArchivePriorityChange> ValidationEngine::checkArchivePriority(const 
     std::vector<uint64_t> rank(idx.archives.size());
     for (size_t a = 0; a < idx.archives.size(); ++a) {
         const auto& ar = idx.archives[a];
-        uint64_t tier = ar.owner == kInvalidPlugin ? 0 : compiled.isCompiled(ar.owner) ? 1 : 2;
+        bool movesToIni = ar.owner != kInvalidPlugin && compiled.isCompiled(ar.owner) && !compiled.hasArchiveLoader(ar.owner);
+        uint64_t tier = ar.owner == kInvalidPlugin ? 0 : movesToIni ? 1 : 2;
         rank[a] = (tier << 32) | a;
     }
     std::vector<ArchivePriorityChange> out;

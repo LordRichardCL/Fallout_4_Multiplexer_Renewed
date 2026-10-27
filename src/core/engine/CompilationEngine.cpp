@@ -37,6 +37,11 @@ bool CompiledOutput::isCompiled(PluginIndex p) const
     return p < compiledFlag_.size() && compiledFlag_[p];
 }
 
+bool CompiledOutput::hasArchiveLoader(PluginIndex p) const
+{
+    return std::find(archiveLoaders.begin(), archiveLoaders.end(), p) != archiveLoaders.end();
+}
+
 const OutputPlugin* CompiledOutput::patchOutput() const
 {
     for (const auto& o : outputs)
@@ -831,9 +836,16 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     std::string lang = session.install.config.language.empty() ? "en" : session.install.config.language;
     for (auto pi : out.compiledPlugins) {
         const auto& p = session.plugins[pi];
+        std::vector<std::string> archives;
         for (const auto& a : AssetScanner::pluginArchiveNames(p, lang))
             if (session.vfs.find(toLower(a)))
-                out.archivesToRegister.push_back(a);
+                archives.push_back(a);
+        if (archives.empty())
+            continue;
+        if (options.archiveLoaders)
+            out.archiveLoaders.push_back(pi);
+        else
+            out.archivesToRegister.insert(out.archivesToRegister.end(), archives.begin(), archives.end());
     }
 
     size_t used = std::count_if(out.outputs.begin(), out.outputs.end(),

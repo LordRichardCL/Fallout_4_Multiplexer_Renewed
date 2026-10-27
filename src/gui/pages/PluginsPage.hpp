@@ -17,6 +17,8 @@ class PluginsPage : public Page {
 public:
     explicit PluginsPage(AppController* app, QWidget* parent = nullptr);
     void refresh() override;
+    // Blocking types and every plugin's header, record types and eligibility, as tab-separated text.
+    QString exportText();
 
 private:
     void reload();

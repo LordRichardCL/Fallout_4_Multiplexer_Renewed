@@ -1086,3 +1086,103 @@ TEST(unaligned_undescribed_formid_is_caught)
         reported |= is.message.find("GLOB UNKN") != std::string::npos && is.message.find("+3") != std::string::npos;
     CHECK(reported);
 }
+
+TEST(archive_loaders_keep_archive_priority_in_mo2)
+{
+    auto root = tempDir("loaders");
+    auto game = root / "Game";
+    writePlugin(game / "Data" / "Fallout4.esm", {}, {record("KYWD", 0x800, {zs("EDID", "K")})}, ESM);
+    auto inst = root / "MO2";
+    writeFile(inst / "ModOrganizer.ini", "[General]\ngamePath=@ByteArray(" + pathToUtf8(game) +
+                                             ")\nselected_profile=@ByteArray(Default)\n[Settings]\n");
+    // ModStay (a cell: stays) loads first and ships the same texture as ModWeap (compiled).
+    writeFile(inst / "profiles" / "Default" / "modlist.txt", "+ModWeap\n+ModStay\n");
+    writeFile(inst / "profiles" / "Default" / "plugins.txt", "*ModStay.esp\n*ModWeap.esp\n");
+    writePlugin(inst / "mods" / "ModStay" / "ModStay.esp", {"Fallout4.esm"},
+                {record("CELL", 0x01000800, {zs("EDID", "StayCell")})});
+    writeGeneralBa2(inst / "mods" / "ModStay" / "ModStay - Main.ba2", {{"textures\\gun.dds", std::vector<uint8_t>(32, 1)}},
+                    false);
+    writePlugin(inst / "mods" / "ModWeap" / "ModWeap.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000800, {zs("EDID", "WeapKeyword")})});
+    writeGeneralBa2(inst / "mods" / "ModWeap" / "ModWeap - Main.ba2", {{"textures\\gun.dds", std::vector<uint8_t>(32, 2)}},
+                    false);
+
+    PipelineConfig cfg;
+    cfg.install.kind = InstallKind::ModOrganizer2;
+    cfg.install.mo2Path = inst;
+    cfg.install.iniDirectory = root / "ini";
+    cfg.databasePath = root / "db.sqlite";
+    cfg.compile.outputCount = 10;
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        const auto* c = p.compiledOutput();
+        auto weap = p.session().findPlugin("ModWeap.esp")->index;
+        CHECK(c->isCompiled(weap));
+        CHECK(c->hasArchiveLoader(weap));
+        CHECK(c->archivesToRegister.empty());          // nothing for the INI
+        CHECK(p.archivePriorityChanges().empty());     // ModWeap's texture keeps winning
+        auto result = p.exportOutputs();
+        CHECK_EQ(result.archiveLoaders.size(), size_t(1));
+        auto header = readPluginHeader(result.archiveLoaders.at(0));
+        CHECK(header.record.flags & RecordFlags::Light);
+        CHECK_EQ(header.author, std::string(kGeneratorAuthor));
+        CHECK(header.masters.empty());
+        std::ifstream proposed(result.pluginsTxt);
+        std::string text((std::istreambuf_iterator<char>(proposed)), std::istreambuf_iterator<char>());
+        CHECK(text.find("*ModWeap.esp") != std::string::npos); // stays enabled: it is the loader now
+    }
+
+    // After switching over: the output mod wins in MO2 and ModWeap.esp is the loader. A rescan
+    // still reads the original underneath and does not treat the outputs as sources.
+    writeFile(inst / "profiles" / "Default" / "modlist.txt", "+Fallout 4 Multiplexer Output\n+ModWeap\n+ModStay\n");
+    writeFile(inst / "profiles" / "Default" / "plugins.txt", "*ModStay.esp\n*ModWeap.esp\n*Dummy_Plugin_01.esp\n");
+    Pipeline p(cfg);
+    p.scan();
+    const auto* weap = p.session().findPlugin("ModWeap.esp");
+    CHECK(weap->behindLoader);
+    CHECK_EQ(weap->sourceMod, std::string("ModWeap"));
+    CHECK(weap->active);
+    CHECK_EQ(weap->recordCount, 1u); // the original's record, not the empty loader
+    CHECK(p.session().findPlugin("Dummy_Plugin_01.esp")->generated);
+    CHECK(!p.session().findPlugin("Dummy_Plugin_01.esp")->active);
+    p.analyse();
+    CHECK(p.compile());
+    CHECK(p.compiledOutput()->isCompiled(weap->index));
+}
+
+TEST(rescan_after_switching_over_reads_the_original_load_order)
+{
+    auto root = buildInstall("switched");
+    auto cfg = configFor(root);
+    cfg.exportOptions.outputDirectory = root / "Game" / "Data"; // outputs visible to later scans
+    std::vector<std::string> compiled;
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        for (auto pi : p.compiledOutput()->compiledPlugins)
+            compiled.push_back(p.session().plugins[pi].name);
+        auto result = p.exportOutputs();
+        // Switch over: the proposed plugins.txt disables compiled plugins and enables the outputs.
+        std::filesystem::copy_file(result.pluginsTxt, root / "plugins.txt", std::filesystem::copy_options::overwrite_existing);
+    }
+    CHECK(!compiled.empty());
+    Pipeline p(cfg);
+    p.scan();
+    for (const auto& name : compiled) {
+        const auto* pl = p.session().findPlugin(name);
+        CHECK(pl->active);      // still a source, in its recorded position
+        CHECK(pl->reactivated);
+    }
+    for (const auto& pl : p.session().plugins)
+        if (pl.name.rfind("Dummy_Plugin_", 0) == 0) {
+            CHECK(pl.generated);
+            CHECK(!pl.active);
+        }
+    // Nothing changed since the build, so nothing needs rebuilding.
+    CHECK(p.changes().status != BuildStatus::RequiresRebuild);
+}

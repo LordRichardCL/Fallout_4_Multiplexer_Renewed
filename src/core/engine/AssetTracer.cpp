@@ -30,7 +30,8 @@ const char* rootFor(Signature record, Signature sub)
         if (s == "MNAM")
             return "materials\\";
     }
-    if (record == Signature("MSWP") && (s == "BNAM" || s == "SNAM"))
+    // BNAM only names the material being replaced; the replacement (SNAM) is what loads.
+    if (record == Signature("MSWP") && s == "SNAM")
         return "materials\\";
     if (record == Signature("SNDR") && s == "ANAM")
         return "sound\\";
@@ -51,6 +52,10 @@ std::string underRoot(const std::string& value, const char* root)
     std::string p = normalizeAssetPath(value);
     if (p.empty())
         return p;
+    // Some records carry absolute build paths ("c:\projects\...\data\meshes\..."); the engine
+    // resolves them from the part after "data\".
+    if (auto pos = p.rfind("data\\"); pos != std::string::npos && p.find(':') != std::string::npos)
+        p = p.substr(pos + 5);
     return istartsWith(p, root) ? p : std::string(root) + p;
 }
 
@@ -73,6 +78,11 @@ AssetTrace AssetTracer::trace(Session& session, const CompiledOutput& compiled, 
 
     auto locate = [&](TracedAsset& a) {
         const AssetEntry* e = session.assets.find(a.path);
+        // Sound descriptors name .wav files; the game ships them as .xwm or .fuz.
+        if (!e && iendsWith(a.path, ".wav"))
+            for (const char* ext : {".xwm", ".fuz"})
+                if ((e = session.assets.find(a.path.substr(0, a.path.size() - 4) + ext)))
+                    break;
         a.found = e != nullptr;
         if (!e)
             return;
@@ -87,7 +97,8 @@ AssetTrace AssetTracer::trace(Session& session, const CompiledOutput& compiled, 
             a.physical = ar.archive ? pathToUtf8(ar.archive->path()) : ar.name;
             if (ar.owner != kInvalidPlugin) {
                 a.archiveOwner = session.plugins[ar.owner].name;
-                a.needsRegistration = compiledNames.count(session.plugins[ar.owner].key) != 0;
+                a.needsRegistration = compiledNames.count(session.plugins[ar.owner].key) != 0 &&
+                                      !compiled.hasArchiveLoader(ar.owner);
             }
         }
     };
@@ -148,7 +159,14 @@ AssetTrace AssetTracer::trace(Session& session, const CompiledOutput& compiled, 
             std::string path = underRoot(value, root);
             if (path.size() <= std::string(root).size())
                 return;
-            add(path, std::string(root) == "meshes\\" ? "Mesh" : "Icon", {}, true);
+            const std::string r = root;
+            const std::string sub = s.sig.str();
+            const char* role = r == "meshes\\"      ? "Mesh"
+                               : r == "materials\\" ? "Material"
+                               : r == "sound\\"     ? "Sound"
+                               : (sub.rfind("ICO", 0) == 0 || sub.rfind("MIC", 0) == 0) ? "Icon"
+                                                                                        : "Texture";
+            add(path, role, {}, true);
             if (!followMeshes)
                 return;
             for (const auto& c : childrenOf(path)) {

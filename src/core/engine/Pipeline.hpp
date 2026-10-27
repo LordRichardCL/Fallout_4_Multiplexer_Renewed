@@ -35,6 +35,9 @@ struct PipelineConfig {
     // When validation finds records that cannot be written safely, keep their source plugins out of
     // compilation (and those records out of the patch) and compile again, instead of blocking export.
     bool autoIsolate = true;
+    // Mod Organizer 2 with the output folder inside the mods folder: replace compiled plugins that
+    // have archives with archive loaders so their archives keep their priority (no INI change).
+    bool archiveLoaders = true;
 };
 
 // Runs the compiler stages in order and keeps every intermediate result:

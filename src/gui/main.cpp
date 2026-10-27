@@ -4,6 +4,7 @@
 #include "Format.hpp"
 #include "MainWindow.hpp"
 #include "SetupDialog.hpp"
+#include "pages/PluginsPage.hpp"
 #include "Theme.hpp"
 
 #include "util/Log.hpp"
@@ -13,6 +14,7 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QEventLoop>
+#include <QFile>
 #include <QListWidget>
 #include <QPushButton>
 #include <QTableView>
@@ -109,6 +111,13 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
             window.grab().save(outDir.filePath("13-blocking-types.png"));
             break;
         }
+
+    // The Plugins page's text export.
+    for (auto* page : window.findChildren<gui::PluginsPage*>()) {
+        QFile f(outDir.filePath("plugin-report.txt"));
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text))
+            f.write(page->exportText().toUtf8());
+    }
 
     // Record definition check, filtered to its findings.
     {

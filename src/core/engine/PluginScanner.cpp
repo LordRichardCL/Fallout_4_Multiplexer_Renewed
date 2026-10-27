@@ -101,8 +101,10 @@ void PluginScanner::discoverPlugins(Session& session, ProgressSink& progress)
         order.push_back(key);
     }
 
+    std::vector<const VirtualFileSystem::File*> fileOf;
     for (const auto& key : order) {
         const auto* f = files[key];
+        fileOf.push_back(f);
         PluginInfo info;
         info.name = f->relativePath;
         info.path = session.vfs.winnerPath(*f);
@@ -130,6 +132,38 @@ void PluginScanner::discoverPlugins(Session& session, ProgressSink& progress)
             p.active = false;
         }
     });
+
+    // This app's own files: Dummy plugins and patches are outputs, never sources. An archive
+    // loader stands in for a compiled plugin, so the original underneath it is read instead.
+    for (auto& p : session.plugins) {
+        if (!p.error.empty() || p.header.author != kGeneratorAuthor)
+            continue;
+        const auto* f = fileOf[p.index];
+        if (p.header.description.rfind(kArchiveLoaderTag, 0) == 0 && f->sources.size() > 1) {
+            size_t slot = f->sources.size() - 2;
+            p.path = session.vfs.physicalPath(*f, slot);
+            p.sourceMod = session.vfs.roots()[f->sources[slot]].name;
+            p.fileSize = f->sizes[slot];
+            p.modified = f->mtimes[slot];
+            p.behindLoader = true;
+            try {
+                p.header = readPluginHeader(p.path);
+                p.kind = classify(p);
+            } catch (const std::exception& e) {
+                p.error = e.what();
+                p.active = false;
+            }
+            continue;
+        }
+        p.generated = true;
+        p.active = false;
+    }
+    // Plugins the last build compiled are still sources, in their recorded position.
+    for (auto& p : session.plugins)
+        if (!p.active && !p.generated && p.error.empty() && session.reactivate.count(p.key)) {
+            p.active = true;
+            p.reactivated = true;
+        }
 
     // Final load order: implicit plugins first, then masters, then the rest,
     // each group keeping the recorded order (this is what the engine does).

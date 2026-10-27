@@ -5,7 +5,10 @@
 #include "models/SqlModel.hpp"
 #include "widgets/Widgets.hpp"
 
+#include <QFile>
+#include <QFileDialog>
 #include <QHeaderView>
+#include <QStandardPaths>
 #include <QLineEdit>
 #include <QSet>
 #include <QSplitter>
@@ -25,9 +28,22 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
     search_->setPlaceholderText("Search plugins…");
     search_->setClearButtonEnabled(true);
     search_->setMinimumWidth(260);
+    auto* exportBtn = makeButton("Export…");
+    exportBtn->setToolTip("Save the blocking record types and every plugin's type, flags, record types, masters and "
+                          "eligibility to a text file");
     l->addWidget(makePageHeader("Plugin Explorer",
                                 "Every installed plugin, its type, records, masters and whether it can be compiled.",
-                                {search_}));
+                                {search_, exportBtn}));
+    connect(exportBtn, &QPushButton::clicked, this, [this] {
+        QString path = QFileDialog::getSaveFileName(
+            this, "Export plugin report",
+            QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/PluginReport.txt", "Text (*.txt)");
+        if (path.isEmpty())
+            return;
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text))
+            f.write(exportText().toUtf8());
+    });
     chips_ = new FilterChips({"All", "ESM", "ESP", "ESL", "Generated", "Conflicting", "Disabled", "Eligible", "Ineligible",
                              "Blocking Types"});
     chips_->setToolTip("Blocking Types: record types the compiler does not support yet, and how many plugins "
@@ -146,6 +162,77 @@ void PluginsPage::reload()
     }
     details_->setHtml("<p style='color:#8aa196'>Select a plugin to see its details.</p>");
     exclude_->setEnabled(false);
+}
+
+QString PluginsPage::exportText()
+{
+    QSqlDatabase db = app_->readDb();
+    QStringList out;
+    out << "Fallout 4 Multiplexer Renewed - plugin report"
+        << QString("Plugins held back only by record types: %1; supporting every blocking type would unlock %2")
+               .arg(meta("blocked_by_types"), meta("unlocked_by_all_types"))
+        << "";
+
+    // Blocking types, each with the plugins it blocks and what else those plugins need.
+    QSet<QString> unsupported;
+    out << "[Blocking record types]" << "Type\tName\tWould Unlock\tOnly Blocker In\tFound In\tRecords";
+    QSqlQuery b(db);
+    b.exec("SELECT signature, name, unlocks, sole_blocker, plugins, records FROM EligibilityBlockers "
+           "ORDER BY unlocks DESC, plugins DESC, signature");
+    QList<QStringList> blockers;
+    while (b.next()) {
+        QStringList row;
+        for (int c = 0; c < 6; ++c)
+            row << b.value(c).toString();
+        unsupported.insert(row[0]);
+        blockers << row;
+        out << row.join('\t');
+    }
+    out << "";
+    QList<QPair<QString, QString>> plugins; // name, record types
+    QSqlQuery pl(db);
+    pl.exec("SELECT name, record_types FROM Plugins WHERE active = 1 AND eligibility IN ('Eligible', 'Ineligible') "
+            "ORDER BY load_order");
+    while (pl.next())
+        plugins.append({pl.value(0).toString(), pl.value(1).toString()});
+    for (const auto& row : blockers) {
+        out << "[" + row[0] + " - " + row[1] + " blocks]" << "Plugin\tAll unsupported types it contains";
+        for (const auto& [name, types] : plugins) {
+            QStringList needs;
+            bool has = false;
+            for (const auto& t : types.split(", ", Qt::SkipEmptyParts)) {
+                QString sig = t.section(' ', 0, 0);
+                if (unsupported.contains(sig))
+                    needs << t;
+                has |= sig == row[0];
+            }
+            if (has)
+                out << name + "\t" + needs.join(", ");
+        }
+        out << "";
+    }
+
+    // Every plugin.
+    out << "[Plugins]"
+        << "Load Order\tPlugin\tType\tHeader Flags\tActive\tEligibility\tReason\tRecords\tNew\tOverrides\t"
+           "Record Types\tMod\tMasters\tAuthor";
+    QSqlQuery all(db);
+    all.exec("SELECT p.load_order_hex, p.name, p.type, printf('0x%08X', p.flags), p.active, p.eligibility, "
+             "p.eligibility_reason, p.record_count, p.new_records, p.override_count, p.record_types, p.source_mod, "
+             "(SELECT group_concat(master_name, ', ') FROM Masters m WHERE m.plugin_id = p.id), p.author "
+             "FROM Plugins p ORDER BY p.active DESC, CASE WHEN p.load_order < 0 THEN 99999 ELSE p.load_order END, "
+             "p.name");
+    while (all.next()) {
+        QStringList row;
+        for (int c = 0; c < 14; ++c) {
+            QString v = all.value(c).toString();
+            if (c == 4)
+                v = all.value(c).toInt() ? "yes" : "no";
+            row << v.replace('\t', ' ').replace('\n', ' ');
+        }
+        out << row.join('\t');
+    }
+    return out.join('\n') + '\n';
 }
 
 void PluginsPage::showBlocker(int row)

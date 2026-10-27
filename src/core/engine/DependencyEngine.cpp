@@ -137,7 +137,8 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
         p.reasons.clear();
         if (!p.active) {
             p.eligibility = Eligibility::Inactive;
-            p.reasons.push_back("Not enabled in the load order");
+            p.reasons.push_back(p.generated ? "Written by Fallout 4 Multiplexer Renewed (an output, never a source)"
+                                            : "Not enabled in the load order");
             continue;
         }
         if (!p.error.empty() || !p.scanned) {

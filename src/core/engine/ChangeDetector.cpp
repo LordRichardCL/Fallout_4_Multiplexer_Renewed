@@ -222,6 +222,8 @@ InstallSnapshot ChangeDetector::capture(const Session& session)
     s.profile = pathToUtf8(session.install.profilePath.filename());
     s.mods = modsFrom(session.install, session.vfs, s.looseFiles);
     for (const auto& p : session.plugins) {
+        if (p.generated)
+            continue; // this app's own outputs
         FileFingerprint f;
         f.name = p.name;
         f.mod = p.sourceMod;
@@ -271,6 +273,9 @@ InstallSnapshot ChangeDetector::captureQuick(const InstallConfig& config, const 
     Session session;
     session.install = resolveInstall(config);
     populateVfs(session.install, session.vfs, progress);
+    if (reference && reference->isBuild)
+        for (const auto& name : reference->compiledPlugins)
+            session.reactivate.insert(toLower(name));
     PluginScanner::discoverPlugins(session, progress);
 
     InstallSnapshot s;
@@ -284,6 +289,8 @@ InstallSnapshot ChangeDetector::captureQuick(const InstallConfig& config, const 
         for (const auto& p : reference->plugins)
             previous[toLower(p.name)] = &p;
     for (const auto& p : session.plugins) {
+        if (p.generated)
+            continue;
         FileFingerprint f;
         f.name = p.name;
         f.mod = p.sourceMod;

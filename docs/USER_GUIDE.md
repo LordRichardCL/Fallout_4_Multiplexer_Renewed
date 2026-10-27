@@ -54,6 +54,8 @@ Filter by ESM/ESP/ESL, conflicting, disabled, eligible, ineligible, or **Generat
 
 Select a type to see each plugin it blocks and everything else that plugin needs.
 
+**Export…** (top right) saves a text file with every blocking type and the plugins it holds back, and every plugin's load order position, type, header flags, eligibility and reason, record types with counts, mod, masters and author. It is useful for planning which record types to support next.
+
 ![Blocking types](images/13-blocking-types.png)
  The detail panel shows masters, dependents, record types, archives and the **exact reason** a plugin can or cannot be compiled. Use **Exclude from compilation** to keep a plugin.
 
@@ -128,15 +130,16 @@ Then:
 
 1. In MO2, enable the output mod (or refresh if you exported into an existing mod).
 2. On the **Compilation** page, press **Apply to Game…**. It makes a timestamped backup of every file first, then:
+   - **Mod Organizer 2, output folder inside the mods folder (the default):** compiled plugins that have archives are replaced by **archive loaders**. An archive loader is an empty, ESL-flagged plugin with the same file name, written into the output mod. It stays enabled in the same load order position, so the game loads that mod's archives at exactly the same priority as before, and it takes no full load order slot. The records themselves are in the Dummy plugins. Keep the output mod at the **bottom of the left pane** so it overrides the original plugins; validation warns if it does not.
    - **Mod Organizer 2:** rewrites the profile's `plugins.txt`/`loadorder.txt` so compiled plugins are disabled and the generated ones enabled.
-   - **All installs:** adds the compiled plugins' archives to `SResourceArchiveList2` in `Fallout4Custom.ini`, in the folder the game reads its INIs from (the MO2 profile when it uses profile-local INIs). Archives an earlier build added but this one no longer needs are taken out again. Every other line of the INI is kept as it was.
+   - **Other installs (or MO2 with an output folder outside the mods folder):** adds the compiled plugins' archives to `SResourceArchiveList2` in `Fallout4Custom.ini`, in the folder the game reads its INIs from (the MO2 profile when it uses profile-local INIs). Archives an earlier build added but this one no longer needs are taken out again. Every other line of the INI is kept as it was.
    - **Vortex and manual installs:** disable the plugins in `Multiplexer_DisablePlugins.txt` and enable the generated plugins yourself (Vortex manages `plugins.txt`).
 3. **Keep the compiled mods installed.** In MO2, untick only their *plugins* (right pane), never the mods themselves (left pane). Their textures, meshes and archives must stay in the Data folder.
 4. Open the outputs in FO4Edit and spot-check a few records.
 
 ### Archive priority
 
-Archives listed in the INI load before every plugin's own archives. Once compiled plugins' archives move into that list, an archive of a plugin that stays can start winning a file it used to lose. The **Validation** page lists these under **Archive Priority** (up to 50, with the full list in `Multiplexer_ArchivePriority.txt`). To keep the compiled mod's version of a file, exclude that mod from compilation, or provide the file loose (loose files beat every archive).
+With archive loaders (MO2) nothing changes: every archive keeps its position. Without them, archives listed in the INI load before every plugin's own archives. Once compiled plugins' archives move into that list, an archive of a plugin that stays can start winning a file it used to lose. The **Validation** page lists these under **Archive Priority** (up to 50, with the full list in `Multiplexer_ArchivePriority.txt`). To keep the compiled mod's version of a file, exclude that mod from compilation, or provide the file loose (loose files beat every archive).
 
 ### When some records cannot be compiled safely
 
@@ -162,6 +165,10 @@ The app needs the exact layout of every record type it compiles. This check conf
 The same **Copy** and **Save…** buttons work for any filter. For example, after a compile, click **Errors** and then **Save…** to send the errors that blocked an export.
 
 Command line: `fo4mx check-definitions --mo2 "C:\Modding\MO2"` prints the same results (exit code 4 if there are warnings).
+
+## Rebuilding after switching over
+
+You do not need to switch back to the original load order to rebuild. Scans recognise the app's own files: Dummy plugins and patches are never read as sources, an archive loader is looked through to the original plugin underneath it, and plugins the last build compiled count as active sources in their original position even though they are disabled now. **Changes** and **Rebuild** therefore work straight from the switched-over load order.
 
 ## Starting fresh
 

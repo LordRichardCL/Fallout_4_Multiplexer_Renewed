@@ -25,6 +25,7 @@ struct ExportResult {
     std::filesystem::path disableList;
     std::filesystem::path pluginsTxt;
     std::filesystem::path summary;
+    std::vector<std::filesystem::path> archiveLoaders; // empty ESL plugins keeping compiled plugins' archives loading
 };
 
 // Stage Export: writes the output plugins and everything needed to switch

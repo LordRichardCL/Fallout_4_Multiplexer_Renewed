@@ -36,6 +36,12 @@ enum class Eligibility : uint8_t {
 };
 const char* eligibilityName(Eligibility e);
 
+// Author written into every plugin this app generates; scans recognise them by it.
+inline constexpr const char* kGeneratorAuthor = "Fallout 4 Multiplexer Renewed";
+// Description prefix of archive loaders: empty ESL plugins named after a compiled plugin so its
+// archives keep loading at the same priority.
+inline constexpr const char* kArchiveLoaderTag = "Archive loader";
+
 struct PluginInfo {
     PluginIndex index = kInvalidPlugin;
     std::string name;
@@ -49,6 +55,9 @@ struct PluginInfo {
     bool implicit = false;
     bool baseGame = false;
     bool creationClub = false;
+    bool generated = false;       // a Dummy plugin, patch or loader this app wrote: never a source
+    bool behindLoader = false;    // the file is the original underneath this app's archive loader
+    bool reactivated = false;     // compiled in the last build and disabled since: still a source
     int32_t loadOrder = -1;     // position among active plugins
     std::string loadOrderHex;   // "0A" or "FE 001"
 
@@ -140,6 +149,9 @@ public:
     // Plugins kept out of compilation because validation found records it cannot write safely
     // (lowercase name -> the finding that caused it). Rebuilt by every compilation.
     std::map<std::string, std::string> autoRetained;
+    // Plugins compiled by the last build (lowercase). After switching over they are disabled, or
+    // hidden behind an archive loader; scans still treat them as active sources in their position.
+    std::unordered_set<std::string> reactivate;
 
     BuildCache* cache = nullptr; // optional, owned by the pipeline
 

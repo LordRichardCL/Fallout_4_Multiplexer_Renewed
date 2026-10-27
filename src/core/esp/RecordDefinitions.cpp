@@ -257,9 +257,14 @@ void buildOldGen(RecordDefinitions& d)
     // 11,257 of 13,243 weapons, which fixes every offset after it.
     FieldDef weaponData = structAt({0, 40, 44, 73, 77, 81, 85, 89, 93, 97, 101}, 0, true);
     weaponData.plain = {{4, 40}, {48, 73}, {105, 132}};
+    // FNAM: animation and rumble timings (+0..+27), projectile count (+28), projectile override
+    // (+29, found by the unaligned scan on grenades and custom guns), then pattern and rumble period.
+    FieldDef weaponFiring = structAt({29}, 0, true);
+    weaponFiring.plain = {{0, 29}};
     b.record("WEAP", "Weapon", true)
         .field("DNAM", weaponData)
         .field("CRDT", structAt({8}, 0, true)) // critical damage and charge multipliers, critical effect spell
+        .field("FNAM", weaponFiring)            // firing data: projectile override at +29
         .field("INAM", formId())                // impact data set
         .field("WAMD", formId())                // aim model
         .field("WZMD", formId())                // zoom
@@ -357,8 +362,13 @@ void buildOldGen(RecordDefinitions& d)
         .field("CDIX", noRefs())
         .modelRegions();
 
+    // DNAM: flags (+0), then what the book teaches (perk, spell or actor value) at +1; text offsets
+    // follow. Found by the unaligned scan on a real load order: magazines' perks at +1.
+    FieldDef bookData = structAt({1}, 0, true);
+    bookData.plain = {{0, 1}};
     b.record("BOOK", "Book", true)
         .field("DATA", noRefs())
+        .field("DNAM", bookData)
         .field("INAM", formId())
         .field("CNAM", dlstring())
         .modelRegions();

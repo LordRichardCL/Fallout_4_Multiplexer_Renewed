@@ -43,6 +43,10 @@ struct CompileOptions {
     std::string patchName = "Multiplexer_Patch.esp";
     size_t patchMasterLimit = 254; // a patch is split into several plugins above this many masters
     std::unordered_set<uint64_t> skipPatchRecords; // FormKey::packed(): left to last-plugin-wins
+    // Keep compiled plugins' archives loading at their original priority through empty ESL plugins
+    // of the same name (archive loaders) instead of the INI list. Only possible when the output
+    // folder is a mod-manager mod that overrides the original files (Mod Organizer 2).
+    bool archiveLoaders = false;
 
     std::string author = "Fallout 4 Multiplexer Renewed";
     std::filesystem::path previousFormMap; // reuse FormIDs from an earlier compilation
@@ -115,7 +119,8 @@ struct CompiledOutput {
     std::vector<EmittedRecord> records;
     std::vector<OutputPlugin> outputs;
     std::vector<FormMapping> mappings;
-    std::vector<std::string> archivesToRegister;
+    std::vector<std::string> archivesToRegister; // archives that must be listed in the INI
+    std::vector<PluginIndex> archiveLoaders;      // compiled plugins replaced by an archive loader
     std::vector<CompileIssue> issues;
     std::unordered_map<FormKey, uint32_t> indexByKey;
     size_t sourceRecords = 0;      // instances in compiled plugins
@@ -128,6 +133,7 @@ struct CompiledOutput {
     size_t mergesComputed = 0; // override chains merged in this compilation
     bool empty() const { return records.empty(); }
     bool isCompiled(PluginIndex p) const;
+    bool hasArchiveLoader(PluginIndex p) const;
     std::string outputName(int index) const { return outputs.at(static_cast<size_t>(index)).name; }
     const OutputPlugin* patchOutput() const; // the first patch plugin, if any
 

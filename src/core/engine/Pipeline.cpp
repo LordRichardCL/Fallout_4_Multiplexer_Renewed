@@ -96,6 +96,11 @@ void Pipeline::scan(ProgressSink& progress)
     exported_.reset();
 
     progress.stage("Scan");
+    openDatabase();
+    if (db_)
+        if (auto build = db::DatabaseWriter(*db_).loadSnapshot("build"); build && build->isBuild)
+            for (const auto& name : build->compiledPlugins)
+                session_->reactivate.insert(toLower(name));
     spdlog::info("Reading {} configuration", installKindName(config_.install.kind));
     session_->install = resolveInstall(config_.install);
     for (const auto& name : config_.analysis.excludedPlugins)
@@ -184,6 +189,22 @@ bool Pipeline::compile(ProgressSink& progress)
     // plugins (or patch records) aside and compile again. Each round only ever removes work.
     session_->autoRetained.clear();
     CompileOptions options = config_.compile;
+
+    // Archive loaders need the output mod to override the original plugin files, which only a
+    // Mod Organizer 2 mod folder does. Anywhere else they would overwrite the originals.
+    const auto outputDir = config_.exportOptions.outputDirectory.empty()
+                               ? Exporter::defaultOutputDirectory(*session_)
+                               : config_.exportOptions.outputDirectory;
+    std::string outputMod;
+    if (config_.archiveLoaders && session_->install.config.kind == InstallKind::ModOrganizer2 &&
+        !session_->install.modsPath.empty()) {
+        auto rel = std::filesystem::path(outputDir).lexically_normal().lexically_relative(
+            session_->install.modsPath.lexically_normal());
+        if (!rel.empty() && *rel.begin() != ".." && *rel.begin() != ".") {
+            outputMod = pathToUtf8(*rel.begin());
+            options.archiveLoaders = true;
+        }
+    }
     std::map<std::string, std::string> isolatedPatchRecords; // record label -> finding
     for (int round = 0;; ++round) {
         DependencyEngine::evaluateEligibility(*session_, config_.analysis, dependencies_ ? &*dependencies_ : nullptr);
@@ -234,6 +255,34 @@ bool Pipeline::compile(ProgressSink& progress)
                           label + " was left out of the patch (last plugin wins for it): " + reason);
     if (db_ && !session_->autoRetained.empty())
         db::DatabaseWriter(*db_).updatePlugins(*session_);
+
+    if (!compiled_->archiveLoaders.empty()) {
+        // The output mod must win over every mod whose plugin it replaces with a loader.
+        const ModInfo* out = nullptr;
+        for (const auto& m : session_->install.mods)
+            if (iequals(m.name, outputMod))
+                out = &m;
+        std::vector<std::string> above;
+        for (auto pi : compiled_->archiveLoaders) {
+            const auto& p = session_->plugins[pi];
+            for (const auto& m : session_->install.mods)
+                if (out && iequals(m.name, p.sourceMod) && m.priority > out->priority)
+                    above.push_back(p.name + " (" + m.name + ")");
+        }
+        if (!out)
+            validation_->fail(Severity::Info, "Archive Loaders",
+                              std::to_string(compiled_->archiveLoaders.size()) +
+                                  " compiled plugins keep their archives through archive loaders in '" + outputMod +
+                                  "'. After exporting, refresh Mod Organizer and keep that mod at the bottom of the "
+                                  "left pane so it overrides the original plugins.");
+        else if (!above.empty())
+            validation_->fail(Severity::Warning, "Archive Loaders",
+                              "Move '" + outputMod + "' to the bottom of Mod Organizer's left pane: these mods are "
+                              "below it, so their original plugins would win over the archive loaders: " +
+                                  join(above, ", "));
+        else
+            validation_->pass();
+    }
 
     archiveChanges_ = ValidationEngine::checkArchivePriority(*session_, *compiled_);
     if (!archiveChanges_.empty()) {
