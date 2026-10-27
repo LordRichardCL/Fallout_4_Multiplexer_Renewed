@@ -160,6 +160,11 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
             p.reasons.push_back("Creation Club content");
             continue;
         }
+        if (auto it = session.autoRetained.find(p.key); it != session.autoRetained.end()) {
+            p.eligibility = Eligibility::Retained;
+            p.reasons.push_back("Kept out automatically: " + it->second);
+            continue;
+        }
         if (excluded.count(p.key)) {
             p.eligibility = Eligibility::Retained;
             p.reasons.push_back("Excluded by user");

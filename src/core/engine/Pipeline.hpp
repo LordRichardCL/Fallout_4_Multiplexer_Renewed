@@ -32,6 +32,9 @@ struct PipelineConfig {
     bool useCache = true;               // incremental scans / analysis / compilation
     std::filesystem::path cachePath;    // default: next to the database
     bool traceAssets = true;            // resolve the assets compiled records use
+    // When validation finds records that cannot be written safely, keep their source plugins out of
+    // compilation (and those records out of the patch) and compile again, instead of blocking export.
+    bool autoIsolate = true;
 };
 
 // Runs the compiler stages in order and keeps every intermediate result:
@@ -59,6 +62,7 @@ public:
     ChangeReport checkForChanges(ProgressSink& progress = nullProgress());
     const ChangeReport& changes() const { return changes_; }
     const AssetTrace& assetTrace() const { return assetTrace_; }
+    const std::vector<ArchivePriorityChange>& archivePriorityChanges() const { return archiveChanges_; }
     BuildCache* cache() { return cache_.get(); }
     uint64_t currentSettingsHash() const;
 
@@ -89,6 +93,7 @@ private:
     std::optional<DependencyReport> dependencies_;
     std::optional<CompiledOutput> compiled_;
     std::optional<ValidationReport> validation_;
+    std::vector<ArchivePriorityChange> archiveChanges_;
     std::optional<ExportResult> exported_;
     std::unique_ptr<BuildCache> cache_;
     AssetTrace assetTrace_;

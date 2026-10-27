@@ -2,7 +2,9 @@
 
 #include "Format.hpp"
 
+#include "db/Database.hpp"
 #include "db/DatabaseWriter.hpp"
+#include "engine/BuildCache.hpp"
 #include "engine/Exporter.hpp"
 #include "util/Log.hpp"
 #include "util/Platform.hpp"
@@ -15,6 +17,7 @@
 
 #include <mutex>
 #include <algorithm>
+#include <fstream>
 
 #include <spdlog/sinks/base_sink.h>
 
@@ -118,6 +121,90 @@ QSqlDatabase AppController::readDb()
     if (!db.open())
         spdlog::warn("Cannot open results database: {}", db.lastError().text().toStdString());
     return db;
+}
+
+bool AppController::clearResultsAfterUpgrade(const QString& buildId)
+{
+    QSettings s;
+    QString previous = s.value("app/build").toString();
+    s.setValue("app/build", buildId);
+    if (previous.isEmpty() || previous == buildId)
+        return false;
+    spdlog::info("New build ({} -> {}): clearing results and cache from the previous build", previous.toStdString(),
+                 buildId.toStdString());
+    resetToFreshState(true);
+    return true;
+}
+
+QStringList AppController::resetToFreshState(bool keepSettings)
+{
+    QStringList removed;
+    if (busy_)
+        return removed;
+    pipeline_.reset();
+    if (QSqlDatabase::contains(connectionName_)) {
+        QSqlDatabase::database(connectionName_, false).close();
+        QSqlDatabase::removeDatabase(connectionName_);
+    }
+
+    namespace fs = std::filesystem;
+    auto remove = [&](const fs::path& p) {
+        std::error_code ec;
+        if (!fs::exists(p, ec))
+            return;
+        if (fs::remove(p, ec)) {
+            removed << toQString(p);
+            return;
+        }
+        // The current log file stays open while the app runs: empty it instead.
+        std::ofstream(p, std::ios::trunc);
+        removed << toQString(p) + " (emptied)";
+    };
+    std::vector<fs::path> databases = {config_.databasePath, platform::applicationDataDir() / "multiplexer.sqlite"};
+    for (const auto& db : databases) {
+        if (db.empty())
+            continue;
+        if (keepSettings && fs::exists(db)) {
+            // Keep the conflict resolutions the user chose; empty everything else.
+            try {
+                db::Database d(db);
+                std::vector<std::string> tables;
+                auto q = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'");
+                while (q.step())
+                    tables.push_back(q.columnText(0));
+                for (const auto& t : tables)
+                    if (t != "UserResolutions")
+                        d.exec("DELETE FROM \"" + t + "\";");
+                removed << toQString(db) + " (results cleared, conflict resolutions kept)";
+            } catch (const std::exception& e) {
+                spdlog::warn("Could not clear {}: {}", pathToUtf8(db), e.what());
+            }
+        } else {
+            remove(db);
+            for (const char* suffix : {"-wal", "-shm", "-journal"})
+                remove(fs::path(db.native() + fs::path(suffix).native()));
+        }
+        auto cache = config_.cachePath.empty() ? BuildCache::defaultPathFor(db) : config_.cachePath;
+        remove(cache);
+        for (const char* suffix : {"-wal", "-shm", "-journal"})
+            remove(fs::path(cache.native() + fs::path(suffix).native()));
+    }
+    std::error_code ec;
+    if (!keepSettings)
+        for (const auto& entry : fs::directory_iterator(platform::applicationDataDir() / "logs", ec))
+            remove(entry.path());
+
+    if (!keepSettings) {
+        QSettings().clear();
+        QSettings().sync();
+        removed << "All saved settings, exclusions and conflict resolutions";
+        config_ = PipelineConfig{};
+        loadSettings(); // defaults
+    }
+    spdlog::info("Reset to a fresh state: {} items removed", removed.size());
+    emit settingsChanged();
+    emit dataChanged();
+    return removed;
 }
 
 void AppController::reopenDatabase()
@@ -449,11 +536,20 @@ bool AppController::applyToProfile(QString* message)
     }
     const auto& s = pipeline_->session();
     try {
-        auto written = Exporter::applyToProfile(s, *pipeline_->compiledOutput(), s.install.pluginsFile);
+        std::vector<std::filesystem::path> written;
+        // Vortex manages plugins.txt itself; for MO2 the profile's load order is rewritten.
+        if (s.install.config.kind == fo4mx::InstallKind::ModOrganizer2)
+            written = Exporter::applyToProfile(s, *pipeline_->compiledOutput(), s.install.pluginsFile);
+        for (auto& p : Exporter::applyArchiveIni(s, *pipeline_->compiledOutput(), pipeline_->exportResult()->directory))
+            written.push_back(p);
         QStringList names;
         for (const auto& w : written)
             names << toQString(w);
-        *message = "Updated (backups kept next to each file):\n" + names.join("\n");
+        *message = names.isEmpty() ? QString("Nothing needed to change.")
+                                   : "Updated (backups kept next to each file):\n" + names.join("\n");
+        if (s.install.config.kind != fo4mx::InstallKind::ModOrganizer2)
+            *message += "\n\nDisable the plugins listed in Multiplexer_DisablePlugins.txt and enable the generated "
+                        "plugins in your mod manager.";
         return true;
     } catch (const std::exception& e) {
         *message = QString::fromUtf8(e.what());

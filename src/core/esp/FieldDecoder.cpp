@@ -110,8 +110,17 @@ private:
             for (uint16_t o : def.offsets)
                 if (o + 4u <= size)
                     slot(i, o);
-            if (def.partial)
-                heuristic(i, 0, static_cast<uint32_t>(size));
+            if (def.partial) {
+                // Scan everything except the ranges known to hold numbers and flags.
+                uint32_t from = 0;
+                for (auto [b, e] : def.plain) {
+                    if (b > from)
+                        heuristic(i, from, std::min<uint32_t>(b, static_cast<uint32_t>(size)));
+                    from = std::max<uint32_t>(from, e);
+                }
+                if (from < size)
+                    heuristic(i, from, static_cast<uint32_t>(size));
+            }
             break;
         case FieldKind::StructArray:
             if (def.stride == 0 || size % def.stride != 0) {
@@ -239,6 +248,27 @@ private:
             vmadProperty(r, i, version, objFormat, 0);
     }
 
+    // Script fragments (PERK, TERM, QUST, INFO, SCEN, PACK): an extra-bind-data version byte and the
+    // fragment script with its own properties, followed by the fragment list (indices and names).
+    // Anything that does not parse that way is scanned instead.
+    void vmadFragments(BinaryReader& r, uint32_t i, const Subrecord& sr, int16_t version, int16_t objFormat)
+    {
+        const size_t start = r.position();
+        const size_t slotsBefore = out_.formIdSlots.size();
+        try {
+            r.skip(1); // extra bind data version
+            vmadScript(r, i, version, objFormat);
+        } catch (const FormatError&) {
+            out_.formIdSlots.resize(slotsBefore);
+            heuristic(i, static_cast<uint32_t>(start), static_cast<uint32_t>(sr.data.size()));
+            return;
+        }
+        // The fragment list (and aliases, for quests) is scanned; the definition check shows
+        // whether anything in it still looks like a FormID.
+        if (!r.atEnd())
+            heuristic(i, static_cast<uint32_t>(r.position()), static_cast<uint32_t>(sr.data.size()));
+    }
+
     void decodeVmad(uint32_t i, const Subrecord& sr)
     {
         size_t slotsBefore = out_.formIdSlots.size();
@@ -249,13 +279,8 @@ private:
             uint16_t scripts = r.read<uint16_t>();
             for (uint16_t s = 0; s < scripts; ++s)
                 vmadScript(r, i, version, objFormat);
-            if (!r.atEnd()) {
-                // Script fragments (PERK and other fragment-bearing records).
-                // Their layout is not decoded, so scan it heuristically.
-                if (record_ != Signature("PERK"))
-                    issue(Severity::Info, sr.signature, "unexpected data after script list");
-                heuristic(i, static_cast<uint32_t>(r.position()), static_cast<uint32_t>(sr.data.size()));
-            }
+            if (!r.atEnd())
+                vmadFragments(r, i, sr, version, objFormat);
         } catch (const FormatError& e) {
             out_.formIdSlots.resize(slotsBefore);
             issue(Severity::Warning, sr.signature, std::string("script data not fully decoded: ") + e.what());

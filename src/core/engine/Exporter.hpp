@@ -44,6 +44,22 @@ public:
                                                              const std::filesystem::path& pluginsTxt);
 
     static std::string proposedPluginsTxt(const Session& session, const CompiledOutput& compiled);
+
+    // The SResourceArchiveList2 value the build needs: the current value, without archives an
+    // earlier build in `outputDirectory` registered but this one no longer needs, plus the
+    // archives of compiled plugins.
+    static std::vector<std::string> archiveList(const Session& session, const CompiledOutput& compiled,
+                                                const std::filesystem::path& outputDirectory);
+
+    // Writes archiveList() into Fallout4Custom.ini in the folder the game reads its INIs from
+    // (the MO2 profile when it uses profile-local INIs), after a timestamped backup. Every other
+    // line is kept. Returns the files written (empty when nothing needed to change).
+    static std::vector<std::filesystem::path> applyArchiveIni(const Session& session, const CompiledOutput& compiled,
+                                                              const std::filesystem::path& outputDirectory);
+
+    // Sets [section] key=value in INI text, keeping every other line, comment and line ending.
+    static std::string setIniValue(const std::string& text, const std::string& section, const std::string& key,
+                                   const std::string& value);
 };
 
 } // namespace fo4mx

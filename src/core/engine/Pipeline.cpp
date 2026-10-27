@@ -4,6 +4,8 @@
 #include "report/ReportGenerator.hpp"
 #include "util/Text.hpp"
 
+#include <fstream>
+
 #include <spdlog/spdlog.h>
 
 namespace fo4mx {
@@ -178,8 +180,80 @@ bool Pipeline::compile(ProgressSink& progress)
         if (std::filesystem::exists(previous))
             config_.compile.previousFormMap = previous;
     }
-    compiled_ = CompilationEngine::compile(*session_, config_.compile, progress);
-    validation_ = ValidationEngine::validate(*session_, *compiled_, progress);
+    // Compile, and while validation finds records that cannot be written safely, set their source
+    // plugins (or patch records) aside and compile again. Each round only ever removes work.
+    session_->autoRetained.clear();
+    CompileOptions options = config_.compile;
+    std::map<std::string, std::string> isolatedPatchRecords; // record label -> finding
+    for (int round = 0;; ++round) {
+        DependencyEngine::evaluateEligibility(*session_, config_.analysis, dependencies_ ? &*dependencies_ : nullptr);
+        compiled_ = CompilationEngine::compile(*session_, options, progress);
+        validation_ = ValidationEngine::validate(*session_, *compiled_, progress);
+        if (!validation_->critical() || !config_.autoIsolate || round >= 8)
+            break;
+        size_t isolated = 0;
+        for (const auto& is : validation_->issues) {
+            if (is.severity != Severity::Error || !is.record.valid())
+                continue;
+            auto it = compiled_->indexByKey.find(is.record);
+            if (it == compiled_->indexByKey.end())
+                continue;
+            const auto& e = compiled_->records[it->second];
+            if (e.patch) {
+                if (options.skipPatchRecords.insert(e.key.packed()).second) {
+                    isolatedPatchRecords.emplace(session_->formLabel(e.key), is.message);
+                    ++isolated;
+                }
+                continue;
+            }
+            std::vector<PluginIndex> sources;
+            if (e.isNew)
+                sources.push_back(e.key.origin);
+            else
+                for (auto pi : e.chain)
+                    if (compiled_->isCompiled(pi))
+                        sources.push_back(pi);
+            for (auto pi : sources)
+                if (session_->autoRetained.emplace(session_->plugins[pi].key, is.message).second)
+                    ++isolated;
+        }
+        if (isolated == 0)
+            break; // the remaining errors are not tied to a plugin or record
+        spdlog::info("Validation round {}: kept {} plugins and {} patch records aside; compiling again", round + 1,
+                     session_->autoRetained.size(), options.skipPatchRecords.size());
+    }
+    for (const auto& [key, reason] : session_->autoRetained) {
+        const auto* p = session_->findPlugin(key);
+        validation_->fail(Severity::Warning, "Kept Out Automatically",
+                          (p ? p->name : key) + " stays in the load order because one of its records could not be "
+                                                "written safely: " + reason,
+                          p ? p->name : key);
+    }
+    for (const auto& [label, reason] : isolatedPatchRecords)
+        validation_->fail(Severity::Warning, "Kept Out Automatically",
+                          label + " was left out of the patch (last plugin wins for it): " + reason);
+    if (db_ && !session_->autoRetained.empty())
+        db::DatabaseWriter(*db_).updatePlugins(*session_);
+
+    archiveChanges_ = ValidationEngine::checkArchivePriority(*session_, *compiled_);
+    if (!archiveChanges_.empty()) {
+        validation_->fail(Severity::Warning, "Archive Priority",
+                          std::to_string(archiveChanges_.size()) +
+                              " files would be served by a different archive once compiled plugins' archives load "
+                              "from the INI list (they load before every plugin's own archives). The full list is "
+                              "written to Multiplexer_ArchivePriority.txt on export. To keep a compiled mod's "
+                              "version, exclude that mod from compilation or provide the file loose.");
+        size_t shown = 0;
+        for (const auto& c : archiveChanges_) {
+            if (++shown > 50)
+                break;
+            validation_->fail(Severity::Warning, "Archive Priority",
+                              c.path + ": " + c.before + " (" + c.beforeMod + ") wins today; " + c.after + " (" +
+                                  c.afterMod + ") would win after switching");
+        }
+    } else {
+        validation_->pass();
+    }
     assetTrace_ = AssetTrace{};
     if (config_.traceAssets) {
         assetTrace_ = AssetTracer::trace(*session_, *compiled_, true, progress);
@@ -225,6 +299,20 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         for (const auto& o : build->outputs)
             previousOutputs.push_back(o.name);
     auto result = Exporter::write(*session_, *compiled_, config_.exportOptions, previousOutputs);
+    {
+        auto list = result.directory / "Multiplexer_ArchivePriority.txt";
+        std::error_code ec;
+        if (archiveChanges_.empty()) {
+            std::filesystem::remove(list, ec);
+        } else {
+            std::ofstream out(list, std::ios::binary | std::ios::trunc);
+            out << "# Files whose winning archive changes after switching to the compiled output\n"
+                   "# path\twins today (mod)\twould win (mod)\n";
+            for (const auto& c : archiveChanges_)
+                out << c.path << '\t' << c.before << " (" << c.beforeMod << ")\t" << c.after << " (" << c.afterMod
+                    << ")\n";
+        }
+    }
     auto post = ValidationEngine::validateWrittenFiles(*compiled_, result.pluginFiles);
     validation_->merge(post);
     if (db_)

@@ -39,7 +39,9 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     l->setSpacing(10);
     compile_ = makeButton("Compile", "Primary");
     export_ = makeButton("Export Plugins");
-    apply_ = makeButton("Apply to MO2 Profile…");
+    apply_ = makeButton("Apply to Game…");
+    apply_->setToolTip("Mod Organizer 2: switch the profile's load order to the output plugins. All installs: add "
+                       "compiled plugins' archives to Fallout4Custom.ini so their assets keep loading.");
     openFolder_ = makeButton("Open Output Folder");
     l->addWidget(makePageHeader("Multiplexer Compilation",
                                 "Scan → Analyse → Resolve → Merge → Rewrite → Compile → Validate → Export. Eligible "
@@ -187,18 +189,26 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         app_->runExport();
     });
     connect(apply_, &QPushButton::clicked, this, [this] {
+        auto* p = app_->pipeline();
+        bool mo2 = p && p->scanned() && p->session().install.config.kind == fo4mx::InstallKind::ModOrganizer2;
+        QString what = mo2 ? "This rewrites the active MO2 profile's plugins.txt (and loadorder.txt) so compiled "
+                             "plugins are disabled and the output plugins are enabled, and adds the compiled "
+                             "plugins' archives to SResourceArchiveList2 in Fallout4Custom.ini so their textures "
+                             "and meshes keep loading."
+                           : "This adds the compiled plugins' archives to SResourceArchiveList2 in "
+                             "Fallout4Custom.ini so their textures and meshes keep loading.";
         auto answer = QMessageBox::question(
-            this, "Apply to profile",
-            "This rewrites the active profile's plugins.txt (and loadorder.txt) so that compiled plugins are disabled "
-            "and the output plugins are enabled. Backups of both files are created first.\n\nContinue?");
+            this, "Apply to game",
+            what + "\n\nArchives added by an earlier build that are no longer needed are removed again. A "
+                   "timestamped backup of every file is made first.\n\nContinue?");
         if (answer != QMessageBox::Yes)
             return;
         QString msg;
         bool ok = app_->applyToProfile(&msg);
         if (ok)
-            QMessageBox::information(this, "Apply to profile", msg);
+            QMessageBox::information(this, "Apply to game", msg);
         else
-            QMessageBox::warning(this, "Apply to profile", msg);
+            QMessageBox::warning(this, "Apply to game", msg);
     });
     connect(openFolder_, &QPushButton::clicked, this, [this] {
         auto* p = app_->pipeline();
@@ -277,8 +287,7 @@ void CompilationPage::updateButtons()
     compile_->setEnabled(!busy);
     export_->setEnabled(!busy && valid);
     export_->setToolTip(valid ? "" : "Compile first; export is blocked while critical validation errors exist.");
-    bool mo2 = p && p->scanned() && p->session().install.config.kind == fo4mx::InstallKind::ModOrganizer2;
-    apply_->setEnabled(!busy && mo2 && p->exportResult().has_value());
+    apply_->setEnabled(!busy && p && p->exportResult().has_value());
     openFolder_->setEnabled(p && p->exportResult().has_value());
 }
 

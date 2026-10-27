@@ -259,7 +259,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             // Only retained plugins: last-plugin-wins already applies unless the patch
             // merges the chain. Only described types can be rebuilt safely.
             if (options.buildPatch && inst.size() > 1 && session.defs.isCompilable(inst[0].signature) &&
-                (options.mergeCompatible || forced >= 0))
+                (options.mergeCompatible || forced >= 0) && !options.skipPatchRecords.count(key.packed()))
                 candidates.push_back({gi, false, true, forced, true});
             continue;
         }

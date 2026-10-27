@@ -175,6 +175,9 @@ int main(int argc, char** argv)
     gui::theme::apply(app);
 
     gui::AppController controller;
+    // Results and caches from a different build are cleared so nothing stale carries over.
+    if (!args.isSet("screenshots"))
+        controller.clearResultsAfterUpgrade(QStringLiteral(FO4MX_VERSION " " __DATE__ " " __TIME__));
     if (!args.isSet("screenshots") && gui::SetupDialog::shouldShowAtStartup(&controller)) {
         gui::SetupDialog setup(&controller);
         if (setup.exec() != QDialog::Accepted)

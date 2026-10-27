@@ -47,6 +47,7 @@ struct FieldDef {
     uint16_t stride = 0;           // StructArray element size
     uint16_t requiredSize = 0;     // FormId / Struct: expected size (0 = any)
     bool partial = false;          // bytes outside `offsets` may hold undescribed FormIDs
+    std::vector<std::pair<uint16_t, uint16_t>> plain; // partial structs: [begin, end) known to hold no FormIDs
     MergeMode merge = MergeMode::Scalar;
     Signature countSig;            // count subrecord written before this list (KSIZ, LLCT)
     uint8_t countWidth = 0;        // byte width of the count subrecord

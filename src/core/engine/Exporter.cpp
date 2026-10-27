@@ -66,6 +66,156 @@ std::string timestamp()
 
 } // namespace
 
+namespace {
+
+const char* kRegisteredFile = "Multiplexer_RegisteredArchives.txt";
+
+std::vector<std::string> readLines(const fs::path& path)
+{
+    std::vector<std::string> out;
+    std::ifstream in(path, std::ios::binary);
+    std::string line;
+    while (std::getline(in, line)) {
+        line = std::string(trim(line));
+        if (!line.empty() && line[0] != '#')
+            out.push_back(line);
+    }
+    return out;
+}
+
+} // namespace
+
+std::vector<std::string> Exporter::archiveList(const Session& session, const CompiledOutput& c,
+                                               const fs::path& outputDirectory)
+{
+    std::unordered_set<std::string> needed, stale;
+    for (const auto& a : c.archivesToRegister)
+        needed.insert(toLower(a));
+    for (const auto& a : readLines(outputDirectory / kRegisteredFile))
+        if (!needed.count(toLower(a)))
+            stale.insert(toLower(a));
+
+    std::vector<std::string> list;
+    std::unordered_set<std::string> seen;
+    for (auto& a : split(session.install.ini.get("Archive", "SResourceArchiveList2", "Fallout4 - Animations.ba2"), ','))
+        if (!a.empty() && !stale.count(toLower(a)) && seen.insert(toLower(a)).second)
+            list.push_back(a);
+    for (const auto& a : c.archivesToRegister)
+        if (seen.insert(toLower(a)).second)
+            list.push_back(a);
+    return list;
+}
+
+std::string Exporter::setIniValue(const std::string& text, const std::string& section, const std::string& key,
+                                  const std::string& value)
+{
+    const std::string eol = text.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+    std::vector<std::string> lines;
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t nl = text.find('\n', start);
+        std::string line = text.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        lines.push_back(line);
+        if (nl == std::string::npos)
+            break;
+        start = nl + 1;
+    }
+    const std::string entry = key + "=" + value;
+    bool inSection = false, sectionSeen = false, done = false;
+    size_t sectionEnd = 0;
+    for (size_t i = 0; i < lines.size() && !done; ++i) {
+        std::string t(trim(lines[i]));
+        if (!t.empty() && t.front() == '[') {
+            if (inSection)
+                break; // key not found inside the section
+            inSection = iequals(trim(std::string_view(t).substr(1, t.find(']') == std::string::npos ? t.size() - 1 : t.find(']') - 1)), section);
+            if (inSection) {
+                sectionSeen = true;
+                sectionEnd = i + 1;
+            }
+            continue;
+        }
+        if (!inSection)
+            continue;
+        if (!t.empty() && t[0] != ';' && t[0] != '#') {
+            auto eq = t.find('=');
+            if (eq != std::string::npos && iequals(trim(std::string_view(t).substr(0, eq)), key)) {
+                lines[i] = entry;
+                done = true;
+                break;
+            }
+            sectionEnd = i + 1;
+        } else if (!t.empty()) {
+            sectionEnd = i + 1;
+        }
+    }
+    if (!done) {
+        if (sectionSeen) {
+            lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(sectionEnd), entry);
+        } else {
+            while (!lines.empty() && trim(lines.back()).empty())
+                lines.pop_back();
+            if (!lines.empty())
+                lines.push_back("");
+            lines.push_back("[" + section + "]");
+            lines.push_back(entry);
+        }
+    }
+    bool endsWithNewline = text.empty() || text.back() == '\n';
+    std::string out;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (i)
+            out += eol;
+        out += lines[i];
+    }
+    if (endsWithNewline)
+        out += eol;
+    return out;
+}
+
+std::vector<fs::path> Exporter::applyArchiveIni(const Session& session, const CompiledOutput& c,
+                                                const fs::path& outputDirectory)
+{
+    std::vector<fs::path> written;
+    const auto registeredPath = outputDirectory / kRegisteredFile;
+    auto previously = readLines(registeredPath);
+    if (c.archivesToRegister.empty() && previously.empty())
+        return written; // nothing was ever registered and nothing needs to be
+
+    fs::path dir = session.install.iniDirectory;
+    if (dir.empty())
+        throw std::runtime_error("the game's INI folder is unknown; set it in Settings");
+    fs::create_directories(dir);
+    fs::path custom = dir / "Fallout4Custom.ini";
+    for (const auto& entry : fs::directory_iterator(dir))
+        if (iequals(pathToUtf8(entry.path().filename()), "Fallout4Custom.ini"))
+            custom = entry.path();
+
+    std::string text;
+    if (fs::exists(custom)) {
+        std::ifstream in(custom, std::ios::binary);
+        text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        auto backup = custom;
+        backup += ".multiplexer-backup-" + timestamp();
+        fs::copy_file(custom, backup, fs::copy_options::overwrite_existing);
+        spdlog::info("Backed up {} to {}", pathToUtf8(custom), pathToUtf8(backup));
+    }
+    std::string updated = setIniValue(text, "Archive", "SResourceArchiveList2", join(archiveList(session, c, outputDirectory), ", "));
+    if (updated != text) {
+        writeText(custom, updated);
+        written.push_back(custom);
+    }
+
+    std::string record = "# Archives Fallout 4 Multiplexer Renewed added to SResourceArchiveList2\n";
+    for (const auto& a : c.archivesToRegister)
+        record += a + "\n";
+    fs::create_directories(outputDirectory);
+    writeText(registeredPath, record);
+    return written;
+}
+
 fs::path Exporter::defaultOutputDirectory(const Session& session)
 {
     if (session.install.config.kind == InstallKind::ModOrganizer2 && !session.install.modsPath.empty())
@@ -138,14 +288,7 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
 
     // Archives of compiled plugins no longer load with their plugin.
     r.archiveIni = r.directory / "Multiplexer_Archives.ini";
-    std::string existing = session.install.ini.get("Archive", "SResourceArchiveList2", "Fallout4 - Animations.ba2");
-    std::vector<std::string> list = split(existing, ',');
-    std::unordered_set<std::string> seen;
-    for (auto& a : list)
-        seen.insert(toLower(a));
-    for (const auto& a : c.archivesToRegister)
-        if (seen.insert(toLower(a)).second)
-            list.push_back(a);
+    std::vector<std::string> list = archiveList(session, c, r.directory);
     std::string ini = "; Generated by Fallout 4 Multiplexer Renewed\n"
                       "; Archives below belonged to plugins that were compiled and disabled.\n"
                       "; Merge this section into Fallout4Custom.ini (or your MO2 profile's INI) so they keep loading.\n"

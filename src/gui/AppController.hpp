@@ -35,6 +35,13 @@ public:
     QString databasePath() const;
     QSqlDatabase readDb();
     void reopenDatabase();
+    // Forgets everything this app stored: settings, the results database, the build cache, logs
+    // and remembered conflict resolutions. Generated plugins in the output folder are not touched.
+    // Returns what was removed.
+    QStringList resetToFreshState(bool keepSettings = false);
+    // On the first start of a different build: clears results and the cache from the previous one
+    // (settings are kept). Returns true when it did.
+    bool clearResultsAfterUpgrade(const QString& buildId);
 
     QStringList excludedPlugins() const;
     void setExcluded(const QString& plugin, bool excluded);

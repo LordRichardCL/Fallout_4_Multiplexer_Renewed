@@ -117,7 +117,8 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 |---|---|
 | `Dummy_Plugin_XX.esp` | the compiled game state |
 | `Multiplexer_FormMap.tsv` | every old → new FormID; also lets the next compilation keep the same FormIDs |
-| `Multiplexer_Archives.ini` | the compiled plugins' BA2s, to merge into `Fallout4Custom.ini` |
+| `Multiplexer_Archives.ini` | the compiled plugins' BA2s, for `Fallout4Custom.ini` (**Apply to Game** does this for you) |
+| `Multiplexer_ArchivePriority.txt` | only when needed: files whose winning archive changes after switching (see below) |
 | `Multiplexer_DisablePlugins.txt` | plugins that are now compiled |
 | `Multiplexer_plugins.txt` | a proposed `plugins.txt` |
 | `Multiplexer_Compilation.json` | machine-readable summary |
@@ -126,9 +127,20 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 Then:
 
 1. In MO2, enable the output mod (or refresh if you exported into an existing mod).
-2. Disable the plugins listed in `Multiplexer_DisablePlugins.txt`, or press **Apply to MO2 Profile**. That rewrites the profile's `plugins.txt`/`loadorder.txt` after making timestamped backups.
-3. Copy the `[Archive]` line from `Multiplexer_Archives.ini` into `Fallout4Custom.ini` (or the profile's INI when MO2 uses profile-local INIs). Without this, textures and meshes from compiled mods' archives will be missing.
+2. On the **Compilation** page, press **Apply to Game…**. It makes a timestamped backup of every file first, then:
+   - **Mod Organizer 2:** rewrites the profile's `plugins.txt`/`loadorder.txt` so compiled plugins are disabled and the generated ones enabled.
+   - **All installs:** adds the compiled plugins' archives to `SResourceArchiveList2` in `Fallout4Custom.ini`, in the folder the game reads its INIs from (the MO2 profile when it uses profile-local INIs). Archives an earlier build added but this one no longer needs are taken out again. Every other line of the INI is kept as it was.
+   - **Vortex and manual installs:** disable the plugins in `Multiplexer_DisablePlugins.txt` and enable the generated plugins yourself (Vortex manages `plugins.txt`).
+3. **Keep the compiled mods installed.** In MO2, untick only their *plugins* (right pane), never the mods themselves (left pane). Their textures, meshes and archives must stay in the Data folder.
 4. Open the outputs in FO4Edit and spot-check a few records.
+
+### Archive priority
+
+Archives listed in the INI load before every plugin's own archives. Once compiled plugins' archives move into that list, an archive of a plugin that stays can start winning a file it used to lose. The **Validation** page lists these under **Archive Priority** (up to 50, with the full list in `Multiplexer_ArchivePriority.txt`). To keep the compiled mod's version of a file, exclude that mod from compilation, or provide the file loose (loose files beat every archive).
+
+### When some records cannot be compiled safely
+
+If validation finds records that cannot be written safely, for example a FormID in data the app does not fully understand, the app does **not** block the whole export. It keeps those records' plugins in the load order (or leaves those records out of the patch) and compiles again. The **Validation** page lists every plugin it kept out under **Kept Out Automatically**, with the reason. The **Plugins** page shows them as *Retained*. Only errors that cannot be traced to a plugin or record still block export.
 
 ## Checking the record definitions
 
@@ -150,6 +162,12 @@ The app needs the exact layout of every record type it compiles. This check conf
 The same **Copy** and **Save…** buttons work for any filter. For example, after a compile, click **Errors** and then **Save…** to send the errors that blocked an export.
 
 Command line: `fo4mx check-definitions --mo2 "C:\Modding\MO2"` prints the same results (exit code 4 if there are warnings).
+
+## Starting fresh
+
+**Settings → Reset to Fresh State…** removes everything the app has stored: settings and folders, exclusions, conflict resolutions, the results database, the build cache and the logs. The Setup screen then opens as on a first start. Your mods, your load order and the generated plugins in the output folder are not touched.
+
+When you start a **new build** of the app for the first time, it clears the previous build's results and cache automatically (your settings and conflict resolutions are kept), so nothing stale carries over.
 
 ## Keeping the build up to date
 

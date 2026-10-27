@@ -17,6 +17,7 @@ struct ValidationIssue {
     std::string message;
     std::string plugin;
     std::string formId;
+    FormKey record; // the generated record the finding is about, when there is one
 };
 
 struct ValidationReport {
@@ -25,6 +26,7 @@ struct ValidationReport {
     uint64_t warnings = 0;
     uint64_t errors = 0;
     std::vector<ValidationIssue> issues;
+    FormKey context; // record being checked; copied into findings made meanwhile
 
     bool critical() const { return errors > 0; }
     void pass(uint64_t n = 1)
@@ -47,12 +49,21 @@ struct DefinitionStat {
     uint64_t resolved = 0;  // ... that name an existing record
     uint64_t softRefs = 0;  // values in undescribed bytes that look like FormIDs
     std::string example;    // a record showing the problem
+    std::map<uint32_t, uint64_t> softOffsets;       // byte offset -> values there that look like FormIDs
+    std::map<uint32_t, uint64_t> unresolvedOffsets; // byte offset -> described FormIDs there that name nothing
 };
 
 struct DefinitionCheck {
     std::vector<DefinitionStat> stats;
     std::map<Signature, uint64_t> recordsByType;
     ValidationReport report; // findings, never errors: the check does not block export
+};
+
+// A file whose winning archive changes once compiled plugins' archives load from the INI list.
+struct ArchivePriorityChange {
+    std::string path;
+    std::string before, beforeMod; // archive that wins today
+    std::string after, afterMod;   // archive that wins after switching to the compiled output
 };
 
 // Stage Validate: proves the compiled output is internally consistent before
@@ -63,6 +74,12 @@ public:
                                      ProgressSink& progress = nullProgress());
     static ValidationReport validateWrittenFiles(const CompiledOutput& compiled,
                                                  const std::vector<std::filesystem::path>& files);
+
+    // Archives listed in SResourceArchiveList2 load before every plugin's own archives. Once compiled
+    // plugins are disabled, their archives move into that list, so an archive of a plugin that stays
+    // can start winning files it used to lose. Loose files are unaffected (they beat all archives).
+    static std::vector<ArchivePriorityChange> checkArchivePriority(const Session& session,
+                                                                   const CompiledOutput& compiled);
 
     // Decodes every record of the compilable types (or `types`) in the load order, base game
     // included, and reports layouts that look wrong: FormIDs at described offsets that do not

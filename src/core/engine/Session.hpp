@@ -137,6 +137,9 @@ public:
     std::vector<PluginNameReference> nameReferences;
     std::vector<RecordEdge> recordEdges; // references of winning compilable records
     std::unordered_set<std::string> userRetained; // lowercase plugin names the user excluded
+    // Plugins kept out of compilation because validation found records it cannot write safely
+    // (lowercase name -> the finding that caused it). Rebuilt by every compilation.
+    std::map<std::string, std::string> autoRetained;
 
     BuildCache* cache = nullptr; // optional, owned by the pipeline
 

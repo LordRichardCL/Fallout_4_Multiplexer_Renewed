@@ -757,7 +757,7 @@ TEST(tier1_records_compile_with_references_rewritten)
     CHECK_EQ(text(swap->record.find(Signature("SNAM"))), std::string("Armor\\SuitRed.bgsm"));
 }
 
-TEST(undescribed_formid_with_shifted_master_blocks_export)
+TEST(undescribed_formid_with_shifted_master_is_isolated)
 {
     auto root = buildInstall("softref");
     auto data = root / "Game" / "Data";
@@ -782,13 +782,30 @@ TEST(undescribed_formid_with_shifted_master_blocks_export)
     CHECK_EQ(blockers.front().soleBlocker, size_t(2));
     CHECK_EQ(blockers.front().unlocks, size_t(2));
     CHECK_EQ(p.dependencies()->unlockedByAll, size_t(2));
-    p.compile();
-    // In the output ModC is no longer master 2, so the copied bytes would name another plugin.
-    CHECK(p.validation()->critical());
-    bool found = false;
+    // In the output ModC is no longer master 2, so ModG's copied bytes would name another plugin.
+    // ModG is kept out of compilation automatically and everything else still compiles.
+    CHECK(p.compile());
+    CHECK(!p.validation()->critical());
+    CHECK_EQ(p.session().findPlugin("ModG.esp")->eligibility, Eligibility::Retained);
+    CHECK(p.session().autoRetained.count("modg.esp") == 1);
+    CHECK(p.session().autoRetained.at("modg.esp").find("master index would point elsewhere") != std::string::npos);
+    CHECK(!p.compiledOutput()->isCompiled(p.session().findPlugin("ModG.esp")->index));
+    CHECK(p.compiledOutput()->isCompiled(p.session().findPlugin("ModA.esp")->index));
+    bool reported = false;
     for (const auto& is : p.validation()->issues)
-        found |= is.message.find("master index would point elsewhere") != std::string::npos;
-    CHECK(found);
+        reported |= is.category == "Kept Out Automatically" && is.plugin == "ModG.esp";
+    CHECK(reported);
+    p.exportOutputs(); // not blocked
+
+    // With automatic isolation off, the same finding blocks export.
+    auto strict = configFor(root);
+    strict.databasePath.clear();
+    strict.autoIsolate = false;
+    Pipeline q(strict);
+    q.scan();
+    q.analyse();
+    CHECK(!q.compile());
+    CHECK(q.validation()->critical());
 }
 
 TEST(definition_check_flags_suspect_layouts)
@@ -931,4 +948,86 @@ TEST(tier1_second_batch_references_rewritten)
     CHECK(refAt(rec("CrateVisual"), "DATA", 0) == out.identity(*rec("CrateArt")));
     CHECK(refAt(rec("CrateVisual"), "DATA", 4) == out.identity(*rec("CrateShader")));
     CHECK_EQ(text(rec("CrateSound")->record.find(Signature("ANAM"))), std::string("FX\\Crate.wav"));
+}
+
+TEST(ini_editing_keeps_everything_else)
+{
+    // Replace in place, case-insensitive, keeping CRLF, comments and other keys.
+    std::string a = "[Display]\r\niSize W=1920\r\n\r\n[archive]\r\n; mods\r\nsresourcearchivelist2 = Old.ba2\r\nbInvalidateOlderFiles=1\r\n";
+    std::string ra = Exporter::setIniValue(a, "Archive", "SResourceArchiveList2", "A.ba2, B.ba2");
+    CHECK_EQ(ra, std::string("[Display]\r\niSize W=1920\r\n\r\n[archive]\r\n; mods\r\nSResourceArchiveList2=A.ba2, B.ba2\r\n"
+                             "bInvalidateOlderFiles=1\r\n"));
+    // Section present, key missing: added after the section's last entry.
+    std::string b = "[Archive]\nbInvalidateOlderFiles=1\n\n[General]\nsLanguage=en\n";
+    CHECK_EQ(Exporter::setIniValue(b, "Archive", "SResourceArchiveList2", "A.ba2"),
+             std::string("[Archive]\nbInvalidateOlderFiles=1\nSResourceArchiveList2=A.ba2\n\n[General]\nsLanguage=en\n"));
+    // No section: appended. Empty file: created.
+    CHECK_EQ(Exporter::setIniValue("[General]\nsLanguage=en\n", "Archive", "SResourceArchiveList2", "A.ba2"),
+             std::string("[General]\nsLanguage=en\n\n[Archive]\nSResourceArchiveList2=A.ba2\n"));
+    CHECK_EQ(Exporter::setIniValue("", "Archive", "SResourceArchiveList2", "A.ba2"),
+             std::string("[Archive]\nSResourceArchiveList2=A.ba2\n"));
+}
+
+TEST(apply_registers_and_unregisters_archives_in_the_ini)
+{
+    auto root = buildInstall("applyini");
+    writeFile(root / "ini" / "Fallout4Custom.ini", "[Display]\niSize W=1920\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        auto result = p.exportOutputs();
+        auto written = Exporter::applyArchiveIni(p.session(), *p.compiledOutput(), result.directory);
+        CHECK_EQ(written.size(), size_t(1));
+        std::ifstream in(root / "ini" / "Fallout4Custom.ini");
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK(text.find("iSize W=1920") != std::string::npos);
+        CHECK(text.find("SResourceArchiveList2=Fallout4 - Animations.ba2, ModA - Main.ba2") != std::string::npos);
+        bool backup = false;
+        for (const auto& e : std::filesystem::directory_iterator(root / "ini"))
+            backup |= pathToUtf8(e.path().filename()).find("multiplexer-backup") != std::string::npos;
+        CHECK(backup);
+    }
+    // A later build that no longer compiles ModA removes its archive again.
+    cfg.analysis.excludedPlugins = {"ModA.esp"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    auto result = p.exportOutputs();
+    Exporter::applyArchiveIni(p.session(), *p.compiledOutput(), result.directory);
+    std::ifstream in(root / "ini" / "Fallout4Custom.ini");
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(text.find("ModA - Main.ba2") == std::string::npos);
+    CHECK(text.find("SResourceArchiveList2=Fallout4 - Animations.ba2") != std::string::npos);
+}
+
+TEST(archive_priority_change_is_reported)
+{
+    auto root = buildInstall("archprio");
+    auto data = root / "Game" / "Data";
+    // ModE stays in the load order (it has a cell), loads before ModA and ships the same mesh.
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("CELL", 0x01000800, {zs("EDID", "ModECell")})});
+    writeGeneralBa2(data / "ModE - Main.ba2", {{"meshes\\moda\\gun.nif", std::vector<uint8_t>(64, 9)}}, true);
+    writeFile(root / "plugins.txt", "*ModE.esp\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto& changes = p.archivePriorityChanges();
+    CHECK_EQ(changes.size(), size_t(1));
+    CHECK_EQ(changes.at(0).path, std::string("meshes\\moda\\gun.nif"));
+    CHECK_EQ(changes.at(0).before, std::string("ModA - Main.ba2"));
+    CHECK_EQ(changes.at(0).after, std::string("ModE - Main.ba2"));
+    bool warned = false;
+    for (const auto& is : p.validation()->issues)
+        warned |= is.category == "Archive Priority";
+    CHECK(warned);
+    auto result = p.exportOutputs();
+    CHECK(std::filesystem::exists(result.directory / "Multiplexer_ArchivePriority.txt"));
 }

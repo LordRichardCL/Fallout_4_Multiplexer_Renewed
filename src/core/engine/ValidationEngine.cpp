@@ -26,7 +26,7 @@ void ValidationReport::fail(Severity s, std::string category, std::string messag
         warnings++;
     else
         passed++; // informational findings do not fail a check
-    issues.push_back({s, std::move(category), std::move(message), std::move(plugin), std::move(formId)});
+    issues.push_back({s, std::move(category), std::move(message), std::move(plugin), std::move(formId), context});
 }
 
 void ValidationReport::merge(const ValidationReport& o)
@@ -116,6 +116,7 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
     for (const auto& op : c.outputs) {
         for (size_t ri = 0; ri < op.records.size(); ++ri) {
             const auto& e = c.records[op.records[ri]];
+            v.context = e.key;
             const std::string fid = formatFormId(e.rawFormId);
             const std::string label = session.formLabel(e.key);
             if ((++n & 0xFFF) == 0)
@@ -208,6 +209,8 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
             }
         }
     }
+
+    v.context = FormKey{};
 
     // Definition self-check: a described FormID slot that rarely resolves is suspect.
     for (const auto& [key, stat] : slotStats) {
@@ -346,13 +349,18 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                         if (!k.valid() && k.objectId == 0)
                             continue; // null
                         st.formIds++;
-                        if (session.exists(k))
+                        if (session.exists(k)) {
                             st.resolved++;
-                        else if (st.example.empty())
-                            st.example = where;
+                        } else {
+                            st.unresolvedOffsets[off]++;
+                            if (st.example.empty())
+                                st.example = where;
+                        }
                     }
                     if (!sub.softRefs.empty()) {
                         st.softRefs += sub.softRefs.size();
+                        for (const auto& [off, k] : sub.softRefs)
+                            st.softOffsets[off]++;
                         if (st.example.empty())
                             st.example = where;
                     }
@@ -381,6 +389,10 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                 t.formIds += v.formIds;
                 t.resolved += v.resolved;
                 t.softRefs += v.softRefs;
+                for (auto [o, n] : v.softOffsets)
+                    t.softOffsets[o] += n;
+                for (auto [o, n] : v.unresolvedOffsets)
+                    t.unresolvedOffsets[o] += n;
                 if (t.example.empty())
                     t.example = v.example;
             }
@@ -394,6 +406,19 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
 
     auto& v = out.report;
     auto pct = [](uint64_t a, uint64_t b) { return b ? std::to_string((a * 1000 / b) / 10) + "." + std::to_string((a * 1000 / b) % 10) + "%" : std::string("-"); };
+    // "at +92 (900), +100 (8)": the offsets with the most hits, so a missing or wrong field can be located.
+    auto topOffsets = [](const std::map<uint32_t, uint64_t>& m) {
+        std::vector<std::pair<uint64_t, uint32_t>> v;
+        for (auto [o, n] : m)
+            v.emplace_back(n, o);
+        std::sort(v.rbegin(), v.rend());
+        std::string out;
+        for (size_t i = 0; i < v.size() && i < 6; ++i)
+            out += (i ? ", +" : "at +") + std::to_string(v[i].second) + " (" + std::to_string(v[i].first) + ")";
+        if (v.size() > 6)
+            out += ", ...";
+        return out;
+    };
     std::map<Signature, std::pair<uint64_t, uint64_t>> perType; // resolved / FormIDs
     for (auto& [k, st] : stats) {
         out.stats.push_back(st);
@@ -405,8 +430,8 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
         if (st.formIds >= 10 && st.resolved * 10 < st.formIds * 9) {
             v.fail(Severity::Warning, "Definitions",
                    label + ": only " + pct(st.resolved, st.formIds) + " of " + std::to_string(st.formIds) +
-                       " FormIDs at the described offsets name an existing record; the layout is probably wrong "
-                       "(e.g. " + st.example + ")");
+                       " FormIDs at the described offsets name an existing record; the layout is probably wrong; "
+                       "failing " + topOffsets(st.unresolvedOffsets) + " (e.g. " + st.example + ")");
             flagged = true;
         }
         if (st.sizeIssues) {
@@ -421,8 +446,9 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
             v.fail(st.described ? Severity::Warning : Severity::Info, "Definitions",
                    label + (st.described ? " (partly described)" : " (not described)") + ": " +
                        std::to_string(st.softRefs) + " values in " + std::to_string(st.occurrences) +
-                       " records look like FormIDs; compiled records are protected by validation, but this "
-                       "field should be described (e.g. " + st.example + ")");
+                       " records look like FormIDs " + topOffsets(st.softOffsets) +
+                       "; compiled records are protected by validation, but this field should be described (e.g. " +
+                       st.example + ")");
             flagged = true;
         }
         if (!flagged)
@@ -440,6 +466,38 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
     }
     spdlog::info("Definition check: {} record types, {} subrecord layouts, {} warnings", out.recordsByType.size(),
                  out.stats.size(), v.warnings);
+    return out;
+}
+
+std::vector<ArchivePriorityChange> ValidationEngine::checkArchivePriority(const Session& session,
+                                                                         const CompiledOutput& compiled)
+{
+    const auto& idx = session.assets;
+    // Load sequence after switching over: INI archives as today, then compiled plugins' archives
+    // (appended to the INI list in load order), then the archives of plugins that stay.
+    std::vector<uint64_t> rank(idx.archives.size());
+    for (size_t a = 0; a < idx.archives.size(); ++a) {
+        const auto& ar = idx.archives[a];
+        uint64_t tier = ar.owner == kInvalidPlugin ? 0 : compiled.isCompiled(ar.owner) ? 1 : 2;
+        rank[a] = (tier << 32) | a;
+    }
+    std::vector<ArchivePriorityChange> out;
+    for (const auto& e : idx.entries) {
+        if (e.sources.size() < 2)
+            continue;
+        const AssetSource& before = e.winner();
+        if (before.archive == kLooseFile)
+            continue; // a loose file wins either way
+        const AssetSource* after = nullptr;
+        for (const auto& s : e.sources)
+            if (s.archive != kLooseFile && (!after || rank[s.archive] > rank[after->archive]))
+                after = &s;
+        if (!after || after->archive == before.archive)
+            continue;
+        out.push_back({idx.path(e), idx.archives[before.archive].name, idx.modName(before),
+                       idx.archives[after->archive].name, idx.modName(*after)});
+    }
+    std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.path < b.path; });
     return out;
 }
 

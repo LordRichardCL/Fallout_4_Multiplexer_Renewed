@@ -40,6 +40,11 @@ FieldDef noRefs()
 {
     return FieldDef{FieldKind::NoRefs};
 }
+// Explicitly undescribed: overrides a common definition that does not apply to this record.
+FieldDef unknown()
+{
+    return FieldDef{FieldKind::Unknown};
+}
 FieldDef zstring()
 {
     return FieldDef{FieldKind::ZString};
@@ -179,7 +184,8 @@ void buildCommon(RecordDefinitions& d)
     for (const char* m : {"MODS", "MO2S", "MO3S", "MO4S", "MO5S", "DMDS"})
         c[S(m)] = formId();
 
-    for (const char* m : {"YNAM", "ZNAM", "ETYP", "BIDS", "BAMT", "EITM", "INRD", "FIMD", "EFID"})
+    // CUSD crafting use sound and STCP animation sound were confirmed against Fallout4.esm by the definition check.
+    for (const char* m : {"YNAM", "ZNAM", "ETYP", "BIDS", "BAMT", "EITM", "INRD", "FIMD", "EFID", "CUSD", "STCP"})
         c[S(m)] = formId();
     c[S("APPR")] = formIdArray(MergeMode::Set);
     c[S("EFIT")] = noRefs();
@@ -242,8 +248,14 @@ void buildOldGen(RecordDefinitions& d)
     buildConditionFunctions(d);
     Builder b(d);
 
+    // DNAM: ammo, then speed, reload, reach, ranges, attack delay, out-of-range damage and on-hit
+    // (numbers); flags, capacity and animation type at +48. Everything else is scanned. The flags
+    // were mistaken for a FormID in a real load order.
+    FieldDef weaponData = structAt({0}, 0, true);
+    weaponData.plain = {{4, 40}, {48, 55}};
     b.record("WEAP", "Weapon", true)
-        .field("DNAM", structAt({0}, 0, true)) // ammo; remaining layout scanned heuristically
+        .field("DNAM", weaponData)
+        .field("CRDT", structAt({8}, 0, true)) // critical damage and charge multipliers, critical effect spell
         .field("INAM", formId())                // impact data set
         .field("WAMD", formId())                // aim model
         .field("WZMD", formId())                // zoom
@@ -460,6 +472,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("FTYP", formId()) // forced location ref type
         .field("NTRM", formId()) // native terminal
         .field("ONAM", formId()) // filter list (workshop racks, sorters)
+        .field("TNAM", formId()) // set on every vanilla container; always names a record
         .modelRegions();
 
     b.record("CMPO", "Component", true)
@@ -519,7 +532,13 @@ void buildOldGen(RecordDefinitions& d)
 
     // ---- Tier 1, second batch: placeable base objects, projectiles and effects, sounds, UI data.
 
+    // Navmeshes embedded in base objects (workshop pieces) hold vertices and triangles only. A
+    // definition check over a full load order found 162,000 values that looked like FormIDs at
+    // scattered offsets in 7,500 of them: number patterns, not references.
+    const FieldDef embeddedNavmesh = noRefs();
+
     b.record("STAT", "Static", true)
+        .field("NVNM", embeddedNavmesh)
         .field("FTYP", formId())               // forced location ref type
         .field("DNAM", structAt({4}, 0, true)) // max angle, directional material, leaf amplitude/frequency
         .field("MNAM", noRefs())               // distant LOD model names
@@ -532,11 +551,13 @@ void buildOldGen(RecordDefinitions& d)
         .modelRegions();
 
     b.record("MSTT", "Movable Static", true)
+        .field("NVNM", embeddedNavmesh)
         .field("DATA", noRefs()) // flags
         .field("SNAM", formId()) // looping sound
         .modelRegions();
 
     b.record("ACTI", "Activator", true)
+        .field("NVNM", embeddedNavmesh)
         .field("FTYP", formId())                // forced location ref type
         .field("NTRM", formId())                // native terminal
         .field("PNAM", noRefs())                // marker colour
@@ -550,6 +571,7 @@ void buildOldGen(RecordDefinitions& d)
         .conditionRegion();
 
     b.record("FURN", "Furniture", true)
+        .field("NVNM", embeddedNavmesh)
         .field("FTYP", formId())
         .field("NTRM", formId())
         .field("PNAM", noRefs())
@@ -560,6 +582,12 @@ void buildOldGen(RecordDefinitions& d)
         .field("FNMK", formId()) // marker keyword
         .field("FNPR", noRefs()) // entry points
         .field("XMRK", zstring()) // marker model
+        .field("COCT", noRefs())
+        .field("CNTO", cnto)     // items (power armour stations)
+        .field("COED", structAt({0}, 12, true))
+        .field("NAM0", formId())
+        .field("NAM1", formId())
+        .field("WNAM", formId())
         .modelRegions()
         .conditionRegion();
 
@@ -593,6 +621,9 @@ void buildOldGen(RecordDefinitions& d)
         .field("ITID", noRefs())  // menu item id
         .field("TNAM", formId())  // submenu terminal
         .field("WNAM", lstring()) // welcome text
+        .field("COCT", noRefs())
+        .field("CNTO", cnto) // items (holotapes)
+        .field("COED", structAt({0}, 12, true))
         .add(region("Body Text", {"BTXT"}, {"BTXT", "CTDA", "CIS1", "CIS2"}))
         .add(region("Menu Items", {"ITXT"}, {"ITXT", "RNAM", "ANAM", "ITID", "TNAM", "CTDA", "CIS1", "CIS2"}))
         .modelRegions();
@@ -621,10 +652,10 @@ void buildOldGen(RecordDefinitions& d)
         .field("NAM2", formId()) // hazard
         .modelRegions();
 
-    // DATA: limit, radius, lifetime, image space radius, target interval, flags, spell, light,
+    // DNAM: limit, radius, lifetime, image space radius, target interval, flags, spell, light,
     // impact data set, sound; later bytes are scanned.
     b.record("HAZD", "Hazard", true)
-        .field("DATA", structAt({24, 28, 32, 36}, 0, true))
+        .field("DNAM", structAt({24, 28, 32, 36}, 0, true))
         .field("MNAM", formId()) // image space modifier
         .modelRegions();
 
@@ -645,11 +676,12 @@ void buildOldGen(RecordDefinitions& d)
 
     b.record("EQUP", "Equip Type", true)
         .field("PNAM", formIdArray(MergeMode::Set)) // slot parents
-        .field("DATA", noRefs())                   // flags
-        .field("ANAM", formId());                  // condition actor value
+        .field("DATA", noRefs()); // flags
 
     b.record("LSCR", "Load Screen", true)
         .field("NNAM", formId()) // loading screen model (static)
+        .field("TNAM", formId()) // transform
+        .field("ZNAM", unknown()) // 8 bytes here, not the common put-down sound
         .conditionRegion();
 
     b.record("DMGT", "Damage Type", true).field("DNAM", structArray(8, {0, 4}, MergeMode::Scalar)); // actor value, spell
@@ -744,6 +776,8 @@ void RecordDefinitions::computeFingerprint()
                 "/" + f.countSig.str() + std::to_string(f.countWidth) + "/" + f.companion.str();
         for (auto o : f.offsets)
             text += "," + std::to_string(o);
+        for (auto [b, e] : f.plain)
+            text += "~" + std::to_string(b) + "-" + std::to_string(e);
     };
     auto sortedFields = [](const std::unordered_map<Signature, FieldDef>& m) {
         std::vector<std::pair<std::string, const FieldDef*>> v;

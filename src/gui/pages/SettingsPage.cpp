@@ -16,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QRadioButton>
 #include <QScrollArea>
@@ -112,6 +113,22 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     af->addRow(logs);
     l->addWidget(advBox);
 
+    auto* resetBox = new QGroupBox("Start fresh");
+    auto* rl = new QVBoxLayout(resetBox);
+    auto* resetNote = new QLabel(
+        "Forget everything this app has stored: settings, folders, exclusions, conflict resolutions, the results "
+        "database, the build cache and the logs. Use it after installing a new version, or when results look stale. "
+        "Generated plugins and reports in your output folder are not deleted.");
+    resetNote->setObjectName("PageSubtitle");
+    resetNote->setWordWrap(true);
+    rl->addWidget(resetNote);
+    auto* reset = makeButton("Reset to Fresh State…", "Danger");
+    auto* resetRow = new QHBoxLayout;
+    resetRow->addWidget(reset);
+    resetRow->addStretch();
+    rl->addLayout(resetRow);
+    l->addWidget(resetBox);
+
     status_ = new QLabel;
     status_->setObjectName("PageSubtitle");
     l->addWidget(status_);
@@ -124,6 +141,27 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
             status_->setText("Setup saved. Run Scan to apply installation changes.");
     });
     connect(app_, &AppController::settingsChanged, this, [this] { load(); });
+    connect(reset, &QPushButton::clicked, this, [this] {
+        if (app_->busy()) {
+            status_->setText("Wait for the current task to finish first.");
+            return;
+        }
+        auto answer = QMessageBox::warning(
+            this, "Reset to fresh state",
+            "This deletes all settings, the results database, the build cache and the logs, as if the app had just "
+            "been installed.\n\nYour mods, your load order and the generated plugins in the output folder are not "
+            "touched.\n\nContinue?",
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (answer != QMessageBox::Yes)
+            return;
+        QStringList removed = app_->resetToFreshState();
+        QMessageBox::information(this, "Reset to fresh state",
+                                 "Removed:\n" + removed.join("\n") + "\n\nThe Setup screen opens next.");
+        SetupDialog setup(app_, this);
+        setup.exec();
+        load();
+        status_->setText("Reset complete. Run Scan to start again.");
+    });
     connect(group, &QButtonGroup::buttonToggled, this, [this] { updateVisibility(); });
     connect(mo2Path_, &QLineEdit::editingFinished, this, [this] { reloadProfiles(); });
     connect(detect, &QPushButton::clicked, this, [this] {

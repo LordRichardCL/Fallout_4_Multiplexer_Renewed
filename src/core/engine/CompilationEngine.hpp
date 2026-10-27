@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace fo4mx {
@@ -41,6 +42,8 @@ struct CompileOptions {
     bool patchOnly = false;
     std::string patchName = "Multiplexer_Patch.esp";
     size_t patchMasterLimit = 254; // a patch is split into several plugins above this many masters
+    std::unordered_set<uint64_t> skipPatchRecords; // FormKey::packed(): left to last-plugin-wins
+
     std::string author = "Fallout 4 Multiplexer Renewed";
     std::filesystem::path previousFormMap; // reuse FormIDs from an earlier compilation
     std::unordered_map<uint64_t, PluginIndex> forcedWinners; // FormKey::packed() -> plugin
