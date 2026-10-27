@@ -162,6 +162,7 @@ docs/          specification, architecture, user guide, screenshots
 
 - [Vision, Architecture & Product Specification](docs/VISION_SPECIFICATION.md)
 - [Architecture](docs/ARCHITECTURE.md): how the compiler works and why
+- [Dependency and Compilation Scenarios](docs/DEPENDENCY_SCENARIOS.md): what happens when compiled and retained plugins depend on each other
 - [User Guide](docs/USER_GUIDE.md)
 
 ## Related
