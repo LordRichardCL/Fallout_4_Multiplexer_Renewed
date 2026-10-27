@@ -424,6 +424,33 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
     // ---- Rewrite (dependency extraction) ------------------------------------------
     progress.stage("Rewrite");
+    // References that are already broken in the source (a master index past the master list, or
+    // a record that exists nowhere in the load order) read as "none" in game. Write them as none
+    // instead of refusing the record: the compiled plugin then behaves exactly like the source.
+    for (auto& e : out.records) {
+        auto nullBroken = [&](NormSub& s) {
+            for (auto& [off, k] : s.refs) {
+                bool badMaster = !k.valid() && k.objectId != 0;
+                bool missing = k.valid() && out.compiledFlag_[k.origin] && !out.indexByKey.count(k) && !session.exists(k);
+                if (!badMaster && !missing)
+                    continue;
+                addIssue(Severity::Warning, "Broken in Source",
+                         session.formLabel(e.key) + " (" + s.sig.str() + ") refers to " +
+                             (badMaster ? "FormID " + formatFormId(k.objectId) + " with a master index past its master list"
+                                        : formatFormId(k.objectId) + " in " + session.pluginName(k.origin)) +
+                             ", which does not exist; the game reads it as none, so it is written as none",
+                         e.key, session.pluginName(e.winner));
+                k = FormKey{kInvalidPlugin, 0};
+            }
+        };
+        for (auto& f : e.fields.fields) {
+            for (auto& sub : f.subs)
+                nullBroken(sub);
+            for (auto& item : f.items)
+                for (auto& sub : item.subs)
+                    nullBroken(sub);
+        }
+    }
     for (uint32_t i = 0; i < out.records.size(); ++i) {
         auto& e = out.records[i];
         std::set<uint32_t> deps;

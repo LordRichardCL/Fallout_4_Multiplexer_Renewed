@@ -36,12 +36,14 @@ public:
     void fit();
 
 signals:
-    void nodeActivated(const QString& id);
+    void nodeActivated(const QString& id); // double-click
+    void nodeSelected(const QString& id);  // single click
 
 protected:
     void wheelEvent(QWheelEvent* e) override;
     void mousePressEvent(QMouseEvent* e) override;
     void mouseDoubleClickEvent(QMouseEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override;
 
 private:
     void highlight(const QString& id);
@@ -52,6 +54,7 @@ private:
     std::vector<Edge> edges_;
     QHash<QString, QGraphicsRectItem*> items_;
     std::vector<QGraphicsPathItem*> edgeItems_;
+    bool autoFit_ = true; // re-fit on resize until the user zooms or pans
 };
 
 } // namespace gui

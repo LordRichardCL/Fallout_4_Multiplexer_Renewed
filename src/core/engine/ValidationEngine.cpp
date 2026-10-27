@@ -45,8 +45,11 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
 
     for (const auto& is : c.issues) {
         std::string fid = is.form.valid() ? session.loadOrderFormId(is.form) : std::string();
+        // Findings about a generated record carry it, so automatic isolation can act on them.
+        v.context = c.indexByKey.count(is.form) ? is.form : FormKey{};
         v.fail(is.severity, is.category, is.message, is.plugin, fid);
     }
+    v.context = FormKey{};
 
     // Every record of every compiled plugin must be accounted for.
     std::set<FormKey> emittedKeys;

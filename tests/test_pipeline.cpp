@@ -1186,3 +1186,34 @@ TEST(rescan_after_switching_over_reads_the_original_load_order)
     // Nothing changed since the build, so nothing needs rebuilding.
     CHECK(p.changes().status != BuildStatus::RequiresRebuild);
 }
+
+TEST(references_broken_in_the_source_are_written_as_none)
+{
+    auto root = buildInstall("brokensource");
+    // ModX refers to its own record 0x900, which it does not contain (deleted in an update), and
+    // carries a FormID whose master index is past its master list.
+    writePlugin(root / "Game" / "Data" / "ModX.esp", {"Fallout4.esm"},
+                {record("FLST", 0x01000800, {zs("EDID", "ModX_List"), u32("LNAM", 0x01000900), u32("LNAM", 0xFE001234),
+                                              u32("LNAM", 0x00001000)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModX.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK(p.session().autoRetained.empty()); // compiled, not kept out
+    CHECK(p.compiledOutput()->isCompiled(p.session().findPlugin("ModX.esp")->index));
+    size_t warned = 0;
+    for (const auto& is : p.validation()->issues)
+        warned += is.category == "Broken in Source";
+    CHECK_EQ(warned, size_t(2));
+    OutputSet out(p.exportOutputs().pluginFiles);
+    const auto* list = out.byEditorId("ModX_List");
+    CHECK(list != nullptr);
+    auto items = list->record.findAll(Signature("LNAM"));
+    CHECK_EQ(items.size(), size_t(3));
+    CHECK_EQ(loadLE<uint32_t>(items[0]->data.data()), 0u);
+    CHECK_EQ(loadLE<uint32_t>(items[1]->data.data()), 0u);
+    CHECK(out.resolve(*list, loadLE<uint32_t>(items[2]->data.data())) == std::make_pair(std::string("Fallout4.esm"), 0x1000u));
+}

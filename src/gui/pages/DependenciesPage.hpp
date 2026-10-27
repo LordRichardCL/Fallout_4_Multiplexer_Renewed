@@ -7,6 +7,7 @@ class QLabel;
 class QLineEdit;
 class QSpinBox;
 class QTableView;
+class QTextBrowser;
 class QTabWidget;
 
 namespace gui {
@@ -24,6 +25,8 @@ public:
 private:
     void buildPluginGraph();
     void buildRecordGraph(const QString& query);
+    void showPluginDetails(const QString& name);
+    void showRecordDetails(const QString& id);
 
     QTabWidget* tabs_;
     GraphView* pluginGraph_;
@@ -33,6 +36,8 @@ private:
     QLineEdit* recordSearch_;
     QSpinBox* depth_;
     QLabel* recordInfo_;
+    QTextBrowser* pluginDetails_;
+    QTextBrowser* recordDetails_;
     QTableView* issues_;
     SqlModel* issuesModel_;
     QString focusPlugin_;

@@ -31,29 +31,85 @@ GraphView::GraphView(QWidget* parent) : QGraphicsView(parent), scene_(new QGraph
 
 void GraphView::setGraph(std::vector<Node> nodes, std::vector<Edge> edges, const QString& focus)
 {
+    autoFit_ = true;
     scene_->clear();
     items_.clear();
     edgeItems_.clear();
     nodes_ = std::move(nodes);
     edges_ = std::move(edges);
 
-    // Layer = longest path from a root (bounded relaxation handles cycles).
-    QHash<QString, int> layer;
-    for (const auto& n : nodes_)
-        layer[n.id] = 0;
-    for (size_t iter = 0; iter < std::min<size_t>(nodes_.size(), 64); ++iter) {
-        bool changed = false;
-        for (const auto& e : edges_) {
-            if (!layer.contains(e.from) || !layer.contains(e.to) || e.from == e.to)
+    // Layer = longest path from a root over the graph with every cycle collapsed into one node
+    // (records that reference each other share a column instead of pushing each other right).
+    const int n = static_cast<int>(nodes_.size());
+    QHash<QString, int> indexOf;
+    for (int i = 0; i < n; ++i)
+        indexOf[nodes_[static_cast<size_t>(i)].id] = i;
+    std::vector<std::vector<int>> out(static_cast<size_t>(n));
+    for (const auto& e : edges_) {
+        auto a = indexOf.find(e.from), b = indexOf.find(e.to);
+        if (a != indexOf.end() && b != indexOf.end() && *a != *b)
+            out[static_cast<size_t>(*a)].push_back(*b);
+    }
+    // Tarjan's strongly connected components (iterative).
+    std::vector<int> comp(static_cast<size_t>(n), -1), low(static_cast<size_t>(n)), num(static_cast<size_t>(n), -1);
+    std::vector<int> stack;
+    std::vector<char> onStack(static_cast<size_t>(n), 0);
+    int counter = 0, comps = 0;
+    for (int root = 0; root < n; ++root) {
+        if (num[static_cast<size_t>(root)] >= 0)
+            continue;
+        std::vector<std::pair<int, size_t>> work{{root, 0}};
+        while (!work.empty()) {
+            auto& [v, next] = work.back();
+            auto vs = static_cast<size_t>(v);
+            if (next == 0) {
+                num[vs] = low[vs] = counter++;
+                stack.push_back(v);
+                onStack[vs] = 1;
+            }
+            if (next < out[vs].size()) {
+                int w = out[vs][next++];
+                auto ws = static_cast<size_t>(w);
+                if (num[ws] < 0)
+                    work.push_back({w, 0});
+                else if (onStack[ws])
+                    low[vs] = std::min(low[vs], num[ws]);
                 continue;
-            if (layer[e.to] < layer[e.from] + 1 && layer[e.from] + 1 < 64) {
-                layer[e.to] = layer[e.from] + 1;
-                changed = true;
+            }
+            if (low[vs] == num[vs]) {
+                int w;
+                do {
+                    w = stack.back();
+                    stack.pop_back();
+                    onStack[static_cast<size_t>(w)] = 0;
+                    comp[static_cast<size_t>(w)] = comps;
+                } while (w != v);
+                ++comps;
+            }
+            int finished = v;
+            work.pop_back();
+            if (!work.empty()) {
+                auto ps = static_cast<size_t>(work.back().first);
+                low[ps] = std::min(low[ps], low[static_cast<size_t>(finished)]);
             }
         }
-        if (!changed)
-            break;
     }
+    // Tarjan numbers components in reverse topological order: walk them from last to first.
+    std::vector<std::vector<int>> members(static_cast<size_t>(comps));
+    for (int v = 0; v < n; ++v)
+        members[static_cast<size_t>(comp[static_cast<size_t>(v)])].push_back(v);
+    std::vector<int> compLayer(static_cast<size_t>(comps), 0);
+    for (int c = comps - 1; c >= 0; --c)
+        for (int v : members[static_cast<size_t>(c)])
+            for (int w : out[static_cast<size_t>(v)]) {
+                int cw = comp[static_cast<size_t>(w)];
+                if (cw != c)
+                    compLayer[static_cast<size_t>(cw)] =
+                        std::max(compLayer[static_cast<size_t>(cw)], compLayer[static_cast<size_t>(c)] + 1);
+            }
+    QHash<QString, int> layer;
+    for (int v = 0; v < n; ++v)
+        layer[nodes_[static_cast<size_t>(v)].id] = compLayer[static_cast<size_t>(comp[static_cast<size_t>(v)])];
     std::map<int, std::vector<const Node*>> columns;
     for (const auto& n : nodes_)
         columns[layer[n.id]].push_back(&n);
@@ -124,6 +180,13 @@ void GraphView::setGraph(std::vector<Node> nodes, std::vector<Edge> edges, const
     fit();
 }
 
+void GraphView::resizeEvent(QResizeEvent* e)
+{
+    QGraphicsView::resizeEvent(e);
+    if (autoFit_)
+        fit();
+}
+
 void GraphView::fit()
 {
     if (!scene_->items().isEmpty()) {
@@ -187,6 +250,7 @@ QString GraphView::nodeAt(const QPoint& pos) const
 
 void GraphView::wheelEvent(QWheelEvent* e)
 {
+    autoFit_ = false;
     double factor = e->angleDelta().y() > 0 ? 1.15 : 1 / 1.15;
     double current = transform().m11();
     if ((current > 4 && factor > 1) || (current < 0.05 && factor < 1))
@@ -196,9 +260,12 @@ void GraphView::wheelEvent(QWheelEvent* e)
 
 void GraphView::mousePressEvent(QMouseEvent* e)
 {
+    autoFit_ = false; // the user is navigating: keep their view
     QString id = nodeAt(e->pos());
-    if (!id.isEmpty())
+    if (!id.isEmpty()) {
         highlight(id);
+        emit nodeSelected(id);
+    }
     QGraphicsView::mousePressEvent(e);
 }
 

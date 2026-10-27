@@ -91,7 +91,10 @@ Select a record to see the override chain and a grid of every field per plugin:
 
 - **Plugins**: the master graph, coloured by eligibility. Double-click a plugin to show only its masters and dependents.
 - **Records**: search an Editor ID or FormID to see what a record references (green) and what references it (yellow). Double-click to re-centre.
-- **Missing Requirements & Breakages**: missing masters and references to records that do not exist.
+- **Details panel** (right of both graphs): click a plugin or record to see it in full, since the boxes in the graph shorten long names. For a record that means its type, FormID, the plugin that created it and the one that wins, and every reference in both directions with the field that holds it. The panel scrolls.
+
+![Record details](images/15-record-details.png)
+- **Missing Requirements & Breakages**: missing masters and references to records that do not exist. These are problems in the mods themselves, typically a patch made for a different version of the mod it patches, or a record a mod removed in an update. The game reads such a reference as "none". Compiling keeps that behaviour: the reference is written as none and listed under **Broken in Source** on the Validation page, and the plugin is compiled normally.
 
 ## 5. Compile
 

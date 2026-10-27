@@ -1,5 +1,7 @@
 #include "pages/DependenciesPage.hpp"
 
+#include "Format.hpp"
+
 #include "Theme.hpp"
 #include "models/SqlModel.hpp"
 #include "widgets/GraphView.hpp"
@@ -9,6 +11,8 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QTextBrowser>
+#include <QSplitter>
 #include <QLineEdit>
 #include <QSet>
 #include <QSpinBox>
@@ -65,7 +69,17 @@ DependenciesPage::DependenciesPage(AppController* app, QWidget* parent) : Page(a
     pbar->addWidget(fitP);
     pl->addLayout(pbar);
     pluginGraph_ = new GraphView;
-    pl->addWidget(pluginGraph_, 1);
+    pluginDetails_ = new QTextBrowser;
+    pluginDetails_->setHtml("<p style='color:#8aa196'>Click a plugin to see its full details.</p>");
+    auto* pluginSplit = new QSplitter(Qt::Horizontal);
+    pluginSplit->addWidget(pluginGraph_);
+    pluginSplit->addWidget(pluginDetails_);
+    pluginGraph_->setMinimumWidth(320);
+    pluginDetails_->setMinimumWidth(240);
+    pluginSplit->setStretchFactor(0, 3);
+    pluginSplit->setStretchFactor(1, 1);
+    pluginSplit->setSizes({900, 320});
+    pl->addWidget(pluginSplit, 1);
     tabs_->addTab(pluginTab, "Plugins");
 
     // Record graph
@@ -87,9 +101,22 @@ DependenciesPage::DependenciesPage(AppController* app, QWidget* parent) : Page(a
     rl->addLayout(rbar);
     recordInfo_ = new QLabel("Search for a weapon, armour, keyword, form list… to see what it references and what references it.");
     recordInfo_->setObjectName("PageSubtitle");
+    recordInfo_->setWordWrap(true);
+    recordInfo_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     rl->addWidget(recordInfo_);
     recordGraph_ = new GraphView;
-    rl->addWidget(recordGraph_, 1);
+    // Node boxes shorten long names; the panel shows the selected record in full and scrolls.
+    recordDetails_ = new QTextBrowser;
+    recordDetails_->setHtml("<p style='color:#8aa196'>Click a record to see its full details and every reference.</p>");
+    auto* recordSplit = new QSplitter(Qt::Horizontal);
+    recordSplit->addWidget(recordGraph_);
+    recordSplit->addWidget(recordDetails_);
+    recordGraph_->setMinimumWidth(320);
+    recordDetails_->setMinimumWidth(260);
+    recordSplit->setStretchFactor(0, 3);
+    recordSplit->setStretchFactor(1, 2);
+    recordSplit->setSizes({760, 440});
+    rl->addWidget(recordSplit, 1);
     tabs_->addTab(recordTab, "Records");
 
     // Issues
@@ -122,6 +149,8 @@ DependenciesPage::DependenciesPage(AppController* app, QWidget* parent) : Page(a
     connect(fitR, &QPushButton::clicked, recordGraph_, &GraphView::fit);
     connect(show, &QPushButton::clicked, this, [this] { buildRecordGraph(recordSearch_->text().trimmed()); });
     connect(recordSearch_, &QLineEdit::returnPressed, this, [this] { buildRecordGraph(recordSearch_->text().trimmed()); });
+    connect(pluginGraph_, &GraphView::nodeSelected, this, [this](const QString& id) { showPluginDetails(id); });
+    connect(recordGraph_, &GraphView::nodeSelected, this, [this](const QString& id) { showRecordDetails(id); });
     connect(recordGraph_, &GraphView::nodeActivated, this, [this](const QString& id) {
         recordSearch_->clear();
         buildRecordGraph(id);
@@ -297,6 +326,107 @@ void DependenciesPage::buildRecordGraph(const QString& query)
                              .arg(nodes.size() - 1)
                              .arg(edges.size()));
     recordGraph_->setGraph(std::move(nodes), std::move(edges), focus);
+    showRecordDetails(focus);
+}
+
+void DependenciesPage::showPluginDetails(const QString& name)
+{
+    QSqlDatabase db = app_->readDb();
+    QSqlQuery q(db);
+    q.prepare("SELECT id, name, type, load_order_hex, record_count, new_records, override_count, eligibility, "
+              "eligibility_reason, record_types, source_mod, author FROM Plugins WHERE name = ?");
+    q.addBindValue(name);
+    if (!q.exec() || !q.next())
+        return;
+    auto v = [&](int i) { return q.value(i).toString().toHtmlEscaped(); };
+    qint64 id = q.value(0).toLongLong();
+    QString html = QString("<h3 style='color:#3ddc84'>%1</h3><p>%2 · load order %3 · mod: %4 · author: %5</p>"
+                           "<p><b>Records:</b> %6 (new %7, overrides %8)<br><b>Compilation:</b> %9<br>%10</p>"
+                           "<p><b>Record types:</b><br>%11</p>")
+                       .arg(v(1), v(2), v(3), v(10), v(11), v(4), v(5), v(6), v(7))
+                       .arg(v(8).replace("; ", "<br>"), v(9));
+    auto list = [&](const QString& title, const QString& sql) {
+        QSqlQuery l(db);
+        l.prepare(sql);
+        l.addBindValue(id);
+        l.exec();
+        QStringList items;
+        while (l.next())
+            items << l.value(0).toString().toHtmlEscaped();
+        html += QString("<p><b>%1 (%2):</b><br>%3</p>").arg(title).arg(items.size()).arg(items.isEmpty() ? "none" : items.join("<br>"));
+    };
+    list("Masters", "SELECT master_name FROM Masters WHERE plugin_id = ? ORDER BY position");
+    list("Required by", "SELECT p.name FROM Masters m JOIN Plugins p ON p.id = m.plugin_id WHERE m.master_plugin_id = ? "
+                        "AND p.active = 1 ORDER BY p.load_order");
+    pluginDetails_->setHtml(html);
+}
+
+void DependenciesPage::showRecordDetails(const QString& id)
+{
+    if (!id.contains('|'))
+        return;
+    QSqlDatabase db = app_->readDb();
+    qint64 origin = id.section('|', 0, 0).toLongLong(), object = id.section('|', 1, 1).toLongLong();
+    auto label = [&](qint64 o, qint64 obj) {
+        QSqlQuery f(db);
+        f.prepare("SELECT f.editor_id, f.signature, f.form_id, p.name FROM Forms f LEFT JOIN Plugins p "
+                  "ON p.id = f.winner_plugin_id WHERE f.origin_plugin_id = ? AND f.object_id = ?");
+        f.addBindValue(o);
+        f.addBindValue(obj);
+        if (f.exec() && f.next())
+            return QString("%1 [%2:%3] <span style='color:#8aa196'>(%4)</span>")
+                .arg(f.value(0).toString().toHtmlEscaped(), f.value(1).toString(), f.value(2).toString(),
+                     f.value(3).toString().toHtmlEscaped());
+        QSqlQuery p(db);
+        p.prepare("SELECT name FROM Plugins WHERE id = ?");
+        p.addBindValue(o);
+        QString plugin = p.exec() && p.next() ? p.value(0).toString() : QString("?");
+        return QString("<span style='color:#ff5c5c'>%1:%2 (not found)</span>")
+            .arg(plugin.toHtmlEscaped())
+            .arg(obj, 6, 16, QChar('0'));
+    };
+
+    QSqlQuery f(db);
+    f.prepare("SELECT f.editor_id, f.signature, f.form_id, w.name, o.name FROM Forms f LEFT JOIN Plugins w "
+              "ON w.id = f.winner_plugin_id LEFT JOIN Plugins o ON o.id = f.origin_plugin_id "
+              "WHERE f.origin_plugin_id = ? AND f.object_id = ?");
+    f.addBindValue(origin);
+    f.addBindValue(object);
+    QString html;
+    if (f.exec() && f.next()) {
+        QString edid = f.value(0).toString();
+        html += QString("<h3 style='color:#3ddc84'>%1</h3><p><b>Type:</b> %2 (%3)<br><b>FormID:</b> %4<br>"
+                        "<b>Created by:</b> %5<br><b>Winning plugin:</b> %6</p>")
+                    .arg(edid.isEmpty() ? "(no editor id)" : edid.toHtmlEscaped(), f.value(1).toString(),
+                         qs(app_->pipeline() && app_->pipeline()->scanned()
+                                ? app_->pipeline()->session().defs.recordName(fo4mx::Signature::fromString(
+                                      ss(f.value(1).toString()).c_str()))
+                                : ss(f.value(1).toString()))
+                             .toHtmlEscaped(),
+                         f.value(2).toString(), f.value(4).toString().toHtmlEscaped(), f.value(3).toString().toHtmlEscaped());
+    } else {
+        html += "<h3>" + label(origin, object) + "</h3>";
+    }
+    auto section = [&](const QString& title, const QString& sql, bool incoming) {
+        QSqlQuery l(db);
+        l.prepare(sql);
+        l.addBindValue(origin);
+        l.addBindValue(object);
+        l.exec();
+        QStringList items;
+        while (l.next()) {
+            QString via = l.value(2).toString().toHtmlEscaped();
+            QString other = label(l.value(0).toLongLong(), l.value(1).toLongLong());
+            items << (incoming ? QString("%1 <span style='color:#8aa196'>via %2</span>").arg(other, via)
+                               : QString("<span style='color:#8aa196'>%1</span> → %2").arg(via, other));
+        }
+        html += QString("<p><b>%1 (%2):</b><br>%3</p>").arg(title).arg(items.size()).arg(items.isEmpty() ? "none" : items.join("<br>"));
+    };
+    section("References", "SELECT to_origin, to_object, via FROM Dependencies WHERE from_origin = ? AND from_object = ? "
+                          "LIMIT 2000", false);
+    section("Referenced by", "SELECT from_origin, from_object, via FROM Dependencies WHERE to_origin = ? AND "
+                             "to_object = ? LIMIT 2000", true);
+    recordDetails_->setHtml(html);
 }
 
 } // namespace gui

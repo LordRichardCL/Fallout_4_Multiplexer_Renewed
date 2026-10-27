@@ -15,6 +15,7 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QTableView>
@@ -112,6 +113,25 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
             break;
         }
 
+    // Record dependency graph with the details panel.
+    window.showPage("Dependencies");
+    for (auto* tabs : window.findChildren<QTabWidget*>()) {
+        if (!tabs->isVisible() || tabs->count() < 2 || tabs->tabText(1) != "Records")
+            continue;
+        tabs->setCurrentIndex(1);
+        for (auto* edit : window.findChildren<QLineEdit*>())
+            if (edit->isVisible() && edit->placeholderText().startsWith("Editor ID or load-order")) {
+                edit->setText(args.isSet("record") ? args.value("record") : QStringLiteral("Crate"));
+                QMetaObject::invokeMethod(edit, "returnPressed");
+                break;
+            }
+        QEventLoop settle;
+        QTimer::singleShot(300, &settle, &QEventLoop::quit);
+        settle.exec();
+        window.grab().save(outDir.filePath("15-record-details.png"));
+        break;
+    }
+
     // The Plugins page's text export.
     for (auto* page : window.findChildren<gui::PluginsPage*>()) {
         QFile f(outDir.filePath("plugin-report.txt"));
@@ -175,7 +195,7 @@ int main(int argc, char** argv)
     QCommandLineParser args;
     args.addHelpOption();
     args.addVersionOption();
-    for (const char* opt : {"screenshots", "game", "mo2", "plugins", "ini-dir", "db", "out"})
+    for (const char* opt : {"screenshots", "game", "mo2", "plugins", "ini-dir", "db", "out", "record"})
         args.addOption(QCommandLineOption(opt, QString("Developer screenshot mode: %1").arg(opt), "value"));
     args.addOption(QCommandLineOption("check-only", "Developer screenshot mode: only check for changes"));
     args.process(app);
