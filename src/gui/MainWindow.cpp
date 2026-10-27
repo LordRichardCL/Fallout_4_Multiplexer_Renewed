@@ -3,6 +3,7 @@
 #include "AppController.hpp"
 #include "Theme.hpp"
 #include "pages/AssetsPage.hpp"
+#include "pages/ChangesPage.hpp"
 #include "pages/CompilationPage.hpp"
 #include "pages/ConflictsPage.hpp"
 #include "pages/DashboardPage.hpp"
@@ -66,6 +67,7 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
     setCentralWidget(central);
 
     addPage("Dashboard", new DashboardPage(app_));
+    addPage("Changes", new ChangesPage(app_));
     addPage("Plugins", new PluginsPage(app_));
     addPage("Conflicts", new ConflictsPage(app_));
     addPage("Assets", new AssetsPage(app_));

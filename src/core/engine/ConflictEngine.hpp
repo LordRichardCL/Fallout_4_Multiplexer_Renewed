@@ -58,6 +58,7 @@ struct ConflictReport {
     size_t identicalOverrides = 0; // groups whose overrides are all ITMs
     size_t analysedGroups = 0;
     size_t failedGroups = 0;
+    size_t reusedGroups = 0; // restored from the build cache
 
     size_t conflictCount() const { return byType[1] + byType[2] + byType[3]; }
     const ConflictEntry* find(FormKey key) const;

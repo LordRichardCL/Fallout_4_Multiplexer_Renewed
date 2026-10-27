@@ -20,9 +20,11 @@
 #include <QPlainTextEdit>
 #include <QScrollArea>
 #include <QSpinBox>
+#include <QSqlQuery>
 #include <QSplitter>
 #include <QTabWidget>
 #include <QTableView>
+#include <QTextBrowser>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -132,7 +134,23 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     tabs_->addTab(outputsView_, "Output Plugins");
     tabs_->addTab(recordsView_, "Generated Records");
     tabs_->addTab(mappingsView_, "FormID Mappings");
-    rl->addWidget(tabs_, 1);
+    assetsView_ = new QTableView;
+    styleTable(assetsView_);
+    assetsModel_ = new SqlModel(this);
+    assetsView_->setModel(assetsModel_);
+    tabs_->addTab(assetsView_, "Assets Used");
+    auto* resultSplit = new QSplitter(Qt::Vertical);
+    resultSplit->addWidget(tabs_);
+    trace_ = new QTextBrowser;
+    trace_->setHtml("<p style='color:#8aa196'>Select a generated record to trace it back to its source plugins and the "
+                    "original files its meshes, materials and textures load from. Compiled plugins contain records "
+                    "only; assets stay in their original mods and archives.</p>");
+    resultSplit->addWidget(trace_);
+    resultSplit->setStretchFactor(0, 2);
+    resultSplit->setStretchFactor(1, 3);
+    rl->addWidget(resultSplit, 1);
+    connect(recordsView_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
+            [this](const QModelIndex& i) { showTrace(i.row()); });
     split->addWidget(results);
     split->setStretchFactor(0, 2);
     split->setStretchFactor(1, 3);
@@ -170,10 +188,14 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         if (p && p->exportResult())
             QDesktopServices::openUrl(QUrl::fromLocalFile(toQString(p->exportResult()->directory)));
     });
-    connect(app_, &AppController::taskStarted, this, [this](const QString&) { stages_->reset(); });
+    connect(app_, &AppController::taskStarted, this, [this](const QString& task) {
+        if (task != "Check")
+            stages_->reset();
+    });
     connect(app_, &AppController::stageStarted, stages_, &StageIndicator::activate);
-    connect(app_, &AppController::taskFinished, this, [this](const QString&, bool ok, const QString&) {
-        stages_->finish(ok);
+    connect(app_, &AppController::taskFinished, this, [this](const QString& task, bool ok, const QString&) {
+        if (task != "Check")
+            stages_->finish(ok);
         updateButtons();
     });
     connect(app_, &AppController::busyChanged, this, [this] { updateButtons(); });
@@ -256,20 +278,96 @@ void CompilationPage::refresh()
                          "SELECT source_plugin AS 'Source Plugin', printf('%06X', source_object_id) AS 'Source Object', "
                          "output_plugin AS Output, printf('%06X', output_object_id) AS 'New Object', signature AS Type, "
                          "editor_id AS 'Editor ID' FROM FormMappings ORDER BY source_plugin, source_object_id LIMIT 500000");
-    for (auto* v : {outputsView_, recordsView_, mappingsView_})
+    assetsModel_->setStatusColumns({4});
+    assetsModel_->load(db,
+                       "SELECT output_plugin AS Output, form_id AS FormID, editor_id AS 'Editor ID', asset_path AS Asset, "
+                       "CASE WHEN found = 0 THEN 'Missing' WHEN needs_registration = 1 THEN 'Via Archive INI' ELSE "
+                       "'OK' END AS Status, role AS Role, origin_mod AS 'Origin Mod', archive AS Archive, archive_owner "
+                       "AS 'Archive Owner', physical AS 'Physical Path' FROM RecordAssets ORDER BY output_plugin, form_id, "
+                       "role LIMIT 500000");
+    for (auto* v : {outputsView_, recordsView_, mappingsView_, assetsView_})
         fitColumns(v);
 
     QString compiled = meta("compiled_plugins");
     if (compiled.isEmpty()) {
         summary_->setText("Not compiled yet. Options on the left are saved with your settings.");
     } else {
+        QString incremental;
+        if (!meta("merges_reused").isEmpty())
+            incremental = QString(" · incremental: %1 override chains reused, %2 rebuilt").arg(meta("merges_reused"),
+                                                                                              meta("merges_computed"));
+        if (!meta("export_written").isEmpty())
+            incremental += QString(" · last export: %1 plugins written, %2 unchanged, %3 removed")
+                               .arg(meta("export_written"), meta("export_unchanged"), meta("export_removed"));
         summary_->setText(QString("%1 plugins compiled into %2 output plugins · %3 records written · validation: %4 "
-                                  "checks, %5 warnings, %6 errors")
+                                  "checks, %5 warnings, %6 errors%7")
                               .arg(compiled, meta("output_plugins"), formatCount(meta("compiled_records").toLongLong()),
                                    formatCount(meta("validation_pre-export_checks").toLongLong()),
-                                   meta("validation_pre-export_warnings"), meta("validation_pre-export_errors")));
+                                   meta("validation_pre-export_warnings"), meta("validation_pre-export_errors"), incremental));
     }
     updateButtons();
+}
+
+void CompilationPage::showTrace(int row)
+{
+    if (row < 0)
+        return;
+    QString output = recordsModel_->value(row, 0).toString();
+    QString formId = recordsModel_->value(row, 1).toString();
+    QSqlDatabase db = app_->readDb();
+    QSqlQuery q(db);
+    q.prepare("SELECT g.editor_id, g.signature, o.name, w.name, g.contributors, g.is_new, g.merged, g.object_id "
+              "FROM GeneratedRecords g LEFT JOIN Plugins o ON o.id = g.origin_plugin_id "
+              "LEFT JOIN Plugins w ON w.id = g.winner_plugin_id WHERE g.output_plugin = ? AND g.form_id = ?");
+    q.addBindValue(output);
+    q.addBindValue(formId);
+    if (!q.exec() || !q.next())
+        return;
+    auto v = [&](int i) { return q.value(i).toString().toHtmlEscaped(); };
+    QString html = QString("<h3 style='color:#3ddc84;margin-bottom:2px'>%1 <span style='color:#8aa196'>[%2]</span></h3>")
+                       .arg(v(0).isEmpty() ? "(no editor id)" : v(0), v(1));
+    html += "<table cellpadding='3'>";
+    auto row2 = [&](const QString& k, const QString& val) {
+        html += "<tr><td style='color:#8aa196'>" + k + "</td><td>" + val + "</td></tr>";
+    };
+    row2("Generated plugin", output.toHtmlEscaped() + " · " + formId);
+    row2("Source plugin", v(2) + (q.value(5).toInt()
+                                      ? QString(" · object %1").arg(QString::number(q.value(7).toUInt(), 16).rightJustified(6, '0').toUpper())
+                                      : QString(" (override of an existing record)")));
+    row2("Winning override", v(3));
+    row2("Changed by", v(4).isEmpty() ? v(3) : v(4));
+    row2("Resolution", q.value(6).toInt() ? "merged from several plugins" : "taken from the winning plugin");
+    html += "</table>";
+
+    QSqlQuery a(db);
+    a.prepare("SELECT role, asset_path, via, found, origin_mod, archive, archive_owner, physical, needs_registration "
+              "FROM RecordAssets WHERE output_plugin = ? AND form_id = ? ORDER BY CASE role WHEN 'Mesh' THEN 0 WHEN "
+              "'Icon' THEN 1 WHEN 'Material' THEN 2 ELSE 3 END");
+    a.addBindValue(output);
+    a.addBindValue(formId);
+    a.exec();
+    QString assets;
+    while (a.next()) {
+        QString origin;
+        if (!a.value(3).toInt())
+            origin = "<span style='color:#ff5c5c'>missing: no installed mod provides this file</span>";
+        else if (!a.value(5).toString().isEmpty())
+            origin = QString("%1 → <b>%2</b>%3").arg(a.value(4).toString().toHtmlEscaped(), a.value(5).toString().toHtmlEscaped(),
+                                                      a.value(8).toInt() ? " <span style='color:#f5c542'>(kept loading via "
+                                                                           "Multiplexer_Archives.ini)</span>"
+                                                                         : "");
+        else
+            origin = QString("%1 (loose file)").arg(a.value(4).toString().toHtmlEscaped());
+        assets += QString("<p style='margin:4px 0'><b>%1:</b> <span style='font-family:monospace'>%2</span>%3<br>"
+                          "<span style='color:#8aa196'>Origin:</span> %4<br><span style='color:#8aa196;font-family:monospace'>%5</span></p>")
+                      .arg(a.value(0).toString(), a.value(1).toString().toHtmlEscaped(),
+                           a.value(2).toString().isEmpty() ? QString() : " <span style='color:#8aa196'>(via " + a.value(2).toString().toHtmlEscaped() + ")</span>",
+                           origin, a.value(7).toString().toHtmlEscaped());
+    }
+    html += "<h4>Referenced assets</h4>" + (assets.isEmpty() ? QString("<p style='color:#8aa196'>This record references no "
+                                                                         "meshes, materials or textures.</p>")
+                                                              : assets);
+    trace_->setHtml(html);
 }
 
 } // namespace gui

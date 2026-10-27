@@ -49,6 +49,12 @@ public slots:
     void runAnalyse();
     void runCompile();
     void runExport();
+    // Compares the mod space with the last build (no full scan).
+    void runCheck();
+    // Scan, analyse, compile and export in one go, reusing cached work.
+    void runRebuild();
+    // On startup: check for changes when a previous build exists.
+    void checkOnStartup();
     void cancel();
     bool applyToProfile(QString* message);
 

@@ -1,5 +1,6 @@
 #include "engine/ConflictEngine.hpp"
 
+#include "engine/BuildCache.hpp"
 #include "engine/ParallelFor.hpp"
 
 #include <algorithm>
@@ -126,7 +127,8 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
         e.summary += "; winner deletes the record";
 
     if (keepDetails) {
-        auto label = [&](FormKey k) { return session.formLabel(k); };
+        // Tokens are rendered against the current load order when the report is finalised.
+        auto label = [](FormKey k) { return formToken(k); };
         for (const auto& fa : a.fields) {
             ConflictField cf;
             cf.key = fa.key;
@@ -159,10 +161,46 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
 
     std::vector<ConflictEntry> results(overridden.size());
     std::vector<uint8_t> failed(overridden.size(), 0);
+    std::vector<uint8_t> reused(overridden.size(), 0);
+    std::vector<uint64_t> keys(overridden.size(), 0);
+
+    // Reuse analyses of override chains whose content has not changed.
+    BuildCache* cache = session.cache;
+    if (cache) {
+        const uint64_t optionBits = (options.analyseAllRecordTypes ? 1 : 0) | (options.keepFieldDetails ? 2 : 0);
+        for (size_t i = 0; i < overridden.size(); ++i) {
+            keys[i] = chainSignature(session, session.groups[overridden[i]]) ^ (optionBits * 0x9E3779B97F4A7C15ULL);
+            auto blob = cache->get("conflicts", keys[i]);
+            auto entry = blob ? deserializeConflict(session, *blob) : std::nullopt;
+            if (!entry) {
+                cache->conflicts.misses++;
+                continue;
+            }
+            cache->conflicts.hits++;
+            const auto& g = session.groups[overridden[i]];
+            auto inst = session.instances(g);
+            entry->group = overridden[i];
+            entry->key = inst[0].key;
+            entry->sig = inst[0].signature;
+            entry->winner = inst.back().plugin;
+            for (const auto& r : inst)
+                entry->chain.push_back(r.plugin);
+            for (size_t k = inst.size(); k-- > 0;)
+                if (inst[k].editorId) {
+                    entry->editorId = session.strings.get(inst[k].editorId);
+                    break;
+                }
+            results[i] = std::move(*entry);
+            reused[i] = 1;
+        }
+    }
+
     std::atomic<size_t> done{0};
     parallelFor(
         overridden.size(),
         [&](size_t i) {
+            if (reused[i])
+                return;
             uint32_t gi = overridden[i];
             Signature s = session.records[session.groups[gi].begin].signature;
             bool fieldLevel = options.analyseAllRecordTypes || session.defs.isCompilable(s);
@@ -179,6 +217,23 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
                 progress.progress(n, overridden.size(), "override chains");
         },
         progress, options.threads);
+
+    if (cache) {
+        cache->begin();
+        for (size_t i = 0; i < results.size(); ++i)
+            if (!reused[i] && !failed[i])
+                cache->put("conflicts", keys[i], serializeConflict(session, results[i]));
+        cache->commit();
+        spdlog::info("Conflict cache: {} chains reused, {} analysed", cache->conflicts.hits.load(),
+                     cache->conflicts.misses.load());
+    }
+    for (auto& e : results)
+        for (auto& f : e.fields) {
+            f.result = renderFormTokens(session, f.result);
+            for (auto& c : f.cells)
+                c.value = renderFormTokens(session, c.value);
+        }
+    report.reusedGroups = static_cast<size_t>(std::count(reused.begin(), reused.end(), 1));
 
     for (auto& p : session.plugins) {
         p.conflictCount = 0;

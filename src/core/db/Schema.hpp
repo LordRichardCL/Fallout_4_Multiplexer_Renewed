@@ -249,6 +249,39 @@ CREATE TABLE IF NOT EXISTS ValidationResults (
 );
 CREATE INDEX IF NOT EXISTS idx_validation_sev ON ValidationResults(severity);
 
+CREATE TABLE IF NOT EXISTS Snapshots (
+    kind TEXT PRIMARY KEY,
+    created INTEGER NOT NULL,
+    data TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS Changes (
+    id INTEGER PRIMARY KEY,
+    category TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    detail TEXT,
+    affects_build INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS RecordAssets (
+    output_plugin TEXT NOT NULL,
+    form_id TEXT NOT NULL,
+    editor_id TEXT,
+    asset_path TEXT NOT NULL,
+    role TEXT NOT NULL,
+    via TEXT,
+    found INTEGER NOT NULL,
+    source_kind TEXT,
+    origin_mod TEXT,
+    archive TEXT,
+    archive_owner TEXT,
+    physical TEXT,
+    needs_registration INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_record_assets ON RecordAssets(output_plugin, form_id);
+CREATE INDEX IF NOT EXISTS idx_record_assets_path ON RecordAssets(asset_path);
+
 CREATE TABLE IF NOT EXISTS UserResolutions (
     origin_plugin TEXT NOT NULL,
     object_id INTEGER NOT NULL,

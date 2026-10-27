@@ -167,6 +167,53 @@ Every source of every path is recorded, so the Asset Conflict Viewer shows the w
 
 The implicit plugins (Fallout4.esm, the DLC masters and `Fallout4.ccc` entries) load first, then masters, then everything else, each group in recorded order.
 
+## Asset layer and traceability
+
+The compiler never writes assets. Generated plugins are record containers. Every path a compiled record holds (`MODL`, `MOD2`/`MOD4`, `ICON`, ammunition casing models, …) is copied verbatim, so the game resolves it through its normal priority rules at runtime: loose files, then archives in load order.
+
+Disabling a compiled plugin has one runtime consequence: the engine no longer auto-loads archives named after it. `Multiplexer_Archives.ini` registers exactly those archives, in place, through `SResourceArchiveList2`.
+
+`engine/AssetTracer` resolves, for every emitted record:
+
+1. the direct asset paths (meshes under `meshes\`, icons under `textures\`);
+2. the materials a mesh names (NIF string table → `.bgsm`/`.bgem`);
+3. the textures each material names.
+
+Each path is resolved through the asset index to the winning mod, loose file or archive, the plugin that owns that archive, and the physical file. Assets served by an archive of a compiled plugin are flagged as depending on the archive registration. Direct references that no installed mod provides are validation warnings. Results go to the `RecordAssets` table and the Compilation page's traceability panel.
+
+## Change detection
+
+`engine/ChangeDetector` fingerprints the mod space into an `InstallSnapshot`:
+
+| Item | Fingerprint |
+|---|---|
+| Mods (MO2 mods, Vortex mods, Data) | enabled, priority, file count, bytes, order-independent hash of every file's path, size and date (plugins excluded: they have their own hash) |
+| Plugins | size, date, full-content hash, active flag, load order index, record types |
+| Archives | size, date, sampled content hash (first and last 64 KiB) |
+| Load order | active plugins in order |
+| Build | compiled plugins, participating plugins, output folder, output plugin hashes, settings hash (options, rules, exclusions, user resolutions by name) |
+
+A **scan** snapshot is stored after every scan, and a **build** snapshot after every successful export. `checkForChanges` takes a quick snapshot (install resolution, virtual Data walk, plugin headers, content hashes only for files whose size or date changed) and compares it with the build:
+
+- **Requires Rebuild**: active plugin added, removed, updated, enabled, disabled or moved; archive of a compiled plugin added or removed; settings changed; generated plugin missing or modified.
+- **Changes Detected**: only the asset layer changed.
+- **Up To Date**: nothing changed.
+
+The report lists every change, the record types the changed plugins contain (affected) and the compiled types they do not touch (unaffected). The GUI runs this check on startup.
+
+## Build cache and incremental recompilation
+
+`engine/BuildCache` is a separate SQLite file next to the results database. Every entry is keyed by content, so invalidation is automatic:
+
+| Cached work | Key | Effect |
+|---|---|---|
+| Plugin record index | path + size + date + sampled hash | unchanged plugins are not read or parsed |
+| Conflict analysis | override-chain signature (each instance's plugin, master list and record bytes hash) + options | unchanged chains are not re-normalised or re-diffed |
+| Record references | winning instance signature | dependency graph built without decoding unchanged records |
+| Merge result | chain signature + merge options + forced winner | unchanged chains are not re-merged |
+
+Cached values store FormKeys by plugin **name**, so they survive load order changes and new plugin numbering. Conflict cell text stores form references as tokens, rendered against the current load order (so labels show current FormIDs). Allocation, FormID translation and validation always run in full: they are fast, and they guarantee a consistent output. The exporter compares each output image with the file on disk and leaves identical files untouched. It removes generated plugins that the new build no longer produces.
+
 ## Technology choices
 
 - **C++20, Qt 6 Widgets, SQLite, zlib, spdlog**, as specified.

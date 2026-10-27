@@ -4,6 +4,7 @@
 #include "util/Json.hpp"
 #include "util/Text.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <fstream>
@@ -23,6 +24,30 @@ void writeText(const fs::path& path, const std::string& text)
     if (!out)
         throw std::runtime_error("cannot write " + pathToUtf8(path));
     out << text;
+}
+
+bool sameContent(const fs::path& path, const std::vector<uint8_t>& image)
+{
+    std::error_code ec;
+    if (!fs::exists(path, ec) || fs::file_size(path, ec) != image.size())
+        return false;
+    std::ifstream in(path, std::ios::binary);
+    std::vector<uint8_t> current(image.size());
+    in.read(reinterpret_cast<char*>(current.data()), static_cast<std::streamsize>(current.size()));
+    return in.gcount() == static_cast<std::streamsize>(image.size()) && current == image;
+}
+
+void writeBinary(const fs::path& path, const std::vector<uint8_t>& image)
+{
+    auto tmp = path;
+    tmp += ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out)
+            throw std::runtime_error("cannot write " + pathToUtf8(path));
+        out.write(reinterpret_cast<const char*>(image.data()), static_cast<std::streamsize>(image.size()));
+    }
+    fs::rename(tmp, path);
 }
 
 std::string timestamp()
@@ -63,7 +88,8 @@ std::string Exporter::proposedPluginsTxt(const Session& session, const CompiledO
     return out;
 }
 
-ExportResult Exporter::write(const Session& session, const CompiledOutput& c, const ExportOptions& options)
+ExportResult Exporter::write(const Session& session, const CompiledOutput& c, const ExportOptions& options,
+                             const std::vector<std::string>& previousOutputs)
 {
     ExportResult r;
     r.directory = options.outputDirectory.empty() ? defaultOutputDirectory(session) : options.outputDirectory;
@@ -77,9 +103,28 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
         for (const auto& rec : op.built)
             w.addRecord(rec);
         auto path = r.directory / utf8ToPath(op.name);
-        w.write(path, options.compressLargeRecords);
+        auto image = w.build(options.compressLargeRecords);
         r.pluginFiles.push_back(path);
+        if (sameContent(path, image)) {
+            r.unchangedOutputs.push_back(op.name);
+            spdlog::info("{} is unchanged", op.name);
+            continue;
+        }
+        writeBinary(path, image);
+        r.writtenOutputs.push_back(op.name);
         spdlog::info("Wrote {} ({} records, {} masters)", op.name, op.built.size(), op.masterNames.size());
+    }
+    // Outputs from the previous build that this build no longer produces.
+    for (const auto& name : previousOutputs) {
+        bool current = std::any_of(r.pluginFiles.begin(), r.pluginFiles.end(),
+                                   [&](const fs::path& p) { return iequals(pathToUtf8(p.filename()), name); });
+        auto path = r.directory / utf8ToPath(name);
+        std::error_code ec;
+        if (!current && fs::exists(path, ec)) {
+            fs::remove(path, ec);
+            r.removedOutputs.push_back(name);
+            spdlog::info("Removed {} (no longer produced)", name);
+        }
     }
 
     // FormID map (also the input for stable FormIDs next time).

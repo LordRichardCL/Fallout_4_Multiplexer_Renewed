@@ -87,6 +87,23 @@ private:
     std::vector<Segment> segments_;
 };
 
+// "✓ Up To Date / ⚠ Changes Detected / ✖ Requires Rebuild" banner.
+class BuildStatusBanner : public QFrame {
+    Q_OBJECT
+public:
+    explicit BuildStatusBanner(QWidget* parent = nullptr);
+    // status: Build status name as stored in Meta (empty = unknown)
+    void setStatus(const QString& status, const QString& detail, const QStringList& counts);
+    QHBoxLayout* actions() const { return actions_; }
+
+private:
+    QLabel* icon_;
+    QLabel* title_;
+    QLabel* detail_;
+    QLabel* counts_;
+    QHBoxLayout* actions_;
+};
+
 // Page title + subtitle + optional right-aligned widgets.
 QWidget* makePageHeader(const QString& title, const QString& subtitle, const std::vector<QWidget*>& actions = {});
 QLabel* makeSectionTitle(const QString& text);

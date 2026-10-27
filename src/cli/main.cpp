@@ -22,6 +22,7 @@ namespace {
 const char* kUsage = R"(Fallout 4 Multiplexer Renewed - load order compiler
 
 Usage:
+  fo4mx status   <install> [--db FILE]
   fo4mx scan     <install> [--db FILE]
   fo4mx analyse  <install> [--db FILE] [--reports DIR]
   fo4mx compile  <install> [--db FILE] [compile options] [--dry-run]
@@ -51,6 +52,7 @@ Compile options:
   --out DIR            output folder (default: MO2 mod folder or Data)
   --reports DIR        report folder
   --dry-run            compile and validate without writing files
+  --no-cache           ignore the build cache (full rescan, analysis and merge)
 
   -v, --verbose        debug logging
 )";
@@ -77,7 +79,8 @@ struct Args {
 
 Args parseArgs(int argc, char** argv)
 {
-    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--dry-run", "--verbose", "-v"};
+    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--dry-run", "--no-cache",
+                                                   "--verbose", "-v"};
     Args a;
     for (int i = 1; i < argc; ++i) {
         std::string s = argv[i];
@@ -177,6 +180,7 @@ PipelineConfig makeConfig(const Args& a)
     c.mergeCompatible = !a.has("--no-merge");
     c.lightOutputsWhenPossible = a.has("--light");
     cfg.analysis.excludedPlugins = a.all("--exclude");
+    cfg.useCache = !a.has("--no-cache");
     return cfg;
 }
 
@@ -304,6 +308,31 @@ int cmdBa2(const Args& a)
     return 0;
 }
 
+void printChanges(const ChangeReport& r)
+{
+    const char* mark = r.status == BuildStatus::UpToDate          ? "[OK]"
+                       : r.status == BuildStatus::ChangesDetected ? "[!]"
+                       : r.status == BuildStatus::RequiresRebuild ? "[X]"
+                                                                  : "[-]";
+    std::printf("\nBuild status: %s %s\n", mark, buildStatusName(r.status));
+    if (r.status == BuildStatus::NotBuilt) {
+        std::printf("  No compiled output has been exported yet.\n");
+        return;
+    }
+    std::printf("  New mods %zu · removed %zu · updated %zu · plugins +%zu / -%zu / ~%zu · archives %zu · load order %zu\n",
+                r.newMods, r.removedMods, r.updatedMods, r.addedPlugins, r.removedPlugins, r.updatedPlugins,
+                r.archiveChanges, r.loadOrderChanges);
+    for (const auto& i : r.items)
+        std::printf("  %s %-10s %-9s %s%s%s\n", i.affectsBuild ? "*" : " ", i.category.c_str(), i.kind.c_str(),
+                    i.name.c_str(), i.detail.empty() ? "" : "  — ", i.detail.c_str());
+    if (!r.affectedRecordTypes.empty())
+        std::printf("  Affected record types:   %s\n", join(r.affectedRecordTypes, " ").c_str());
+    if (!r.unaffectedRecordTypes.empty())
+        std::printf("  Unaffected record types: %s\n", join(r.unaffectedRecordTypes, " ").c_str());
+    if (r.status == BuildStatus::RequiresRebuild)
+        std::printf("  (*) requires recompilation. Run: fo4mx compile ...\n");
+}
+
 int cmdPipeline(const Args& a)
 {
     auto cfg = makeConfig(a);
@@ -312,9 +341,14 @@ int cmdPipeline(const Args& a)
     Pipeline p(cfg);
     ConsoleProgress progress;
 
+    if (a.command == "status") {
+        printChanges(p.checkForChanges(progress));
+        return p.changes().status == BuildStatus::RequiresRebuild ? 3 : 0;
+    }
     p.scan(progress);
     if (a.command == "scan") {
         printDashboard(p);
+        printChanges(p.changes());
         std::printf("Database: %s\n", pathToUtf8(cfg.databasePath).c_str());
         return 0;
     }
@@ -329,6 +363,13 @@ int cmdPipeline(const Args& a)
 
     bool ok = p.compile(progress);
     printDashboard(p);
+    const auto* compiled = p.compiledOutput();
+    std::printf("Incremental: %zu override chains reused, %zu rebuilt\n", compiled->mergesReused,
+                compiled->mergesComputed);
+    const auto& trace = p.assetTrace();
+    std::printf("Assets: %zu referenced by compiled records (%zu missing, %zu served from archives of compiled "
+                "plugins); nothing is copied\n",
+                trace.assets.size(), trace.missing, trace.viaRegisteredArchives);
     const auto* v = p.validation();
     std::printf("Validation: %s checks, %s passed, %s warnings, %s errors\n", formatCount(v->checks).c_str(),
                 formatCount(v->passed).c_str(), formatCount(v->warnings).c_str(), formatCount(v->errors).c_str());
@@ -350,9 +391,13 @@ int cmdPipeline(const Args& a)
         return 0;
     }
     auto result = p.exportOutputs(progress);
-    std::printf("Output written to %s\n", pathToUtf8(result.directory).c_str());
-    for (const auto& f : result.pluginFiles)
-        std::printf("  %s\n", pathToUtf8(f.filename()).c_str());
+    std::printf("Output in %s\n", pathToUtf8(result.directory).c_str());
+    for (const auto& n : result.writtenOutputs)
+        std::printf("  written    %s\n", n.c_str());
+    for (const auto& n : result.unchangedOutputs)
+        std::printf("  unchanged  %s\n", n.c_str());
+    for (const auto& n : result.removedOutputs)
+        std::printf("  removed    %s\n", n.c_str());
     std::printf("Next steps:\n  1. Enable the output plugins (see %s)\n  2. Disable the compiled plugins (%s)\n"
                 "  3. Merge %s into Fallout4Custom.ini so their archives still load\n",
                 pathToUtf8(result.pluginsTxt.filename()).c_str(), pathToUtf8(result.disableList.filename()).c_str(),
@@ -377,7 +422,8 @@ int main(int argc, char** argv)
             return cmdDump(a);
         if (a.command == "ba2")
             return cmdBa2(a);
-        if (a.command == "scan" || a.command == "analyse" || a.command == "analyze" || a.command == "compile")
+        if (a.command == "scan" || a.command == "analyse" || a.command == "analyze" || a.command == "compile" ||
+            a.command == "status")
             return cmdPipeline(a);
         std::fprintf(stderr, "Unknown command '%s'\n\n%s", a.command.c_str(), kUsage);
         return 1;

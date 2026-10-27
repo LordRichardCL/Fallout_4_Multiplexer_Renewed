@@ -56,6 +56,9 @@ struct PluginInfo {
     std::vector<std::string> missingMasters;
 
     uint64_t fileSize = 0;
+    int64_t modified = 0;   // Unix seconds
+    uint64_t fileHash = 0;  // FNV-1a of the whole file (set by the scanner)
+    bool fromCache = false; // record index restored from the build cache
     uint32_t recordCount = 0;
     uint32_t newRecords = 0;
     uint32_t overrides = 0;
@@ -112,6 +115,8 @@ struct RecordEdge {
     Signature via; // subrecord holding the reference
 };
 
+class BuildCache;
+
 class Session {
 public:
     explicit Session(const RecordDefinitions& defs = RecordDefinitions::get());
@@ -132,6 +137,8 @@ public:
     std::vector<PluginNameReference> nameReferences;
     std::vector<RecordEdge> recordEdges; // references of winning compilable records
     std::unordered_set<std::string> userRetained; // lowercase plugin names the user excluded
+
+    BuildCache* cache = nullptr; // optional, owned by the pipeline
 
     bool scanned = false;
     bool assetsScanned = false;

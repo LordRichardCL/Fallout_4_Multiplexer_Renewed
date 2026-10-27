@@ -1,6 +1,8 @@
 #pragma once
 
 #include "db/Database.hpp"
+#include "engine/AssetTracer.hpp"
+#include "engine/ChangeDetector.hpp"
 #include "engine/CompilationEngine.hpp"
 #include "engine/ConflictEngine.hpp"
 #include "engine/DependencyEngine.hpp"
@@ -8,6 +10,7 @@
 #include "engine/ValidationEngine.hpp"
 #include "util/Progress.hpp"
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -27,6 +30,13 @@ public:
     void writeCompilation(const Session& session, const CompiledOutput& compiled);
     void writeValidation(const std::string& stage, const ValidationReport& report, bool clearPrevious);
     void updatePlugins(const Session& session);
+    void writeAssetTrace(const CompiledOutput& compiled, const AssetTrace& trace);
+
+    // Mod space snapshots ("scan", "build") and the latest change report.
+    void saveSnapshot(const std::string& kind, const InstallSnapshot& snapshot);
+    std::optional<InstallSnapshot> loadSnapshot(const std::string& kind);
+    void writeChanges(const ChangeReport& report);
+    std::vector<std::string> resolutionStrings();
 
     // User decisions survive rescans because they are keyed by plugin name.
     void saveResolution(const std::string& originPlugin, uint32_t objectId, const std::string& winnerPlugin);

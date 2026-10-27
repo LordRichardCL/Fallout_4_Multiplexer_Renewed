@@ -8,6 +8,7 @@ class QLabel;
 
 namespace gui {
 
+class BuildStatusBanner;
 class StatCard;
 class StageIndicator;
 class StackedBar;
@@ -25,6 +26,7 @@ private:
     StackedBar* conflictBar_;
     StackedBar* eligibilityBar_;
     QLabel* subtitle_;
+    BuildStatusBanner* banner_;
     QLabel* status_;
     QLabel* empty_;
 };

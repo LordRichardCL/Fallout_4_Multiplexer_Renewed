@@ -371,6 +371,53 @@ void AppController::runExport()
     });
 }
 
+void AppController::runCheck()
+{
+    saveSettings();
+    if (!pipeline_)
+        pipeline_ = std::make_unique<Pipeline>(config_);
+    else
+        ensurePipeline(false);
+    runTask("Check", [this](ProgressSink& p) {
+        auto r = pipeline_->checkForChanges(p);
+        return QString("%1 — %2 change(s) since the last build").arg(qs(buildStatusName(r.status))).arg(r.items.size());
+    });
+}
+
+void AppController::runRebuild()
+{
+    saveSettings();
+    ensurePipeline(true);
+    runTask("Rebuild", [this](ProgressSink& p) {
+        pipeline_->scan(p);
+        pipeline_->analyse(p);
+        if (!pipeline_->compile(p))
+            throw std::runtime_error("Validation found " + std::to_string(pipeline_->validation()->errors) +
+                                     " critical errors; review the Validation Centre");
+        auto r = pipeline_->exportOutputs(p);
+        const auto* c = pipeline_->compiledOutput();
+        return QString("Rebuilt: %1 chains reused, %2 rebuilt · %3 plugins written, %4 unchanged")
+            .arg(c->mergesReused)
+            .arg(c->mergesComputed)
+            .arg(r.writtenOutputs.size())
+            .arg(r.unchangedOutputs.size());
+    });
+}
+
+void AppController::checkOnStartup()
+{
+    if (!std::filesystem::exists(config_.databasePath))
+        return;
+    try {
+        db::Database db(config_.databasePath);
+        db::DatabaseWriter(db).initSchema();
+        if (db.scalar("SELECT COUNT(*) FROM Snapshots WHERE kind = 'build'").value_or(0) > 0)
+            runCheck();
+    } catch (const std::exception& e) {
+        spdlog::warn("Startup change check skipped: {}", e.what());
+    }
+}
+
 void AppController::cancel()
 {
     if (busy_ && progress_)

@@ -50,7 +50,8 @@ std::filesystem::path buildInstall(const std::string& name)
                             formIds("KWDA", {0x800, 0x801, 0x01000800}), weaponData(0x900, 0x11)}),
                     record("WEAP", 0x01000801,
                            {zs("EDID", "ModA_Gun"), vmad({0x01000800}, {0x00000800, 0x01000800}), zs("FULL", "Mod A Gun"),
-                            u32("KSIZ", 1), formIds("KWDA", {0x01000800}), weaponData(0x00000900, 0x22)}),
+                            zs("MODL", "ModA\\Gun.nif"), u32("KSIZ", 1), formIds("KWDA", {0x01000800}),
+                            weaponData(0x00000900, 0x22)}),
                     record("COBJ", 0x01000802,
                            {zs("EDID", "co_ModA_Gun"), components({{0x00000900, 5}}), hasPerk(0x00001300),
                             u32("CNAM", 0x01000801), u32("BNAM", 0x00000800), raw("INTV", {1, 0, 0, 0})}),
@@ -61,8 +62,8 @@ std::filesystem::path buildInstall(const std::string& name)
     writePlugin(data / "ModB.esp", {"Fallout4.esm", "ModA.esp"},
                 {
                     record("WEAP", 0x00001000,
-                           {zs("EDID", "Pistol10mm"), zs("FULL", "10mm Pistol"), u32("KSIZ", 1), formIds("KWDA", {0x800}),
-                            weaponData(0x900, 0x33)}),
+                           {zs("EDID", "Pistol10mm"), zs("FULL", "10mm Pistol"), zs("MODL", "Weapons\\Missing.nif"),
+                            u32("KSIZ", 1), formIds("KWDA", {0x800}), weaponData(0x900, 0x33)}),
                     record("FLST", 0x00001100, {zs("EDID", "WeaponList"), formIds("LNAM", {0x1000}),
                                                 formIds("LNAM", {0x01000801})}),
                     record("LVLI", 0x00001200,
@@ -409,4 +410,154 @@ TEST(mo2_instance_and_virtual_file_system)
     CHECK_EQ(s.findPlugin("ModLow.esp")->eligibility, Eligibility::Eligible);
     // ModHigh overrides a Fallout4.esm record; ModLow injects nothing.
     CHECK_EQ(s.findPlugin("ModHigh.esp")->overrides, 1u);
+}
+
+namespace {
+
+void writeModB(const std::filesystem::path& data, bool extraLoot)
+{
+    std::vector<Subrecord> loot = {zs("EDID", "LootPistols"), raw("LLCT", {static_cast<uint8_t>(extraLoot ? 3 : 2)}),
+                                   lvlo(1, 0x1000, 1), lvlo(5, 0x01000801, 1)};
+    if (extraLoot)
+        loot.push_back(lvlo(10, 0x01000801, 2));
+    writePlugin(data / "ModB.esp", {"Fallout4.esm", "ModA.esp"},
+                {
+                    record("WEAP", 0x00001000,
+                           {zs("EDID", "Pistol10mm"), zs("FULL", "10mm Pistol"), zs("MODL", "Weapons\\Missing.nif"),
+                            u32("KSIZ", 1), formIds("KWDA", {0x800}), weaponData(0x900, 0x33)}),
+                    record("FLST", 0x00001100, {zs("EDID", "WeaponList"), formIds("LNAM", {0x1000}),
+                                                formIds("LNAM", {0x01000801})}),
+                    record("LVLI", 0x00001200, std::move(loot)),
+                });
+}
+
+} // namespace
+
+TEST(incremental_rebuild_reuses_unchanged_work)
+{
+    auto root = buildInstall("incremental");
+    {
+        Pipeline p(configFor(root));
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        p.exportOutputs();
+        CHECK(p.changes().status == BuildStatus::UpToDate);
+    }
+    size_t candidates = 0;
+    {
+        // Nothing changed: every stage restores its previous work.
+        Pipeline p(configFor(root));
+        p.scan();
+        CHECK(p.changes().status == BuildStatus::UpToDate);
+        for (auto pi : p.session().loadOrder)
+            CHECK(p.session().plugins[pi].fromCache);
+        p.analyse();
+        CHECK_EQ(p.conflicts()->reusedGroups, p.conflicts()->analysedGroups);
+        CHECK(p.compile());
+        CHECK_EQ(p.compiledOutput()->mergesComputed, size_t(0));
+        candidates = p.compiledOutput()->mergesReused;
+        CHECK(candidates > 0);
+        auto r = p.exportOutputs();
+        CHECK(r.writtenOutputs.empty());
+        CHECK_EQ(r.unchangedOutputs.size(), r.pluginFiles.size());
+    }
+    // One plugin changes: only the chains it takes part in are rebuilt.
+    writeModB(root / "Game" / "Data", true);
+    {
+        Pipeline p(configFor(root));
+        p.scan();
+        CHECK(!p.session().findPlugin("ModB.esp")->fromCache);
+        CHECK(p.session().findPlugin("ModA.esp")->fromCache);
+        const auto& ch = p.changes();
+        CHECK(ch.status == BuildStatus::RequiresRebuild);
+        CHECK_EQ(ch.updatedPlugins, size_t(1));
+        CHECK(std::find(ch.affectedRecordTypes.begin(), ch.affectedRecordTypes.end(), "LVLI") != ch.affectedRecordTypes.end());
+        CHECK(std::find(ch.unaffectedRecordTypes.begin(), ch.unaffectedRecordTypes.end(), "COBJ") !=
+              ch.unaffectedRecordTypes.end());
+        p.analyse();
+        CHECK(p.compile());
+        const auto* c = p.compiledOutput();
+        CHECK(c->mergesComputed > 0);
+        CHECK(c->mergesReused > 0); // ModA-only chains were not rebuilt
+        CHECK_EQ(c->mergesComputed + c->mergesReused, candidates);
+        auto r = p.exportOutputs();
+        CHECK_EQ(r.writtenOutputs.size(), size_t(1));
+        OutputSet out(r.pluginFiles);
+        CHECK_EQ(out.byEditorId("LootPistols")->record.findAll(Signature("LVLO")).size(), size_t(3));
+    }
+}
+
+TEST(change_detection_reports_build_status)
+{
+    auto root = buildInstall("changes");
+    auto cfg = configFor(root);
+    {
+        Pipeline p(cfg);
+        p.scan();
+        CHECK(p.changes().status == BuildStatus::NotBuilt);
+        p.analyse();
+        CHECK(p.compile());
+        p.exportOutputs();
+    }
+    auto check = [&](PipelineConfig c) {
+        Pipeline p(c);
+        return p.checkForChanges();
+    };
+    CHECK(check(cfg).status == BuildStatus::UpToDate);
+
+    // Asset-only change: the compiled records are still valid.
+    writeFile(root / "Game" / "Data" / "textures" / "new" / "decal.dds", "texture");
+    auto assetOnly = check(cfg);
+    CHECK(assetOnly.status == BuildStatus::ChangesDetected);
+    CHECK_EQ(assetOnly.updatedMods, size_t(1)); // the Data folder gained a file
+
+    // Settings change requires a rebuild.
+    auto changedSettings = cfg;
+    changedSettings.compile.outputCount = 12;
+    CHECK(check(changedSettings).status == BuildStatus::RequiresRebuild);
+
+    // A new enabled plugin requires a rebuild.
+    writePlugin(root / "Game" / "Data" / "NewWeapons.esp", {"Fallout4.esm"},
+                {record("WEAP", 0x01000800, {zs("EDID", "NewGun")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*NewWeapons.esp\n");
+    auto added = check(cfg);
+    CHECK(added.status == BuildStatus::RequiresRebuild);
+    CHECK_EQ(added.addedPlugins, size_t(1));
+
+    // Deleting a generated plugin is detected too.
+    std::filesystem::remove(root / "Output" / "Dummy_Plugin_01.esp");
+    auto missing = check(cfg);
+    CHECK(std::any_of(missing.items.begin(), missing.items.end(),
+                      [](const ChangeItem& i) { return i.category == "Output" && i.kind == "Missing"; }));
+}
+
+TEST(asset_trace_keeps_original_sources)
+{
+    auto root = buildInstall("assettrace");
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto& trace = p.assetTrace();
+    const TracedAsset* gun = nullptr;
+    const TracedAsset* missing = nullptr;
+    for (const auto& a : trace.assets) {
+        if (a.path == "meshes\\moda\\gun.nif")
+            gun = &a;
+        if (a.path == "meshes\\weapons\\missing.nif")
+            missing = &a;
+    }
+    CHECK(gun && gun->found && !gun->loose);
+    CHECK_EQ(gun->archive, std::string("ModA - Main.ba2"));
+    CHECK_EQ(gun->archiveOwner, std::string("ModA.esp"));
+    CHECK(gun->needsRegistration); // ModA is compiled: its archive loads through the generated INI
+    CHECK(missing && !missing->found);
+    CHECK(std::any_of(p.validation()->issues.begin(), p.validation()->issues.end(),
+                      [](const ValidationIssue& i) { return i.category == "Missing Assets"; }));
+    CHECK(*p.database()->scalar("SELECT COUNT(*) FROM RecordAssets WHERE archive = 'ModA - Main.ba2'") >= 1);
+    // Nothing was copied: the output folder holds plugins and text files only.
+    auto r = p.exportOutputs();
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(r.directory))
+        CHECK(!iendsWith(pathToUtf8(entry.path()), ".nif") && !iendsWith(pathToUtf8(entry.path()), ".ba2"));
 }

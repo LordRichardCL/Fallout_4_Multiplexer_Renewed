@@ -2,6 +2,9 @@
 
 #include "assets/AssetScanner.hpp"
 #include "db/Database.hpp"
+#include "engine/AssetTracer.hpp"
+#include "engine/BuildCache.hpp"
+#include "engine/ChangeDetector.hpp"
 #include "engine/CompilationEngine.hpp"
 #include "engine/ConflictEngine.hpp"
 #include "engine/DependencyEngine.hpp"
@@ -26,6 +29,9 @@ struct PipelineConfig {
     ExportOptions exportOptions;
     std::filesystem::path databasePath; // empty = no database
     std::filesystem::path reportDirectory;
+    bool useCache = true;               // incremental scans / analysis / compilation
+    std::filesystem::path cachePath;    // default: next to the database
+    bool traceAssets = true;            // resolve the assets compiled records use
 };
 
 // Runs the compiler stages in order and keeps every intermediate result:
@@ -47,6 +53,13 @@ public:
     ExportResult exportOutputs(ProgressSink& progress = nullProgress());
     std::vector<std::filesystem::path> writeReports(const std::filesystem::path& directory);
 
+    // Compares the mod space with the last exported build without a full scan.
+    ChangeReport checkForChanges(ProgressSink& progress = nullProgress());
+    const ChangeReport& changes() const { return changes_; }
+    const AssetTrace& assetTrace() const { return assetTrace_; }
+    BuildCache* cache() { return cache_.get(); }
+    uint64_t currentSettingsHash() const;
+
     bool scanned() const { return session_->scanned; }
     bool analysed() const { return conflicts_.has_value(); }
     bool compiled() const { return compiled_.has_value(); }
@@ -63,6 +76,9 @@ public:
 
 private:
     void openDatabase();
+    void openCache();
+    ChangeReport finishChangeReport(const std::optional<InstallSnapshot>& build, InstallSnapshot current,
+                                    uint64_t settings);
 
     PipelineConfig config_;
     std::unique_ptr<Session> session_;
@@ -72,6 +88,9 @@ private:
     std::optional<CompiledOutput> compiled_;
     std::optional<ValidationReport> validation_;
     std::optional<ExportResult> exported_;
+    std::unique_ptr<BuildCache> cache_;
+    AssetTrace assetTrace_;
+    ChangeReport changes_;
 };
 
 } // namespace fo4mx

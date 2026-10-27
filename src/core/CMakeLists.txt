@@ -18,6 +18,9 @@ add_library(fo4mx_core STATIC
     assets/AssetIndex.cpp
     assets/AssetPreview.cpp
     assets/AssetScanner.cpp
+    engine/BuildCache.cpp
+    engine/AssetTracer.cpp
+    engine/ChangeDetector.cpp
     engine/CompilationEngine.cpp
     engine/ConflictEngine.cpp
     engine/DependencyEngine.cpp

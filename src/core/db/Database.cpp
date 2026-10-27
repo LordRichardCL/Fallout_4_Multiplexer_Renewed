@@ -61,6 +61,19 @@ Statement& Statement::bind(int index, std::string_view v)
     return *this;
 }
 
+Statement& Statement::bindBlob(int index, const void* data, size_t size)
+{
+    sqlite3_bind_blob64(stmt_, index, data, static_cast<sqlite3_uint64>(size), SQLITE_TRANSIENT);
+    return *this;
+}
+
+std::vector<uint8_t> Statement::columnBlob(int col) const
+{
+    const auto* p = static_cast<const uint8_t*>(sqlite3_column_blob(stmt_, col));
+    int n = sqlite3_column_bytes(stmt_, col);
+    return p ? std::vector<uint8_t>(p, p + n) : std::vector<uint8_t>();
+}
+
 Statement& Statement::bindNull(int index)
 {
     sqlite3_bind_null(stmt_, index);

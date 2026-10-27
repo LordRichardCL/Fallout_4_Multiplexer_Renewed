@@ -1,5 +1,6 @@
 #include "engine/PluginScanner.hpp"
 
+#include "engine/BuildCache.hpp"
 #include "engine/ParallelFor.hpp"
 #include "esp/PluginFile.hpp"
 #include "util/Text.hpp"
@@ -107,6 +108,7 @@ void PluginScanner::discoverPlugins(Session& session, ProgressSink& progress)
         info.path = session.vfs.winnerPath(*f);
         info.sourceMod = session.vfs.winnerName(*f);
         info.fileSize = f->sizes.back();
+        info.modified = f->mtimes.back();
         info.active = entries[key].active;
         info.implicit = entries[key].implicit;
         info.baseGame = isBaseGamePlugin(info.name);
@@ -185,6 +187,13 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
     progress.stage("Scanning plugins");
     const auto& defs = session.defs;
     std::vector<std::vector<RecordInstance>> perPlugin(session.loadOrder.size());
+    struct PendingCache {
+        bool store = false;
+        uint64_t sample = 0;
+        CachedPluginIndex index;
+    };
+    std::vector<PendingCache> pending(session.loadOrder.size());
+    BuildCache* cache = session.cache;
     std::atomic<size_t> done{0};
 
     parallelFor(
@@ -193,8 +202,46 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
             auto& p = session.plugins[session.loadOrder[pos]];
             auto& out = perPlugin[pos];
             try {
+                // Unchanged plugin: restore its record index instead of parsing it.
+                uint64_t sample = 0;
+                if (cache && p.modified != 0) {
+                    sample = sampleFileHash(p.path, p.fileSize);
+                    if (auto cached = cache->loadPluginIndex(pathToUtf8(p.path), p.fileSize, p.modified, sample)) {
+                        out.reserve(cached->records.size());
+                        for (const auto& c : cached->records) {
+                            RecordInstance r;
+                            r.plugin = p.index;
+                            r.signature = c.sig;
+                            r.flags = c.flags;
+                            r.dataSize = c.dataSize;
+                            r.rawFormId = c.rawFormId;
+                            r.offset = c.offset;
+                            r.hash = c.hash;
+                            r.loadPos = p.loadOrder;
+                            r.key = session.resolve(p, c.rawFormId);
+                            if (!c.editorId.empty())
+                                r.editorId = session.strings.intern(c.editorId);
+                            ++p.recordCount;
+                            ++p.typeCounts[c.sig];
+                            if (c.flags & RecordFlags::Deleted)
+                                ++p.deletedCount;
+                            out.push_back(r);
+                        }
+                        p.fileHash = cached->fileHash;
+                        p.fromCache = true;
+                        p.scanned = true;
+                        size_t n = ++done;
+                        progress.progress(n, session.loadOrder.size(), p.name);
+                        return;
+                    }
+                }
                 auto file = PluginFile::load(p.path);
                 p.header = file.header();
+                p.fileHash = fnv1a64(file.bytes().data(), file.bytes().size());
+                auto& pc = pending[pos];
+                pc.store = cache && p.modified != 0;
+                pc.sample = sample;
+                pc.index.fileHash = p.fileHash;
                 file.forEachRecord([&](const RecordLocation& loc) {
                     if ((p.recordCount & 0xFFFF) == 0 && progress.cancelled())
                         return false;
@@ -217,6 +264,8 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
                     if (loc.header.deleted())
                         ++p.deletedCount;
                     out.push_back(r);
+                    if (pc.store)
+                        pc.index.records.push_back({r.signature, r.flags, r.dataSize, r.rawFormId, r.offset, r.hash, edid});
                     return true;
                 });
                 p.scanned = true;
@@ -228,6 +277,19 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
             progress.progress(n, session.loadOrder.size(), p.name);
         },
         progress, options.threads);
+
+    if (cache) {
+        cache->begin();
+        for (size_t pos = 0; pos < pending.size(); ++pos) {
+            const auto& pc = pending[pos];
+            const auto& p = session.plugins[session.loadOrder[pos]];
+            if (pc.store && p.scanned)
+                cache->storePluginIndex(pathToUtf8(p.path), p.fileSize, p.modified, pc.sample, pc.index);
+        }
+        cache->commit();
+        spdlog::info("Plugin index cache: {} plugins reused, {} parsed", cache->plugins.hits.load(),
+                     cache->plugins.misses.load());
+    }
 
     size_t total = 0;
     for (const auto& v : perPlugin)

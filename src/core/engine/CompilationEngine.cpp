@@ -1,6 +1,7 @@
 #include "engine/CompilationEngine.hpp"
 
 #include "assets/AssetScanner.hpp"
+#include "engine/BuildCache.hpp"
 #include "engine/MergeEngine.hpp"
 #include "engine/Normalizer.hpp"
 #include "engine/ParallelFor.hpp"
@@ -258,6 +259,24 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     progress.stage("Merge");
     std::vector<std::optional<EmittedRecord>> emitted(candidates.size());
     std::vector<std::vector<CompileIssue>> mergeIssues(candidates.size());
+
+    // Merging an override chain depends only on its content and the merge options,
+    // so unchanged chains reuse the previous result (incremental recompilation).
+    std::vector<std::optional<CachedMerge>> merges(candidates.size());
+    std::vector<uint64_t> keys(candidates.size(), 0);
+    BuildCache* cache = session.cache;
+    if (cache) {
+        for (size_t ci = 0; ci < candidates.size(); ++ci) {
+            const auto& c = candidates[ci];
+            uint64_t opts = (options.mergeCompatible ? 1ull : 0ull) | (static_cast<uint64_t>(c.forced + 1) << 8);
+            keys[ci] = chainSignature(session, session.groups[c.group]) ^ ((opts + 1) * 0xC2B2AE3D27D4EB4FULL);
+            if (auto blob = cache->get("merges", keys[ci]))
+                merges[ci] = deserializeMerge(session, *blob);
+            (merges[ci] ? cache->merges.hits : cache->merges.misses)++;
+        }
+    }
+    std::vector<uint8_t> computed(candidates.size(), 0);
+
     std::atomic<size_t> done{0};
     parallelFor(
         candidates.size(),
@@ -265,32 +284,42 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             const auto& c = candidates[ci];
             auto inst = session.instances(session.groups[c.group]);
             try {
-                Normalizer norm(session);
-                std::vector<FieldSet> chain;
-                std::vector<DecodeIssue> issues;
-                for (const auto& r : inst) {
-                    auto nr = norm.normalize(r);
-                    if (out.compiledFlag_[r.plugin])
-                        issues.insert(issues.end(), nr.issues.begin(), nr.issues.end());
-                    chain.push_back(splitFields(nr, session.defs));
+                if (!merges[ci]) {
+                    Normalizer norm(session);
+                    std::vector<FieldSet> chain;
+                    CachedMerge m;
+                    for (const auto& r : inst) {
+                        auto nr = norm.normalize(r);
+                        m.issues.push_back(std::move(nr.issues));
+                        chain.push_back(splitFields(nr, session.defs));
+                    }
+                    MergeOptions mo;
+                    mo.mergeCompatible = options.mergeCompatible;
+                    mo.forcedWinner = c.forced;
+                    MergeResult mr = MergeEngine::merge(chain, mo);
+                    for (const auto& link : chain)
+                        m.equalsInstance.push_back(sameRecord(mr.fields, link) ? 1 : 0);
+                    for (size_t idx : mr.contributors)
+                        m.contributors.push_back(static_cast<uint32_t>(idx));
+                    m.merged = mr.merged;
+                    m.fields = std::move(mr.fields);
+                    merges[ci] = std::move(m);
+                    computed[ci] = 1;
                 }
-                MergeOptions mo;
-                mo.mergeCompatible = options.mergeCompatible;
-                mo.forcedWinner = c.forced;
-                MergeResult mr = MergeEngine::merge(chain, mo);
+                const CachedMerge& m = *merges[ci];
 
                 // Once compiled plugins are disabled, the last retained instance is what the game
                 // loads. If the result equals it, an override would only be an ITM.
                 for (size_t i = inst.size(); i-- > 0;) {
                     if (out.compiledFlag_[inst[i].plugin])
                         continue;
-                    if (sameRecord(mr.fields, chain[i])) {
+                    if (m.equalsInstance[i]) {
                         mergeIssues[ci].push_back({Severity::Info, "Identical", "", inst[0].key, {}});
                         return;
                     }
                     break;
                 }
-                if (c.isNew && (mr.fields.flags() & RecordFlags::Deleted)) {
+                if (c.isNew && (m.fields.flags() & RecordFlags::Deleted)) {
                     mergeIssues[ci].push_back({Severity::Info, "Deleted",
                                                session.formLabel(inst[0].key) + " is a deleted new record and is dropped",
                                                inst[0].key, session.pluginName(inst.back().plugin)});
@@ -306,14 +335,16 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                         break;
                     }
                 e.isNew = c.isNew;
-                e.merged = mr.merged;
+                e.merged = m.merged;
                 e.winner = inst.back().plugin;
                 for (const auto& r : inst)
                     e.chain.push_back(r.plugin);
-                for (size_t idx : mr.contributors)
+                for (uint32_t idx : m.contributors)
                     e.contributors.push_back(inst[idx].plugin);
-                e.fields = std::move(mr.fields);
-                e.issues = std::move(issues);
+                for (size_t i = 0; i < inst.size() && i < m.issues.size(); ++i)
+                    if (out.compiledFlag_[inst[i].plugin])
+                        e.issues.insert(e.issues.end(), m.issues[i].begin(), m.issues[i].end());
+                e.fields = m.fields;
                 e.size = estimateSize(e.fields);
                 emitted[ci] = std::move(e);
             } catch (const std::exception& ex) {
@@ -326,6 +357,18 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 progress.progress(n, candidates.size(), "merging records");
         },
         progress, options.threads);
+
+    if (cache) {
+        cache->begin();
+        for (size_t ci = 0; ci < candidates.size(); ++ci)
+            if (computed[ci])
+                cache->put("merges", keys[ci], serializeMerge(session, *merges[ci]));
+        cache->commit();
+    }
+    for (size_t ci = 0; ci < candidates.size(); ++ci)
+        (computed[ci] ? out.mergesComputed : out.mergesReused)++;
+    merges.clear();
+    spdlog::info("Merge: {} chains reused from the build cache, {} recomputed", out.mergesReused, out.mergesComputed);
 
     for (size_t ci = 0; ci < candidates.size(); ++ci) {
         for (auto& is : mergeIssues[ci]) {

@@ -233,6 +233,58 @@ void StackedBar::paintEvent(QPaintEvent*)
     }
 }
 
+BuildStatusBanner::BuildStatusBanner(QWidget* parent) : QFrame(parent)
+{
+    setObjectName("Card");
+    auto* h = new QHBoxLayout(this);
+    h->setContentsMargins(18, 14, 18, 14);
+    h->setSpacing(16);
+    icon_ = new QLabel;
+    icon_->setFixedWidth(46);
+    icon_->setAlignment(Qt::AlignCenter);
+    h->addWidget(icon_);
+    auto* texts = new QVBoxLayout;
+    texts->setSpacing(2);
+    auto* caption = new QLabel("CURRENT BUILD STATUS");
+    caption->setObjectName("CardLabel");
+    title_ = new QLabel;
+    detail_ = new QLabel;
+    detail_->setObjectName("PageSubtitle");
+    detail_->setWordWrap(true);
+    counts_ = new QLabel;
+    counts_->setWordWrap(true);
+    texts->addWidget(caption);
+    texts->addWidget(title_);
+    texts->addWidget(detail_);
+    texts->addWidget(counts_);
+    h->addLayout(texts, 1);
+    actions_ = new QHBoxLayout;
+    actions_->setSpacing(8);
+    h->addLayout(actions_);
+}
+
+void BuildStatusBanner::setStatus(const QString& status, const QString& detail, const QStringList& counts)
+{
+    QString symbol = "•";
+    QColor color = theme::kMuted;
+    QString text = status.isEmpty() ? QString("Not Built") : status;
+    if (status == "Up To Date")
+        symbol = "✓", color = theme::kGreen;
+    else if (status == "Changes Detected")
+        symbol = "⚠", color = theme::kYellow;
+    else if (status == "Requires Rebuild")
+        symbol = "✖", color = theme::kRed;
+    icon_->setText(symbol);
+    // Sizes go through the style sheet: the application sheet would override setFont().
+    icon_->setStyleSheet(QString("color:%1; font-size:26pt; font-weight:700;").arg(color.name()));
+    title_->setText(text);
+    title_->setStyleSheet(QString("color:%1; font-size:15pt; font-weight:600;").arg(color.name()));
+    detail_->setText(detail);
+    counts_->setText(counts.join("   ·   "));
+    counts_->setVisible(!counts.isEmpty());
+    setStyleSheet(QString("#Card { border-left: 4px solid %1; }").arg(color.name()));
+}
+
 QWidget* makePageHeader(const QString& title, const QString& subtitle, const std::vector<QWidget*>& actions)
 {
     auto* w = new QWidget;

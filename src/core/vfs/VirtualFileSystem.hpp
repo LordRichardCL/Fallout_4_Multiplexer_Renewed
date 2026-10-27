@@ -19,6 +19,9 @@ struct FileSourceRoot {
     bool baseGame = false;
 };
 
+// Unix seconds of a file's last write time.
+int64_t toUnixTime(std::filesystem::file_time_type t);
+
 // Merged view of the Data directory, mirroring how Mod Organizer 2's USVFS
 // presents files to the game: a file from a higher priority source hides the
 // same file from lower priority ones.
@@ -28,13 +31,14 @@ public:
         std::string relativePath;        // original case, '\' separated
         std::vector<uint32_t> sources;   // indices into roots(), ascending priority (last = winner)
         std::vector<uint64_t> sizes;     // parallel to sources
+        std::vector<int64_t> mtimes;     // parallel to sources (Unix seconds)
     };
 
     // Roots must be added in ascending priority.
     uint32_t addRoot(FileSourceRoot root);
     void scan(ProgressSink& progress = nullProgress());
     // Adds a single file manually (used for tests and synthetic sources).
-    void addFile(uint32_t root, const std::string& relativePath, uint64_t size);
+    void addFile(uint32_t root, const std::string& relativePath, uint64_t size, int64_t mtime = 0);
 
     const std::vector<FileSourceRoot>& roots() const { return roots_; }
     const std::vector<File>& files() const { return files_; }

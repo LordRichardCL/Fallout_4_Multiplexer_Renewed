@@ -1,5 +1,6 @@
 #include "engine/DependencyEngine.hpp"
 
+#include "engine/BuildCache.hpp"
 #include "engine/FieldModel.hpp"
 #include "engine/Normalizer.hpp"
 #include "engine/ParallelFor.hpp"
@@ -163,40 +164,73 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
             targets.push_back(gi);
     }
 
-    std::vector<std::vector<RecordEdge>> edges(targets.size());
-    std::vector<std::vector<DependencyIssue>> issues(targets.size());
+    // References of each winning record: restored from the cache when unchanged.
+    std::vector<std::optional<std::vector<std::pair<FormKey, Signature>>>> refs(targets.size());
+    std::vector<uint64_t> keys(targets.size(), 0);
+    std::vector<std::string> unreadable(targets.size());
+    BuildCache* cache = session.cache;
+    if (cache) {
+        for (size_t i = 0; i < targets.size(); ++i) {
+            const auto& g = session.groups[targets[i]];
+            keys[i] = chainSignature(session, FormGroup{g.end - 1, g.end}) ^ 0xED6E5ULL;
+            if (auto blob = cache->get("edges", keys[i]))
+                refs[i] = deserializeEdges(session, *blob);
+            (refs[i] ? cache->edges.hits : cache->edges.misses)++;
+        }
+    }
+    std::vector<uint8_t> computed(targets.size(), 0);
     std::atomic<size_t> done{0};
     parallelFor(
         targets.size(),
         [&](size_t i) {
+            if (refs[i])
+                return;
             const auto& g = session.groups[targets[i]];
-            const auto& w = session.records[g.end - 1];
             try {
                 Normalizer norm(session);
-                FieldSet fs = splitFields(norm.normalize(w), session.defs);
-                for (const auto& [to, via] : collectRefs(fs)) {
-                    if (to == w.key)
-                        continue;
-                    edges[i].push_back({w.key, to, via});
-                    if (!to.valid()) {
-                        issues[i].push_back({Severity::Error, "Missing Reference", w.plugin, w.key,
-                                             session.formLabel(w.key) + " references a FormID whose master is missing"});
-                    } else if (!session.findGroup(to)) {
-                        issues[i].push_back({Severity::Warning, "Missing Reference", w.plugin, w.key,
-                                             session.formLabel(w.key) + " (" + via.str() + ") references " +
-                                                 formatFormId(to.objectId) + " in " + session.pluginName(to.origin) +
-                                                 ", which does not exist"});
-                    }
-                }
+                FieldSet fs = splitFields(norm.normalize(session.records[g.end - 1]), session.defs);
+                refs[i] = collectRefs(fs);
+                computed[i] = 1;
             } catch (const std::exception& e) {
-                issues[i].push_back({Severity::Warning, "Unreadable Record", w.plugin, w.key,
-                                     session.formLabel(w.key) + ": " + e.what()});
+                unreadable[i] = e.what();
             }
             size_t n = ++done;
             if ((n & 0x3FF) == 0 || n == targets.size())
                 progress.progress(n, targets.size(), "record references");
         },
         progress, options.threads);
+    if (cache) {
+        cache->begin();
+        for (size_t i = 0; i < targets.size(); ++i)
+            if (computed[i])
+                cache->put("edges", keys[i], serializeEdges(session, *refs[i]));
+        cache->commit();
+    }
+
+    std::vector<std::vector<RecordEdge>> edges(targets.size());
+    std::vector<std::vector<DependencyIssue>> issues(targets.size());
+    for (size_t i = 0; i < targets.size(); ++i) {
+        const auto& w = session.records[session.groups[targets[i]].end - 1];
+        if (!refs[i]) {
+            issues[i].push_back({Severity::Warning, "Unreadable Record", w.plugin, w.key,
+                                 session.formLabel(w.key) + ": " + unreadable[i]});
+            continue;
+        }
+        for (const auto& [to, via] : *refs[i]) {
+            if (to == w.key)
+                continue;
+            edges[i].push_back({w.key, to, via});
+            if (!to.valid()) {
+                issues[i].push_back({Severity::Error, "Missing Reference", w.plugin, w.key,
+                                     session.formLabel(w.key) + " references a FormID whose master is missing"});
+            } else if (!session.findGroup(to)) {
+                issues[i].push_back({Severity::Warning, "Missing Reference", w.plugin, w.key,
+                                     session.formLabel(w.key) + " (" + via.str() + ") references " +
+                                         formatFormId(to.objectId) + " in " + session.pluginName(to.origin) +
+                                         ", which does not exist"});
+            }
+        }
+    }
 
     session.recordEdges.clear();
     for (auto& v : edges) {

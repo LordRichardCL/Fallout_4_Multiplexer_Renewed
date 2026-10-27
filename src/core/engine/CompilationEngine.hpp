@@ -112,6 +112,8 @@ struct CompiledOutput {
     size_t identicalToRetained = 0;
     size_t mergedRecords = 0;
     size_t droppedDeleted = 0;
+    size_t mergesReused = 0;   // override chains restored from the build cache
+    size_t mergesComputed = 0; // override chains merged in this compilation
     bool empty() const { return records.empty(); }
     bool isCompiled(PluginIndex p) const;
     std::string outputName(int index) const { return outputs.at(static_cast<size_t>(index)).name; }

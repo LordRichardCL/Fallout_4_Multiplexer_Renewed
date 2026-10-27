@@ -424,6 +424,8 @@ void DatabaseWriter::writeCompilation(const Session& session, const CompiledOutp
     for (const auto& op : compiled.outputs)
         used += op.records.empty() ? 0 : 1;
     setMeta("compiled_plugins", std::to_string(compiled.compiledPlugins.size()));
+    setMeta("merges_reused", std::to_string(compiled.mergesReused));
+    setMeta("merges_computed", std::to_string(compiled.mergesComputed));
     setMeta("compiled_records", std::to_string(compiled.records.size()));
     setMeta("output_plugins", std::to_string(used));
 }
@@ -448,6 +450,93 @@ void DatabaseWriter::writeValidation(const std::string& stage, const ValidationR
     setMeta("validation_" + stage + "_passed", std::to_string(report.passed));
     setMeta("validation_" + stage + "_warnings", std::to_string(report.warnings));
     setMeta("validation_" + stage + "_errors", std::to_string(report.errors));
+}
+
+void DatabaseWriter::writeAssetTrace(const CompiledOutput& compiled, const AssetTrace& trace)
+{
+    Transaction tx(db_);
+    db_.exec("DELETE FROM RecordAssets;");
+    auto st = db_.prepare("INSERT INTO RecordAssets(output_plugin, form_id, editor_id, asset_path, role, via, found, "
+                          "source_kind, origin_mod, archive, archive_owner, physical, needs_registration) "
+                          "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    for (const auto& a : trace.assets) {
+        const auto& e = compiled.records[a.record];
+        st.bind(1, compiled.outputName(e.output))
+            .bind(2, formatFormId(e.rawFormId))
+            .bind(3, e.editorId)
+            .bind(4, a.path)
+            .bind(5, a.role)
+            .bind(6, a.via)
+            .bind(7, a.found ? 1 : 0)
+            .bind(8, !a.found ? "Missing" : a.loose ? "Loose" : "Archive")
+            .bind(9, a.mod)
+            .bind(10, a.archive)
+            .bind(11, a.archiveOwner)
+            .bind(12, a.physical)
+            .bind(13, a.needsRegistration ? 1 : 0);
+        st.run();
+    }
+    tx.commit();
+    setMeta("traced_assets", std::to_string(trace.assets.size()));
+    setMeta("missing_assets", std::to_string(trace.missing));
+}
+
+void DatabaseWriter::saveSnapshot(const std::string& kind, const InstallSnapshot& snapshot)
+{
+    db_.prepare("INSERT OR REPLACE INTO Snapshots(kind, created, data) VALUES(?,?,?)")
+        .bind(1, kind)
+        .bind(2, static_cast<int64_t>(snapshot.created))
+        .bind(3, snapshot.toJson().dump(0))
+        .run();
+}
+
+std::optional<InstallSnapshot> DatabaseWriter::loadSnapshot(const std::string& kind)
+{
+    auto st = db_.prepare("SELECT data FROM Snapshots WHERE kind = ?");
+    st.bind(1, kind);
+    if (!st.step())
+        return std::nullopt;
+    try {
+        return InstallSnapshot::fromJson(json::Value::parse(st.columnText(0)));
+    } catch (const std::exception& e) {
+        spdlog::warn("Ignoring unreadable {} snapshot: {}", kind, e.what());
+        return std::nullopt;
+    }
+}
+
+void DatabaseWriter::writeChanges(const ChangeReport& r)
+{
+    {
+        Transaction tx(db_);
+        db_.exec("DELETE FROM Changes;");
+        auto st = db_.prepare("INSERT INTO Changes(category, kind, name, detail, affects_build) VALUES(?,?,?,?,?)");
+        for (const auto& i : r.items)
+            st.bind(1, i.category).bind(2, i.kind).bind(3, i.name).bind(4, i.detail).bind(5, i.affectsBuild ? 1 : 0).run();
+        tx.commit();
+    }
+    setMeta("build_status", buildStatusName(r.status));
+    setMeta("build_checked", std::to_string(r.checkedTime));
+    setMeta("build_reference", std::to_string(r.referenceTime));
+    setMeta("changes_new_mods", std::to_string(r.newMods));
+    setMeta("changes_removed_mods", std::to_string(r.removedMods));
+    setMeta("changes_updated_mods", std::to_string(r.updatedMods));
+    setMeta("changes_added_plugins", std::to_string(r.addedPlugins));
+    setMeta("changes_removed_plugins", std::to_string(r.removedPlugins));
+    setMeta("changes_updated_plugins", std::to_string(r.updatedPlugins));
+    setMeta("changes_archives", std::to_string(r.archiveChanges));
+    setMeta("changes_load_order", std::to_string(r.loadOrderChanges));
+    setMeta("changes_affected_types", join(r.affectedRecordTypes, " "));
+    setMeta("changes_unaffected_types", join(r.unaffectedRecordTypes, " "));
+    setMeta("changes_reasons", join(r.reasons, "\n"));
+}
+
+std::vector<std::string> DatabaseWriter::resolutionStrings()
+{
+    std::vector<std::string> out;
+    auto st = db_.prepare("SELECT origin_plugin, object_id, winner_plugin FROM UserResolutions");
+    while (st.step())
+        out.push_back(st.columnText(0) + ":" + std::to_string(st.columnInt(1)) + "=" + st.columnText(2));
+    return out;
 }
 
 void DatabaseWriter::saveResolution(const std::string& originPlugin, uint32_t objectId, const std::string& winnerPlugin)

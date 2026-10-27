@@ -2,6 +2,8 @@
 
 #include "util/Text.hpp"
 
+#include <chrono>
+
 #include <spdlog/spdlog.h>
 
 namespace fo4mx {
@@ -12,7 +14,13 @@ uint32_t VirtualFileSystem::addRoot(FileSourceRoot root)
     return static_cast<uint32_t>(roots_.size() - 1);
 }
 
-void VirtualFileSystem::addFile(uint32_t root, const std::string& relativePath, uint64_t size)
+int64_t toUnixTime(std::filesystem::file_time_type t)
+{
+    auto sys = std::chrono::clock_cast<std::chrono::system_clock>(t);
+    return std::chrono::duration_cast<std::chrono::seconds>(sys.time_since_epoch()).count();
+}
+
+void VirtualFileSystem::addFile(uint32_t root, const std::string& relativePath, uint64_t size, int64_t mtime)
 {
     std::string key = normalizeAssetPath(relativePath);
     auto [it, inserted] = index_.try_emplace(key, static_cast<uint32_t>(files_.size()));
@@ -27,6 +35,7 @@ void VirtualFileSystem::addFile(uint32_t root, const std::string& relativePath, 
     File& f = files_[it->second];
     f.sources.push_back(root);
     f.sizes.push_back(size);
+    f.mtimes.push_back(mtime);
 }
 
 void VirtualFileSystem::scan(ProgressSink& progress)
@@ -50,7 +59,9 @@ void VirtualFileSystem::scan(ProgressSink& progress)
             // MO2 metadata files at a mod's root are not part of Data.
             if (!roots_[r].baseGame && it.depth() == 0 && iequals(relStr, "meta.ini"))
                 continue;
-            addFile(r, relStr, it->file_size(ec));
+            uint64_t size = it->file_size(ec);
+            auto written = it->last_write_time(ec);
+            addFile(r, relStr, size, ec ? 0 : toUnixTime(written));
         }
         if (ec)
             spdlog::warn("Error while scanning {}: {}", pathToUtf8(root), ec.message());

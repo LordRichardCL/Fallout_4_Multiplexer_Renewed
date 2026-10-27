@@ -91,9 +91,31 @@ Then:
 3. Copy the `[Archive]` line from `Multiplexer_Archives.ini` into `Fallout4Custom.ini` (or the profile's INI when MO2 uses profile-local INIs). Without this, textures and meshes from compiled mods' archives will be missing.
 4. Open the outputs in FO4Edit and spot-check a few records.
 
-## Recompiling after changing mods
+## Keeping the build up to date
 
-Rescan, re-analyse and compile again **into the same output folder**. The previous `Multiplexer_FormMap.tsv` is used automatically, so records keep their FormIDs. If a record must move (new dependencies), validation reports a *FormID Stability* warning naming it.
+When the app starts it compares your mod space with the last exported build. The Dashboard banner shows:
+
+- **✓ Up To Date**: nothing that matters changed.
+- **⚠ Changes Detected**: only assets changed (new textures, an updated loose-file mod). The compiled plugins are still correct.
+- **✖ Requires Rebuild**: plugins were added, removed, updated or reordered, compilation settings changed, or a generated plugin was deleted or edited.
+
+**Changes** lists every added, removed and updated mod, plugin and archive, load order moves, and whether each one requires a rebuild. It also shows which record types the changed plugins contain and which compiled types are unaffected. **Check Now** re-runs the comparison at any time.
+
+**Rebuild** runs Scan → Analyse → Compile → Export in one step and reuses everything that did not change:
+
+- unchanged plugins are not re-parsed;
+- unchanged override chains are not re-analysed or re-merged;
+- output plugins whose content is identical are not rewritten;
+- outputs the new build no longer needs are removed;
+- records keep their FormIDs (`Multiplexer_FormMap.tsv`); a record that must move is reported as a *FormID Stability* warning.
+
+Compile into the same output folder each time.
+
+## Assets
+
+Compilation never copies, extracts or repacks assets. Compiled records keep their original mesh, texture and material paths, and the game loads those files from the mods that provide them. The only thing to do is merge `Multiplexer_Archives.ini`, so archives that belonged to compiled plugins keep loading from where they are.
+
+On the Compilation page, select a record under **Generated Records** to see its generated plugin, source plugin, winning override, and every mesh, material and texture it uses with the mod, archive and path each one is served from. **Assets Used** lists all of them. Missing assets are reported in the Validation Centre.
 
 ## Reports
 
@@ -107,7 +129,7 @@ Everything is also available through `fo4mx` (run `fo4mx help`), for example:
 fo4mx compile --mo2 "C:\Modding\MO2" --profile "Test" --outputs 16 --strategy type --dry-run
 ```
 
-`--dry-run` stops after validation.
+`--dry-run` stops after validation. `fo4mx status …` prints the build status and every change since the last build (exit code 3 when a rebuild is required, handy for scripts). `--no-cache` forces a full rebuild.
 
 ## Troubleshooting
 

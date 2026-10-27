@@ -675,3 +675,54 @@ The software analyses an effectively unlimited collection of Fallout 4 plugins, 
 These generated plugins contain fully materialised Bethesda records, remain fully compatible with xEdit, FO4Edit and the Creation Kit, and provide users with a scalable, transparent and inspectable alternative to traditional Fallout 4 load-order management.
 
 **In simple terms:** Fallout 4 Multiplexer Renewed allows users to see, understand, validate and compile the complete final state of a Fallout 4 modlist into a manageable set of fully inspectable plugins.
+
+---
+
+## Critical Design Clarification: Asset Preservation, Change Detection and Incremental Recompilation
+
+### Asset preservation and runtime asset resolution
+
+Compilation must not duplicate, move, extract or redistribute game assets. The generated plugins contain compiled Fallout 4 records only; the application is not an asset packing, archive rebuilding or asset duplication system.
+
+- Compiled records keep referencing the original asset paths (for example `Meshes\Weapons\10mm\10mm.nif`, `Textures\Weapons\10mm\10mm_d.dds`, `Materials\Weapons\10mm\10mm.bgsm`).
+- Asset ownership stays with the original mods: BA2 archives, loose files, Mod Organizer 2 mod folders, Vortex-managed folders.
+- At runtime Fallout 4 resolves those paths through its normal asset system (compiled record → mesh/texture → original archive or loose file). The generated plugin is purely a compiled record container.
+- No duplicate assets are created unless the user explicitly asks for it.
+
+### Archive awareness
+
+The application understands asset ownership and archive relationships (for example `WeaponExpansion.esp` → `WeaponExpansion - Main.ba2`, `WeaponExpansion - Textures.ba2`) and preserves them in its database.
+
+### Asset traceability
+
+For any generated record a user can see: the generated plugin, the source plugin, the winning override, the referenced meshes, textures and materials, and the original archive sources and file paths of each.
+
+### Design goal
+
+Compile the plugin layer while leaving the asset layer distributed across the original mods. The original mods remain the authoritative source of every game asset.
+
+### Automatic mod space monitoring
+
+After each successful scan or compilation the application saves a snapshot of installed mods, plugins, BA2 archives, loose files, plugin sizes, file hashes, load order and modification dates. That snapshot is the reference state.
+
+On startup or rescan the application detects: new mods, removed mods, added/removed plugins, plugin updates, archive updates, file changes and load order changes, and reports them, e.g.:
+
+```
+Mod Space Changes Detected
+New Mods: 5
+Updated Plugins: 3
+Removed Mods: 0
+Compilation Status: Out of Date
+```
+
+### Incremental recompilation
+
+The software determines what changed, which records changed and which dependencies changed, and rebuilds only the affected work where possible (for example, a changed weapon mod affects WEAP, OMOD and COBJ; armour, NPC, quest and audio are unaffected).
+
+### Compilation status indicator
+
+The dashboard always shows the current build status: **✓ Up To Date**, **⚠ Changes Detected**, **✖ Requires Rebuild**, like a development environment that knows when source changes require a rebuild.
+
+### Long-term design philosophy
+
+Fallout 4 Multiplexer Renewed behaves like a modern build system: users install, remove, update or reorder mods and immediately see what changed, what broke, what requires recompilation and what the next build will include.

@@ -2,6 +2,7 @@
 
 #include "Format.hpp"
 #include "Theme.hpp"
+#include "pages/ChangesPage.hpp"
 #include "widgets/Widgets.hpp"
 
 #include <QGridLayout>
@@ -45,6 +46,19 @@ DashboardPage::DashboardPage(AppController* app, QWidget* parent) : Page(app, pa
     auto* header = makePageHeader("Dashboard", "", {scan, analyse, compile, validate, reports});
     subtitle_ = header->findChild<QLabel*>("PageSubtitle");
     l->addWidget(header);
+
+    banner_ = new BuildStatusBanner;
+    auto* review = makeButton("Review Changes");
+    auto* checkNow = makeButton("Check Now");
+    auto* rebuild = makeButton("Rebuild", "Primary");
+    for (auto* b : {review, checkNow, rebuild})
+        banner_->actions()->addWidget(b);
+    connect(review, &QPushButton::clicked, this, [this] { emit navigate("Changes"); });
+    connect(checkNow, &QPushButton::clicked, app_, &AppController::runCheck);
+    connect(rebuild, &QPushButton::clicked, app_, &AppController::runRebuild);
+    for (auto* b : {checkNow, rebuild})
+        connect(app_, &AppController::busyChanged, b, [b](bool busy) { b->setEnabled(!busy); });
+    l->addWidget(banner_);
 
     empty_ = new QLabel("No scan results yet. Configure your installation in Settings, then press Scan.");
     empty_->setObjectName("PageSubtitle");
@@ -96,16 +110,21 @@ DashboardPage::DashboardPage(AppController* app, QWidget* parent) : Page(app, pa
     l->addWidget(status_);
     l->addStretch();
 
-    connect(app_, &AppController::taskStarted, this, [this](const QString&) { stages_->reset(); });
+    connect(app_, &AppController::taskStarted, this, [this](const QString& task) {
+        if (task != "Check")
+            stages_->reset();
+    });
     connect(app_, &AppController::stageStarted, stages_, &StageIndicator::activate);
     connect(app_, &AppController::taskFinished, this, [this](const QString& task, bool ok, const QString& msg) {
-        stages_->finish(ok);
+        if (task != "Check")
+            stages_->finish(ok);
         status_->setText(QString("%1 %2: %3").arg(task, ok ? "finished" : "failed", msg));
     });
 }
 
 void DashboardPage::refresh()
 {
+    fillBuildBanner(this, banner_, [this](const QString& k) { return meta(k); });
     QSqlDatabase db = app_->readDb();
     bool have = db.isOpen() && scalar("SELECT COUNT(*) FROM Plugins").toInt() > 0;
     empty_->setVisible(!have);
@@ -158,9 +177,12 @@ void DashboardPage::refresh()
     setCard("Eligible Plugins", have ? QVariant(eligibility.value("Eligible")) : QVariant(),
             have ? QString("%1 records").arg(formatCount(meta("eligible_records").toLongLong())) : "");
     QString outputs = meta("output_plugins");
+    QString reuse = meta("merges_reused").isEmpty()
+                        ? QString()
+                        : QString(" · %1 chains reused, %2 rebuilt").arg(meta("merges_reused"), meta("merges_computed"));
     setCard("Output Plugins", outputs.isEmpty() ? QVariant() : QVariant(outputs),
             outputs.isEmpty() ? QString("estimated after Compile (max %1)").arg(app_->config().compile.outputCount)
-                              : QString("from %1 compiled plugins").arg(meta("compiled_plugins")));
+                              : QString("from %1 compiled plugins%2").arg(meta("compiled_plugins"), reuse));
 
     conflictBar_->setSegments({{"Simple override", meta("conflicts_type1").toDouble(), theme::kBlue},
                                {"Compatible merge", meta("conflicts_type2").toDouble(), theme::kYellow},

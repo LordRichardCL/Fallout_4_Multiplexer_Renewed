@@ -11,6 +11,7 @@ class QPushButton;
 class QSpinBox;
 class QTableView;
 class QTabWidget;
+class QTextBrowser;
 
 namespace gui {
 
@@ -28,6 +29,7 @@ private:
     void loadOptions();
     void storeOptions();
     void updateButtons();
+    void showTrace(int row);
 
     QSpinBox* outputs_;
     QLineEdit* prefix_;
@@ -50,6 +52,9 @@ private:
     QTableView* outputsView_;
     QTableView* recordsView_;
     QTableView* mappingsView_;
+    QTableView* assetsView_;
+    SqlModel* assetsModel_;
+    QTextBrowser* trace_;
 };
 
 } // namespace gui

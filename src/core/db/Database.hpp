@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 struct sqlite3;
 struct sqlite3_stmt;
@@ -30,6 +31,7 @@ public:
     Statement& bind(int index, const char* v) { return bind(index, std::string_view(v)); }
     Statement& bind(int index, const std::string& v) { return bind(index, std::string_view(v)); }
     Statement& bindNull(int index);
+    Statement& bindBlob(int index, const void* data, size_t size);
 
     // Returns true while rows are available.
     bool step();
@@ -41,6 +43,7 @@ public:
     double columnDouble(int col) const;
     std::string columnText(int col) const;
     bool columnIsNull(int col) const;
+    std::vector<uint8_t> columnBlob(int col) const;
 
 private:
     sqlite3* db_ = nullptr;

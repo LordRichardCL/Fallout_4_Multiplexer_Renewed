@@ -8,6 +8,10 @@ Author: Romewolf · Target runtime: **Fallout 4 1.10.163 (Old Gen)** · Windows 
 
 Fallout 4 Multiplexer Renewed is a compiler for large modded installations. It reads every plugin, BA2 archive and loose file the game would load, works out the final winning state of every record and asset, merges compatible edits, and compiles the result into a small set of generated output plugins (`Dummy_Plugin_01.esp` …). The outputs contain real Bethesda records with real FormIDs and open in xEdit, FO4Edit and the Creation Kit like any other plugin.
 
+The outputs are **record containers only**. No mesh, texture, material, script or sound is copied, extracted or repacked: compiled records keep their original asset paths, and Fallout 4 keeps loading every asset from the mod, loose file or BA2 archive that provides it today.
+
+It behaves like a **build system**. It fingerprints your mod space, notices when mods are installed, removed, updated or reordered, tells you whether the compiled output is still up to date, and rebuilds only what changed.
+
 It is **not** a mod manager, load order sorter, Bash Patch replacement or runtime virtualisation layer.
 
 ## What it does
@@ -19,15 +23,20 @@ It is **not** a mod manager, load order sorter, Bash Patch replacement or runtim
 | **Asset intelligence** | Loose files and BA2 archives (general and texture) merged in engine order (INI archive lists, then plugin archives, then loose files by mod priority); winning source and reason; every alternative version; texture preview (BC1–BC5, uncompressed), mesh structure (NIF blocks and materials), material texture slots. |
 | **Dependency analysis** | Zoomable plugin master graph and record reference graph with search and relationship highlighting; missing masters; references to records that do not exist. |
 | **Compilation** | Resolve → Merge → Rewrite → Compile → Validate → Export. Field-level merging (keyword, form and leveled lists merge additions and removals), three allocation strategies, FormID translation with reference rewriting (including script properties, conditions, object templates and OMOD data), stable FormIDs across recompiles. |
+| **Asset traceability** | For every generated record: generated plugin, source plugin, winning override, and every mesh, material and texture it uses with the mod, archive and file path that serves it. Missing assets are reported. Nothing is duplicated. |
+| **Change detection** | Snapshots of mods, plugins (content hashes), archives, loose files, load order and dates. On startup the dashboard shows **✓ Up To Date**, **⚠ Changes Detected** (assets only) or **✖ Requires Rebuild**, with exactly what changed and which record types are affected. |
+| **Incremental rebuilds** | Unchanged plugins are not re-parsed, unchanged override chains are not re-analysed or re-merged, and output plugins whose content did not change are not rewritten. |
 | **Validation** | Missing references, broken FormIDs, duplicate IDs, missing masters, circular dependencies, orphaned records, undecodable data, a self-check of the record definitions against your real data, and a read-back of every written file. Critical failures block export. |
 | **Reports** | Conflict, asset, dependency, compilation and validation reports as HTML, JSON and PDF. |
 | **Mod managers** | Mod Organizer 2 (instance, profile, modlist priority, overwrite, profile-local INIs, the virtual Data folder), Vortex (deployment manifest for attribution), standalone installs. |
 
 | Conflict Centre | Asset Intelligence |
 |---|---|
-| ![Conflicts](docs/images/03-conflicts.png) | ![Assets](docs/images/04-assets.png) |
+| ![Conflicts](docs/images/04-conflicts.png) | ![Assets](docs/images/05-assets.png) |
+| **Mod Space Changes** | **Asset Traceability** |
+| ![Changes](docs/images/02-changes.png) | ![Traceability](docs/images/11-traceability.png) |
 | **Compilation** | **Dependency Graph** |
-| ![Compilation](docs/images/06-compilation.png) | ![Dependencies](docs/images/05-dependencies.png) |
+| ![Compilation](docs/images/07-compilation.png) | ![Dependencies](docs/images/06-dependencies.png) |
 
 ## Workflow
 
@@ -38,8 +47,34 @@ It is **not** a mod manager, load order sorter, Bash Patch replacement or runtim
 5. Review the **Plugins**, **Conflicts**, **Assets** and **Dependencies** pages; force winners where you disagree.
 6. **Compile**: merges, allocates and rewrites in memory, then validates.
 7. **Export**: writes the output plugins plus `Multiplexer_FormMap.tsv`, `Multiplexer_Archives.ini`, `Multiplexer_DisablePlugins.txt` and a proposed `plugins.txt`.
-8. Enable the outputs, disable the compiled plugins (or use **Apply to MO2 Profile**, which backs up your files first), and merge the archive INI so compiled plugins' BA2s keep loading.
+8. Enable the outputs, disable the compiled plugins (or use **Apply to MO2 Profile**, which backs up your files first), and merge the archive INI so compiled plugins' BA2s keep loading from where they are.
 9. Play with the compiled output.
+10. Later, install, update or remove mods as usual. The app shows what changed since the build. **Rebuild** reuses everything that did not change.
+
+## Assets stay where they are
+
+Compilation touches the record layer only:
+
+```
+WeaponExpansion.esp ─┐                          Dummy_Plugin_04.esp
+MyBalancePatch.esp ──┼─► compiled WEAP / OMOD ─► (records only)
+                     │   records keep their            │
+                     │   original asset paths          ▼ at runtime
+WeaponExpansion - Main.ba2 ─────────────────────► meshes\weapons\10mm\10mm.nif
+WeaponExpansion - Textures.ba2 ─────────────────► textures\weapons\10mm\10mm_d.dds
+```
+
+The only runtime effect of disabling a compiled plugin is that Fallout 4 stops auto-loading the archives named after it (`WeaponExpansion - Main.ba2`). `Multiplexer_Archives.ini` registers those same archives, in their original location, so the assets keep loading. No copies are made. Each generated record's traceability view shows which assets depend on this registration.
+
+## Build status and incremental rebuilds
+
+| Status | Meaning |
+|---|---|
+| ✓ **Up To Date** | The compiled output matches the installed mods. |
+| ⚠ **Changes Detected** | Only the asset layer changed (loose files, archives of plugins that were not compiled). The compiled records are still valid. |
+| ✖ **Requires Rebuild** | A plugin was added, removed, updated, enabled, disabled or moved; an archive of a compiled plugin was added or removed; compilation settings changed; or a generated plugin was deleted or edited by hand. |
+
+Plugins are fingerprinted by content hash, so re-saving or touching a file without changing it is not reported. Loose files are fingerprinted per mod by path, size and modification date. A rebuild reuses the build cache (`multiplexer.cache.sqlite`, next to the results database): unchanged plugins are not re-parsed, unchanged override chains are not re-analysed or re-merged, and output plugins with identical content are left untouched on disk. FormIDs stay stable through `Multiplexer_FormMap.tsv`.
 
 See the [User Guide](docs/USER_GUIDE.md) for details.
 
@@ -62,7 +97,8 @@ Every other plugin stays in the load order untouched, and the Plugins page tells
 - **Archives.** BA2s named after a compiled plugin (`MyMod - Main.ba2`) no longer load automatically once the plugin is disabled. Merge the generated `Multiplexer_Archives.ini` into `Fallout4Custom.ini`.
 - **Load order slots.** Outputs are full ESPs unless *ESL-flag outputs* is on and they fit the light range.
 - **Previews.** BC6H/BC7 textures show metadata only; meshes show structure (blocks, materials), not a 3D view.
-- **Windows build.** The CI workflow builds the Windows package with MSVC and Qt 6. It has not been run yet.
+- **Windows.** CI builds, tests and packages the Windows version (MSVC, Qt 6) on every push. The download is the workflow artifact. The desktop app has not yet been used against a real Windows Fallout 4 installation.
+- **Mesh tracing.** Textures are traced through the materials (`.bgsm`/`.bgem`) a mesh names. Texture sets embedded directly in mesh blocks are not followed yet.
 
 ## Building
 
@@ -93,6 +129,7 @@ Options: `-DFO4MX_BUILD_GUI=OFF`, `-DFO4MX_BUILD_CLI=OFF`, `-DFO4MX_BUILD_TESTS=
 The `fo4mx` tool runs the same pipeline without the GUI:
 
 ```text
+fo4mx status   --mo2 "C:\Modding\MO2"          # what changed since the last build?
 fo4mx scan     --mo2 "C:\Modding\MO2" [--profile Default]
 fo4mx analyse  --mo2 "C:\Modding\MO2" --reports .\Reports
 fo4mx compile  --mo2 "C:\Modding\MO2" --outputs 16 --strategy type --dry-run
