@@ -56,6 +56,9 @@ struct InstallSnapshot {
     static InstallSnapshot fromJson(const json::Value& v);
 };
 
+// Runtime profile and definitions fingerprint, as recorded in the build settings.
+std::string definitionsId(const RecordDefinitions& defs);
+
 enum class BuildStatus : uint8_t { NotBuilt, UpToDate, ChangesDetected, RequiresRebuild };
 const char* buildStatusName(BuildStatus s);
 

@@ -7,6 +7,7 @@
 
 #include <QHeaderView>
 #include <QLineEdit>
+#include <QSet>
 #include <QSplitter>
 #include <QSqlQuery>
 #include <QTableView>
@@ -27,7 +28,10 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
     l->addWidget(makePageHeader("Plugin Explorer",
                                 "Every installed plugin, its type, records, masters and whether it can be compiled.",
                                 {search_}));
-    chips_ = new FilterChips({"All", "ESM", "ESP", "ESL", "Generated", "Conflicting", "Disabled", "Eligible", "Ineligible"});
+    chips_ = new FilterChips({"All", "ESM", "ESP", "ESL", "Generated", "Conflicting", "Disabled", "Eligible", "Ineligible",
+                             "Blocking Types"});
+    chips_->setToolTip("Blocking Types: record types the compiler does not support yet, and how many plugins "
+                       "supporting each one would make compilable");
     l->addWidget(chips_);
 
     auto* split = new QSplitter(Qt::Horizontal);
@@ -73,10 +77,19 @@ void PluginsPage::reload()
 {
     QString chip = chips_->current();
     generatedMode_ = chip == "Generated";
+    blockersMode_ = chip == "Blocking Types";
     QVariantList binds;
     QString sql;
     QString like = "%" + search_->text().trimmed() + "%";
-    if (generatedMode_) {
+    if (blockersMode_) {
+        sql = "SELECT signature AS Type, unlocks AS 'Would Unlock', sole_blocker AS 'Only Blocker In', "
+              "plugins AS 'Found In', records AS Records, name AS Name FROM EligibilityBlockers WHERE signature LIKE ? "
+              "OR name LIKE ? ORDER BY unlocks DESC, plugins DESC, signature";
+        binds << like << like;
+        model_->setNumberColumns({1, 2, 3, 4});
+        model_->setBytesColumns({});
+        model_->setStatusColumns({});
+    } else if (generatedMode_) {
         sql = "SELECT output_index + 1 AS '#', output_name AS 'Plugin Name', CASE light WHEN 1 THEN 'ESL Flagged ESP' "
               "ELSE 'ESP' END AS Type, record_count AS Records, new_records AS 'New', overrides AS Overrides, "
               "size_bytes AS Size, masters AS Masters FROM CompilationGroups WHERE record_count > 0 AND output_name LIKE ? "
@@ -112,12 +125,60 @@ void PluginsPage::reload()
     }
     model_->setMonoColumns({0});
     model_->load(app_->readDb(), sql, binds);
-    if (!generatedMode_)
+    if (!generatedMode_ && !blockersMode_)
         table_->hideColumn(9);
     else
         table_->showColumn(9);
     fitColumns(table_);
+    if (blockersMode_) {
+        QString held = meta("blocked_by_types"), all = meta("unlocked_by_all_types");
+        details_->setHtml(QString("<h3 style='color:#3ddc84'>What blocks compilation</h3>"
+                                  "<p>%1 plugins are held back only by record types the compiler does not support yet. "
+                                  "Supporting every type listed would make %2 more plugins compilable.</p>"
+                                  "<p><b>Would Unlock</b>: plugins that become compilable if only this type is added, "
+                                  "including plugins kept in the load order because something depends on them.<br>"
+                                  "<b>Only Blocker In</b>: plugins where this is the only unsupported type.<br>"
+                                  "<b>Found In</b>: plugins that contain the type.</p>"
+                                  "<p style='color:#8aa196'>Select a type to see the plugins it blocks.</p>")
+                              .arg(held.isEmpty() ? "0" : held, all.isEmpty() ? "0" : all));
+        exclude_->setEnabled(false);
+        return;
+    }
     details_->setHtml("<p style='color:#8aa196'>Select a plugin to see its details.</p>");
+    exclude_->setEnabled(false);
+}
+
+void PluginsPage::showBlocker(int row)
+{
+    QString sig = model_->value(row, 0).toString();
+    QSet<QString> unsupported;
+    {
+        QSqlQuery b(app_->readDb());
+        b.exec("SELECT signature FROM EligibilityBlockers");
+        while (b.next())
+            unsupported.insert(b.value(0).toString());
+    }
+    QSqlQuery q(app_->readDb());
+    q.prepare("SELECT name, record_types, eligibility FROM Plugins WHERE active = 1 AND eligibility IN ('Eligible', "
+              "'Ineligible') AND (', ' || record_types) LIKE ? ORDER BY load_order");
+    q.addBindValue("%, " + sig + " %");
+    q.exec();
+    QStringList rows;
+    while (q.next()) {
+        QStringList blockers;
+        for (const auto& t : q.value(1).toString().split(", ")) {
+            QString type = t.section(' ', 0, 0);
+            if (unsupported.contains(type))
+                blockers << (type == sig ? "<b>" + type + "</b>" : type);
+        }
+        rows << QString("%1 <span style='color:#8aa196'>— needs %2</span>")
+                    .arg(q.value(0).toString().toHtmlEscaped(), blockers.join(", "));
+    }
+    details_->setHtml(QString("<h3 style='color:#3ddc84'>%1 — %2</h3><p>%3 active plugins contain this type. Each line lists every "
+                              "unsupported type that plugin needs.</p><p>%4</p>")
+                          .arg(sig.toHtmlEscaped(), model_->value(row, 5).toString().toHtmlEscaped())
+                          .arg(rows.size())
+                          .arg(rows.join("<br>")));
     exclude_->setEnabled(false);
 }
 
@@ -125,6 +186,10 @@ void PluginsPage::showDetails(int row)
 {
     if (row < 0)
         return;
+    if (blockersMode_) {
+        showBlocker(row);
+        return;
+    }
     if (generatedMode_) {
         QString name = model_->value(row, 1).toString();
         QString html = QString("<h2 style='color:#3ddc84'>%1</h2><p>Generated by Fallout 4 Multiplexer Renewed.</p>"

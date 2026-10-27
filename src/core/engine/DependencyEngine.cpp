@@ -26,8 +26,90 @@ std::vector<PluginIndex> DependencyEngine::dependents(const Session& session, Pl
     return out;
 }
 
+namespace {
+
+// What keeps one plugin from compilation, independent of its masters and dependents.
+struct IntrinsicBlock {
+    bool candidate = false; // active, readable, not base game, Creation Club or excluded
+    bool otherReason = false; // blocked by something supporting a record type cannot fix
+    std::vector<Signature> types;
+};
+
+// Plugins eligible when `supported` types are added to the compilable set,
+// including the rule that plugins staying in the load order keep their masters.
+size_t countEligible(const Session& session, const std::vector<IntrinsicBlock>& blocks,
+                     const std::unordered_set<Signature>& supported)
+{
+    std::vector<uint8_t> eligible(session.plugins.size(), 0);
+    for (size_t i = 0; i < blocks.size(); ++i) {
+        const auto& b = blocks[i];
+        eligible[i] = b.candidate && !b.otherReason &&
+                      std::all_of(b.types.begin(), b.types.end(), [&](Signature s) { return supported.count(s) != 0; });
+    }
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto& q : session.plugins) {
+            if (!q.active || eligible[q.index])
+                continue;
+            for (auto m : q.masters)
+                if (m != kInvalidPlugin && eligible[m]) {
+                    eligible[m] = 0;
+                    changed = true;
+                }
+        }
+    }
+    return static_cast<size_t>(std::count(eligible.begin(), eligible.end(), 1));
+}
+
+void reportBlockers(const Session& session, const std::vector<IntrinsicBlock>& blocks, DependencyReport& report)
+{
+    std::unordered_set<Signature> supported(session.defs.compilableTypes().begin(), session.defs.compilableTypes().end());
+    const size_t baseline = countEligible(session, blocks, supported);
+
+    std::map<Signature, TypeBlocker> byType;
+    std::unordered_set<Signature> all = supported;
+    report.blockedByTypes = 0;
+    for (const auto& b : blocks) {
+        if (!b.candidate || b.types.empty())
+            continue;
+        if (!b.otherReason)
+            report.blockedByTypes++;
+        size_t index = static_cast<size_t>(&b - blocks.data());
+        for (Signature s : b.types) {
+            auto& t = byType[s];
+            t.sig = s;
+            t.name = session.defs.recordName(s);
+            t.plugins++;
+            auto it = session.plugins[index].typeCounts.find(s);
+            t.records += it == session.plugins[index].typeCounts.end() ? 0 : it->second;
+            if (b.types.size() == 1 && !b.otherReason)
+                t.soleBlocker++;
+            all.insert(s);
+        }
+    }
+    report.blockers.clear();
+    for (auto& [s, t] : byType) {
+        auto with = supported;
+        with.insert(s);
+        t.unlocks = countEligible(session, blocks, with) - baseline;
+        report.blockers.push_back(t);
+    }
+    std::sort(report.blockers.begin(), report.blockers.end(), [](const TypeBlocker& a, const TypeBlocker& b) {
+        if (a.unlocks != b.unlocks)
+            return a.unlocks > b.unlocks;
+        if (a.plugins != b.plugins)
+            return a.plugins > b.plugins;
+        return a.sig.str() < b.sig.str();
+    });
+    report.unlockedByAll = countEligible(session, blocks, all) - baseline;
+}
+
+} // namespace
+
 void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptions& options, DependencyReport* report)
 {
+    std::vector<IntrinsicBlock> blocks(session.plugins.size());
     std::unordered_set<std::string> excluded = session.userRetained;
     for (const auto& e : options.excludedPlugins)
         excluded.insert(toLower(e));
@@ -85,10 +167,14 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
         }
 
         p.eligibility = Eligibility::Eligible;
+        auto& block = blocks[p.index];
+        block.candidate = true;
         std::vector<std::string> unsupported;
         for (const auto& [s, n] : p.typeCounts)
-            if (!session.defs.isCompilable(s))
+            if (!session.defs.isCompilable(s)) {
                 unsupported.push_back(s.str() + " (" + std::to_string(n) + ")");
+                block.types.push_back(s);
+            }
         if (!unsupported.empty()) {
             p.eligibility = Eligibility::Ineligible;
             if (unsupported.size() > 6) {
@@ -99,12 +185,14 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
             p.reasons.push_back("Contains record types not yet compiled: " + join(unsupported, ", "));
         }
         if (auto it = nameRefs.find(p.index); it != nameRefs.end()) {
+            block.otherReason = true;
             p.eligibility = Eligibility::Ineligible;
             std::string where = it->second.front()->assetPath;
             p.reasons.push_back("Referenced by file name in " + std::to_string(it->second.size()) + " script/config file" +
                                 (it->second.size() == 1 ? "" : "s") + " (e.g. " + where + ")");
         }
         if (auto it = namedAssets.find(p.key); it != namedAssets.end()) {
+            block.otherReason = true;
             p.eligibility = Eligibility::Ineligible;
             p.reasons.push_back(std::to_string(it->second) + " assets are stored in folders named after the plugin");
         }
@@ -138,8 +226,10 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
                 report->eligiblePlugins++;
                 report->eligibleRecords += p.recordCount;
             }
+        reportBlockers(session, blocks, *report);
     }
 }
+
 
 DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptions& options, ProgressSink& progress)
 {

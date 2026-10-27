@@ -357,7 +357,20 @@ void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport&
         di.bind(4, is.form.valid() ? session.loadOrderFormId(is.form) : std::string()).bind(5, is.message);
         di.run();
     }
+    db_.exec("DELETE FROM EligibilityBlockers;");
+    auto eb = db_.prepare(
+        "INSERT INTO EligibilityBlockers(signature, name, plugins, records, sole_blocker, unlocks) VALUES(?,?,?,?,?,?)");
+    for (const auto& b : deps.blockers)
+        eb.bind(1, b.sig.str())
+            .bind(2, b.name)
+            .bind(3, static_cast<uint64_t>(b.plugins))
+            .bind(4, static_cast<uint64_t>(b.records))
+            .bind(5, static_cast<uint64_t>(b.soleBlocker))
+            .bind(6, static_cast<uint64_t>(b.unlocks))
+            .run();
     tx.commit();
+    setMeta("blocked_by_types", std::to_string(deps.blockedByTypes));
+    setMeta("unlocked_by_all_types", std::to_string(deps.unlockedByAll));
     setMeta("conflicts_type1", std::to_string(conflicts.byType[1]));
     setMeta("conflicts_type2", std::to_string(conflicts.byType[2]));
     setMeta("conflicts_type3", std::to_string(conflicts.byType[3]));
@@ -436,8 +449,11 @@ void DatabaseWriter::writeCompilation(const Session& session, const CompiledOutp
 void DatabaseWriter::writeValidation(const std::string& stage, const ValidationReport& report, bool clearPrevious)
 {
     Transaction tx(db_);
-    if (clearPrevious)
-        db_.exec("DELETE FROM ValidationResults;");
+    // Definition checks run separately and stay until the next definition check.
+    if (stage == "definitions")
+        db_.exec("DELETE FROM ValidationResults WHERE stage = 'definitions';");
+    else if (clearPrevious)
+        db_.exec("DELETE FROM ValidationResults WHERE stage <> 'definitions';");
     auto st = db_.prepare(
         "INSERT INTO ValidationResults(stage, severity, category, message, plugin, form_id) VALUES(?,?,?,?,?,?)");
     for (const auto& is : report.issues)

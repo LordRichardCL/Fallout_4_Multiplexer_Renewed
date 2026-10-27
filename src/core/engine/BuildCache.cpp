@@ -277,7 +277,8 @@ uint64_t fullFileHash(const std::filesystem::path& path)
 
 uint64_t chainSignature(const Session& session, const FormGroup& group)
 {
-    uint64_t h = fnv1a64(session.defs.profileName().data(), session.defs.profileName().size());
+    // The definitions decide how a chain decodes, so a layout change invalidates its cached results.
+    uint64_t h = session.defs.fingerprint();
     for (const auto& r : session.instances(group)) {
         const auto& p = session.plugins[r.plugin];
         h = fnv1a64(p.key.data(), p.key.size(), h);

@@ -14,6 +14,8 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QListWidget>
+#include <QPushButton>
+#include <QTableView>
 #include <QTabWidget>
 #include <QTimer>
 
@@ -90,6 +92,23 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
         settle.exec();
         window.grab().save(outDir.filePath(QString("%1-%2.png").arg(i + 1, 2, 10, QChar('0')).arg(pages[i].toLower())));
     }
+
+    // Record types that block compilation, with the plugins the first one holds back.
+    window.showPage("Plugins");
+    for (auto* b : window.findChildren<QPushButton*>())
+        if (b->isVisible() && b->text() == "Blocking Types") {
+            b->click();
+            for (auto* view : window.findChildren<QTableView*>())
+                if (view->isVisible() && view->model() && view->model()->rowCount() > 0) {
+                    view->setCurrentIndex(view->model()->index(0, 0));
+                    break;
+                }
+            QEventLoop settle;
+            QTimer::singleShot(300, &settle, &QEventLoop::quit);
+            settle.exec();
+            window.grab().save(outDir.filePath("13-blocking-types.png"));
+            break;
+        }
 
     // Traceability: a compiled weapon traced back to its sources and original assets.
     window.showPage("Compilation");

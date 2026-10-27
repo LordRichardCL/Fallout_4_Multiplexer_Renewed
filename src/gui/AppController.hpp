@@ -53,6 +53,8 @@ public slots:
     void runCheck();
     // Scan, analyse, compile and export in one go, reusing cached work.
     void runRebuild();
+    // Decodes every record of the supported types and reports layouts that look wrong.
+    void runDefinitionCheck();
     // On startup: check for changes when a previous build exists.
     void checkOnStartup();
     void cancel();

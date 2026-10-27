@@ -19,8 +19,19 @@ const char* rootFor(Signature record, Signature sub)
     static const std::set<std::string> meshes = {"MODL", "MOD2", "MOD3", "MOD4", "MOD5", "DMDL"};
     static const std::set<std::string> icons = {"ICON", "MICO", "ICO2", "MIC2"};
     std::string s = sub.str();
+    // In armours and armour addons MODL holds FormIDs (armatures, additional races), not a mesh.
+    if (s == "MODL" && (record == sig::ARMO || record == Signature("ARMA")))
+        return nullptr;
     if (meshes.count(s))
         return "meshes\\";
+    if (record == Signature("TXST")) {
+        if (s.size() == 4 && s[0] == 'T' && s[1] == 'X' && s[2] == '0' && s[3] >= '0' && s[3] <= '7')
+            return "textures\\";
+        if (s == "MNAM")
+            return "materials\\";
+    }
+    if (record == Signature("MSWP") && (s == "BNAM" || s == "SNAM"))
+        return "materials\\";
     if (icons.count(s))
         return "textures\\";
     if (record == sig::AMMO && s == "NAM1")

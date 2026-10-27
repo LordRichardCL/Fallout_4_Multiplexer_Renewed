@@ -507,6 +507,12 @@ ChangeReport ChangeDetector::compare(const InstallSnapshot* reference, const Ins
     return r;
 }
 
+std::string definitionsId(const RecordDefinitions& defs)
+{
+    // New record definitions can make more plugins compilable, so they count as a settings change.
+    return defs.profileName() + "#" + std::to_string(defs.fingerprint());
+}
+
 uint64_t ChangeDetector::settingsHash(const CompileOptions& c, const std::vector<std::string>& excluded,
                                       const std::string& runtimeName, std::vector<std::string> resolutions)
 {
@@ -536,7 +542,7 @@ uint64_t ChangeDetector::settingsHash(const Session& session, const CompileOptio
         FormKey key = FormKey::unpack(k);
         forced.push_back(session.pluginName(key.origin) + ":" + std::to_string(key.objectId) + "=" + session.pluginName(v));
     }
-    return settingsHash(c, excluded, session.defs.profileName(), std::move(forced));
+    return settingsHash(c, excluded, definitionsId(session.defs), std::move(forced));
 }
 
 } // namespace fo4mx

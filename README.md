@@ -85,13 +85,17 @@ See the [User Guide](docs/USER_GUIDE.md) for details.
 
 A plugin is compiled only when the compiled output can reproduce it exactly. In this release that means:
 
-- all of its records are **Phase One** types: `WEAP ARMO AMMO OMOD COBJ KYWD LVLI FLST INGR ALCH MISC BOOK NOTE KEYM FACT PERK SPEL MESG`;
+- all of its records are supported types:
+  - **Phase One:** `WEAP ARMO AMMO OMOD COBJ KYWD LVLI FLST INGR ALCH MISC BOOK NOTE KEYM FACT PERK SPEL MESG`;
+  - **Tier 1, first batch:** `ARMA OTFT LVLN CONT CMPO GLOB TXST MSWP INNR ENCH MGEF IPDS AORU`;
 - no script or F4SE/MCM config refers to it by file name (`GetFormFromFile` etc.);
 - no FaceGen or voice folders are named after it;
 - it is not a master of a plugin that stays in the load order;
 - it is not the base game, DLC, Creation Club content, or on your exclusion list.
 
-Every other plugin stays in the load order untouched, and the Plugins page tells you why. Mods that edit cells, NPCs, quests or dialogue are analysed fully but compiled in a later phase (`NPC_ QUST WRLD CELL REFR ACHR CONT DIAL INFO`).
+Every other plugin stays in the load order untouched, and the Plugins page tells you why. **Plugins → Blocking Types** ranks the unsupported record types in *your* load order by how many plugins supporting each one would make compilable. Mods that edit cells, NPCs, quests or dialogue are analysed fully but compiled in a later phase (`NPC_ QUST WRLD CELL REFR ACHR DIAL INFO`). [Dependency and Compilation Scenarios](docs/DEPENDENCY_SCENARIOS.md) explains the tiers.
+
+**Validation → Check Record Definitions** (or `fo4mx check-definitions`) decodes every record of the supported types in your load order, base game included, and reports any field layout that looks wrong. Run it once after installing a new version.
 
 ## Important caveats
 

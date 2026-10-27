@@ -348,6 +348,19 @@ void AppController::runAnalyse()
     });
 }
 
+void AppController::runDefinitionCheck()
+{
+    saveSettings();
+    ensurePipeline(false);
+    runTask("Check Definitions", [this](ProgressSink& p) {
+        auto check = pipeline_->checkDefinitions({}, p);
+        return QString("Checked %1 record types: %2 layouts, %3 warnings")
+            .arg(check.recordsByType.size())
+            .arg(check.stats.size())
+            .arg(check.report.warnings);
+    });
+}
+
 void AppController::runCompile()
 {
     saveSettings();

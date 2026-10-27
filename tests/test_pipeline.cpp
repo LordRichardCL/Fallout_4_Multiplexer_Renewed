@@ -645,3 +645,149 @@ TEST(conflict_resolution_patch_merges_retained_chains)
     std::string listed((std::istreambuf_iterator<char>(disable)), std::istreambuf_iterator<char>());
     CHECK(listed.find(".esp") == std::string::npos);
 }
+
+namespace {
+
+// A subrecord of `size` zero bytes with FormIDs written at the given offsets.
+Subrecord structWith(const char* sig, size_t size, const std::vector<std::pair<size_t, uint32_t>>& ids)
+{
+    std::vector<uint8_t> d(size, 0);
+    for (auto [off, id] : ids)
+        storeLE<uint32_t>(d.data() + off, id);
+    return raw(sig, std::move(d));
+}
+
+} // namespace
+
+TEST(tier1_records_compile_with_references_rewritten)
+{
+    auto root = buildInstall("tier1");
+    auto data = root / "Game" / "Data";
+    // A typical armour + effect mod: everything it needs is a tier 1 type.
+    writePlugin(data / "ModT.esp", {"Fallout4.esm"},
+                {
+                    record("MSWP", 0x01000800,
+                           {zs("EDID", "SuitSwap"), zs("BNAM", "Armor\\Suit.bgsm"), zs("SNAM", "Armor\\SuitRed.bgsm")}),
+                    record("ARMA", 0x01000801,
+                           {zs("EDID", "SuitAA"), raw("BOD2", {0, 0, 0, 0}), zs("MOD2", "Armor\\Suit_M.nif"),
+                            u32("MO2S", 0x01000800), u32("MODL", 0x00000800)}),
+                    record("ARMO", 0x01000802,
+                           {zs("EDID", "Suit"), zs("FULL", "Suit"), raw("INDX", {0, 0}), u32("MODL", 0x01000801),
+                            u32("KSIZ", 1), formIds("KWDA", {0x00000800})}),
+                    record("OTFT", 0x01000803, {zs("EDID", "SuitOutfit"), formIds("INAM", {0x01000802, 0x00001000})}),
+                    record("MGEF", 0x01000804,
+                           {zs("EDID", "SuitEffect"), structWith("DATA", 152, {{8, 0x01000802}, {136, 0x00001300}})}),
+                    record("ENCH", 0x01000805,
+                           {zs("EDID", "SuitEnchant"), structWith("ENIT", 36, {{32, 0x01000808}}), u32("EFID", 0x01000804),
+                            raw("EFIT", std::vector<uint8_t>(12, 0))}),
+                    record("CONT", 0x01000806,
+                           {zs("EDID", "SuitCrate"), u32("COCT", 1), components({{0x01000802, 2}}, "CNTO")}),
+                    record("GLOB", 0x01000807, {zs("EDID", "SuitCount"), raw("FNAM", {'s'}), u32("FLTV", 0)}),
+                    record("FLST", 0x01000808, {zs("EDID", "SuitRestrictions"), u32("LNAM", 0x00001000)}),
+                });
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModT.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    CHECK_EQ(p.session().findPlugin("ModT.esp")->eligibility, Eligibility::Eligible);
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    auto result = p.exportOutputs();
+    OutputSet out(result.pluginFiles);
+
+    auto rec = [&](const char* edid) {
+        const auto* r = out.byEditorId(edid);
+        CHECK(r != nullptr);
+        return r;
+    };
+    auto refAt = [&](const OutputSet::Rec* r, const char* sig, size_t offset) {
+        const auto* s = r->record.find(Signature::fromString(sig));
+        CHECK(s != nullptr);
+        return out.resolve(*r, loadLE<uint32_t>(s->data.data() + offset));
+    };
+    const auto* swap = rec("SuitSwap");
+    const auto* addon = rec("SuitAA");
+    const auto* armor = rec("Suit");
+    const auto* effect = rec("SuitEffect");
+    const auto* list = rec("SuitRestrictions");
+    // Armour -> armour addon -> material swap, all moved to the outputs.
+    CHECK(refAt(armor, "MODL", 0) == out.identity(*addon));
+    CHECK(refAt(addon, "MO2S", 0) == out.identity(*swap));
+    CHECK(refAt(addon, "MODL", 0) == std::make_pair(std::string("Fallout4.esm"), uint32_t(0x800)));
+    CHECK(refAt(rec("SuitOutfit"), "INAM", 0) == out.identity(*armor));
+    CHECK(refAt(rec("SuitOutfit"), "INAM", 4) == std::make_pair(std::string("Fallout4.esm"), uint32_t(0x1000)));
+    // Magic effect DATA slots: associated item (new) and perk (base game).
+    CHECK(refAt(effect, "DATA", 8) == out.identity(*armor));
+    CHECK(refAt(effect, "DATA", 136) == std::make_pair(std::string("Fallout4.esm"), uint32_t(0x1300)));
+    // Enchantment: worn restrictions in ENIT and its effect.
+    CHECK(refAt(rec("SuitEnchant"), "ENIT", 32) == out.identity(*list));
+    CHECK(refAt(rec("SuitEnchant"), "EFID", 0) == out.identity(*effect));
+    // Container item and regenerated count.
+    CHECK(refAt(rec("SuitCrate"), "CNTO", 0) == out.identity(*armor));
+    CHECK_EQ(loadLE<uint32_t>(rec("SuitCrate")->record.find(Signature("COCT"))->data.data()), uint32_t(1));
+    // Paths stay as they were: the assets are not copied.
+    CHECK_EQ(text(swap->record.find(Signature("SNAM"))), std::string("Armor\\SuitRed.bgsm"));
+}
+
+TEST(undescribed_formid_with_shifted_master_blocks_export)
+{
+    auto root = buildInstall("softref");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("CELL", 0x01000800, {zs("EDID", "ModECell")})});
+    // ModG keeps ModE and ModC (both retained) as masters 1 and 2, and refers to ModC's cell
+    // from a subrecord the definitions do not describe.
+    writePlugin(data / "ModG.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
+                {record("GLOB", 0x03000800,
+                        {zs("EDID", "ModG_Global"), raw("FNAM", {'f'}), u32("FLTV", 0), u32("UNKN", 0x02000800)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModG.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    CHECK_EQ(p.session().findPlugin("ModG.esp")->eligibility, Eligibility::Eligible);
+    p.analyse();
+    // Blocker report: CELL is the only thing keeping ModC and ModE out.
+    const auto& blockers = p.dependencies()->blockers;
+    CHECK(!blockers.empty());
+    CHECK_EQ(blockers.front().sig.str(), std::string("CELL"));
+    CHECK_EQ(blockers.front().plugins, size_t(2));
+    CHECK_EQ(blockers.front().soleBlocker, size_t(2));
+    CHECK_EQ(blockers.front().unlocks, size_t(2));
+    CHECK_EQ(p.dependencies()->unlockedByAll, size_t(2));
+    p.compile();
+    // In the output ModC is no longer master 2, so the copied bytes would name another plugin.
+    CHECK(p.validation()->critical());
+    bool found = false;
+    for (const auto& is : p.validation()->issues)
+        found |= is.message.find("master index would point elsewhere") != std::string::npos;
+    CHECK(found);
+}
+
+TEST(definition_check_flags_suspect_layouts)
+{
+    auto root = buildInstall("defcheck");
+    std::vector<Record> records;
+    for (uint32_t i = 0; i < 12; ++i)
+        // Values at the described ENIT offsets that name no record, and an undescribed
+        // subrecord that always holds a real FormID.
+        records.push_back(record("ENCH", 0x01000800 + i,
+                                 {zs("EDID", "Ench" + std::to_string(i)), structWith("ENIT", 36, {{28, 0x00ABC000 + i}}),
+                                  u32("UNKN", 0x00001000)}));
+    writePlugin(root / "Game" / "Data" / "ModD.esp", {"Fallout4.esm"}, std::move(records));
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModD.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    auto check = p.checkDefinitions({Signature("ENCH")});
+    CHECK_EQ(check.recordsByType[Signature("ENCH")], uint64_t(12));
+    bool wrongLayout = false, undescribed = false;
+    for (const auto& is : check.report.issues) {
+        wrongLayout |= is.message.find("ENCH ENIT: only 0.0%") != std::string::npos;
+        undescribed |= is.message.find("ENCH UNKN (not described)") != std::string::npos;
+    }
+    CHECK(wrongLayout);
+    CHECK(undescribed);
+    CHECK(!check.report.critical()); // findings never block export
+}

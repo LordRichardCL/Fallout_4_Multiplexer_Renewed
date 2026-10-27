@@ -1,9 +1,14 @@
 #include "engine/ValidationEngine.hpp"
 
+#include "engine/Normalizer.hpp"
+#include "engine/ParallelFor.hpp"
 #include "esp/PluginFile.hpp"
 #include "util/Text.hpp"
 
+#include <atomic>
 #include <map>
+#include <mutex>
+#include <unordered_map>
 #include <set>
 #include <unordered_set>
 
@@ -172,14 +177,26 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
                     }
                     if (!c.options.rewriteHeuristicReferences)
                         for (const auto& [off, k] : s.softRefs) {
-                            if (c.isCompiled(k.origin))
+                            if (c.isCompiled(k.origin)) {
                                 v.fail(Severity::Error, "Missing References",
                                        label + " " + s.sig.str() + " +" + std::to_string(off) +
                                            " probably refers to compiled record " + session.formLabel(k) +
                                            " in a layout this profile does not describe",
                                        op.name, fid);
-                            else
+                                continue;
+                            }
+                            // Undescribed bytes are copied as they are, so the master index they
+                            // carry must name the same plugin in the output's master list.
+                            uint32_t raw = off + 4 <= s.bytes.size() ? loadLE<uint32_t>(s.bytes.data() + off) : 0;
+                            uint32_t mi = masterIndexOf(raw);
+                            if (mi < op.retainedMasters.size() && op.retainedMasters[mi] == k.origin)
                                 v.pass();
+                            else
+                                v.fail(Severity::Error, "Missing References",
+                                       label + " " + s.sig.str() + " +" + std::to_string(off) + " probably refers to " +
+                                           session.formLabel(k) + " in a layout this profile does not describe; in " +
+                                           op.name + " its master index would point elsewhere",
+                                       op.name, fid);
                         }
                 };
                 for (const auto& s : f.subs)
@@ -277,6 +294,151 @@ ValidationReport ValidationEngine::validateWrittenFiles(const CompiledOutput& c,
         }
     }
     return v;
+}
+
+DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::vector<Signature>& types,
+                                                   ProgressSink& progress, unsigned threads)
+{
+    progress.stage("Check definitions");
+    DefinitionCheck out;
+    auto wanted = [&](Signature sig) {
+        if (!types.empty())
+            return std::find(types.begin(), types.end(), sig) != types.end();
+        return session.defs.isCompilable(sig);
+    };
+    std::vector<const FormGroup*> groups;
+    for (const auto& g : session.groups)
+        if (!session.instances(g).empty() && wanted(session.instances(g)[0].signature))
+            groups.push_back(&g);
+
+    struct Key {
+        Signature record, sub;
+        bool operator<(const Key& o) const { return record < o.record || (record == o.record && sub < o.sub); }
+    };
+    std::map<Key, DefinitionStat> stats;
+    std::mutex mutex;
+    std::atomic<size_t> done{0};
+    parallelFor(
+        groups.size(),
+        [&](size_t gi) {
+            std::map<Key, DefinitionStat> local;
+            std::map<Signature, uint64_t> records;
+            Normalizer norm(session);
+            for (const auto& inst : session.instances(*groups[gi])) {
+                if (!session.plugins[inst.plugin].active)
+                    continue;
+                NormRecord nr;
+                try {
+                    nr = norm.normalize(inst);
+                } catch (const std::exception&) {
+                    continue;
+                }
+                records[nr.sig]++;
+                std::string where = session.formLabel(nr.key) + " in " + session.pluginName(inst.plugin);
+                for (const auto& sub : nr.subs) {
+                    auto& st = local[{nr.sig, sub.sig}];
+                    st.record = nr.sig;
+                    st.sub = sub.sig;
+                    st.described = session.defs.field(nr.sig, sub.sig).kind != FieldKind::Unknown;
+                    st.occurrences++;
+                    for (const auto& [off, k] : sub.refs) {
+                        if (!k.valid() && k.objectId == 0)
+                            continue; // null
+                        st.formIds++;
+                        if (k.valid() && session.findGroup(k))
+                            st.resolved++;
+                        else if (st.example.empty())
+                            st.example = where;
+                    }
+                    if (!sub.softRefs.empty()) {
+                        st.softRefs += sub.softRefs.size();
+                        if (st.example.empty())
+                            st.example = where;
+                    }
+                }
+                for (const auto& is : nr.issues) {
+                    auto& st = local[{nr.sig, is.sub}];
+                    st.record = nr.sig;
+                    st.sub = is.sub;
+                    if (is.message.find("size") != std::string::npos || is.message.find("expected") != std::string::npos) {
+                        st.sizeIssues++;
+                        if (st.example.empty())
+                            st.example = where + ": " + is.message;
+                    }
+                }
+            }
+            std::lock_guard lock(mutex);
+            for (auto& [k, v] : local) {
+                auto& t = stats[k];
+                if (t.occurrences == 0 && t.sizeIssues == 0) {
+                    t = v;
+                    continue;
+                }
+                t.described |= v.described;
+                t.occurrences += v.occurrences;
+                t.sizeIssues += v.sizeIssues;
+                t.formIds += v.formIds;
+                t.resolved += v.resolved;
+                t.softRefs += v.softRefs;
+                if (t.example.empty())
+                    t.example = v.example;
+            }
+            for (auto [sig, n] : records)
+                out.recordsByType[sig] += n;
+            size_t n = ++done;
+            if ((n & 0x3FF) == 0 || n == groups.size())
+                progress.progress(n, groups.size(), "decoding records");
+        },
+        progress, threads);
+
+    auto& v = out.report;
+    auto pct = [](uint64_t a, uint64_t b) { return b ? std::to_string((a * 1000 / b) / 10) + "." + std::to_string((a * 1000 / b) % 10) + "%" : std::string("-"); };
+    std::map<Signature, std::pair<uint64_t, uint64_t>> perType; // resolved / FormIDs
+    for (auto& [k, st] : stats) {
+        out.stats.push_back(st);
+        perType[st.record].first += st.resolved;
+        perType[st.record].second += st.formIds;
+        std::string label = st.record.str() + " " + st.sub.str();
+        bool flagged = false;
+        // A described FormID slot that rarely names a real record means the offsets are wrong.
+        if (st.formIds >= 10 && st.resolved * 10 < st.formIds * 9) {
+            v.fail(Severity::Warning, "Definitions",
+                   label + ": only " + pct(st.resolved, st.formIds) + " of " + std::to_string(st.formIds) +
+                       " FormIDs at the described offsets name an existing record; the layout is probably wrong "
+                       "(e.g. " + st.example + ")");
+            flagged = true;
+        }
+        if (st.sizeIssues) {
+            v.fail(Severity::Warning, "Definitions",
+                   label + ": unexpected size in " + std::to_string(st.sizeIssues) + " of " +
+                       std::to_string(st.occurrences) + " records; these are scanned instead of decoded (e.g. " +
+                       st.example + ")");
+            flagged = true;
+        }
+        // Undescribed data that keeps looking like FormIDs is a field the definitions should cover.
+        if (st.softRefs && st.softRefs * 4 >= st.occurrences) {
+            v.fail(st.described ? Severity::Warning : Severity::Info, "Definitions",
+                   label + (st.described ? " (partly described)" : " (not described)") + ": " +
+                       std::to_string(st.softRefs) + " values in " + std::to_string(st.occurrences) +
+                       " records look like FormIDs; compiled records are protected by validation, but this "
+                       "field should be described (e.g. " + st.example + ")");
+            flagged = true;
+        }
+        if (!flagged)
+            v.pass();
+    }
+    std::sort(out.stats.begin(), out.stats.end(), [](const DefinitionStat& a, const DefinitionStat& b) {
+        return a.record.str() != b.record.str() ? a.record.str() < b.record.str() : a.sub.str() < b.sub.str();
+    });
+    for (const auto& [sig, n] : out.recordsByType) {
+        auto [res, total] = perType[sig];
+        v.fail(Severity::Info, "Definitions",
+               sig.str() + " (" + session.defs.recordName(sig) + "): " + std::to_string(n) + " records decoded, " +
+                   std::to_string(total) + " FormIDs, " + pct(res, total) + " resolve");
+    }
+    spdlog::info("Definition check: {} record types, {} subrecord layouts, {} warnings", out.recordsByType.size(),
+                 out.stats.size(), v.warnings);
+    return out;
 }
 
 } // namespace fo4mx

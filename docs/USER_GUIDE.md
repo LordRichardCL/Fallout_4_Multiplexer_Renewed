@@ -44,7 +44,18 @@ Optional overrides: a different `plugins.txt`, a different INI folder, and the s
 
 ### Plugins
 
-Filter by ESM/ESP/ESL, conflicting, disabled, eligible, ineligible, or **Generated** (the compiled outputs). The detail panel shows masters, dependents, record types, archives and the **exact reason** a plugin can or cannot be compiled. Use **Exclude from compilation** to keep a plugin.
+Filter by ESM/ESP/ESL, conflicting, disabled, eligible, ineligible, or **Generated** (the compiled outputs).
+
+**Blocking Types** lists every record type the compiler does not support yet that appears in your load order:
+
+- **Would Unlock:** plugins that become compilable if only this type were supported. This includes plugins currently kept because something depends on them.
+- **Only Blocker In:** plugins where it is the only unsupported type.
+- **Found In:** how many active plugins contain the type, and how many records.
+
+Select a type to see each plugin it blocks and everything else that plugin needs.
+
+![Blocking types](images/13-blocking-types.png)
+ The detail panel shows masters, dependents, record types, archives and the **exact reason** a plugin can or cannot be compiled. Use **Exclude from compilation** to keep a plugin.
 
 ### Conflicts
 
@@ -162,7 +173,8 @@ fo4mx compile --mo2 "C:\Modding\MO2" --profile "Test" --outputs 16 --strategy ty
 
 | Symptom | What to do |
 |---|---|
-| A mod you expected to compile is ineligible | The Plugins page shows the reason. Most mods that touch cells, NPCs or quests are not compilable in this phase. |
+| A mod you expected to compile is ineligible | The Plugins page shows the reason, and **Blocking Types** shows which unsupported types hold back the most plugins. Most mods that touch cells, NPCs or quests are not compilable in this phase. |
+| You want to be sure the record layouts match your game | **Validation → Check Record Definitions** decodes every supported record in your load order and lists any layout that looks wrong under **Definitions**. Findings never block export, and compiled records are always protected by validation. |
 | Validation: "probably refers to compiled record … in a layout this profile does not describe" | A record contains a FormID the definitions do not cover. Exclude the plugin it comes from, or enable *rewrite probable FormIDs* if you have checked the field in FO4Edit. |
 | Validation: "Only N% of FormIDs in X Y resolve" | The field layout for this runtime looks wrong. Please report it with the plugin name. |
 | Missing textures in game after switching | Merge `Multiplexer_Archives.ini` into `Fallout4Custom.ini`. |

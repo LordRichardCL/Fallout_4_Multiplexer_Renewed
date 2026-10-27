@@ -40,18 +40,24 @@ The scanner indexes every record of every active plugin as a compact `RecordInst
 
 ## Record definitions and the FormID decoder
 
-Rewriting references requires knowing exactly which bytes are FormIDs. `esp/RecordDefinitions.cpp` describes the Phase One record types for the 1.10.163 runtime profile:
+Rewriting references requires knowing exactly which bytes are FormIDs. `esp/RecordDefinitions.cpp` describes the supported record types for the 1.10.163 runtime profile (Phase One plus the first tier 1 batch: `ARMA OTFT LVLN CONT CMPO GLOB TXST MSWP INNR ENCH MGEF IPDS AORU`):
 
 - simple kinds: `FormId`, `FormIdArray`, `Struct` (FormIDs at offsets), `StructArray`;
 - strings: `ZString`, and `LString`/`DLString`/`ILString` (localised);
 - structured decoders (`esp/FieldDecoder.cpp`) for **VMAD** script properties (objects, arrays, structs), **CTDA** conditions (global comparison values, parameters of known functions, run-on references), **OBTS** object templates, **OMOD DATA**, **PERK** effect data (context-dependent on the preceding `PRKE`/`EPFT`), and **FACT PLVD**;
 - **regions**: runs of subrecords compared and merged as a unit (model data, conditions, effects, object templates, armature lists, perk effects, message buttons).
 
-Every structured decoder checks that the layout consumes exactly the subrecord's size. If it doesn't, the subrecord is reported and treated as **undescribed**: it is copied verbatim and scanned heuristically, never trusted. Undescribed bytes are scanned for 4-byte values that resolve to existing records ("soft references"). Soft references are used for comparison and validation. A soft reference to a compiled record is a validation **error**, because the bytes could not be rewritten safely.
+Every structured decoder checks that the layout consumes exactly the subrecord's size. If it doesn't, the subrecord is reported and treated as **undescribed**: it is copied verbatim and scanned heuristically, never trusted. Undescribed bytes are scanned for 4-byte values that resolve to existing records ("soft references"). Soft references are used for comparison and validation. A soft reference to a compiled record is a validation **error**, because the bytes could not be rewritten safely. A soft reference to a retained record is an error too when the output's master list would give its master index a different plugin, because the copied bytes would silently name the wrong record. Leaving a subrecord undescribed is therefore always safe: the worst case is a blocked export, never a broken plugin.
 
 ### Self-validation against real data
 
 The Validation Engine counts, per `(record type, subrecord)`, how many decoded FormIDs resolve to an existing record. If fewer than 80 % resolve, the definition is reported as suspect. A wrong offset therefore shows up as a warning against your actual load order instead of silently damaging data.
+
+`ValidationEngine::checkDefinitions` (Validation → Check Record Definitions, `fo4mx check-definitions`) runs the same measurement over every record of every supported type in the load order, compiled or not, with the base game as the reference. It also reports unexpected sizes and undescribed subrecords that keep looking like FormIDs, which means a field the definitions should describe.
+
+### Eligibility blockers
+
+`DependencyEngine` records, for every unsupported record type, how many plugins contain it, how many it alone blocks, and how many would become eligible if it were supported. That last number re-runs the full eligibility rule, including the rule that plugins staying in the load order keep their masters. The Plugins page shows it as **Blocking Types**, and it decides which record types to support next.
 
 ## Normalisation and the field model
 

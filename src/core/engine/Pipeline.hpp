@@ -52,6 +52,8 @@ public:
     // Writes plugins and side files, re-validates them and writes reports.
     ExportResult exportOutputs(ProgressSink& progress = nullProgress());
     std::vector<std::filesystem::path> writeReports(const std::filesystem::path& directory);
+    // Decodes every record of the supported types and reports layouts that look wrong.
+    DefinitionCheck checkDefinitions(const std::vector<Signature>& types = {}, ProgressSink& progress = nullProgress());
 
     // Compares the mod space with the last exported build without a full scan.
     ChangeReport checkForChanges(ProgressSink& progress = nullProgress());

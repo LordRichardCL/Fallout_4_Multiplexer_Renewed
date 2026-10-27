@@ -71,7 +71,7 @@ ChangeReport Pipeline::checkForChanges(ProgressSink& progress)
     }
     auto current = ChangeDetector::captureQuick(config_.install, build ? &*build : nullptr, progress);
     uint64_t settings = ChangeDetector::settingsHash(config_.compile, config_.analysis.excludedPlugins,
-                                                     RecordDefinitions::get(config_.install.runtime).profileName(),
+                                                     definitionsId(RecordDefinitions::get(config_.install.runtime)),
                                                      std::move(resolutions));
     changes_ = finishChangeReport(build, std::move(current), settings);
     if (db_)
@@ -125,6 +125,17 @@ void Pipeline::scan(ProgressSink& progress)
                                       ChangeDetector::settingsHash(*session_, effective, config_.analysis.excludedPlugins));
         w.writeChanges(changes_);
     }
+}
+
+DefinitionCheck Pipeline::checkDefinitions(const std::vector<Signature>& types, ProgressSink& progress)
+{
+    if (!session_->scanned)
+        scan(progress);
+    auto check = ValidationEngine::checkDefinitions(*session_, types, progress, config_.scan.threads);
+    openDatabase();
+    if (db_)
+        db::DatabaseWriter(*db_).writeValidation("definitions", check.report, false);
+    return check;
 }
 
 void Pipeline::analyse(ProgressSink& progress)

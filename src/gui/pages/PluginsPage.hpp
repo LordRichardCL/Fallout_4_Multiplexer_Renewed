@@ -21,6 +21,7 @@ public:
 private:
     void reload();
     void showDetails(int row);
+    void showBlocker(int row);
 
     FilterChips* chips_;
     QLineEdit* search_;
@@ -30,6 +31,7 @@ private:
     QPushButton* exclude_;
     QString selectedPlugin_;
     bool generatedMode_ = false;
+    bool blockersMode_ = false;
 };
 
 } // namespace gui

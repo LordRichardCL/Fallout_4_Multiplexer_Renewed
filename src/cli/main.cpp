@@ -26,6 +26,9 @@ Usage:
   fo4mx scan     <install> [--db FILE]
   fo4mx analyse  <install> [--db FILE] [--reports DIR]
   fo4mx compile  <install> [--db FILE] [compile options] [--dry-run]
+  fo4mx check-definitions <install> [--types ARMA,MGEF,...]
+                 decode every record of the supported types in the load order
+                 and report layouts that look wrong
   fo4mx info     <plugin.esp>
   fo4mx dump     <plugin.esp> [--formid XXXXXXXX] [--limit N]
   fo4mx ba2      <archive.ba2> [--extract PATH --to FILE]
@@ -220,6 +223,19 @@ void printDashboard(const Pipeline& p)
     for (const auto& pl : s.plugins)
         eligible += pl.eligibility == Eligibility::Eligible;
     std::printf("  Eligible plugins    %s\n", formatCount(eligible).c_str());
+    if (auto d = p.dependencies(); d && !d->blockers.empty()) {
+        std::printf("\n  Record types that keep plugins out of compilation (%zu plugins held back; supporting all\n"
+                    "  of them would unlock %zu):\n",
+                    d->blockedByTypes, d->unlockedByAll);
+        std::printf("    %-6s %-28s %8s %10s %8s %8s\n", "Type", "Name", "Plugins", "Records", "Only", "Unlocks");
+        size_t shown = 0;
+        for (const auto& b : d->blockers) {
+            if (++shown > 20)
+                break;
+            std::printf("    %-6s %-28s %8zu %10zu %8zu %8zu\n", b.sig.str().c_str(), b.name.substr(0, 28).c_str(),
+                        b.plugins, b.records, b.soleBlocker, b.unlocks);
+        }
+    }
     if (auto c = p.compiledOutput()) {
         size_t used = 0;
         for (const auto& op : c->outputs)
@@ -354,6 +370,30 @@ int cmdPipeline(const Args& a)
         return p.changes().status == BuildStatus::RequiresRebuild ? 3 : 0;
     }
     p.scan(progress);
+    if (a.command == "check-definitions") {
+        std::vector<Signature> types;
+        for (const auto& t : split(a.get("--types", ""), ','))
+            if (t.size() == 4)
+                types.push_back(Signature::fromString(t.c_str()));
+        auto check = p.checkDefinitions(types, progress);
+        std::printf("\n%-6s %-6s %-11s %10s %10s %9s %8s %8s\n", "Record", "Sub", "Described", "Seen", "FormIDs",
+                    "Resolve", "Sizes", "Undesc.");
+        for (const auto& st : check.stats) {
+            char rate[16] = "-";
+            if (st.formIds)
+                std::snprintf(rate, sizeof(rate), "%.1f%%", 100.0 * double(st.resolved) / double(st.formIds));
+            std::printf("%-6s %-6s %-11s %10llu %10llu %9s %8llu %8llu\n", st.record.str().c_str(), st.sub.str().c_str(),
+                        st.described ? "yes" : "no", static_cast<unsigned long long>(st.occurrences),
+                        static_cast<unsigned long long>(st.formIds), rate,
+                        static_cast<unsigned long long>(st.sizeIssues), static_cast<unsigned long long>(st.softRefs));
+        }
+        std::printf("\nFindings:\n");
+        for (const auto& is : check.report.issues)
+            if (is.severity != Severity::Info)
+                std::printf("  [%s] %s\n", severityName(is.severity), is.message.c_str());
+        std::printf("%llu warnings\n", static_cast<unsigned long long>(check.report.warnings));
+        return check.report.warnings ? 4 : 0;
+    }
     if (a.command == "scan") {
         printDashboard(p);
         printChanges(p.changes());
@@ -431,7 +471,7 @@ int main(int argc, char** argv)
         if (a.command == "ba2")
             return cmdBa2(a);
         if (a.command == "scan" || a.command == "analyse" || a.command == "analyze" || a.command == "compile" ||
-            a.command == "status")
+            a.command == "status" || a.command == "check-definitions")
             return cmdPipeline(a);
         std::fprintf(stderr, "Unknown command '%s'\n\n%s", a.command.c_str(), kUsage);
         return 1;

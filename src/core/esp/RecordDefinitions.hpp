@@ -99,6 +99,8 @@ public:
     static const RecordDefinitions& get(RuntimeProfile profile = RuntimeProfile::OldGen_1_10_163);
 
     const std::string& profileName() const { return profileName_; }
+    // Changes whenever any layout changes, so cached decoding results are not reused across versions.
+    uint64_t fingerprint() const { return fingerprint_; }
     const RecordDef* record(Signature s) const;
     // Record-specific definition first, then the common one. Never null.
     const FieldDef& field(Signature record, Signature sub) const;
@@ -118,6 +120,9 @@ public:
     std::vector<Signature> compilable_;
     std::unordered_map<uint16_t, uint8_t> conditionFormParams_; // bit0 = param1, bit1 = param2
     std::unordered_map<Signature, std::string> names_;
+    uint64_t fingerprint_ = 0;
+
+    void computeFingerprint();
 };
 
 } // namespace fo4mx

@@ -21,10 +21,15 @@ ValidationPage::ValidationPage(AppController* app, QWidget* parent) : Page(app, 
     auto* run = makeButton("Run Validation", "Primary");
     connect(run, &QPushButton::clicked, app_, &AppController::runCompile);
     connect(app_, &AppController::busyChanged, run, [run](bool b) { run->setEnabled(!b); });
+    auto* defs = makeButton("Check Record Definitions");
+    defs->setToolTip("Decode every record of the supported types in your load order (base game included) and report "
+                     "field layouts that look wrong. Results appear under Definitions.");
+    connect(defs, &QPushButton::clicked, app_, &AppController::runDefinitionCheck);
+    connect(app_, &AppController::busyChanged, defs, [defs](bool b) { defs->setEnabled(!b); });
     l->addWidget(makePageHeader("Validation Centre",
                                 "Missing references, broken FormIDs, duplicate IDs, missing masters, circular "
                                 "dependencies and orphaned records. Critical failures block export.",
-                                {run}));
+                                {defs, run}));
     auto* cards = new QHBoxLayout;
     checks_ = new StatCard("Checks");
     passed_ = new StatCard("Passed");
@@ -39,7 +44,7 @@ ValidationPage::ValidationPage(AppController* app, QWidget* parent) : Page(app, 
     l->addWidget(bar_);
 
     auto* filterRow = new QHBoxLayout;
-    chips_ = new FilterChips({"All", "Errors", "Warnings", "Info"});
+    chips_ = new FilterChips({"All", "Errors", "Warnings", "Info", "Definitions"});
     search_ = new QLineEdit;
     search_->setPlaceholderText("Filter messages…");
     search_->setClearButtonEnabled(true);
@@ -91,6 +96,8 @@ void ValidationPage::reload()
         where += " AND severity = 'Warning'";
     else if (chip == "Info")
         where += " AND severity = 'Info'";
+    else if (chip == "Definitions")
+        where += " AND stage = 'definitions'";
     if (!search_->text().trimmed().isEmpty()) {
         where += " AND (message LIKE ? OR category LIKE ? OR plugin LIKE ?)";
         QString like = "%" + search_->text().trimmed() + "%";

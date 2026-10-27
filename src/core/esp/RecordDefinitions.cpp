@@ -1,6 +1,10 @@
 #include "esp/RecordDefinitions.hpp"
 
+#include "util/Text.hpp"
+
 #include <algorithm>
+#include <string>
+#include <vector>
 #include <initializer_list>
 
 // Field layouts for Fallout 4 1.10.163 (form version 131).
@@ -297,6 +301,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("DATA", formId()) // attraction rule
         .field("NNAM", lstring());
 
+    // Leveled list entry: level, unused, reference, count, chance none, unused.
     FieldDef lvlo = structAt({4}, 12);
     lvlo.merge = MergeMode::Multiset;
     lvlo.countSig = S("LLCT");
@@ -406,21 +411,127 @@ void buildOldGen(RecordDefinitions& d)
         .field("INAM", formId())
         .add(region("Buttons", {"ITXT"}, {"ITXT", "CTDA", "CIS1", "CIS2"}));
 
+    // ---- Tier 1: base objects that item, armour and gameplay mods add alongside the above.
+    // Subrecords that are not listed stay undescribed: they are scanned for FormIDs and the
+    // Validation Engine blocks export if one would point at the wrong plugin.
+
+    b.record("ARMA", "Armor Addon", true)
+        .field("BOD2", noRefs())                    // biped body template
+        .field("RNAM", formId())                    // race
+        .field("DNAM", noRefs())                    // priorities, weight slider, detection sound value, weapon adjust
+        .field("MODL", formIdList(MergeMode::Set))  // additional races
+        .field("NAM0", formId())                    // male skin texture
+        .field("NAM1", formId())                    // female skin texture
+        .field("NAM2", formId())                    // male skin texture swap list
+        .field("NAM3", formId())                    // female skin texture swap list
+        .field("SNDD", formId())                    // footstep sound
+        .field("ONAM", formId())                    // art object
+        .add(region("Male Biped Model", {"MOD2"}, {"MOD2", "MO2T", "MO2C", "MO2S", "MO2F"}))
+        .add(region("Female Biped Model", {"MOD3"}, {"MOD3", "MO3T", "MO3C", "MO3S", "MO3F"}))
+        .add(region("Male First Person", {"MOD4"}, {"MOD4", "MO4T", "MO4C", "MO4S", "MO4F"}))
+        .add(region("Female First Person", {"MOD5"}, {"MOD5", "MO5T", "MO5C", "MO5S", "MO5F"}));
+
+    b.record("OTFT", "Outfit", true).field("INAM", formIdArray(MergeMode::Set));
+
+    b.record("LVLN", "Leveled NPC", true)
+        .field("LVLD", noRefs())
+        .field("LVLM", noRefs())
+        .field("LVLF", noRefs())
+        .field("LVLG", formId())
+        .field("LLCT", noRefs())
+        .field("LVLO", lvlo)
+        .field("COED", structAt({0}, 12, true))
+        .field("LLKC", structArray(8, {0}))
+        .modelRegions();
+
+    // Container item: item, count.
+    FieldDef cnto = structAt({0}, 8);
+    cnto.merge = MergeMode::Multiset;
+    cnto.countSig = S("COCT");
+    cnto.countWidth = 4;
+    cnto.companion = S("COED");
+    b.record("CONT", "Container", true)
+        .field("COCT", noRefs())
+        .field("CNTO", cnto)
+        .field("COED", structAt({0}, 12, true))
+        .field("DATA", noRefs()) // flags, weight
+        .field("SNAM", formId()) // open sound
+        .field("QNAM", formId()) // close sound
+        .field("FTYP", formId()) // forced location ref type
+        .field("NTRM", formId()) // native terminal
+        .modelRegions();
+
+    b.record("CMPO", "Component", true)
+        .field("CUSD", formId()) // crafting use sound
+        .field("DATA", noRefs()) // auto calc value
+        .field("MNAM", formId()) // scrap item
+        .field("GNAM", formId()); // mod scrap scalar
+
+    b.record("GLOB", "Global Variable", true).field("FNAM", noRefs()).field("FLTV", noRefs());
+
+    b.record("TXST", "Texture Set", true)
+        .field("TX00", zstring())
+        .field("TX01", zstring())
+        .field("TX02", zstring())
+        .field("TX03", zstring())
+        .field("TX04", zstring())
+        .field("TX05", zstring())
+        .field("TX06", zstring())
+        .field("TX07", zstring())
+        .field("DODT", noRefs()) // decal data
+        .field("DNAM", noRefs()) // flags
+        .field("MNAM", zstring()); // material
+
+    b.record("MSWP", "Material Swap", true)
+        .field("FNAM", zstring()) // tree folder
+        .field("BNAM", zstring()) // original material
+        .field("SNAM", zstring()) // replacement material
+        .field("CNAM", noRefs())  // colour remapping index
+        .add(region("Substitution", {"BNAM"}, {"BNAM", "SNAM", "FNAM", "CNAM"}));
+
+    b.record("INNR", "Instance Naming Rules", true)
+        .field("UNAM", noRefs()) // target
+        .field("VNAM", noRefs()) // names in a ruleset
+        .field("WNAM", lstring())
+        .field("YNAM", noRefs()) // name index (not the common pick-up sound FormID)
+        .add(region("Naming Rules", {"VNAM"}, {"VNAM", "WNAM", "KSIZ", "KWDA", "XNAM", "YNAM"}));
+
+    // ENIT: cost, flags, cast type, amount, target type, enchant type, charge time,
+    // base enchantment, worn restrictions.
+    b.record("ENCH", "Object Effect", true).field("ENIT", structAt({28, 32}, 36)).effectRegions();
+
+    // MGEF DATA: every FormID slot of the 152-byte effect data (associated item, skill and
+    // resist values, light, shaders, actor values, projectile, explosion, art, impact data,
+    // dual casting, visuals, equip ability, image space, perk).
+    b.record("MGEF", "Magic Effect", true)
+        .field("DATA", structAt({8, 12, 16, 24, 32, 36, 68, 72, 76, 88, 92, 96, 100, 108, 116, 120, 124, 128, 132, 136},
+                                152, true))
+        .field("ESCE", formIdArray(MergeMode::Scalar)) // counter effects (count is stored in DATA)
+        .field("SNDD", structArray(8, {4}, MergeMode::Scalar)) // sounds: type, sound
+        .field("DNAM", lstring())                              // magic item description
+        .field("MDOB", formId())                               // menu display object
+        .conditionRegion();
+
+    b.record("IPDS", "Impact Data Set", true).field("PNAM", structArray(8, {0, 4})); // material type, impact
+
+    b.record("AORU", "Attraction Rule", true).field("AOR2", noRefs());
+
     // Record types analysed for conflicts but not yet compiled (future phases).
     const std::pair<const char*, const char*> future[] = {
-        {"NPC_", "Non-Player Character"}, {"QUST", "Quest"},    {"WRLD", "Worldspace"},
-        {"CELL", "Cell"},                 {"REFR", "Reference"}, {"ACHR", "Placed NPC"},
-        {"CONT", "Container"},            {"DIAL", "Dialogue Topic"}, {"INFO", "Dialogue Response"},
-        {"GMST", "Game Setting"},         {"GLOB", "Global"},   {"STAT", "Static"},
-        {"MGEF", "Magic Effect"},         {"ENCH", "Enchantment"}, {"LVLN", "Leveled NPC"},
-        {"RACE", "Race"},                 {"ARMA", "Armor Addon"}, {"PROJ", "Projectile"},
-        {"NAVM", "Navmesh"},              {"LAND", "Landscape"}, {"PGRE", "Placed Grenade"},
-        {"PHZD", "Placed Hazard"},        {"SCOL", "Static Collection"}, {"TERM", "Terminal"},
-        {"CMPO", "Component"},            {"AVIF", "Actor Value"}, {"INNR", "Instance Naming Rules"},
-        {"MSWP", "Material Swap"},        {"OTFT", "Outfit"},   {"ACTI", "Activator"},
-        {"FURN", "Furniture"},            {"DOOR", "Door"},     {"LIGH", "Light"},
-        {"SNDR", "Sound Descriptor"},     {"PACK", "Package"},  {"SCEN", "Scene"},
-        {"LCTN", "Location"},             {"IDLE", "Idle Animation"}, {"TXST", "Texture Set"},
+        // Tier 1, still to describe
+        {"STAT", "Static"}, {"SCOL", "Static Collection"}, {"MSTT", "Movable Static"}, {"ACTI", "Activator"},
+        {"FURN", "Furniture"}, {"DOOR", "Door"}, {"LIGH", "Light"}, {"TERM", "Terminal"}, {"PROJ", "Projectile"},
+        {"EXPL", "Explosion"}, {"IPCT", "Impact"}, {"HAZD", "Hazard"}, {"SNDR", "Sound Descriptor"},
+        {"SOUN", "Sound Marker"}, {"AVIF", "Actor Value"}, {"EQUP", "Equip Type"}, {"LSCR", "Load Screen"},
+        {"DMGT", "Damage Type"}, {"ZOOM", "Zoom"}, {"AMDL", "Aim Model"}, {"ARTO", "Art Object"},
+        {"EFSH", "Effect Shader"}, {"MATO", "Material Object"}, {"FLOR", "Flora"},
+        {"KSSM", "Sound Keyword Mapping"}, {"LCRT", "Location Reference Type"}, {"OVIS", "Object Visibility"},
+        // Tier 2-4
+        {"NPC_", "Non-Player Character"}, {"RACE", "Race"}, {"CLAS", "Class"}, {"PACK", "Package"},
+        {"QUST", "Quest"}, {"DIAL", "Dialogue Topic"}, {"INFO", "Dialogue Response"}, {"SCEN", "Scene"},
+        {"IDLE", "Idle Animation"}, {"GMST", "Game Setting"}, {"LCTN", "Location"}, {"WRLD", "Worldspace"},
+        {"CELL", "Cell"}, {"REFR", "Reference"}, {"ACHR", "Placed NPC"}, {"PGRE", "Placed Grenade"},
+        {"PHZD", "Placed Hazard"}, {"NAVM", "Navmesh"}, {"LAND", "Landscape"},
     };
     for (auto [s, n] : future)
         b.record(s, n, false);
@@ -433,6 +544,7 @@ const RecordDefinitions& RecordDefinitions::get(RuntimeProfile profile)
     static const RecordDefinitions oldGen = [] {
         RecordDefinitions d;
         buildOldGen(d);
+        d.computeFingerprint();
         return d;
     }();
     static const RecordDefinitions nextGen = [] {
@@ -442,9 +554,53 @@ const RecordDefinitions& RecordDefinitions::get(RuntimeProfile profile)
         RecordDefinitions d;
         buildOldGen(d);
         d.profileName_ = "Fallout 4 Next Gen (experimental, Old Gen layouts)";
+        d.computeFingerprint();
         return d;
     }();
     return profile == RuntimeProfile::NextGen ? nextGen : oldGen;
+}
+
+void RecordDefinitions::computeFingerprint()
+{
+    std::string text = profileName_;
+    auto addField = [&](Signature sub, const FieldDef& f) {
+        text += "|" + sub.str() + ":" + std::to_string(int(f.kind)) + "/" + std::to_string(int(f.merge)) + "/" +
+                std::to_string(f.stride) + "/" + std::to_string(f.requiredSize) + "/" + std::to_string(f.partial) +
+                "/" + f.countSig.str() + std::to_string(f.countWidth) + "/" + f.companion.str();
+        for (auto o : f.offsets)
+            text += "," + std::to_string(o);
+    };
+    auto sortedFields = [](const std::unordered_map<Signature, FieldDef>& m) {
+        std::vector<std::pair<std::string, const FieldDef*>> v;
+        for (const auto& [k, f] : m)
+            v.emplace_back(k.str(), &f);
+        std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        return v;
+    };
+    for (const auto& [k, f] : sortedFields(common_))
+        addField(Signature::fromString(k.c_str()), *f);
+    std::vector<std::string> recs;
+    for (const auto& [k, _] : records_)
+        recs.push_back(k.str());
+    std::sort(recs.begin(), recs.end());
+    for (const auto& r : recs) {
+        const auto& rd = records_.at(Signature::fromString(r.c_str()));
+        text += "#" + r + (rd.compilable ? "+" : "-");
+        for (const auto& [k, f] : sortedFields(rd.fields))
+            addField(Signature::fromString(k.c_str()), *f);
+        for (const auto& reg : rd.regions) {
+            text += "[" + reg.name + "]" + reg.end.str();
+            for (auto s : reg.start)
+                text += "<" + s.str();
+            for (auto s : reg.members)
+                text += ">" + s.str();
+        }
+    }
+    std::vector<std::pair<uint16_t, uint8_t>> params(conditionFormParams_.begin(), conditionFormParams_.end());
+    std::sort(params.begin(), params.end());
+    for (auto [fn, mask] : params)
+        text += "!" + std::to_string(fn) + "=" + std::to_string(mask);
+    fingerprint_ = fnv1a64(text.data(), text.size());
 }
 
 const RecordDef* RecordDefinitions::record(Signature s) const

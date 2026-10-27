@@ -104,6 +104,15 @@ CREATE TABLE IF NOT EXISTS Conflicts (
 CREATE INDEX IF NOT EXISTS idx_conflicts_type ON Conflicts(conflict_type);
 CREATE INDEX IF NOT EXISTS idx_conflicts_key ON Conflicts(origin_plugin_id, object_id);
 
+CREATE TABLE IF NOT EXISTS EligibilityBlockers (
+    signature TEXT NOT NULL,
+    name TEXT,
+    plugins INTEGER,
+    records INTEGER,
+    sole_blocker INTEGER,
+    unlocks INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS ConflictFields (
     conflict_id INTEGER NOT NULL,
     field_index INTEGER NOT NULL,
