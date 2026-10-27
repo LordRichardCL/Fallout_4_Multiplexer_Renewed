@@ -18,6 +18,7 @@ struct ValidationIssue {
     std::string plugin;
     std::string formId;
     FormKey record; // the generated record the finding is about, when there is one
+    std::string cause; // likely cause, in plain language (filled from the category when empty)
 };
 
 struct ValidationReport {
@@ -36,6 +37,7 @@ struct ValidationReport {
     }
     void fail(Severity s, std::string category, std::string message, std::string plugin = {}, std::string formId = {});
     void merge(const ValidationReport& other);
+    void fillCauses(); // general explanations for findings without a specific likely cause
 };
 
 // How one subrecord of one record type decodes across the whole load order.

@@ -21,6 +21,7 @@ struct DependencyIssue {
     PluginIndex plugin = kInvalidPlugin;
     FormKey form;
     std::string message;
+    std::string cause; // likely cause, in plain language
 };
 
 // A record type that keeps plugins out of compilation because it is not supported yet.

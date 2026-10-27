@@ -66,6 +66,13 @@ QVariant SqlModel::data(const QModelIndex& idx, int role) const
     }
     if (role == Qt::FontRole && monoColumns_.contains(c))
         return QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    if (role == Qt::ToolTipRole) {
+        // Long cells are shortened by the column width: the tooltip shows them in full, wrapped.
+        QString text = QSqlQueryModel::data(idx, Qt::DisplayRole).toString();
+        if (text.size() > 40)
+            return "<p style='white-space:pre-wrap'>" + text.toHtmlEscaped() + "</p>";
+        return {};
+    }
     return QSqlQueryModel::data(idx, role);
 }
 

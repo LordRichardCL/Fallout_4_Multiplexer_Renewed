@@ -24,6 +24,7 @@ add_library(fo4mx_core STATIC
     engine/CompilationEngine.cpp
     engine/ConflictEngine.cpp
     engine/DependencyEngine.cpp
+    engine/Diagnosis.cpp
     engine/Exporter.cpp
     engine/FieldModel.cpp
     engine/MergeEngine.cpp

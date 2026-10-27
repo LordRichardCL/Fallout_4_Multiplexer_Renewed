@@ -1,5 +1,7 @@
 #include "report/ReportGenerator.hpp"
 
+#include "engine/Diagnosis.hpp"
+
 #include "util/Json.hpp"
 #include "util/Text.hpp"
 
@@ -330,12 +332,13 @@ std::string dependencyHtml(const ReportContext& ctx)
 
     if (ctx.dependencies && !ctx.dependencies->issues.empty()) {
         h.h2("Missing requirements and potential breakages");
-        h.tableStart({"Severity", "Category", "Plugin", "Details"});
+        h.tableStart({"Severity", "Category", "Plugin", "Details", "Likely Cause"});
         size_t shown = 0;
         for (const auto& is : ctx.dependencies->issues) {
             if (shown++ >= ctx.maxRows)
                 break;
-            h.row({severityName(is.severity), is.category, s.pluginName(is.plugin), is.message},
+            h.row({severityName(is.severity), is.category, s.pluginName(is.plugin), is.message,
+                   is.cause.empty() ? diagnosis::forCategory(is.category, is.message) : is.cause},
                   {severityName(is.severity)});
         }
         h.tableEnd(std::min(ctx.maxRows, ctx.dependencies->issues.size()), ctx.dependencies->issues.size());
@@ -402,7 +405,7 @@ std::string validationHtml(const ReportContext& ctx)
              {"Errors", formatCount(v.errors)}});
     h.note(v.critical() ? "Critical failures were found: compilation output must not be used."
                         : "No critical failures.");
-    h.tableStart({"Severity", "Category", "Plugin", "FormID", "Message"});
+    h.tableStart({"Severity", "Category", "Plugin", "FormID", "Message", "Likely Cause"});
     std::vector<const ValidationIssue*> list;
     for (const auto& is : v.issues)
         list.push_back(&is);
@@ -411,7 +414,8 @@ std::string validationHtml(const ReportContext& ctx)
     for (auto is : list) {
         if (shown++ >= ctx.maxRows)
             break;
-        h.row({severityName(is->severity), is->category, is->plugin, is->formId, is->message},
+        h.row({severityName(is->severity), is->category, is->plugin, is->formId, is->message,
+               is->cause.empty() ? diagnosis::forCategory(is->category, is->message) : is->cause},
               {severityName(is->severity), "", "", "mono"});
     }
     h.tableEnd(std::min(ctx.maxRows, list.size()), list.size());
@@ -554,6 +558,7 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
                 o.set("category", is.category);
                 o.set("plugin", s->pluginName(is.plugin));
                 o.set("message", is.message);
+                o.set("cause", is.cause.empty() ? diagnosis::forCategory(is.category, is.message) : is.cause);
                 issues.push(o);
             }
             root.set("issues", issues);
@@ -620,6 +625,7 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             o.set("message", is.message);
             o.set("plugin", is.plugin);
             o.set("formId", is.formId);
+            o.set("cause", is.cause.empty() ? diagnosis::forCategory(is.category, is.message) : is.cause);
             issues.push(o);
         }
         root.set("issues", issues);

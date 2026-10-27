@@ -125,7 +125,23 @@ DependenciesPage::DependenciesPage(AppController* app, QWidget* parent) : Page(a
     issuesModel_ = new SqlModel(this);
     issuesModel_->setStatusColumns({0});
     issues_->setModel(issuesModel_);
-    tabs_->addTab(issues_, "Missing Requirements && Breakages");
+    issueDetails_ = new QTextBrowser;
+    issueDetails_->setMaximumHeight(170);
+    issueDetails_->setHtml("<p style='color:#8aa196'>Select a row to see the full message and its likely cause. "
+                           "Summary rows group every missing reference from one plugin to another.</p>");
+    auto* issuesSplit = new QSplitter(Qt::Vertical);
+    issuesSplit->addWidget(issues_);
+    issuesSplit->addWidget(issueDetails_);
+    issuesSplit->setStretchFactor(0, 4);
+    issuesSplit->setStretchFactor(1, 1);
+    tabs_->addTab(issuesSplit, "Missing Requirements && Breakages");
+    connect(issues_->selectionModel(), &QItemSelectionModel::currentRowChanged, this, [this](const QModelIndex& i) {
+        if (i.row() < 0)
+            return;
+        auto v = [&](int c) { return issuesModel_->value(i.row(), c).toString().toHtmlEscaped(); };
+        issueDetails_->setHtml(QString("<p><b>%1 · %2</b> · %3 %4</p><p>%5</p><p><b>Likely cause:</b> %6</p>")
+                                   .arg(v(0), v(1), v(2), v(3), v(4), v(5).isEmpty() ? "—" : v(5)));
+    });
 
     connect(pluginSearch_, &QLineEdit::returnPressed, this, [this] {
         if (neighbourhoodOnly_->isChecked()) {
@@ -162,8 +178,9 @@ void DependenciesPage::refresh()
     buildPluginGraph();
     issuesModel_->load(app_->readDb(),
                        "SELECT severity AS Severity, category AS Category, p.name AS Plugin, form_id AS FormID, "
-                       "message AS Details FROM DependencyIssues d LEFT JOIN Plugins p ON p.id = d.plugin_id "
-                       "ORDER BY CASE severity WHEN 'Error' THEN 0 WHEN 'Warning' THEN 1 ELSE 2 END LIMIT 100000");
+                       "message AS Details, cause AS 'Likely Cause' FROM DependencyIssues d LEFT JOIN Plugins p "
+                       "ON p.id = d.plugin_id ORDER BY CASE severity WHEN 'Error' THEN 0 WHEN 'Warning' THEN 1 ELSE 2 "
+                       "END, CASE WHEN category LIKE '%summary%' THEN 0 ELSE 1 END, p.load_order LIMIT 100000");
     fitColumns(issues_, 640);
     tabs_->setTabText(2, QString("Missing Requirements && Breakages (%1)").arg(issuesModel_->rowCount()));
 }

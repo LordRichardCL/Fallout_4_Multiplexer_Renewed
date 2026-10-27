@@ -2,6 +2,7 @@
 
 #include "assets/AssetScanner.hpp"
 #include "engine/BuildCache.hpp"
+#include "engine/Diagnosis.hpp"
 #include "engine/MergeEngine.hpp"
 #include "engine/Normalizer.hpp"
 #include "engine/ParallelFor.hpp"
@@ -440,6 +441,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                                         : formatFormId(k.objectId) + " in " + session.pluginName(k.origin)) +
                              ", which does not exist; the game reads it as none, so it is written as none",
                          e.key, session.pluginName(e.winner));
+                out.issues.back().cause = diagnosis::missingReference(session, e.winner, badMaster ? FormKey{} : k,
+                                                                      badMaster ? k.objectId : 0);
                 k = FormKey{kInvalidPlugin, 0};
             }
         };

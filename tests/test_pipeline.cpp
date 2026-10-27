@@ -1217,3 +1217,36 @@ TEST(references_broken_in_the_source_are_written_as_none)
     CHECK_EQ(loadLE<uint32_t>(items[1]->data.data()), 0u);
     CHECK(out.resolve(*list, loadLE<uint32_t>(items[2]->data.data())) == std::make_pair(std::string("Fallout4.esm"), 0x1000u));
 }
+
+TEST(missing_references_get_a_likely_cause)
+{
+    auto root = buildInstall("causes");
+    auto data = root / "Game" / "Data";
+    // A patch made for another version of ModA: three records it expects are not in ModA.
+    writePlugin(data / "ModA - Patch.esp", {"Fallout4.esm", "ModA.esp"},
+                {record("FLST", 0x00001100, {zs("EDID", "WeaponList"), u32("LNAM", 0x01000990), u32("LNAM", 0x01000991),
+                                              u32("LNAM", 0x01000992)})});
+    // A mod that refers to its own record, which an update removed.
+    writePlugin(data / "ModR.esp", {"Fallout4.esm"},
+                {record("FLST", 0x01000800, {zs("EDID", "ModR_List"), u32("LNAM", 0x01000F00)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModA - Patch.esp\n*ModR.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    bool summary = false, version = false, own = false;
+    for (const auto& is : p.dependencies()->issues) {
+        if (is.category == "Missing References (summary)" && is.message.find("ModA - Patch.esp -> ModA.esp: 3") == 0)
+            summary = is.cause.find("made for a different version of ModA.esp") != std::string::npos;
+        if (is.category == "Missing Reference" && is.plugin == p.session().findPlugin("ModA - Patch.esp")->index)
+            version |= is.cause.find("different version of ModA.esp") != std::string::npos;
+        if (is.category == "Missing Reference" && is.plugin == p.session().findPlugin("ModR.esp")->index)
+            own |= is.cause.find("refers to its own record") != std::string::npos;
+    }
+    CHECK(summary);
+    CHECK(version);
+    CHECK(own);
+    for (const auto& is : p.dependencies()->issues)
+        CHECK(!is.cause.empty());
+}

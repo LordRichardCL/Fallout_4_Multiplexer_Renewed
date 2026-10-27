@@ -1,6 +1,7 @@
 #include "db/DatabaseWriter.hpp"
 
 #include "db/Schema.hpp"
+#include "engine/Diagnosis.hpp"
 #include "util/Text.hpp"
 
 #include <set>
@@ -47,6 +48,15 @@ std::string pluginStatus(const PluginInfo& p)
 void DatabaseWriter::initSchema()
 {
     db_.exec(kSchema);
+    // Columns added after the first release: databases created earlier get them here.
+    auto ensureColumn = [&](const char* table, const char* column) {
+        auto q = db_.prepare(std::string("SELECT COUNT(*) FROM pragma_table_info('") + table + "') WHERE name = ?");
+        q.bind(1, column);
+        if (q.step() && q.columnText(0) == "0")
+            db_.exec(std::string("ALTER TABLE ") + table + " ADD COLUMN " + column + " TEXT;");
+    };
+    ensureColumn("DependencyIssues", "cause");
+    ensureColumn("ValidationResults", "cause");
     setMeta("schema_version", std::to_string(kSchemaVersion));
 }
 
@@ -347,7 +357,8 @@ void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport&
         d.bind(4, e.to.objectId).bind(5, e.via.str());
         d.run();
     }
-    auto di = db_.prepare("INSERT INTO DependencyIssues(severity, category, plugin_id, form_id, message) VALUES(?,?,?,?,?)");
+    auto di = db_.prepare(
+        "INSERT INTO DependencyIssues(severity, category, plugin_id, form_id, message, cause) VALUES(?,?,?,?,?,?)");
     for (const auto& is : deps.issues) {
         di.bind(1, severityName(is.severity)).bind(2, is.category);
         if (is.plugin == kInvalidPlugin)
@@ -355,6 +366,7 @@ void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport&
         else
             di.bind(3, is.plugin);
         di.bind(4, is.form.valid() ? session.loadOrderFormId(is.form) : std::string()).bind(5, is.message);
+        di.bind(6, is.cause.empty() ? diagnosis::forCategory(is.category, is.message) : is.cause);
         di.run();
     }
     db_.exec("DELETE FROM EligibilityBlockers;");
@@ -458,7 +470,8 @@ void DatabaseWriter::writeValidation(const std::string& stage, const ValidationR
     else if (clearPrevious)
         db_.exec("DELETE FROM ValidationResults WHERE stage <> 'definitions';");
     auto st = db_.prepare(
-        "INSERT INTO ValidationResults(stage, severity, category, message, plugin, form_id) VALUES(?,?,?,?,?,?)");
+        "INSERT INTO ValidationResults(stage, severity, category, message, plugin, form_id, cause) "
+        "VALUES(?,?,?,?,?,?,?)");
     for (const auto& is : report.issues)
         st.bind(1, stage)
             .bind(2, severityName(is.severity))
@@ -466,6 +479,7 @@ void DatabaseWriter::writeValidation(const std::string& stage, const ValidationR
             .bind(4, is.message)
             .bind(5, is.plugin)
             .bind(6, is.formId)
+            .bind(7, is.cause.empty() ? diagnosis::forCategory(is.category, is.message) : is.cause)
             .run();
     tx.commit();
     setMeta("validation_" + stage + "_checks", std::to_string(report.checks));

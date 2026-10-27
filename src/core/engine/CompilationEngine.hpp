@@ -110,6 +110,7 @@ struct CompileIssue {
     std::string message;
     FormKey form;
     std::string plugin;
+    std::string cause; // likely cause, in plain language
 };
 
 struct CompiledOutput {

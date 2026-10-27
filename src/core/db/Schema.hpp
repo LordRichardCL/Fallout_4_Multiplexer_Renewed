@@ -203,7 +203,8 @@ CREATE TABLE IF NOT EXISTS DependencyIssues (
     category TEXT NOT NULL,
     plugin_id INTEGER,
     form_id TEXT,
-    message TEXT
+    message TEXT,
+    cause TEXT
 );
 
 CREATE TABLE IF NOT EXISTS CompilationGroups (
@@ -255,7 +256,8 @@ CREATE TABLE IF NOT EXISTS ValidationResults (
     category TEXT NOT NULL,
     message TEXT NOT NULL,
     plugin TEXT,
-    form_id TEXT
+    form_id TEXT,
+    cause TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_validation_sev ON ValidationResults(severity);
 

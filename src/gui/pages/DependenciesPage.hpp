@@ -38,6 +38,7 @@ private:
     QLabel* recordInfo_;
     QTextBrowser* pluginDetails_;
     QTextBrowser* recordDetails_;
+    QTextBrowser* issueDetails_;
     QTableView* issues_;
     SqlModel* issuesModel_;
     QString focusPlugin_;

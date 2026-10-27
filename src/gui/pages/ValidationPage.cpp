@@ -13,6 +13,8 @@
 #include <QStandardPaths>
 #include <QHeaderView>
 #include <QLineEdit>
+#include <QSplitter>
+#include <QTextBrowser>
 #include <QTableView>
 #include <QVBoxLayout>
 
@@ -79,9 +81,26 @@ ValidationPage::ValidationPage(AppController* app, QWidget* parent) : Page(app, 
     styleTable(table_);
     model_ = new SqlModel(this);
     model_->setStatusColumns({0});
-    model_->setMonoColumns({4});
+    model_->setMonoColumns({5});
     table_->setModel(model_);
-    l->addWidget(table_, 1);
+    details_ = new QTextBrowser;
+    details_->setMaximumHeight(170);
+    details_->setHtml("<p style='color:#8aa196'>Select a row to see the full message and its likely cause.</p>");
+    auto* split = new QSplitter(Qt::Vertical);
+    split->addWidget(table_);
+    split->addWidget(details_);
+    split->setStretchFactor(0, 4);
+    split->setStretchFactor(1, 1);
+    l->addWidget(split, 1);
+    connect(table_->selectionModel(), &QItemSelectionModel::currentRowChanged, this, [this](const QModelIndex& i) {
+        if (i.row() < 0)
+            return;
+        auto v = [&](int c) { return model_->value(i.row(), c).toString().toHtmlEscaped(); };
+        details_->setHtml(QString("<p><b>%1 · %2</b>%3</p><p>%4</p><p><b>Likely cause:</b> %5</p>")
+                              .arg(v(0), v(1),
+                                   v(4).isEmpty() ? QString() : " · " + v(4) + (v(5).isEmpty() ? QString() : " " + v(5)),
+                                   v(2), v(3).isEmpty() ? "—" : v(3)));
+    });
 
     connect(chips_, &FilterChips::changed, this, [this] { reload(); });
     connect(search_, &QLineEdit::textChanged, this, [this] { reload(); });
@@ -145,8 +164,8 @@ void ValidationPage::reload()
         binds << like << like << like;
     }
     model_->load(app_->readDb(),
-                 "SELECT severity AS Severity, category AS Check_, message AS Message, plugin AS Plugin, form_id AS "
-                 "FormID, stage AS Stage FROM ValidationResults WHERE " + where +
+                 "SELECT severity AS Severity, category AS Check_, message AS Message, cause AS 'Likely Cause', "
+                 "plugin AS Plugin, form_id AS FormID, stage AS Stage FROM ValidationResults WHERE " + where +
                      " ORDER BY CASE severity WHEN 'Error' THEN 0 WHEN 'Warning' THEN 1 ELSE 2 END, id LIMIT 200000",
                  binds);
     model_->setHeaderData(1, Qt::Horizontal, "Check");

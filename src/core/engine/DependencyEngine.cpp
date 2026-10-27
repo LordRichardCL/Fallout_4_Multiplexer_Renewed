@@ -1,6 +1,7 @@
 #include "engine/DependencyEngine.hpp"
 
 #include "engine/BuildCache.hpp"
+#include "engine/Diagnosis.hpp"
 #include "engine/FieldModel.hpp"
 #include "engine/Normalizer.hpp"
 #include "engine/ParallelFor.hpp"
@@ -333,12 +334,54 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
         session.recordEdges.insert(session.recordEdges.end(), v.begin(), v.end());
         std::vector<RecordEdge>().swap(v);
     }
+    // Likely causes: missing references are judged together per source -> target plugin, since a
+    // patch made for another version of its master leaves many of them pointing the same way.
+    std::map<std::pair<PluginIndex, PluginIndex>, size_t> perPair;
+    std::map<std::pair<PluginIndex, PluginIndex>, FormKey> examplePerPair;
+    std::vector<std::vector<FormKey>> missingTargets(targets.size());
+    for (size_t i = 0; i < targets.size(); ++i) {
+        const auto& w = session.records[session.groups[targets[i]].end - 1];
+        if (!refs[i])
+            continue;
+        for (const auto& [to, via] : *refs[i])
+            if (to != w.key && (!to.valid() || !session.exists(to))) {
+                missingTargets[i].push_back(to);
+                std::pair<PluginIndex, PluginIndex> pair{w.plugin, to.valid() ? to.origin : kInvalidPlugin};
+                perPair[pair]++;
+                examplePerPair.emplace(pair, to);
+            }
+    }
+    for (size_t i = 0; i < targets.size(); ++i) {
+        size_t m = 0;
+        for (auto& is : issues[i]) {
+            if (is.category != "Missing Reference" || m >= missingTargets[i].size())
+                continue;
+            FormKey to = missingTargets[i][m++];
+            is.cause = diagnosis::missingReference(session, is.plugin, to, to.valid() ? 0 : to.objectId,
+                                                   perPair[{is.plugin, to.valid() ? to.origin : kInvalidPlugin}]);
+        }
+    }
+    for (const auto& [pair, count] : perPair) {
+        if (count < 2)
+            continue;
+        auto [from, to] = pair;
+        std::string target = to == kInvalidPlugin ? std::string("plugins that are not its masters") : session.pluginName(to);
+        report.issues.push_back(
+            {Severity::Warning, "Missing References (summary)", from, {},
+             session.pluginName(from) + " -> " + target + ": " + std::to_string(count) +
+                 " references to records that do not exist",
+             diagnosis::missingReference(session, from, examplePerPair[pair],
+                                         examplePerPair[pair].valid() ? 0 : examplePerPair[pair].objectId, count)});
+    }
     for (auto& v : issues)
         for (auto& is : v) {
             if (is.category == "Missing Reference")
                 report.danglingReferences++;
             report.issues.push_back(std::move(is));
         }
+    for (auto& is : report.issues)
+        if (is.cause.empty())
+            is.cause = diagnosis::forCategory(is.category, is.message);
     report.recordEdges = session.recordEdges.size();
 
     evaluateEligibility(session, options, &report);

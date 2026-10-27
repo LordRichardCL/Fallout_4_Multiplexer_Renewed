@@ -1,5 +1,6 @@
 #include "engine/ValidationEngine.hpp"
 
+#include "engine/Diagnosis.hpp"
 #include "engine/Normalizer.hpp"
 #include "engine/ParallelFor.hpp"
 #include "esp/PluginFile.hpp"
@@ -29,6 +30,13 @@ void ValidationReport::fail(Severity s, std::string category, std::string messag
     issues.push_back({s, std::move(category), std::move(message), std::move(plugin), std::move(formId), context});
 }
 
+void ValidationReport::fillCauses()
+{
+    for (auto& is : issues)
+        if (is.cause.empty())
+            is.cause = diagnosis::forCategory(is.category, is.message);
+}
+
 void ValidationReport::merge(const ValidationReport& o)
 {
     checks += o.checks;
@@ -48,6 +56,7 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
         // Findings about a generated record carry it, so automatic isolation can act on them.
         v.context = c.indexByKey.count(is.form) ? is.form : FormKey{};
         v.fail(is.severity, is.category, is.message, is.plugin, fid);
+        v.issues.back().cause = is.cause;
     }
     v.context = FormKey{};
 
@@ -172,11 +181,13 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
                         else if (masterIndexOf(raw) > selfIndex)
                             v.fail(Severity::Error, "Broken FormIDs", label + " writes an out-of-range FormID",
                                    op.name, fid);
-                        else if (!exists && !c.isCompiled(k.origin))
+                        else if (!exists && !c.isCompiled(k.origin)) {
                             v.fail(Severity::Warning, "Missing References",
                                    label + " " + s.sig.str() + " references " + formatFormId(k.objectId) + " in " +
                                        session.pluginName(k.origin) + ", which does not exist (also broken in the source)",
                                    op.name, fid);
+                            v.issues.back().cause = diagnosis::missingReference(session, e.winner, k);
+                        }
                         else
                             v.pass();
                     }

@@ -4,6 +4,7 @@
 
 class QLineEdit;
 class QTableView;
+class QTextBrowser;
 
 namespace gui {
 
@@ -32,6 +33,7 @@ private:
     QLineEdit* search_;
     QTableView* table_;
     SqlModel* model_;
+    QTextBrowser* details_;
 };
 
 } // namespace gui

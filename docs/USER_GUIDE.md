@@ -205,6 +205,21 @@ Compilation never copies, extracts or repacks assets. Compiled records keep thei
 
 On the Compilation page, select a record under **Generated Records** to see its generated plugin, source plugin, winning override, and every mesh, material and texture it uses with the mod, archive and path each one is served from. **Assets Used** lists all of them. Missing assets are reported in the Validation Centre.
 
+## Likely causes
+
+Every finding on the **Validation** page and under **Dependencies → Missing Requirements & Breakages** has a **Likely Cause** column. Select a row to read the full message and cause in the panel underneath. For missing references the cause is worked out from the data:
+
+| What the app sees | Likely cause it reports |
+|---|---|
+| Many missing references from one plugin to the same mod, or from a patch | The patch was made for a different version of that mod; install versions that match |
+| A plugin referring to its own record that is not there | The record was removed or renumbered in an update (or by ESL compaction) |
+| An object ID above FFF in an ESL-flagged plugin | The reference predates that plugin being compacted and ESL-flagged |
+| A record missing from Fallout4.esm or a DLC | Made for a different game version (the Next-Gen update moved records) |
+| A FormID with an FE/FF prefix | A load-order FormID saved into the file by a script or tool |
+| A FormID from a plugin that is not a master | Added in xEdit without adding the master, or a master removed afterwards |
+
+**Missing References (summary)** rows group all references from one plugin to another (for example *ImprovedAREnclaveNWBBEPatch.esp -> BlackBirdElitePA.esp: 173 references*). Other categories (missing assets, archive priority, kept out automatically, missing masters and so on) carry a general explanation. Likely causes are included in **Copy**, **Save…** and the HTML and JSON reports.
+
 ## Reports
 
 **Reports** previews each report and exports it as HTML, JSON or PDF. **Export All** writes every report to a folder.
