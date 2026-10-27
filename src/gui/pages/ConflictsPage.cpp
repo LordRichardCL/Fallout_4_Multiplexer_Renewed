@@ -16,7 +16,20 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
+#include <map>
+
 namespace gui {
+
+namespace {
+
+// One cell of the field comparison grid. Kept at namespace scope and in std::map:
+// a function-local type inside nested QMaps made MSVC 19.44 hang while compiling.
+struct FieldCell {
+    QString value;
+    QString status;
+};
+
+} // namespace
 
 ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, parent)
 {
@@ -185,21 +198,15 @@ void ConflictsPage::showConflict(int row)
               "WHERE conflict_id = ? ORDER BY field_index, position");
     q.addBindValue(conflictId_);
     q.exec();
-    struct Cell {
-        QString value, status;
-    };
-    QMap<int, QString> fieldNames;
-    QMap<int, bool> hard;
-    QMap<int, QMap<int, Cell>> cells;
-    QMap<int, qint64> chainPlugins;
+    std::map<int, QString> fieldNames;
+    std::map<int, bool> hard;
+    std::map<int, std::map<int, FieldCell>> cells; // field index -> chain position (-1 = result) -> cell
     while (q.next()) {
         int fi = q.value(0).toInt();
         int pos = q.value(3).toInt();
         fieldNames[fi] = q.value(1).toString();
         hard[fi] = q.value(2).toBool();
-        cells[fi][pos] = {q.value(5).toString(), q.value(6).toString()};
-        if (pos >= 0)
-            chainPlugins[pos] = q.value(4).toLongLong();
+        cells[fi][pos] = FieldCell{q.value(5).toString(), q.value(6).toString()};
     }
     QStringList chainNames;
     {
@@ -227,15 +234,20 @@ void ConflictsPage::showConflict(int row)
     fields_->setHorizontalHeaderLabels(headers);
     fields_->setRowCount(static_cast<int>(fieldNames.size()));
     int r = 0;
-    for (auto it = fieldNames.begin(); it != fieldNames.end(); ++it, ++r) {
-        auto* name = new QTableWidgetItem((hard[it.key()] ? "⚠ " : "") + it.value());
-        if (hard[it.key()]) {
+    for (const auto& [fieldIndex, fieldName] : fieldNames) {
+        const auto& row = cells[fieldIndex];
+        auto cellAt = [&](int pos) {
+            auto c = row.find(pos);
+            return c == row.end() ? FieldCell{} : c->second;
+        };
+        auto* name = new QTableWidgetItem((hard[fieldIndex] ? QStringLiteral("⚠ ") : QString()) + fieldName);
+        if (hard[fieldIndex]) {
             name->setForeground(theme::kRed);
             name->setToolTip("Hard conflict: several plugins changed this field differently");
         }
         fields_->setItem(r, 0, name);
         for (int pos = 0; pos < columns; ++pos) {
-            Cell c = cells[it.key()].value(pos);
+            FieldCell c = cellAt(pos);
             auto* item = new QTableWidgetItem(c.value);
             item->setToolTip(c.value + "\n\n" + c.status);
             QColor tint = theme::statusTint(c.status);
@@ -245,11 +257,12 @@ void ConflictsPage::showConflict(int row)
                 item->setForeground(theme::kMuted);
             fields_->setItem(r, pos + 1, item);
         }
-        Cell result = cells[it.key()].value(-1);
+        FieldCell result = cellAt(-1);
         auto* item = new QTableWidgetItem(result.value);
         item->setToolTip(result.value);
         item->setBackground(theme::statusTint("Result"));
         fields_->setItem(r, columns + 1, item);
+        ++r;
     }
     fields_->horizontalHeader()->resizeSection(0, 150);
     for (int c = 1; c <= columns + 1; ++c)

@@ -30,9 +30,3 @@ set_target_properties(Fallout4MultiplexerRenewed PROPERTIES OUTPUT_NAME "Fallout
 fo4mx_set_warnings(Fallout4MultiplexerRenewed)
 
 install(TARGETS Fallout4MultiplexerRenewed RUNTIME DESTINATION bin)
-
-if(MSVC)
-    # MSVC 19.44 (VS 17.14) hangs optimising this file under /O2; it is UI code
-    # where optimisation makes no measurable difference.
-    set_source_files_properties(pages/ConflictsPage.cpp PROPERTIES COMPILE_OPTIONS "/Od")
-endif()
