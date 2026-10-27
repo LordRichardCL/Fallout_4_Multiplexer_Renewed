@@ -118,6 +118,26 @@ NormRecord Normalizer::normalize(const Record& rec, PluginIndex plugin)
             if (session_.exists(key) && key.objectId >= 0x800)
                 s.softRefs.emplace_back(off, key);
         }
+        // FormIDs are not always 4-byte aligned (weapon sounds sit at +73). At the other offsets
+        // only values naming a record in a non-base master count: those are the ones whose master
+        // index can change in the output, and requiring it keeps chance matches rare.
+        for (uint32_t off = span.begin; off + 4 <= span.end && off + 4 <= s.bytes.size(); ++off) {
+            if ((off - span.begin) % 4 == 0 || layout.slotCovers(span.sub, off))
+                continue;
+            bool overlaps = false;
+            for (const auto& [o, _] : s.softRefs)
+                overlaps |= off < o + 4 && o < off + 4;
+            if (overlaps)
+                continue;
+            uint32_t raw = loadLE<uint32_t>(s.bytes.data() + off);
+            uint32_t mi = masterIndexOf(raw);
+            if (mi == 0 || mi > p.masters.size() || objectIdOf(raw) < 0x800)
+                continue;
+            FormKey key = session_.resolve(p, raw);
+            if (key.valid() && !session_.plugins[key.origin].baseGame && session_.exists(key))
+                s.softRefs.emplace_back(off, key);
+        }
+        std::sort(s.softRefs.begin(), s.softRefs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
     }
 
     // Localised strings become inline text so output plugins need no string tables.

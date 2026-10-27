@@ -248,11 +248,15 @@ void buildOldGen(RecordDefinitions& d)
     buildConditionFunctions(d);
     Builder b(d);
 
-    // DNAM: ammo, then speed, reload, reach, ranges, attack delay, out-of-range damage and on-hit
-    // (numbers); flags, capacity and animation type at +48. Everything else is scanned. The flags
-    // were mistaken for a FormID in a real load order.
-    FieldDef weaponData = structAt({0}, 0, true);
-    weaponData.plain = {{4, 40}, {48, 55}};
+    // DNAM: ammo (+0); speed, reload, reach, ranges, attack delay, out-of-range damage, on-hit
+    // (+4..+39); skill and resist actor values (+40, +44); flags, capacity, animation type,
+    // secondary damage, weight, value, base damage, sound level (+48..+72); attack, attack 2D,
+    // attack loop, attack fail, idle, equip, unequip and fast-equip sounds (+73..+104, not 4-byte
+    // aligned); accuracy, attack seconds, AP cost, power and stagger numbers (+105..+131).
+    // Confirmed on a full load order: base damage + sound level at +67 looked like a FormID in
+    // 11,257 of 13,243 weapons, which fixes every offset after it.
+    FieldDef weaponData = structAt({0, 40, 44, 73, 77, 81, 85, 89, 93, 97, 101}, 0, true);
+    weaponData.plain = {{4, 40}, {48, 73}, {105, 132}};
     b.record("WEAP", "Weapon", true)
         .field("DNAM", weaponData)
         .field("CRDT", structAt({8}, 0, true)) // critical damage and charge multipliers, critical effect spell
@@ -602,6 +606,7 @@ void buildOldGen(RecordDefinitions& d)
         .modelRegions();
 
     b.record("LIGH", "Light", true)
+        .field("DATA", noRefs()) // time, radius, colour, flags, falloff, FOV, clip and flicker numbers
         .field("FNAM", noRefs())  // fade value
         .field("NAM0", zstring()) // gobo texture
         .field("LNAM", formId())  // lens flare
@@ -632,8 +637,10 @@ void buildOldGen(RecordDefinitions& d)
     // timer, explosion, sound, muzzle flash duration, fade duration, impact force, countdown sound,
     // disable sound, default weapon source, cone spread, collision radius, lifetime, relaunch
     // interval, decal data, collision layer; later bytes are scanned.
+    FieldDef projectileData = structAt({16, 20, 32, 36, 52, 56, 60, 80, 84}, 0, true);
+    projectileData.plain = {{0, 16}}; // flags, type, gravity, speed, range
     b.record("PROJ", "Projectile", true)
-        .field("DNAM", structAt({16, 20, 32, 36, 52, 56, 60, 80, 84}, 0, true))
+        .field("DNAM", projectileData)
         .field("NAM1", zstring()) // muzzle flash model
         .modelRegions();
 
@@ -660,6 +667,7 @@ void buildOldGen(RecordDefinitions& d)
         .modelRegions();
 
     b.record("SNDR", "Sound Descriptor", true)
+        .field("DNAM", structAt({0}, 0, true)) // a FormID at +0 in 2,961 of 3,079 vanilla descriptors
         .field("GNAM", formId()) // category
         .field("SNAM", formId()) // alternate sound for
         .field("ANAM", zstring()) // sound file
@@ -713,6 +721,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("ENAM", formId())                  // exterior tail
         .field("VNAM", formId())                  // VATS descriptor
         .field("TNAM", noRefs())                  // VATS threshold
+        .field("RNAM", structAt({4}, 8))          // reverb class, sound descriptor
         .field("KNAM", formIdList(MergeMode::Set)); // keywords
 
     b.record("LCRT", "Location Reference Type", true).field("CNAM", noRefs());

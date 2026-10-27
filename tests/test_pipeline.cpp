@@ -1031,3 +1031,58 @@ TEST(archive_priority_change_is_reported)
     auto result = p.exportOutputs();
     CHECK(std::filesystem::exists(result.directory / "Multiplexer_ArchivePriority.txt"));
 }
+
+TEST(weapon_sounds_at_unaligned_offsets_are_rewritten)
+{
+    auto root = buildInstall("weaponsounds");
+    std::vector<uint8_t> dnam(136, 0);
+    storeLE<uint32_t>(dnam.data(), 0x00000900);       // ammo (base game)
+    storeLE<uint32_t>(dnam.data() + 73, 0x01000800);  // attack sound: this mod's own descriptor
+    storeLE<uint32_t>(dnam.data() + 93, 0x01000800);  // equip sound
+    writePlugin(root / "Game" / "Data" / "ModW.esp", {"Fallout4.esm"},
+                {record("SNDR", 0x01000800, {zs("EDID", "ModW_Fire"), zs("ANAM", "Weapons\\ModW\\Fire.wav")}),
+                 record("WEAP", 0x01000801, {zs("EDID", "ModW_Rifle"), raw("DNAM", dnam)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModW.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    OutputSet out(p.exportOutputs().pluginFiles);
+    const auto* rifle = out.byEditorId("ModW_Rifle");
+    const auto* sound = out.byEditorId("ModW_Fire");
+    CHECK(rifle != nullptr && sound != nullptr);
+    const auto& d = rifle->record.find(Signature("DNAM"))->data;
+    CHECK(out.resolve(*rifle, loadLE<uint32_t>(d.data() + 73)) == out.identity(*sound));
+    CHECK(out.resolve(*rifle, loadLE<uint32_t>(d.data() + 93)) == out.identity(*sound));
+    CHECK(out.resolve(*rifle, loadLE<uint32_t>(d.data())) == std::make_pair(std::string("Fallout4.esm"), 0x900u));
+}
+
+TEST(unaligned_undescribed_formid_is_caught)
+{
+    auto root = buildInstall("unaligned");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("CELL", 0x01000800, {zs("EDID", "ModECell")})});
+    // ModC's cell at an odd offset of a subrecord the definitions do not describe.
+    std::vector<uint8_t> bytes(10, 0);
+    storeLE<uint32_t>(bytes.data() + 3, 0x02000800);
+    writePlugin(data / "ModG.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
+                {record("GLOB", 0x03000800, {zs("EDID", "ModG_Global"), raw("FNAM", {'f'}), u32("FLTV", 0),
+                                              raw("UNKN", bytes)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModG.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    // Copying the bytes unchanged would point at the wrong plugin, so ModG stays out.
+    CHECK(p.session().autoRetained.count("modg.esp") == 1);
+    auto check = p.checkDefinitions({Signature("GLOB")});
+    bool reported = false;
+    for (const auto& is : check.report.issues)
+        reported |= is.message.find("GLOB UNKN") != std::string::npos && is.message.find("+3") != std::string::npos;
+    CHECK(reported);
+}

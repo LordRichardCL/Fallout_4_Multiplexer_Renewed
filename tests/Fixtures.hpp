@@ -185,6 +185,9 @@ inline Subrecord weaponData(uint32_t ammo, uint8_t fill)
 {
     std::vector<uint8_t> d(136, fill);
     storeLE<uint32_t>(d.data(), ammo);
+    // Actor value and sound slots hold FormIDs (null here), never filler.
+    for (size_t off : {40, 44, 73, 77, 81, 85, 89, 93, 97, 101})
+        storeLE<uint32_t>(d.data() + off, 0);
     return Subrecord(Signature("DNAM"), std::move(d));
 }
 
