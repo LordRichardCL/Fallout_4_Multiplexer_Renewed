@@ -108,6 +108,23 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         ml->addWidget(c);
     }
     ol->addWidget(mergeBox);
+
+    auto* patchBox = new QGroupBox("Conflict resolution patch");
+    auto* pl = new QVBoxLayout(patchBox);
+    patch_ = new QCheckBox("Build Multiplexer_Patch.esp for plugins that stay in the load order");
+    patchOnly_ = new QCheckBox("Patch only: compile no plugins");
+    for (auto* c : {patch_, patchOnly_}) {
+        c->setStyleSheet("QCheckBox { spacing: 8px; }");
+        pl->addWidget(c);
+    }
+    auto* patchNote = new QLabel("Like a Bashed Patch: where last-plugin-wins would drop edits (leveled lists, form "
+                                 "lists, keywords, different fields), the patch carries the merged record. It only "
+                                 "overrides existing records, so it is always ESL-flagged and adds no FormIDs. "
+                                 "It must load last.");
+    patchNote->setObjectName("PageSubtitle");
+    patchNote->setWordWrap(true);
+    pl->addWidget(patchNote);
+    ol->addWidget(patchBox);
     ol->addStretch();
     split->addWidget(optionsScroll);
 
@@ -200,6 +217,11 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     });
     connect(app_, &AppController::busyChanged, this, [this] { updateButtons(); });
     connect(app_, &AppController::settingsChanged, this, [this] { loadOptions(); });
+    connect(patchOnly_, &QCheckBox::toggled, this, [this](bool on) {
+        if (on)
+            patch_->setChecked(true);
+        patch_->setEnabled(!on);
+    });
     connect(strategy_, &QComboBox::currentIndexChanged, this,
             [this] { rules_->setEnabled(strategy_->currentData().toInt() == int(AllocationStrategy::UserDefined)); });
     loadOptions();
@@ -219,6 +241,9 @@ void CompilationPage::loadOptions()
     merge_->setChecked(c.mergeCompatible);
     light_->setChecked(c.lightOutputsWhenPossible);
     heuristic_->setChecked(c.rewriteHeuristicReferences);
+    patchOnly_->setChecked(c.patchOnly);
+    patch_->setChecked(c.buildPatch || c.patchOnly);
+    patch_->setEnabled(!c.patchOnly);
     outputDir_->setText(toQString(app_->config().exportOptions.outputDirectory));
 }
 
@@ -237,6 +262,8 @@ void CompilationPage::storeOptions()
     c.mergeCompatible = merge_->isChecked();
     c.lightOutputsWhenPossible = light_->isChecked();
     c.rewriteHeuristicReferences = heuristic_->isChecked();
+    c.patchOnly = patchOnly_->isChecked();
+    c.buildPatch = c.patchOnly || patch_->isChecked();
     app_->config().exportOptions.outputDirectory = toPath(outputDir_->text().trimmed());
     app_->saveSettings();
 }
@@ -258,6 +285,7 @@ void CompilationPage::updateButtons()
 void CompilationPage::refresh()
 {
     QSqlDatabase db = app_->readDb();
+    const QString patchName = meta("patch_name");
     outputsModel_->setNumberColumns({1, 2, 3});
     outputsModel_->setBytesColumns({4});
     outputsModel_->load(db,
@@ -268,10 +296,11 @@ void CompilationPage::refresh()
     recordsModel_->setBytesColumns({7});
     recordsModel_->load(db,
                         "SELECT output_plugin AS Output, form_id AS FormID, signature AS Type, editor_id AS 'Editor ID', "
-                        "CASE is_new WHEN 1 THEN 'New' ELSE 'Override' END AS Kind, CASE merged WHEN 1 THEN 'Merged' ELSE "
+                        "CASE WHEN is_new = 1 THEN 'New' WHEN output_plugin = ? THEN 'Patch' ELSE 'Override' END AS Kind, CASE merged WHEN 1 THEN 'Merged' ELSE "
                         "'' END AS Merge, p.name AS 'Source Winner', size_bytes AS Size, contributors AS Contributors "
                         "FROM GeneratedRecords g LEFT JOIN Plugins p ON p.id = g.winner_plugin_id ORDER BY output_index, "
-                        "signature, form_id LIMIT 500000");
+                        "signature, form_id LIMIT 500000",
+                        {patchName});
     recordsModel_->setStatusColumns({5});
     mappingsModel_->setMonoColumns({1, 3});
     mappingsModel_->load(db,
@@ -289,6 +318,9 @@ void CompilationPage::refresh()
         fitColumns(v);
 
     QString compiled = meta("compiled_plugins");
+    QString patchText;
+    if (!patchName.isEmpty())
+        patchText = QString(" · %1: %2 merged records").arg(patchName, formatCount(meta("patched_records").toLongLong()));
     if (compiled.isEmpty()) {
         summary_->setText("Not compiled yet. Options on the left are saved with your settings.");
     } else {
@@ -303,7 +335,8 @@ void CompilationPage::refresh()
                                   "checks, %5 warnings, %6 errors%7")
                               .arg(compiled, meta("output_plugins"), formatCount(meta("compiled_records").toLongLong()),
                                    formatCount(meta("validation_pre-export_checks").toLongLong()),
-                                   meta("validation_pre-export_warnings"), meta("validation_pre-export_errors"), incremental));
+                                   meta("validation_pre-export_warnings"), meta("validation_pre-export_errors"),
+                                   patchText + incremental));
     }
     updateButtons();
 }

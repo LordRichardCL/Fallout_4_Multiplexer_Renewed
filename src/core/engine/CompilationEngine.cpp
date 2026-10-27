@@ -37,6 +37,14 @@ bool CompiledOutput::isCompiled(PluginIndex p) const
     return p < compiledFlag_.size() && compiledFlag_[p];
 }
 
+const OutputPlugin* CompiledOutput::patchOutput() const
+{
+    for (const auto& o : outputs)
+        if (o.patch)
+            return &o;
+    return nullptr;
+}
+
 uint32_t CompiledOutput::translate(const Session& session, FormKey key, int output, bool* ok) const
 {
     if (ok)
@@ -197,8 +205,10 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     options.outputCount = std::clamp(options.outputCount, 1, 64);
 
     out.compiledFlag_.assign(session.plugins.size(), 0);
+    if (options.patchOnly)
+        options.buildPatch = true;
     for (auto pi : session.loadOrder) {
-        if (session.plugins[pi].eligibility == Eligibility::Eligible) {
+        if (!options.patchOnly && session.plugins[pi].eligibility == Eligibility::Eligible) {
             out.compiledFlag_[pi] = 1;
             out.compiledPlugins.push_back(pi);
         } else {
@@ -208,7 +218,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     auto addIssue = [&](Severity s, std::string cat, std::string msg, FormKey k = {}, std::string plugin = {}) {
         out.issues.push_back({s, std::move(cat), std::move(msg), k, std::move(plugin)});
     };
-    if (out.compiledPlugins.empty()) {
+    if (out.compiledPlugins.empty() && !options.buildPatch) {
         addIssue(Severity::Warning, "Compilation", "No plugins are eligible for compilation");
         return out;
     }
@@ -220,6 +230,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         bool isNew;
         bool retainedWinner;
         int forced;
+        bool patch;
     };
     std::vector<Candidate> candidates;
     for (uint32_t gi = 0; gi < session.groups.size(); ++gi) {
@@ -227,19 +238,25 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         size_t inCompiled = 0;
         for (const auto& r : inst)
             inCompiled += out.compiledFlag_[r.plugin];
-        if (!inCompiled)
-            continue;
-        out.sourceRecords += inCompiled;
-
         FormKey key = inst[0].key;
-        bool originCompiled = key.valid() && out.compiledFlag_[key.origin];
-        bool lastCompiled = out.compiledFlag_[inst.back().plugin];
-
         int forced = -1;
         if (auto it = options.forcedWinners.find(key.packed()); it != options.forcedWinners.end())
             for (size_t i = 0; i < inst.size(); ++i)
                 if (inst[i].plugin == it->second)
                     forced = static_cast<int>(i);
+
+        if (!inCompiled) {
+            // Only retained plugins: last-plugin-wins already applies unless the patch
+            // merges the chain. Only described types can be rebuilt safely.
+            if (options.buildPatch && inst.size() > 1 && session.defs.isCompilable(inst[0].signature) &&
+                (options.mergeCompatible || forced >= 0))
+                candidates.push_back({gi, false, true, forced, true});
+            continue;
+        }
+        out.sourceRecords += inCompiled;
+
+        bool originCompiled = key.valid() && out.compiledFlag_[key.origin];
+        bool lastCompiled = out.compiledFlag_[inst.back().plugin];
 
         if (originCompiled) {
             for (const auto& r : inst)
@@ -252,7 +269,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             out.retainedWins++;
             continue;
         }
-        candidates.push_back({gi, originCompiled, !lastCompiled, forced});
+        candidates.push_back({gi, originCompiled, !lastCompiled, forced, false});
     }
 
     // ---- Merge ---------------------------------------------------------------
@@ -335,6 +352,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                         break;
                     }
                 e.isNew = c.isNew;
+                e.patch = c.patch;
                 e.merged = m.merged;
                 e.winner = inst.back().plugin;
                 for (const auto& r : inst)
@@ -420,10 +438,18 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     // ---- Allocation -------------------------------------------------------------
     progress.stage("Compile");
     const int N = options.outputCount;
-    out.outputs.resize(static_cast<size_t>(N));
+    const bool hasPatch = std::any_of(out.records.begin(), out.records.end(), [](const EmittedRecord& e) { return e.patch; });
+    out.outputs.resize(static_cast<size_t>(N + (hasPatch ? 1 : 0)));
     for (int o = 0; o < N; ++o) {
         out.outputs[static_cast<size_t>(o)].index = o;
         out.outputs[static_cast<size_t>(o)].name = outputFileName(options, o);
+    }
+    if (hasPatch) {
+        // The patch adds no records, so it never needs a full load order slot.
+        auto& patch = out.outputs.back();
+        patch.index = N;
+        patch.name = options.patchName;
+        patch.patch = true;
     }
 
     auto sccs = stronglyConnected(out.records);
@@ -434,7 +460,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
     uint64_t totalSize = 0;
     for (const auto& e : out.records)
-        totalSize += e.size;
+        if (!e.patch)
+            totalSize += e.size;
     totalSize = std::max<uint64_t>(totalSize, 1);
 
     std::vector<int> pref(out.records.size(), 0);
@@ -445,6 +472,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     auto balanced = [&](std::vector<int>& target) {
         uint64_t acc = 0;
         for (const auto& comp : sccs) {
+            if (out.records[comp.front()].patch)
+                continue;
             uint64_t compSize = 0;
             for (auto v : comp)
                 compSize += out.records[v].size;
@@ -462,7 +491,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     case AllocationStrategy::ByRecordType: {
         std::map<int, uint64_t> bucketSize;
         for (const auto& e : out.records)
-            bucketSize[typeRank(e.sig)] += e.size;
+            if (!e.patch)
+                bucketSize[typeRank(e.sig)] += e.size;
         // Outputs per bucket: one each, the rest proportional to size.
         std::map<int, std::pair<int, int>> range; // rank -> [first, count)
         int buckets = static_cast<int>(bucketSize.size());
@@ -500,6 +530,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         std::map<int, uint64_t> filled;
         for (const auto& comp : sccs) {
             for (auto v : comp) {
+                if (out.records[v].patch)
+                    continue;
                 int r = typeRank(out.records[v].sig);
                 auto [first, cnt] = range[r];
                 uint64_t sz = std::max<uint64_t>(bucketSize[r], 1);
@@ -515,6 +547,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         balanced(pref);
         for (uint32_t v = 0; v < out.records.size(); ++v) {
             const auto& e = out.records[v];
+            if (e.patch)
+                continue;
             for (const auto& rule : options.rules) {
                 bool match = iequals(rule.pattern, e.sig.str()) ||
                              (e.key.valid() && iequals(rule.pattern, session.pluginName(e.key.origin))) ||
@@ -567,7 +601,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     o = std::max(o, out.records[d].output);
         }
         for (auto v : comp)
-            out.records[v].output = o;
+            out.records[v].output = out.records[v].patch ? N : o;
     }
 
     for (uint32_t v = 0; v < out.records.size(); ++v) {
@@ -575,6 +609,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         auto& op = out.outputs[static_cast<size_t>(e.output)];
         op.records.push_back(v);
         op.bytes += e.size;
+        if (e.patch)
+            out.patchedRecords++;
         if (e.isNew)
             op.newRecords++;
         else
@@ -590,7 +626,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
     // ---- FormIDs --------------------------------------------------------------
     for (auto& op : out.outputs) {
-        op.light = options.lightOutputsWhenPossible && op.newRecords <= (kLightPluginMaxObjectId - kFirstObjectId + 1);
+        op.light = op.patch || (options.lightOutputsWhenPossible &&
+                                op.newRecords <= (kLightPluginMaxObjectId - kFirstObjectId + 1));
         const uint32_t maxId = op.light ? kLightPluginMaxObjectId : 0x00FFFFFFu;
         std::set<uint32_t> used;
         for (auto v : op.records) {
@@ -677,9 +714,13 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         op.header.record.formVersion = 131;
         op.header.version = 1.0f;
         op.header.author = options.author;
-        op.header.description = "Compiled game state " + std::to_string(op.index + 1) + "/" + std::to_string(N) +
-                                " - generated by Fallout 4 Multiplexer Renewed from " +
-                                std::to_string(out.compiledPlugins.size()) + " plugins";
+        if (op.patch)
+            op.header.description = "Conflict resolution patch - " + std::to_string(op.records.size()) +
+                                    " merged records - generated by Fallout 4 Multiplexer Renewed";
+        else
+            op.header.description = "Compiled game state " + std::to_string(op.index + 1) + "/" + std::to_string(N) +
+                                    " - generated by Fallout 4 Multiplexer Renewed from " +
+                                    std::to_string(out.compiledPlugins.size()) + " plugins";
         for (const auto& m : op.masterNames)
             op.header.masters.push_back({m, 0});
 
@@ -748,10 +789,12 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     }
 
     size_t used = std::count_if(out.outputs.begin(), out.outputs.end(),
-                                [](const OutputPlugin& o) { return !o.records.empty(); });
+                                [](const OutputPlugin& o) { return !o.patch && !o.records.empty(); });
     spdlog::info("Compiled {} records ({} new, {} overrides, {} merged) from {} plugins into {} of {} output plugins",
                  out.records.size(), out.mappings.size(), out.records.size() - out.mappings.size(), out.mergedRecords,
                  out.compiledPlugins.size(), used, N);
+    if (options.buildPatch)
+        spdlog::info("Conflict resolution patch: {} records in {}", out.patchedRecords, options.patchName);
     return out;
 }
 

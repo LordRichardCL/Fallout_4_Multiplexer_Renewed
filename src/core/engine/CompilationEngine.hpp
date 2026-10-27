@@ -35,6 +35,11 @@ struct CompileOptions {
     bool mergeCompatible = true;
     bool lightOutputsWhenPossible = false;
     bool rewriteHeuristicReferences = false;
+    // Conflict resolution patch: merges override chains made only of retained plugins
+    // into one override-only plugin (like a Bashed Patch). patchOnly compiles no plugins.
+    bool buildPatch = false;
+    bool patchOnly = false;
+    std::string patchName = "Multiplexer_Patch.esp";
     std::string author = "Fallout 4 Multiplexer Renewed";
     std::filesystem::path previousFormMap; // reuse FormIDs from an earlier compilation
     std::unordered_map<uint64_t, PluginIndex> forcedWinners; // FormKey::packed() -> plugin
@@ -49,6 +54,7 @@ struct EmittedRecord {
     Signature sig;
     std::string editorId;
     bool isNew = false; // defined by a compiled plugin: receives a new FormID
+    bool patch = false; // conflict resolution between retained plugins (goes to the patch)
     bool merged = false;
     PluginIndex winner = kInvalidPlugin;
     std::vector<PluginIndex> chain;
@@ -67,6 +73,7 @@ struct OutputPlugin {
     int index = 0;
     std::string name;
     bool light = false;
+    bool patch = false; // the conflict resolution patch rather than a compiled-state output
     std::vector<PluginIndex> retainedMasters;
     std::vector<int> outputMasters;
     std::vector<std::string> masterNames;
@@ -112,11 +119,13 @@ struct CompiledOutput {
     size_t identicalToRetained = 0;
     size_t mergedRecords = 0;
     size_t droppedDeleted = 0;
+    size_t patchedRecords = 0; // records in the conflict resolution patch
     size_t mergesReused = 0;   // override chains restored from the build cache
     size_t mergesComputed = 0; // override chains merged in this compilation
     bool empty() const { return records.empty(); }
     bool isCompiled(PluginIndex p) const;
     std::string outputName(int index) const { return outputs.at(static_cast<size_t>(index)).name; }
+    const OutputPlugin* patchOutput() const;
 
     // FormID of `key` as written in output `output`; 0 when it cannot be expressed.
     uint32_t translate(const Session& session, FormKey key, int output, bool* ok = nullptr) const;

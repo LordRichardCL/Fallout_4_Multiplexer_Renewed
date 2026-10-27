@@ -48,6 +48,9 @@ Compile options:
                        matches PATTERN to output N (repeatable)
   --no-merge           last plugin wins instead of merging compatible edits
   --light              ESL-flag outputs that fit the light plugin range
+  --patch              also write Multiplexer_Patch.esp, merging conflicts between
+                       plugins that stay in the load order (like a Bashed Patch)
+  --patch-only         write only the patch; compile no plugins
   --exclude PLUGIN     never compile PLUGIN (repeatable)
   --out DIR            output folder (default: MO2 mod folder or Data)
   --reports DIR        report folder
@@ -79,7 +82,7 @@ struct Args {
 
 Args parseArgs(int argc, char** argv)
 {
-    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--dry-run", "--no-cache",
+    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--patch", "--patch-only", "--dry-run", "--no-cache",
                                                    "--verbose", "-v"};
     Args a;
     for (int i = 1; i < argc; ++i) {
@@ -179,6 +182,8 @@ PipelineConfig makeConfig(const Args& a)
     }
     c.mergeCompatible = !a.has("--no-merge");
     c.lightOutputsWhenPossible = a.has("--light");
+    c.patchOnly = a.has("--patch-only");
+    c.buildPatch = c.patchOnly || a.has("--patch");
     cfg.analysis.excludedPlugins = a.all("--exclude");
     cfg.useCache = !a.has("--no-cache");
     return cfg;
@@ -218,8 +223,11 @@ void printDashboard(const Pipeline& p)
     if (auto c = p.compiledOutput()) {
         size_t used = 0;
         for (const auto& op : c->outputs)
-            used += !op.records.empty();
+            used += !op.patch && !op.records.empty();
         std::printf("  Output plugins      %zu\n", used);
+        if (const auto* patch = c->patchOutput())
+            std::printf("  Patch               %s (%s merged records)\n", patch->name.c_str(),
+                        formatCount(patch->records.size()).c_str());
     }
     std::printf("\n");
 }

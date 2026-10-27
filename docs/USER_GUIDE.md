@@ -53,6 +53,14 @@ Filter by ESM/ESP/ESL, conflicting, disabled, eligible, ineligible, or **Generat
 - **Simple Overrides** (type 1): nothing is lost.
 - **Critical**: the winner deletes a record.
 
+Finding conflicts:
+
+- **Click any column header** to sort by it (Winning Plugin, Editor ID, Severity, Written To, …). Click again to reverse.
+- **Plugin** + **is involved / wins / loses** shows only the conflicts of one plugin. For example, "MyPatch.esp loses" lists every record where your patch is overridden. The list shows how many conflicts each plugin takes part in and how many it wins.
+- **Double-click** a row to filter by its winning plugin.
+- **Written To** shows which generated plugin (a `Dummy_Plugin_XX.esp` or `Multiplexer_Patch.esp`) carries the resolved record after compiling. It is empty when last-plugin-wins still applies.
+- **Clear Filters** resets the type, search, plugin and sort.
+
 Select a record to see the override chain and a grid of every field per plugin:
 
 - green: the value that wins
@@ -81,6 +89,11 @@ Open **Compilation**:
 - **Strategy**: A (by record type), B (balanced size), or C (user rules like `WEAP=3` or `MyWeapons.esp=5`). Records always come after everything they reference, so rules are preferences, not guarantees.
 - **Merge compatible edits**: on by default. Turn it off for strict last-plugin-wins.
 - **ESL-flag outputs**: saves load order slots when an output has ≤ 2048 new records.
+- **Conflict resolution patch**: also writes `Multiplexer_Patch.esp`, similar to Wrye Bash's Bashed Patch. Plugins that stay in the load order still lose edits to last-plugin-wins: two mods adding to the same leveled list, form list or keyword list, or changing different fields of the same record. The patch carries the merged record instead, and respects winners you forced in the Conflict Centre.
+  - It only overrides existing records, so it adds no FormIDs, is always ESL-flagged and takes no full load order slot.
+  - It must load last. The proposed `plugins.txt` puts it there.
+  - It covers the same record types as compilation. NPCs, quests and world data are not merged.
+  - **Patch only** writes just the patch and compiles nothing, so no FormIDs change and no plugins are disabled.
 
 Press **Compile**. Everything happens in memory and is then validated. The **Validation** page lists every finding. Errors block export.
 

@@ -151,6 +151,8 @@ void AppController::loadSettings()
     c.strategy = static_cast<AllocationStrategy>(s.value("compile/strategy", int(AllocationStrategy::Balanced)).toInt());
     c.mergeCompatible = s.value("compile/merge", true).toBool();
     c.lightOutputsWhenPossible = s.value("compile/light", false).toBool();
+    c.buildPatch = s.value("compile/patch", false).toBool();
+    c.patchOnly = s.value("compile/patchOnly", false).toBool();
     c.rewriteHeuristicReferences = s.value("compile/rewriteHeuristic", false).toBool();
     c.rules.clear();
     for (const auto& r : s.value("compile/rules").toStringList()) {
@@ -192,6 +194,8 @@ void AppController::saveSettings()
     s.setValue("compile/strategy", int(c.strategy));
     s.setValue("compile/merge", c.mergeCompatible);
     s.setValue("compile/light", c.lightOutputsWhenPossible);
+    s.setValue("compile/patch", c.buildPatch);
+    s.setValue("compile/patchOnly", c.patchOnly);
     s.setValue("compile/rewriteHeuristic", c.rewriteHeuristicReferences);
     QStringList rules;
     for (const auto& r : c.rules)

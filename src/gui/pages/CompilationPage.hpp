@@ -37,6 +37,8 @@ private:
     QPlainTextEdit* rules_;
     QCheckBox* merge_;
     QCheckBox* light_;
+    QCheckBox* patch_;
+    QCheckBox* patchOnly_;
     QCheckBox* heuristic_;
     QLineEdit* outputDir_;
     QPushButton* compile_;

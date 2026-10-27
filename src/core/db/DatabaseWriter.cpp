@@ -422,7 +422,10 @@ void DatabaseWriter::writeCompilation(const Session& session, const CompiledOutp
     tx.commit();
     size_t used = 0;
     for (const auto& op : compiled.outputs)
-        used += op.records.empty() ? 0 : 1;
+        used += op.patch || op.records.empty() ? 0 : 1;
+    const auto* patch = compiled.patchOutput();
+    setMeta("patch_name", patch ? patch->name : std::string());
+    setMeta("patched_records", std::to_string(compiled.patchedRecords));
     setMeta("compiled_plugins", std::to_string(compiled.compiledPlugins.size()));
     setMeta("merges_reused", std::to_string(compiled.mergesReused));
     setMeta("merges_computed", std::to_string(compiled.mergesComputed));

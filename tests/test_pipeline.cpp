@@ -7,6 +7,8 @@
 #include "esp/FieldDecoder.hpp"
 #include "esp/PluginFile.hpp"
 
+#include <fstream>
+#include <iterator>
 #include <map>
 
 using namespace fo4mx;
@@ -560,4 +562,86 @@ TEST(asset_trace_keeps_original_sources)
     auto r = p.exportOutputs();
     for (const auto& entry : std::filesystem::recursive_directory_iterator(r.directory))
         CHECK(!iendsWith(pathToUtf8(entry.path()), ".nif") && !iendsWith(pathToUtf8(entry.path()), ".ba2"));
+}
+
+TEST(conflict_resolution_patch_merges_retained_chains)
+{
+    auto root = buildInstall("patch");
+    auto data = root / "Game" / "Data";
+    // Two plugins that stay in the load order (they contain cells) and edit the same records.
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"},
+                {record("AMMO", 0x00000900, {zs("EDID", "Ammo10mm"), zs("FULL", "10mm Round (E)"),
+                                             raw("DNAM", std::vector<uint8_t>(16, 0))}),
+                 record("LVLI", 0x00001200,
+                        {zs("EDID", "LootPistols"), raw("LLCT", {2}), lvlo(1, 0x1000, 1), lvlo(2, 0x900, 10)}),
+                 record("CELL", 0x01000800, {zs("EDID", "ModECell")})});
+    writePlugin(data / "ModF.esp", {"Fallout4.esm"},
+                {record("AMMO", 0x00000900, {zs("EDID", "Ammo10mm"), zs("FULL", "10mm Round"),
+                                             raw("DNAM", std::vector<uint8_t>(16, 7))}),
+                 record("CELL", 0x01000800, {zs("EDID", "ModFCell")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModF.esp\n");
+
+    // Alongside compilation: chains with a compiled plugin go to the Dummy outputs,
+    // chains of retained plugins only go to the patch.
+    {
+        auto cfg = configFor(root);
+        cfg.databasePath.clear();
+        cfg.compile.buildPatch = true;
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        const auto* c = p.compiledOutput();
+        CHECK(!c->compiledPlugins.empty());
+        const auto* patch = c->patchOutput();
+        CHECK(patch != nullptr);
+        CHECK(patch->light);
+        CHECK_EQ(patch->newRecords, 0u);
+        FormKey ammo{p.session().findPlugin("Fallout4.esm")->index, 0x900};
+        FormKey loot{p.session().findPlugin("Fallout4.esm")->index, 0x1200};
+        CHECK(c->indexByKey.count(ammo) == 1);
+        CHECK(c->records[c->indexByKey.at(ammo)].patch);
+        CHECK_EQ(c->records[c->indexByKey.at(ammo)].output, patch->index);
+        CHECK(c->indexByKey.count(loot) == 1);
+        CHECK(!c->records[c->indexByKey.at(loot)].patch); // ModB is compiled
+        CHECK_EQ(p.validation()->errors, uint64_t(0));
+    }
+
+    // Patch only: nothing is compiled and every merged chain goes to the patch.
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    cfg.compile.patchOnly = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto* c = p.compiledOutput();
+    CHECK(c->compiledPlugins.empty());
+    CHECK(c->mappings.empty());
+    for (const auto& op : c->outputs)
+        CHECK(op.patch || op.records.empty());
+    CHECK(c->patchedRecords >= 2);
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+
+    auto result = p.exportOutputs();
+    CHECK_EQ(result.pluginFiles.size(), size_t(1));
+    CHECK_EQ(pathToUtf8(result.pluginFiles.at(0).filename()), std::string("Multiplexer_Patch.esp"));
+    auto header = readPluginHeader(result.pluginFiles.at(0));
+    CHECK(header.record.flags & RecordFlags::Light);
+
+    OutputSet out(result.pluginFiles);
+    // ModE's ammo name and ModF's ammo data are both kept.
+    const auto* a = out.byEditorId("Ammo10mm");
+    CHECK(a != nullptr);
+    CHECK_EQ(text(a->record.find(Signature("FULL"))), std::string("10mm Round (E)"));
+    CHECK_EQ(a->record.find(Signature("DNAM"))->data.at(0), uint8_t(7));
+    CHECK(out.identity(*a) == std::make_pair(std::string("Fallout4.esm"), uint32_t(0x900)));
+    // ModB's and ModE's leveled list additions are both kept.
+    const auto* l = out.byEditorId("LootPistols");
+    CHECK(l != nullptr);
+    CHECK_EQ(l->record.findAll(Signature("LVLO")).size(), size_t(3));
+    // Nothing was compiled, so nothing should be disabled.
+    std::ifstream disable(result.disableList);
+    std::string listed((std::istreambuf_iterator<char>(disable)), std::istreambuf_iterator<char>());
+    CHECK(listed.find(".esp") == std::string::npos);
 }

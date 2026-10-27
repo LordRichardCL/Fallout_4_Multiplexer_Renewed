@@ -22,12 +22,17 @@ public:
 
 private:
     void reload();
+    void reloadPluginFilter();
     void showConflict(int row);
     void applyResolution();
+    void clearFilters();
 
     FilterChips* chips_;
     QComboBox* signature_;
     QLineEdit* search_;
+    QComboBox* plugin_;
+    QComboBox* role_;
+    QLabel* count_;
     QTableView* table_;
     SqlModel* model_;
     QLabel* title_;
@@ -37,6 +42,8 @@ private:
     QComboBox* resolution_;
     QLabel* resolutionNote_;
 
+    int sortColumn_ = -1; // -1: by conflict type and severity
+    Qt::SortOrder sortOrder_ = Qt::AscendingOrder;
     qint64 conflictId_ = -1;
     QString originPlugin_;
     quint32 objectId_ = 0;

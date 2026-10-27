@@ -170,6 +170,7 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
     summary.set("records", static_cast<uint64_t>(c.records.size()));
     summary.set("newRecords", static_cast<uint64_t>(c.mappings.size()));
     summary.set("mergedRecords", static_cast<uint64_t>(c.mergedRecords));
+    summary.set("patchedRecords", static_cast<uint64_t>(c.patchedRecords));
     summary.set("strategy", allocationStrategyName(c.options.strategy));
     json::Value outputs;
     for (const auto& op : c.outputs) {
@@ -181,6 +182,7 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
         o.set("newRecords", op.newRecords);
         o.set("overrides", op.overrides);
         o.set("light", op.light);
+        o.set("patch", op.patch);
         json::Value masters;
         for (const auto& m : op.masterNames)
             masters.push(m);

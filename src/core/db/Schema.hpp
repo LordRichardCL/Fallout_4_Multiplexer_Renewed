@@ -237,6 +237,7 @@ CREATE TABLE IF NOT EXISTS GeneratedRecords (
     size_bytes INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_generated_output ON GeneratedRecords(output_index);
+CREATE INDEX IF NOT EXISTS idx_generated_key ON GeneratedRecords(origin_plugin_id, object_id);
 
 CREATE TABLE IF NOT EXISTS ValidationResults (
     id INTEGER PRIMARY KEY,
