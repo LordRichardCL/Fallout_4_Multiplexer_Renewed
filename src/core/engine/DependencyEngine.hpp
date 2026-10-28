@@ -22,6 +22,7 @@ struct DependencyIssue {
     FormKey form;
     std::string message;
     std::string cause; // likely cause, in plain language
+    bool cleaning = false; // a mod-cleaning finding (ITM, deleted record, injected record, ...)
 };
 
 // A record type that keeps plugins out of compilation because it is not supported yet.

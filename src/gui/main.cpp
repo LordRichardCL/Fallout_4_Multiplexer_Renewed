@@ -132,6 +132,27 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
         break;
     }
 
+    // Cleaning report with the first finding selected.
+    window.showPage("Dependencies");
+    for (auto* tabs : window.findChildren<QTabWidget*>()) {
+        if (!tabs->isVisible() || tabs->count() < 4 || !tabs->tabText(3).startsWith("Cleaning"))
+            continue;
+        tabs->setCurrentIndex(3);
+        QEventLoop settle;
+        QTimer::singleShot(300, &settle, &QEventLoop::quit);
+        settle.exec();
+        for (auto* view : tabs->currentWidget()->findChildren<QTableView*>())
+            if (view->model() && view->model()->rowCount() > 0) {
+                view->setCurrentIndex(view->model()->index(0, 0));
+                break;
+            }
+        QEventLoop settle2;
+        QTimer::singleShot(300, &settle2, &QEventLoop::quit);
+        settle2.exec();
+        window.grab().save(outDir.filePath("16-cleaning.png"));
+        break;
+    }
+
     // The Plugins page's text export.
     for (auto* page : window.findChildren<gui::PluginsPage*>()) {
         QFile f(outDir.filePath("plugin-report.txt"));

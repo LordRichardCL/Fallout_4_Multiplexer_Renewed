@@ -347,8 +347,10 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
         auto& e = results[i];
         report.analysedGroups++;
         report.failedGroups += failed[i];
-        for (auto p : e.itmPlugins)
+        for (auto p : e.itmPlugins) {
             session.plugins[p].itmCount++;
+            report.itms.push_back({p, e.key, e.sig, p == e.winner && e.type != ConflictType::None});
+        }
         if (e.type == ConflictType::None) {
             report.identicalOverrides++;
             continue;

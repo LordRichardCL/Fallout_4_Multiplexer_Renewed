@@ -1,6 +1,7 @@
 #include "engine/Pipeline.hpp"
 
 #include "db/DatabaseWriter.hpp"
+#include "engine/CleaningEngine.hpp"
 #include "report/ReportGenerator.hpp"
 #include "util/Text.hpp"
 
@@ -152,6 +153,7 @@ void Pipeline::analyse(ProgressSink& progress)
     progress.stage("Analyse");
     conflicts_ = ConflictEngine::analyse(*session_, config_.conflicts, progress);
     dependencies_ = DependencyEngine::analyse(*session_, config_.analysis, progress);
+    CleaningEngine::analyse(*session_, *conflicts_, *dependencies_);
     compiled_.reset();
     validation_.reset();
     if (db_)

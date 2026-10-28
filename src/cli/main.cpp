@@ -241,6 +241,17 @@ void printDashboard(const Pipeline& p)
                         b.category.substr(0, 20).c_str(), b.plugins, b.records, b.soleBlocker, b.unlocks);
         }
     }
+    if (auto d = p.dependencies()) {
+        std::map<std::string, size_t> cleaning; // category -> findings
+        for (const auto& is : d->issues)
+            if (is.cleaning)
+                ++cleaning[is.category];
+        if (!cleaning.empty()) {
+            std::printf("\n  Cleaning report (as in xEdit; reporting only):\n");
+            for (const auto& [category, count] : cleaning)
+                std::printf("    %-40s %8zu\n", category.c_str(), count);
+        }
+    }
     if (auto c = p.compiledOutput()) {
         size_t used = 0;
         for (const auto& op : c->outputs)

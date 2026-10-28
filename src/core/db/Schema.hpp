@@ -208,7 +208,8 @@ CREATE TABLE IF NOT EXISTS DependencyIssues (
     plugin_id INTEGER,
     form_id TEXT,
     message TEXT,
-    cause TEXT
+    cause TEXT,
+    cleaning INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS CompilationGroups (

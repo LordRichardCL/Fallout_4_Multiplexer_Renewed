@@ -27,6 +27,7 @@ add_library(fo4mx_core STATIC
     engine/BuildCache.cpp
     engine/AssetTracer.cpp
     engine/ChangeDetector.cpp
+    engine/CleaningEngine.cpp
     engine/CompilationEngine.cpp
     engine/ConflictEngine.cpp
     engine/DependencyEngine.cpp

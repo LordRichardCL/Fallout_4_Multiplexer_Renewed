@@ -123,6 +123,16 @@ Rules:
 
    This is the process already used for tier 1.
 
+## Stage 3 result: cleaning reports
+
+Done. **Dependencies → Cleaning** (also in the dependency report and the CLI) lists:
+- identical-to-master records (per-plugin summaries, plus each one that undoes other plugins' changes);
+- deleted references, deleted navmeshes and other deleted records;
+- injected records;
+- circular leveled lists (`LVLI`/`LVLN`).
+
+Each finding has a likely cause and the fix the xEdit documentation gives. Official files are informational only. Nothing is cleaned automatically. Not covered: wild edits (they need the mod's intent, ch. 7.5.5), and `LVSP` loops until `LVSP` has a layout.
+
 ## Stage 2 result: honest analysis
 
 Done. Record types without a layout (everything not compiled) are no longer shown as merged:
@@ -193,7 +203,7 @@ Each stage ships separately, keeps every existing test passing, and changes no m
 | **1. Catalogue** *(done)* | Load the xEdit list into `RecordDefinitions` with name, category, placement and support columns. Replace the names list, the writer group order, `typeRank` and the asset table with catalogue data. Report unknown signatures separately. Read Editor IDs for compressed records of every type. | Low: data and display only | Every one of the 138 types is recognised and named. Blocking Types and reports show categories. |
 | **2. Honest analysis** *(done)* | Conflict classification by support level (record level without a layout). Conflict Centre and reports say "preserved, not merged" for those types. A **support level** column on the Plugins page and in exports. | Low: display and classification only | No more implied merges for types the app does not understand. |
 | **0. Merge against own masters** *(done)* | See [the fix above](#fixed-overrides-are-compared-with-their-own-masters-version). | Corrects merges where patches remove or revert their master's edits | Merge results match what each plugin's author intended. |
-| **3. Cleaning reports** | ITM, UDR-candidate, deleted-navmesh, injected-record and circular leveled list findings per plugin, with likely causes (terms as in xEdit docs chapter 7). Findings in official master files are informational only. | Low: reporting only | Error-checking parity with the usual pre-merge checks. |
+| **3. Cleaning reports** *(done)* | ITM, UDR-candidate, deleted-navmesh, injected-record and circular leveled list findings per plugin, with likely causes (terms as in xEdit docs chapter 7). Findings in official master files are informational only. | Low: reporting only | Error-checking parity with the usual pre-merge checks. |
 | **4. Winner-only strategy** | For types confirmed to be single-value records, a merge strategy that takes the winning override whole: no field merging, still compiled. Candidates must still pass the definition check and have every FormID located. | Medium: only for types with full FormID coverage | More plugins compile without field-level merge risk. |
 | **5. Next layouts by evidence** | Describe further types in the order **Plugins → Blocking Types** ranks them across real load orders. Each needs a definition check on your data and tests. Likely early candidates (check against the xEdit Fallout 4 definitions, not assumed): `AACT`, `DOBJ`, `COLL`, `SNCT`, `SOPM`, `ASPC`, `REVB`, `AECH`, `ANIO`, `BPTD`, `DEBR`, `IMGS`, `IMAD`, `LGTM`, `GDRY`, `LENS`, `MOVT`, `STAG`, `NOCM`, `LAYR`, `OVIS`, `PKIN`. | Medium per type, controlled by evidence | Fewer plugins blocked by base-object types. |
 | **6. Group structure** | Parent context in the index; nested-group writing; tests that round-trip cells and dialogue topics byte-for-byte. Still no compiling of these types. | Medium: core reader and writer | Foundation for any future world or quest work. |

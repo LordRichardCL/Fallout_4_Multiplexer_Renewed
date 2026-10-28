@@ -1377,3 +1377,64 @@ TEST(types_that_are_not_merged_are_classified_record_by_record)
         CHECK(p.conflicts()->byType[4] >= 1);
     }
 }
+
+// Cleaning report: ITMs that undo changes, deleted references, navmeshes and records, injected
+// records and circular leveled lists. Reporting only.
+TEST(cleaning_report_findings)
+{
+    auto root = buildInstall("cleaning");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModW.esm", {"Fallout4.esm"},
+                {record("REFR", 0x01000800, {raw("NAME", {0, 0, 0, 0})}),
+                 record("NAVM", 0x01000801, {raw("NVNM", std::vector<uint8_t>(8, 0))}),
+                 record("KYWD", 0x01000802, {zs("EDID", "ModW_Keyword")}),
+                 record("LVLI", 0x01000803, {zs("EDID", "ListA"), raw("LLCT", {1}), lvlo(1, 0x01000804, 1)}),
+                 record("LVLI", 0x01000804, {zs("EDID", "ListB"), raw("LLCT", {1}), lvlo(1, 0x01000803, 1)})},
+                ESM);
+    writePlugin(data / "ModD.esp", {"Fallout4.esm", "ModW.esm"},
+                {record("REFR", 0x01000800, {}, RecordFlags::Deleted),
+                 record("NAVM", 0x01000801, {}, RecordFlags::Deleted),
+                 record("KYWD", 0x01000802, {}, RecordFlags::Deleted),
+                 // A new record in ModW's FormID range that ModW does not have.
+                 record("KYWD", 0x01000900, {zs("EDID", "Injected_Keyword")})});
+    // Repeats Fallout4.esm's form list unchanged but loads after ModB, which added to it.
+    writePlugin(data / "ModI.esp", {"Fallout4.esm"},
+                {record("FLST", 0x00001100, {zs("EDID", "WeaponList"), formIds("LNAM", {0x1000})})});
+    writeFile(root / "plugins.txt", "*ModW.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModD.esp\n*ModI.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    auto& s = p.session();
+
+    std::map<std::string, std::vector<const DependencyIssue*>> found;
+    for (const auto& is : p.dependencies()->issues)
+        if (is.cleaning) {
+            found[is.category].push_back(&is);
+            CHECK(!is.cause.empty());
+        }
+    auto one = [&](const char* category, const char* plugin) -> const DependencyIssue* {
+        for (const auto* is : found[category])
+            if (is->plugin == s.findPlugin(plugin)->index)
+                return is;
+        return nullptr;
+    };
+    const auto* undo = one("Identical to Master (undoes changes)", "ModI.esp");
+    CHECK(undo && undo->severity == Severity::Warning);
+    CHECK(one("Identical to Master (summary)", "ModI.esp") != nullptr);
+    const auto* ref = one("Deleted Reference", "ModD.esp");
+    CHECK(ref && ref->severity == Severity::Warning);
+    CHECK(ref->cause.find("Undelete and Disable") != std::string::npos);
+    CHECK(one("Deleted Navmesh", "ModD.esp") != nullptr);
+    CHECK(one("Deleted Record", "ModD.esp") != nullptr);
+    const auto* injected = one("Injected Record", "ModD.esp");
+    CHECK(injected && injected->message.find("belongs to ModW.esm") != std::string::npos);
+    CHECK_EQ(found["Circular Leveled List"].size(), size_t(1));
+    const auto* cycle = found["Circular Leveled List"].front();
+    CHECK(cycle->severity == Severity::Error);
+    CHECK(cycle->message.find("ListA") != std::string::npos && cycle->message.find("ListB") != std::string::npos);
+    // Nothing else is flagged: the unmodified fixture plugins have no deleted or injected records.
+    CHECK(one("Deleted Reference", "ModA.esp") == nullptr);
+    CHECK(one("Injected Record", "ModA.esp") == nullptr);
+}

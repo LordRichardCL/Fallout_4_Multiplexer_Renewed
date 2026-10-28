@@ -8,6 +8,7 @@
 #include "widgets/Widgets.hpp"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -15,6 +16,7 @@
 #include <QSplitter>
 #include <QLineEdit>
 #include <QSet>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSqlQuery>
 #include <QTabWidget>
@@ -143,6 +145,44 @@ DependenciesPage::DependenciesPage(AppController* app, QWidget* parent) : Page(a
                                    .arg(v(0), v(1), v(2), v(3), v(4), v(5).isEmpty() ? "—" : v(5)));
     });
 
+    // Cleaning report
+    auto* cleaningTab = new QWidget;
+    auto* cl = new QVBoxLayout(cleaningTab);
+    cl->setContentsMargins(0, 8, 0, 0);
+    auto* cleaningBar = new QHBoxLayout;
+    auto* cleaningNote = new QLabel("Mod-cleaning checks as described in the xEdit documentation. Reporting only: no "
+                                    "plugin is changed. Findings in official files are informational.");
+    cleaningNote->setWordWrap(true);
+    cleaningNote->setStyleSheet("color:#8aa196");
+    cleaningCategory_ = new QComboBox;
+    cleaningCategory_->setMinimumWidth(240);
+    cleaningBar->addWidget(cleaningNote, 1);
+    cleaningBar->addWidget(cleaningCategory_);
+    cl->addLayout(cleaningBar);
+    cleaning_ = new QTableView;
+    styleTable(cleaning_);
+    cleaningModel_ = new SqlModel(this);
+    cleaningModel_->setStatusColumns({0});
+    cleaning_->setModel(cleaningModel_);
+    cleaningDetails_ = new QTextBrowser;
+    cleaningDetails_->setMaximumHeight(170);
+    cleaningDetails_->setHtml("<p style='color:#8aa196'>Select a row to see the full finding and what to do about it.</p>");
+    auto* cleaningSplit = new QSplitter(Qt::Vertical);
+    cleaningSplit->addWidget(cleaning_);
+    cleaningSplit->addWidget(cleaningDetails_);
+    cleaningSplit->setStretchFactor(0, 4);
+    cleaningSplit->setStretchFactor(1, 1);
+    cl->addWidget(cleaningSplit, 1);
+    tabs_->addTab(cleaningTab, "Cleaning");
+    connect(cleaningCategory_, &QComboBox::currentIndexChanged, this, [this] { loadCleaning(); });
+    connect(cleaning_->selectionModel(), &QItemSelectionModel::currentRowChanged, this, [this](const QModelIndex& i) {
+        if (i.row() < 0)
+            return;
+        auto v = [&](int c) { return cleaningModel_->value(i.row(), c).toString().toHtmlEscaped(); };
+        cleaningDetails_->setHtml(QString("<p><b>%1 · %2</b> · %3 %4</p><p>%5</p><p><b>Likely cause and fix:</b> %6</p>")
+                                      .arg(v(0), v(1), v(2), v(3), v(4), v(5).isEmpty() ? "—" : v(5)));
+    });
+
     connect(pluginSearch_, &QLineEdit::returnPressed, this, [this] {
         if (neighbourhoodOnly_->isChecked()) {
             focusPlugin_ = pluginSearch_->text().trimmed();
@@ -179,10 +219,48 @@ void DependenciesPage::refresh()
     issuesModel_->load(app_->readDb(),
                        "SELECT severity AS Severity, category AS Category, p.name AS Plugin, form_id AS FormID, "
                        "message AS Details, cause AS 'Likely Cause' FROM DependencyIssues d LEFT JOIN Plugins p "
-                       "ON p.id = d.plugin_id ORDER BY CASE severity WHEN 'Error' THEN 0 WHEN 'Warning' THEN 1 ELSE 2 "
+                       "ON p.id = d.plugin_id WHERE COALESCE(d.cleaning, 0) = 0 ORDER BY CASE severity WHEN 'Error' THEN 0 WHEN 'Warning' THEN 1 ELSE 2 "
                        "END, CASE WHEN category LIKE '%summary%' THEN 0 ELSE 1 END, p.load_order LIMIT 100000");
     fitColumns(issues_, 640);
     tabs_->setTabText(2, QString("Missing Requirements && Breakages (%1)").arg(issuesModel_->rowCount()));
+
+    // Category list with counts; keep the current choice when it still exists.
+    const QString current = cleaningCategory_->currentData().toString();
+    QSignalBlocker block(cleaningCategory_);
+    cleaningCategory_->clear();
+    qint64 total = 0;
+    QList<QPair<QString, qint64>> categories;
+    QSqlQuery q(app_->readDb());
+    q.exec("SELECT category, COUNT(*) FROM DependencyIssues WHERE cleaning = 1 GROUP BY category ORDER BY category");
+    while (q.next()) {
+        categories.append({q.value(0).toString(), q.value(1).toLongLong()});
+        total += q.value(1).toLongLong();
+    }
+    cleaningCategory_->addItem(QString("All findings (%1)").arg(formatCount(total)), QString());
+    for (const auto& [name, count] : categories)
+        cleaningCategory_->addItem(QString("%1 (%2)").arg(name, formatCount(count)), name);
+    cleaningCategory_->setCurrentIndex(std::max(0, cleaningCategory_->findData(current)));
+    tabs_->setTabText(3, QString("Cleaning (%1)").arg(formatCount(total)));
+    loadCleaning();
+}
+
+void DependenciesPage::loadCleaning()
+{
+    const QString category = cleaningCategory_->currentData().toString();
+    QVariantList binds;
+    QString where = "d.cleaning = 1";
+    if (!category.isEmpty()) {
+        where += " AND d.category = ?";
+        binds << category;
+    }
+    cleaningModel_->load(app_->readDb(),
+                         "SELECT severity AS Severity, category AS Category, p.name AS Plugin, form_id AS FormID, "
+                         "message AS Details, cause AS 'Likely Cause and Fix' FROM DependencyIssues d LEFT JOIN Plugins p "
+                         "ON p.id = d.plugin_id WHERE " + where +
+                             " ORDER BY CASE severity WHEN 'Error' THEN 0 WHEN 'Warning' THEN 1 ELSE 2 END, "
+                             "CASE WHEN category LIKE '%summary%' THEN 1 ELSE 0 END, category, p.load_order LIMIT 100000",
+                         binds);
+    fitColumns(cleaning_, 640);
 }
 
 void DependenciesPage::buildPluginGraph()

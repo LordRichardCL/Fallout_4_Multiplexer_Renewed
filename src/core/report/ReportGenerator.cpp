@@ -332,18 +332,28 @@ std::string dependencyHtml(const ReportContext& ctx)
     }
     h.tableEnd(s.loadOrder.size(), s.loadOrder.size());
 
-    if (ctx.dependencies && !ctx.dependencies->issues.empty()) {
-        h.h2("Missing requirements and potential breakages");
+    for (bool cleaning : {false, true}) {
+        if (!ctx.dependencies)
+            break;
+        std::vector<const DependencyIssue*> list;
+        for (const auto& is : ctx.dependencies->issues)
+            if (is.cleaning == cleaning)
+                list.push_back(&is);
+        if (list.empty())
+            continue;
+        h.h2(cleaning ? "Cleaning report (as in xEdit: reporting only, plugins are never changed)"
+                      : "Missing requirements and potential breakages");
         h.tableStart({"Severity", "Category", "Plugin", "Details", "Likely Cause"});
         size_t shown = 0;
-        for (const auto& is : ctx.dependencies->issues) {
-            if (shown++ >= ctx.maxRows)
+        for (const auto* is : list) {
+            if (shown >= ctx.maxRows)
                 break;
-            h.row({severityName(is.severity), is.category, s.pluginName(is.plugin), is.message,
-                   is.cause.empty() ? diagnosis::forCategory(is.category, is.message) : is.cause},
-                  {severityName(is.severity)});
+            ++shown;
+            h.row({severityName(is->severity), is->category, s.pluginName(is->plugin), is->message,
+                   is->cause.empty() ? diagnosis::forCategory(is->category, is->message) : is->cause},
+                  {severityName(is->severity)});
         }
-        h.tableEnd(std::min(ctx.maxRows, ctx.dependencies->issues.size()), ctx.dependencies->issues.size());
+        h.tableEnd(shown, list.size());
     }
     return h.finish();
 }
@@ -564,6 +574,7 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
                 o.set("plugin", s->pluginName(is.plugin));
                 o.set("message", is.message);
                 o.set("cause", is.cause.empty() ? diagnosis::forCategory(is.category, is.message) : is.cause);
+                o.set("cleaning", is.cleaning);
                 issues.push(o);
             }
             root.set("issues", issues);

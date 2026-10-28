@@ -103,6 +103,19 @@ Select a record to see the override chain and a grid of every field per plugin:
 
 ![Record details](images/15-record-details.png)
 - **Missing Requirements & Breakages**: missing masters and references to records that do not exist. These are problems in the mods themselves, typically a patch made for a different version of the mod it patches, or a record a mod removed in an update. The game reads such a reference as "none". Compiling keeps that behaviour: the reference is written as none and listed under **Broken in Source** on the Validation page, and the plugin is compiled normally.
+- **Cleaning**: the mod-cleaning checks described in the xEdit documentation (chapter 7), for every plugin in your load order. **The app only reports these; it never changes a plugin.** Choose a category at the top right; select a row for the likely cause and the usual fix.
+  - **Identical to Master (undoes changes)** (Warning): a record saved unchanged from the plugin's masters that loads after plugins that did change it, so their changes are lost. Clean the plugin's ITMs in xEdit, or load it earlier.
+  - **Identical to Master (summary)** (Info): how many unchanged records each plugin has, with examples. Usually harmless.
+  - **Deleted Reference** (Warning): a placed object or NPC deleted from a master. A significant cause of crashes; xEdit fixes it with *Undelete and Disable References*.
+  - **Deleted Navmesh** (Warning): can crash the game and needs manual cleaning.
+  - **Deleted Record** (Info): another record type deleted from a master.
+  - **Injected Record** (Info): a new record in another plugin's FormID range. Sometimes deliberate.
+  - **Circular Leveled List** (Error): leveled lists that contain each other, directly or through others. The game can loop forever when it resolves them.
+  - Findings in the base game, DLC and Creation Club files are always **Info**: the xEdit documentation says not to correct errors in official files.
+
+  Identical-to-master records are measured against the plugin's own masters' version, as xEdit does. For record types that are not merged, the comparison is byte by byte. With field comparison on (Settings), an override whose bytes differ only because of master order or compression is still recognised as identical. Otherwise such a record is not counted as identical.
+
+![Cleaning report](images/16-cleaning.png)
 
 ## 5. Compile
 

@@ -84,6 +84,7 @@ void DatabaseWriter::initSchema()
     ensureColumn("EligibilityBlockers", "support");
     ensureColumn("Conflicts", "preserved", "INTEGER");
     ensureColumn("Plugins", "support");
+    ensureColumn("DependencyIssues", "cleaning", "INTEGER");
     setMeta("schema_version", std::to_string(kSchemaVersion));
 }
 
@@ -387,7 +388,8 @@ void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport&
         d.run();
     }
     auto di = db_.prepare(
-        "INSERT INTO DependencyIssues(severity, category, plugin_id, form_id, message, cause) VALUES(?,?,?,?,?,?)");
+        "INSERT INTO DependencyIssues(severity, category, plugin_id, form_id, message, cause, cleaning) "
+        "VALUES(?,?,?,?,?,?,?)");
     for (const auto& is : deps.issues) {
         di.bind(1, severityName(is.severity)).bind(2, is.category);
         if (is.plugin == kInvalidPlugin)
@@ -396,6 +398,7 @@ void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport&
             di.bind(3, is.plugin);
         di.bind(4, is.form.valid() ? session.loadOrderFormId(is.form) : std::string()).bind(5, is.message);
         di.bind(6, is.cause.empty() ? diagnosis::forCategory(is.category, is.message) : is.cause);
+        di.bind(7, is.cleaning ? 1 : 0);
         di.run();
     }
     db_.exec("DELETE FROM EligibilityBlockers;");

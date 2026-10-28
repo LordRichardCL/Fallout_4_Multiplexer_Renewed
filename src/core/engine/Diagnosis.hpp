@@ -19,4 +19,8 @@ std::string missingReference(const Session& session, PluginIndex source, FormKey
 // when there is nothing useful to add beyond the message.
 std::string forCategory(const std::string& category, const std::string& message);
 
+// The likely cause and the usual fix for a mod-cleaning finding (terms as in the xEdit documentation).
+// `official`: the finding is in the base game, a DLC or Creation Club content.
+std::string forCleaning(const std::string& category, bool official);
+
 } // namespace fo4mx::diagnosis

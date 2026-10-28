@@ -3,6 +3,7 @@
 #include "pages/Page.hpp"
 
 class QCheckBox;
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QSpinBox;
@@ -41,6 +42,11 @@ private:
     QTextBrowser* issueDetails_;
     QTableView* issues_;
     SqlModel* issuesModel_;
+    QTableView* cleaning_;
+    SqlModel* cleaningModel_;
+    QComboBox* cleaningCategory_;
+    QTextBrowser* cleaningDetails_;
+    void loadCleaning();
     QString focusPlugin_;
 };
 

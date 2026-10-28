@@ -104,6 +104,17 @@ For each override chain, `MergeEngine::merge` compares every plugin's fields wit
 
 Chains whose overrides are all byte-identical to the base are reported as ITMs, not conflicts; with field analysis, an override identical to its own masters' version is an ITM. Every field carries per-plugin cell status (Base, Same, Winning, Merged, Replaced) and the compiled result. The Conflict Centre renders exactly this.
 
+## Cleaning report
+
+`engine/CleaningEngine` runs after conflict and dependency analysis and adds findings to the dependency report (marked `cleaning`, stored with `DependencyIssues.cleaning = 1`):
+
+- **ITMs** come from the conflict analysis: overrides identical to the version they were made against (`ConflictReport::itms`). An ITM that is the winner of a chain other plugins changed *undoes changes* (Warning); the rest are summarised per plugin (Info).
+- **Deleted overrides** (the master's version is not deleted) are classified by the catalogue as Deleted Reference (Placed References category), Deleted Navmesh (`NAVM`) or Deleted Record.
+- **Injected records**: the first version of a record is not in the plugin its FormID names.
+- **Circular leveled lists**: strongly connected components (Tarjan) of the `LVLO` references between winning `LVLI`/`LVLN` records (`Session::recordEdges`). `LVSP` is not described yet, so it is not checked.
+
+Findings in official files (base game, DLC, Creation Club) are Info. Likely causes come from `diagnosis::forCleaning`. The app never edits a plugin.
+
 ## Eligibility
 
 A plugin is compiled only if disabling it and loading the outputs reproduces it exactly (`DependencyEngine::evaluateEligibility`):

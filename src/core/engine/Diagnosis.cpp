@@ -95,4 +95,37 @@ std::string forCategory(const std::string& category, const std::string& message)
     return {};
 }
 
+std::string forCleaning(const std::string& category, bool official)
+{
+    if (official)
+        return "Official file: the xEdit documentation says there are errors in the official DLCs and not to correct "
+               "them. Nothing to do.";
+    if (category == "Identical to Master (undoes changes)")
+        return "A dirty edit: the plugin saved a record without changing it (usually a Creation Kit side effect), and "
+               "because it loads after other plugins that did change it, their changes are lost. Cleaning ITMs in "
+               "xEdit (with only this plugin's masters loaded) removes it; or load this plugin earlier.";
+    if (category == "Identical to Master (summary)")
+        return "Records saved unchanged from the plugin's masters, usually by the Creation Kit. They are harmless "
+               "unless another plugin that changes the same record loads earlier (see 'undoes changes'). The mod "
+               "author can remove them with xEdit's Remove Identical To Master records.";
+    if (category == "Deleted Reference")
+        return "Deleted references are a significant cause of crashes: a plugin that edits the reference cannot find "
+               "it. xEdit fixes them automatically (Undelete and Disable References: the reference is restored, set "
+               "Initially Disabled and moved below the world).";
+    if (category == "Deleted Navmesh")
+        return "Deleting navmeshes can crash the game and cannot be fixed automatically: it needs manual cleaning in "
+               "xEdit or the Creation Kit, or a version of the mod that does not delete it.";
+    if (category == "Deleted Record")
+        return "The plugin deletes a record from a master. A plugin that still uses or edits the record will find "
+               "nothing. Disabling or overriding is usually safer; check the mod's documentation.";
+    if (category == "Injected Record")
+        return "The plugin adds a record in another plugin's FormID range. Sometimes deliberate (so other mods can "
+               "refer to it without a new master), sometimes left over from an older version of that plugin. It "
+               "can clash if the other plugin later adds a record with the same FormID.";
+    if (category == "Circular Leveled List")
+        return "Leveled lists that contain each other, directly or through others. When the game resolves the list "
+               "it can loop forever and crash. Change one of the lists (or the load order) so the chain ends.";
+    return {};
+}
+
 } // namespace fo4mx::diagnosis

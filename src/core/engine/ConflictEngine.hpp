@@ -56,10 +56,19 @@ struct ConflictEntry {
     std::vector<ConflictField> fields;
 };
 
+// An override identical to the version it was made against (xEdit: Identical To Master).
+struct ItmRecord {
+    PluginIndex plugin = kInvalidPlugin;
+    FormKey key;
+    Signature sig;
+    bool cancelsChanges = false; // it is the winner and other plugins changed the record: loading last, it undoes them
+};
+
 struct ConflictReport {
     std::vector<ConflictEntry> entries;
     std::array<size_t, 5> byType{};
     size_t identicalOverrides = 0; // groups whose overrides are all ITMs
+    std::vector<ItmRecord> itms;   // every ITM override, in record order
     size_t analysedGroups = 0;
     size_t failedGroups = 0;
     size_t reusedGroups = 0; // restored from the build cache
