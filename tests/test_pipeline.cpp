@@ -1135,6 +1135,34 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
         CHECK(text.find("*ModWeap.esp") != std::string::npos); // stays enabled: it is the loader now
     }
 
+    // An output folder typed by hand with different letter case still counts as an MO2 mod.
+    {
+        auto typed = cfg;
+        typed.databasePath = root / "db2.sqlite";
+        typed.exportOptions.outputDirectory = inst / "MODS" / "Fallout 4 Multiplexer Output";
+        Pipeline q(typed);
+        q.scan();
+        q.analyse();
+        CHECK(q.compile());
+        CHECK(q.compiledOutput()->hasArchiveLoader(q.session().findPlugin("ModWeap.esp")->index));
+    }
+    // Outside the mods folder: no loaders, and validation says why.
+    {
+        auto outside = cfg;
+        outside.databasePath = root / "db3.sqlite";
+        outside.exportOptions.outputDirectory = root / "Elsewhere";
+        Pipeline q(outside);
+        q.scan();
+        q.analyse();
+        CHECK(q.compile());
+        CHECK(q.compiledOutput()->archiveLoaders.empty());
+        bool explained = false;
+        for (const auto& is : q.validation()->issues)
+            explained |= is.category == "Archive Loaders" &&
+                         is.message.find("is not inside Mod Organizer's mods folder") != std::string::npos;
+        CHECK(explained);
+    }
+
     // After switching over: the output mod wins in MO2 and ModWeap.esp is the loader. A rescan
     // still reads the original underneath and does not treat the outputs as sources.
     writeFile(inst / "profiles" / "Default" / "modlist.txt", "+Fallout 4 Multiplexer Output\n+ModWeap\n+ModStay\n");

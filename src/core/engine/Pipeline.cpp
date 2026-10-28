@@ -196,13 +196,34 @@ bool Pipeline::compile(ProgressSink& progress)
                                ? Exporter::defaultOutputDirectory(*session_)
                                : config_.exportOptions.outputDirectory;
     std::string outputMod;
-    if (config_.archiveLoaders && session_->install.config.kind == InstallKind::ModOrganizer2 &&
-        !session_->install.modsPath.empty()) {
-        auto rel = std::filesystem::path(outputDir).lexically_normal().lexically_relative(
-            session_->install.modsPath.lexically_normal());
-        if (!rel.empty() && *rel.begin() != ".." && *rel.begin() != ".") {
-            outputMod = pathToUtf8(*rel.begin());
+    std::string loadersOff; // why archive loaders are not used, for the validation report
+    if (!config_.archiveLoaders) {
+        loadersOff = "archive loaders are turned off";
+    } else if (session_->install.config.kind != InstallKind::ModOrganizer2) {
+        loadersOff = std::string("the install is managed by ") + installKindName(session_->install.config.kind) +
+                     ", where a loader would overwrite the original plugin in Data (Mod Organizer 2 only)";
+    } else if (session_->install.modsPath.empty()) {
+        loadersOff = "Mod Organizer's mods folder is unknown";
+    } else {
+        // Windows paths differ in letter case and slash direction between MO2's INI and a folder
+        // picked by hand: compare them normalised.
+        auto norm = [](const std::filesystem::path& p) {
+            std::string g = toLower(pathToUtf8(std::filesystem::path(p).lexically_normal().generic_u8string()));
+            while (g.size() > 1 && g.back() == '/')
+                g.pop_back();
+            return g;
+        };
+        std::string mods = norm(session_->install.modsPath) + "/";
+        std::string out = norm(outputDir);
+        if (out.rfind(mods, 0) == 0 && out.size() > mods.size()) {
+            std::string rest = pathToUtf8(std::filesystem::path(outputDir).lexically_normal().generic_u8string());
+            rest = rest.substr(rest.size() - (out.size() - mods.size())); // original spelling
+            outputMod = rest.substr(0, rest.find('/'));
             options.archiveLoaders = true;
+        } else {
+            loadersOff = "the output folder (" + pathToUtf8(outputDir) + ") is not inside Mod Organizer's mods folder (" +
+                         pathToUtf8(session_->install.modsPath) +
+                         "); leave Output folder empty in Setup to use the default MO2 output mod";
         }
     }
     std::map<std::string, std::string> isolatedPatchRecords; // record label -> finding
@@ -285,6 +306,10 @@ bool Pipeline::compile(ProgressSink& progress)
     }
 
     archiveChanges_ = ValidationEngine::checkArchivePriority(*session_, *compiled_);
+    if (!loadersOff.empty() && !compiled_->archivesToRegister.empty())
+        validation_->fail(Severity::Info, "Archive Loaders",
+                          "Archive loaders are not used because " + loadersOff + ". Compiled plugins' archives are "
+                          "added to the INI list instead (Apply to Game).");
     if (!archiveChanges_.empty()) {
         validation_->fail(Severity::Warning, "Archive Priority",
                           std::to_string(archiveChanges_.size()) +
