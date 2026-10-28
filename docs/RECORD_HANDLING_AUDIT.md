@@ -5,7 +5,7 @@ An audit of how the application recognises, parses, analyses and merges Fallout 
 **Sources:**
 - **The codebase**, as of commit `f3438fb`.
 - **The record list from the current xEdit Fallout 4 definitions** (`resources/fallout4_xedit_record_types.csv`, 138 record types plus the `TES4` header). This is the primary reference for which record types exist.
-- **The xEdit documentation** (<https://tes5edit.github.io/docs/>), as a reference for conflict and cleaning concepts. It could not be read during this audit: the host is not in this session's allowed network domains. Statements about xEdit practice below use only long-established, widely known concepts (override, ITM, deleted records and UDRs, injected records, winning and losing overrides). Each is marked *(check against xEdit docs)* so it can be verified once the site is reachable.
+- **The xEdit documentation** (<https://tes5edit.github.io/docs/>), as a secondary reference for conflict and cleaning concepts. Read from its source (`github.com/TES5Edit/docs`): chapters 5 (Conflict Detection and Resolution), 6 (The Method), 7 (Mod Cleaning and Error Checking), 8 (Managing Mod Files) and 13 (Scripting Functions). See [xEdit documentation check](#xedit-documentation-check).
 
 ## Summary
 
@@ -102,12 +102,12 @@ Rules:
 
 1. **One catalogue** loaded from the data file, replacing the names list, the writer's group order, `typeRank` and the asset path table. One source of truth.
 2. **Honest conflict analysis per support level.** Types without a layout get record-level classification:
-   - Identical to master *(ITM)*;
+   - Identical to master *(ITM: identical to the version in the plugin's own masters)*;
    - Override (one changer);
    - Conflict (several plugins change it).
 
    There is no "Compatible Merge" and no "Compiled Result" for them, and the Conflict Centre says *"Not merged: this record type is preserved as is"*.
-3. **Cleaning and error checks as reports** *(check against xEdit docs)*:
+3. **Cleaning and error checks as reports** (terms as defined in xEdit docs chapter 7):
    - ITMs per plugin (the data exists);
    - deleted references (UDR candidates: deleted `REFR`/`ACHR`/`PGRE`/`PHZD`);
    - deleted navmeshes;
@@ -123,6 +123,33 @@ Rules:
 
    This is the process already used for tier 1.
 
+## xEdit documentation check
+
+What the xEdit documentation confirms or changes in this audit.
+
+| Concept | xEdit documentation | Effect here |
+|---|---|---|
+| **Override vs conflict** | An override changes a master's record and is normal. A *conflict* needs a master and at least two overrides that change different things, so the last one loaded discards the other's change (ch. 5.2). Ten plugins can override one record without a conflict if the last one carries all the changes. | Matches the existing Simple Override / Compatible Merge / Hard Conflict split. |
+| **What an override changed** | The conflict algorithm (ch. 5.10) compares each override with the version in **its own masters**: the last of its masters that overrides the record ("CurrentMaster"), not the original record. List entries present only in the override are additions; entries present only in that master version are removals. | **Fixed in this change** (see below). |
+| **ITM** | Identical to Master: the plugin repeats its master's version without a change (ch. 7.5.2, glossary). A record identical to its master that is also the conflict winner ("ITM but conflict winner") is not cleaned. ITMs are only meaningful with the plugin's masters loaded and nothing else (ch. 7.4.1). | ITMs are now measured against the plugin's own masters. The stage 3 report lists ITMs per plugin and never suggests removing one that wins a conflict. |
+| **Deleted references (UDRs)** | Deleted references are "a significant cause of crashes". xEdit's fix is to undelete, set Initially Disabled and move to Z = -30,000 (ch. 7.5.3). | Stage 3 reports them; the app does not edit plugins, so the report names the xEdit fix. |
+| **Deleted navmeshes** | Can cause crashes and cannot be fixed automatically: manual cleaning only (ch. 7.5.4). | Reported as a warning with that explanation. |
+| **Wild edits** | Unintended edits; need the mod's intent to detect, so manual only (ch. 7.5.5). | Not detectable automatically. Not planned. |
+| **Unresolved references** | "Very serious"; must be fixed by the mod author, not the user (ch. 7.4.13). | Matches the existing **Broken in Source** handling and likely-cause text. |
+| **Official DLC errors** | "There are errors in the official DLCs. Do not attempt to correct them." (ch. 7.4.13). | Findings in base-game and DLC masters are shown as informational, never as errors. |
+| **Injected records** | Only described through the scripting API (`IsInjected`, ch. 13), without a definition. | Stage 3 uses the established meaning (a new FormID claiming a master that does not define it) and labels it as such. |
+| **Circular leveled lists** | Can hang or crash the game; xEdit can detect them (ch. 7.4.14). | Added to stage 3: a cycle check over `LVLI`/`LVLN` (and `LVSP` when described) entries. |
+| **Merged patch** | xEdit's own merged patch is obsolete and unsupported; it merged `LVLI`, `LVLN`, `LVSP`, `CONT`, `FACT`, `RACE`, `FLST`, `NPC_` (ch. 5.9). | Our patch covers the described types among these. `RACE`, `NPC_` and `LVSP` stay tier 2. |
+
+### Fixed: overrides are compared with their own masters' version
+
+Until now every override was compared with the **original record** (the first definition). A plugin made with another override as its master was misread:
+- A compatibility patch that **removes** an item its master added (a keyword, a leveled list entry, a form list entry) was treated as making no change for that item, so the merge put the item back.
+- A plugin that deliberately **reverts** a value its master changed was treated as identical to the base, so the master's change won in the merged result.
+- A plugin that only repeats its master's change was counted as a separate changer, which could report a false conflict.
+
+Merging now follows the xEdit algorithm: each override's changes are what differs from the last earlier override among its own (direct or indirect) masters, or the original record when there is none. A later plugin made against an earlier one's version supersedes it rather than conflicting with it. Chains in which no override has another override as master merge exactly as before. The build cache format version was raised so no merge computed the old way is reused.
+
 ## Staged plan
 
 Each stage ships separately, keeps every existing test passing, and changes no merge behaviour for the 61 supported types unless stated.
@@ -131,7 +158,8 @@ Each stage ships separately, keeps every existing test passing, and changes no m
 |---|---|---|---|
 | **1. Catalogue** | Load the xEdit list into `RecordDefinitions` with name, category, placement and support columns. Replace the names list, the writer group order, `typeRank` and the asset table with catalogue data. Report unknown signatures separately. Read Editor IDs for compressed records of every type. | Low: data and display only | Every one of the 138 types is recognised and named. Blocking Types and reports show categories. |
 | **2. Honest analysis** | Conflict classification by support level (record level without a layout). Conflict Centre and reports say "preserved, not merged" for those types. A **support level** column on the Plugins page and in exports. | Low: display and classification only | No more implied merges for types the app does not understand. |
-| **3. Cleaning reports** | ITM, UDR-candidate, deleted-navmesh and injected-record findings per plugin, with likely causes *(terminology to check against xEdit docs)*. | Low: reporting only | Error-checking parity with the usual pre-merge checks. |
+| **0. Merge against own masters** *(done)* | See [the fix above](#fixed-overrides-are-compared-with-their-own-masters-version). | Corrects merges where patches remove or revert their master's edits | Merge results match what each plugin's author intended. |
+| **3. Cleaning reports** | ITM, UDR-candidate, deleted-navmesh, injected-record and circular leveled list findings per plugin, with likely causes (terms as in xEdit docs chapter 7). Findings in official master files are informational only. | Low: reporting only | Error-checking parity with the usual pre-merge checks. |
 | **4. Winner-only strategy** | For types confirmed to be single-value records, a merge strategy that takes the winning override whole: no field merging, still compiled. Candidates must still pass the definition check and have every FormID located. | Medium: only for types with full FormID coverage | More plugins compile without field-level merge risk. |
 | **5. Next layouts by evidence** | Describe further types in the order **Plugins → Blocking Types** ranks them across real load orders. Each needs a definition check on your data and tests. Likely early candidates (check against the xEdit Fallout 4 definitions, not assumed): `AACT`, `DOBJ`, `COLL`, `SNCT`, `SOPM`, `ASPC`, `REVB`, `AECH`, `ANIO`, `BPTD`, `DEBR`, `IMGS`, `IMAD`, `LGTM`, `GDRY`, `LENS`, `MOVT`, `STAG`, `NOCM`, `LAYR`, `OVIS`, `PKIN`. | Medium per type, controlled by evidence | Fewer plugins blocked by base-object types. |
 | **6. Group structure** | Parent context in the index; nested-group writing; tests that round-trip cells and dialogue topics byte-for-byte. Still no compiling of these types. | Medium: core reader and writer | Foundation for any future world or quest work. |

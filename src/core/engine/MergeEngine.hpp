@@ -20,7 +20,7 @@ const char* cellStatusName(CellStatus s);
 struct FieldAnalysis {
     std::string key;
     std::string label;
-    std::vector<size_t> changers; // chain indices whose value differs from the base
+    std::vector<size_t> changers; // chain indices whose value differs from the version they were made against
     bool hard = false;            // two or more changers disagree
     bool listField = false;
     size_t source = 0;            // chain index that supplies the merged value
@@ -31,7 +31,7 @@ struct FieldAnalysis {
 struct ChainAnalysis {
     std::vector<FieldAnalysis> fields; // only fields some plugin changed
     std::vector<size_t> changers;      // chain indices that changed anything
-    std::vector<size_t> itms;          // chain indices identical to the base
+    std::vector<size_t> itms;          // chain indices identical to the version they were made against
     bool hard = false;
     bool winnerLosesChanges = false;   // last-plugin-wins discards someone's edit
 };
@@ -39,6 +39,9 @@ struct ChainAnalysis {
 struct MergeOptions {
     bool mergeCompatible = true; // false = last plugin wins
     int forcedWinner = -1;       // chain index chosen by the user, or -1
+    // Per chain entry, the earlier entry it was made against (Session::overrideParents). A plugin's
+    // changes are what differs from that version, as in xEdit. Empty: every entry against chain[0].
+    std::vector<size_t> parents;
 };
 
 struct MergeResult {

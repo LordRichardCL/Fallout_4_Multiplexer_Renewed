@@ -14,7 +14,7 @@ namespace fo4mx {
 
 namespace {
 
-constexpr uint32_t kFormatVersion = 1;
+constexpr uint32_t kFormatVersion = 2; // 2: overrides merged against their own masters' version
 
 const char* kCacheSchema = R"SQL(
 CREATE TABLE IF NOT EXISTS Info (key TEXT PRIMARY KEY, value TEXT);

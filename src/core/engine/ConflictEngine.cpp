@@ -81,7 +81,9 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
     for (const auto& i : inst)
         chain.push_back(splitFields(norm.normalize(i), session.defs));
 
-    MergeResult merged = MergeEngine::merge(chain);
+    MergeOptions mo;
+    mo.parents = session.overrideParents(inst);
+    MergeResult merged = MergeEngine::merge(chain, mo);
     const ChainAnalysis& a = merged.analysis;
     e.fieldsAnalysed = true;
     e.winnerLosesChanges = a.winnerLosesChanges;

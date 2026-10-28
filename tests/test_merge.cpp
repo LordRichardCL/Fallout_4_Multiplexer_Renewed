@@ -157,3 +157,47 @@ TEST(merge_forced_winner_and_no_merge_mode)
         if (s.sig == Signature("DATA"))
             CHECK_EQ(int(s.bytes[0]), 10);
 }
+
+// Overrides are compared with the version they were made against (their own masters), as in xEdit.
+TEST(merge_against_own_master_version)
+{
+    auto base = weapon("P", {K(0, 1)}, 10);
+    auto modX = weapon("P", {K(0, 1), K(5, 0x800)}, 20);   // adds a keyword, raises the value
+    auto other = weapon("Other", {K(0, 1)}, 10);           // unrelated plugin renames it
+    auto patch = weapon("P", {K(0, 1)}, 10);               // has modX as master: removes and reverts both
+    MergeOptions mo;
+    mo.parents = {0, 0, 0, 1};
+
+    auto r = MergeEngine::merge({base, modX, other, patch}, mo);
+    CHECK(!r.analysis.hard); // the patch supersedes modX deliberately
+    const Field* kw = r.fields.find("array:KWDA");
+    CHECK(kw != nullptr);
+    CHECK_EQ(kw->items.size(), size_t(1)); // the patch's removal is kept
+    std::string fullText;
+    uint8_t value = 0;
+    for (const auto& s : joinFields(r.fields)) {
+        if (s.sig == Signature("FULL"))
+            fullText = reinterpret_cast<const char*>(s.bytes.data());
+        if (s.sig == Signature("DATA"))
+            value = s.bytes[0];
+    }
+    CHECK_EQ(int(value), 10);                    // the deliberate revert is kept
+    CHECK_EQ(fullText, std::string("Other"));    // and the unrelated change still merges in
+
+    // Without lineage everything is compared with the base: the patch looks like it changed nothing.
+    auto flat = MergeEngine::merge({base, modX, other, patch});
+    CHECK(std::find(flat.analysis.itms.begin(), flat.analysis.itms.end(), size_t(3)) != flat.analysis.itms.end());
+}
+
+TEST(merge_repeating_master_edit_is_itm)
+{
+    auto base = weapon("P", {}, 10);
+    auto dlc = weapon("P", {}, 20);
+    auto mod = weapon("P", {}, 20); // made with the DLC as master and changes nothing of its own
+    MergeOptions mo;
+    mo.parents = {0, 0, 1};
+    auto r = MergeEngine::merge({base, dlc, mod}, mo);
+    CHECK_EQ(r.analysis.itms.size(), size_t(1));
+    CHECK_EQ(r.analysis.itms[0], size_t(2));
+    CHECK_EQ(r.analysis.changers.size(), size_t(1));
+}

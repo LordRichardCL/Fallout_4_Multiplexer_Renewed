@@ -154,6 +154,7 @@ public:
     std::unordered_set<std::string> reactivate;
 
     BuildCache* cache = nullptr; // optional, owned by the pipeline
+    std::vector<std::vector<bool>> masterClosure; // [plugin][master], see computeMasterClosure
 
     bool scanned = false;
     bool assetsScanned = false;
@@ -173,6 +174,15 @@ public:
     // (Fallout4.esm object IDs below 0x800, e.g. PlayerRef 0x14), which no plugin stores.
     bool exists(FormKey key) const;
     const RecordInstance* winner(FormKey key) const;
+
+    // True when `master` is a direct or indirect master of `plugin`.
+    bool dependsOn(PluginIndex plugin, PluginIndex master) const;
+    // Precomputes dependsOn for every pair; call after the plugins' masters are resolved.
+    void computeMasterClosure();
+    // For each instance of a record: the earlier instance it was made against, i.e. the last
+    // earlier instance whose plugin is one of its masters (0, the defining record, otherwise).
+    // Entry 0 maps to itself. This is the version xEdit compares an override with.
+    std::vector<size_t> overrideParents(std::span<const RecordInstance> chain) const;
 
     // Global identity of a FormID as written in plugin `p`.
     FormKey resolve(const PluginInfo& p, uint32_t rawFormId) const;

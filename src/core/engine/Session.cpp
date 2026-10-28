@@ -100,6 +100,62 @@ bool Session::exists(FormKey key) const
     return findGroup(key) != nullptr;
 }
 
+bool Session::dependsOn(PluginIndex plugin, PluginIndex master) const
+{
+    if (plugin >= plugins.size() || master >= plugins.size() || plugin == master)
+        return false;
+    if (masterClosure.size() == plugins.size())
+        return masterClosure[plugin][master];
+    std::vector<PluginIndex> stack{plugin};
+    std::vector<bool> seen(plugins.size(), false);
+    while (!stack.empty()) {
+        PluginIndex p = stack.back();
+        stack.pop_back();
+        for (PluginIndex m : plugins[p].masters) {
+            if (m == master)
+                return true;
+            if (m < plugins.size() && !seen[m]) {
+                seen[m] = true;
+                stack.push_back(m);
+            }
+        }
+    }
+    return false;
+}
+
+void Session::computeMasterClosure()
+{
+    masterClosure.clear();
+    std::vector<std::vector<bool>> closure(plugins.size());
+    for (PluginIndex p = 0; p < plugins.size(); ++p) {
+        auto& reach = closure[p];
+        reach.assign(plugins.size(), false);
+        std::vector<PluginIndex> stack{p};
+        while (!stack.empty()) {
+            PluginIndex q = stack.back();
+            stack.pop_back();
+            for (PluginIndex m : plugins[q].masters)
+                if (m < plugins.size() && m != p && !reach[m]) {
+                    reach[m] = true;
+                    stack.push_back(m);
+                }
+        }
+    }
+    masterClosure = std::move(closure);
+}
+
+std::vector<size_t> Session::overrideParents(std::span<const RecordInstance> chain) const
+{
+    std::vector<size_t> parents(chain.size(), 0);
+    for (size_t c = 2; c < chain.size(); ++c)
+        for (size_t j = c - 1; j > 0; --j)
+            if (dependsOn(chain[c].plugin, chain[j].plugin)) {
+                parents[c] = j;
+                break;
+            }
+    return parents;
+}
+
 const RecordInstance* Session::winner(FormKey key) const
 {
     auto g = findGroup(key);

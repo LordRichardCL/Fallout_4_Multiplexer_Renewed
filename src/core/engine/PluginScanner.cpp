@@ -213,6 +213,7 @@ void PluginScanner::discoverPlugins(Session& session, ProgressSink& progress)
                 p.missingMasters.push_back(m.name + (mp->active ? " (loads after this plugin)" : " (not active)"));
         }
     }
+    session.computeMasterClosure();
     spdlog::info("Discovered {} plugins ({} active)", session.plugins.size(), session.loadOrder.size());
 }
 

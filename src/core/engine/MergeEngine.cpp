@@ -56,10 +56,37 @@ const Field* templateField(const std::vector<FieldSet>& chain, const std::string
     return nullptr;
 }
 
+// Which chain entry each entry was made against. An override's changes are what differs from that
+// version, so a patch that removes or reverts something its own master added is a change, and a
+// plugin that only repeats its master's edit is not.
+struct Lineage {
+    std::vector<size_t> parents;
+
+    Lineage(size_t n, const std::vector<size_t>& given) : parents(given)
+    {
+        if (parents.size() != n)
+            parents.assign(n, 0);
+        for (size_t c = 0; c < n; ++c)
+            if (parents[c] >= c)
+                parents[c] = 0;
+    }
+    size_t parent(size_t c) const { return parents[c]; }
+    // True when b was made with a's version in its masters.
+    bool isAncestor(size_t a, size_t b) const
+    {
+        while (b != 0) {
+            b = parents[b];
+            if (b == a)
+                return true;
+        }
+        return false;
+    }
+};
+
 // Merges list fields: start with the base items and replay every changer's
-// additions and removals in load order.
+// additions and removals (against the version it was made against) in load order.
 Field mergeList(const std::vector<const Field*>& values, const std::vector<size_t>& changers, const Field& shape,
-                bool& hard)
+                const Lineage& lineage, bool& hard)
 {
     Field result = shape;
     result.items.clear();
@@ -81,34 +108,37 @@ Field mergeList(const std::vector<const Field*>& values, const std::vector<size_
                 if (keyed.emplace(k, std::make_pair(it, size_t(0))).second)
                     order.push_back(k);
             }
-        std::map<FormKey, ListItem> baseValues;
-        if (base)
-            for (const auto& it : base->items)
-                baseValues.emplace(itemKey(it), it);
 
         for (size_t c : changers) {
             const Field* v = values[c];
+            const Field* parent = values[lineage.parent(c)];
+            std::map<FormKey, ListItem> parentValues;
+            if (parent)
+                for (const auto& it : parent->items)
+                    parentValues.emplace(itemKey(it), it);
             std::set<FormKey> present;
             if (v) {
                 for (const auto& it : v->items) {
                     auto k = itemKey(it);
                     present.insert(k);
-                    auto bit = baseValues.find(k);
-                    bool changed = bit == baseValues.end() || !itemEquivalent(bit->second, it);
+                    auto pit = parentValues.find(k);
+                    bool changed = pit == parentValues.end() || !itemEquivalent(pit->second, it);
                     if (!changed)
                         continue;
                     auto cur = keyed.find(k);
                     if (cur == keyed.end()) {
                         keyed.emplace(k, std::make_pair(it, c));
-                        order.push_back(k);
+                        if (std::find(order.begin(), order.end(), k) == order.end())
+                            order.push_back(k);
                     } else {
-                        if (cur->second.second != 0 && !itemEquivalent(cur->second.first, it))
+                        size_t setBy = cur->second.second;
+                        if (setBy != 0 && !itemEquivalent(cur->second.first, it) && !lineage.isAncestor(setBy, c))
                             hard = true;
                         cur->second = {it, c};
                     }
                 }
             }
-            for (const auto& [k, _] : baseValues)
+            for (const auto& [k, _] : parentValues)
                 if (!present.count(k))
                     keyed.erase(k);
         }
@@ -123,20 +153,21 @@ Field mergeList(const std::vector<const Field*>& values, const std::vector<size_
     // Set / Multiset.
     for (size_t c : changers) {
         const Field* v = values[c];
-        std::vector<ListItem> baseRemaining = base ? base->items : std::vector<ListItem>{};
+        const Field* parent = values[lineage.parent(c)];
+        std::vector<ListItem> parentRemaining = parent ? parent->items : std::vector<ListItem>{};
         std::vector<ListItem> additions;
         if (v) {
             for (const auto& it : v->items) {
-                auto match = std::find_if(baseRemaining.begin(), baseRemaining.end(),
+                auto match = std::find_if(parentRemaining.begin(), parentRemaining.end(),
                                           [&](const ListItem& b) { return itemEquivalent(b, it); });
-                if (match != baseRemaining.end())
-                    baseRemaining.erase(match);
+                if (match != parentRemaining.end())
+                    parentRemaining.erase(match);
                 else
                     additions.push_back(it);
             }
         }
-        // baseRemaining now holds the base items this changer removed.
-        for (const auto& removed : baseRemaining) {
+        // parentRemaining now holds the items this changer removed.
+        for (const auto& removed : parentRemaining) {
             auto match = std::find_if(result.items.begin(), result.items.end(),
                                       [&](const ListItem& r) { return itemEquivalent(r, removed); });
             if (match != result.items.end())
@@ -171,6 +202,7 @@ MergeResult MergeEngine::merge(const std::vector<FieldSet>& chain, const MergeOp
         return result;
     const size_t winner = n - 1;
 
+    const Lineage lineage(n, options.parents);
     std::set<size_t> changerSet;
     std::vector<bool> anyChange(n, false);
 
@@ -191,14 +223,16 @@ MergeResult MergeEngine::merge(const std::vector<FieldSet>& chain, const MergeOp
         fa.label = shape->label;
         fa.listField = shape->isList();
         for (size_t c = 1; c < n; ++c)
-            if (!fieldEquivalent(values[0], values[c]))
+            if (!fieldEquivalent(values[lineage.parent(c)], values[c]))
                 fa.changers.push_back(c);
 
-        // Hard conflict: two changers with different values for a scalar field.
+        // Hard conflict: two changers with different values for a scalar field, unless the later
+        // one was made against the earlier one's version (it deliberately supersedes it).
         if (!fa.listField)
             for (size_t a = 0; a < fa.changers.size() && !fa.hard; ++a)
                 for (size_t b = a + 1; b < fa.changers.size(); ++b)
-                    if (!fieldEquivalent(values[fa.changers[a]], values[fa.changers[b]])) {
+                    if (!fieldEquivalent(values[fa.changers[a]], values[fa.changers[b]]) &&
+                        !lineage.isAncestor(fa.changers[a], fa.changers[b])) {
                         fa.hard = true;
                         break;
                     }
@@ -219,7 +253,7 @@ MergeResult MergeEngine::merge(const std::vector<FieldSet>& chain, const MergeOp
             fa.source = options.mergeCompatible ? 0 : winner;
         } else if (fa.listField) {
             bool listHard = false;
-            merged = mergeList(values, fa.changers, *shape, listHard);
+            merged = mergeList(values, fa.changers, *shape, lineage, listHard);
             fa.hard = fa.hard || listHard;
             fa.source = fa.changers.back();
             present = !merged.items.empty() || values[winner] != nullptr;

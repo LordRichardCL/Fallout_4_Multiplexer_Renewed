@@ -329,6 +329,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     MergeOptions mo;
                     mo.mergeCompatible = options.mergeCompatible;
                     mo.forcedWinner = c.forced;
+                    mo.parents = session.overrideParents(inst);
                     MergeResult mr = MergeEngine::merge(chain, mo);
                     for (const auto& link : chain)
                         m.equalsInstance.push_back(sameRecord(mr.fields, link) ? 1 : 0);

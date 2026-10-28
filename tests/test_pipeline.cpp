@@ -183,7 +183,9 @@ TEST(pipeline_end_to_end)
     CHECK(localizedResolved);
     for (const auto& f : entry->fields)
         if (f.label == "KWDA")
-            CHECK(f.result.find("ModA_Keyword") != std::string::npos && f.result.find("BaseKeyword2") == std::string::npos);
+            // ModB has ModA as a master and drops both ModA's keyword and BaseKeyword2: compared with the
+            // version it was made against (ModA's), both are deliberate removals.
+            CHECK(f.result.find("ModA_Keyword") == std::string::npos && f.result.find("BaseKeyword2") == std::string::npos);
 
     CHECK(p.compile());
     const auto* compiled = p.compiledOutput();
@@ -261,10 +263,9 @@ TEST(pipeline_end_to_end)
     CHECK(out.identity(*pistolOut) == std::make_pair(std::string("Fallout4.esm"), 0x1000u));
     CHECK_EQ(text(pistolOut->record.find(sig::FULL)), std::string("Pistol (Mod C)")); // last changer of a hard conflict
     auto pk = pistolOut->record.find(Signature("KWDA"));
-    CHECK_EQ(pk->data.size(), size_t(8)); // base keyword + ModA keyword; ModB removed BaseKeyword2
+    CHECK_EQ(pk->data.size(), size_t(4)); // base keyword only; ModB (made against ModA) removed the other two
     CHECK(out.resolve(*pistolOut, loadLE<uint32_t>(pk->data.data())) == std::make_pair(std::string("Fallout4.esm"), 0x800u));
-    CHECK(out.resolve(*pistolOut, loadLE<uint32_t>(pk->data.data() + 4)) == kwId);
-    CHECK_EQ(int(pistolOut->record.find(Signature("KSIZ"))->data[0]), 2);
+    CHECK_EQ(int(pistolOut->record.find(Signature("KSIZ"))->data[0]), 1);
     CHECK_EQ(int(pistolOut->record.find(Signature("DNAM"))->data[10]), 0x33); // ModB's data edit kept
 
     // Database contains the analysis.

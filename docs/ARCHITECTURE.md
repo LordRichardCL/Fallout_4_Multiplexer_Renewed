@@ -81,14 +81,14 @@ Count subrecords (`KSIZ`, `LLCT`) are dropped during splitting and regenerated f
 
 ## Conflict classification
 
-For each override chain, `MergeEngine::merge` compares every plugin's fields with the defining record (the base):
+For each override chain, `MergeEngine::merge` compares every plugin's fields with the version it was made against, as xEdit does: the last earlier override among the plugin's own (direct or indirect) masters, or the defining record (the base) when there is none (`Session::overrideParents`). So a patch that removes or reverts its master's edit counts as a change, and a plugin that only repeats its master's edit does not. A later plugin made against an earlier one's version supersedes it instead of conflicting with it.
 
 - **Type 1, Simple Override**: at most one plugin changed anything, and it is the winner.
 - **Type 2, Compatible Merge**: several plugins changed different fields (or lists), or the winner silently reverts someone else's edit. Last-plugin-wins loses edits here; merging recovers them.
-- **Type 3, Hard Conflict**: two plugins changed the same scalar field to different values (or the same keyed list entry).
+- **Type 3, Hard Conflict**: two plugins, neither made against the other, changed the same scalar field to different values (or the same keyed list entry).
 - **Critical** severity: the winner deletes a record the base did not delete.
 
-Chains whose overrides are all byte-identical to the base are reported as ITMs, not conflicts. Every field carries per-plugin cell status (Base, Same, Winning, Merged, Replaced) and the compiled result. The Conflict Centre renders exactly this.
+Chains whose overrides are all byte-identical to the base are reported as ITMs, not conflicts; with field analysis, an override identical to its own masters' version is an ITM. Every field carries per-plugin cell status (Base, Same, Winning, Merged, Replaced) and the compiled result. The Conflict Centre renders exactly this.
 
 ## Eligibility
 
