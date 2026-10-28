@@ -65,10 +65,17 @@ Select a type to see each plugin it blocks and everything else that plugin needs
 - **Hard Conflicts** (type 3): two plugins changed the same field differently. Someone loses.
 - **Compatible Merges** (type 2): plugins changed different things. Last-plugin-wins would lose edits; compilation merges them.
 - **Simple Overrides** (type 1): nothing is lost.
+- **Not Merged**: record types the app does not describe field by field (cells, NPCs, quests, game settings, …; see **Plugins → Blocking Types**). They are never merged: the winning plugin's version is used as it is, and the **Handling** column says *Not merged*. They are compared record by record:
+  - **Conflict (Not Merged)**: two plugins changed the record independently, so the winner drops the other's change. The summary names whose changes are dropped. Change the load order or make a patch in xEdit.
+  - **Simple Override**: one plugin changed it, or each later plugin was made with the earlier one as a master and builds on its version.
+  - The field table, when shown, is a generic comparison for information only. Its last column is **Used in Game** (the winner's version), not a compiled result, and **Winner when compiling** is disabled.
 - **Critical**: the winner deletes a record.
+
+Every override is compared with the version it was made against (the last earlier version in its own masters, as xEdit does), not with the original record.
 
 Finding conflicts:
 
+- **Not Merged** shows only the conflicts in record types the app keeps as they are.
 - **Click any column header** to sort by it (Winning Plugin, Editor ID, Severity, Written To, …). Click again to reverse.
 - **Plugin** + **is involved / wins / loses** shows only the conflicts of one plugin. For example, "MyPatch.esp loses" lists every record where your patch is overridden. The list shows how many conflicts each plugin takes part in and how many it wins.
 - **Double-click** a row to filter by its winning plugin.

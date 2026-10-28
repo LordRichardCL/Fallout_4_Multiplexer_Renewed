@@ -219,9 +219,10 @@ void printDashboard(const Pipeline& p)
     std::printf("  Loose files         %s\n", formatCount(s.assets.looseFileCount()).c_str());
     std::printf("  Asset conflicts     %s\n", formatCount(s.assets.conflictCount()).c_str());
     if (auto c = p.conflicts())
-        std::printf("  Record conflicts    %s (type 1: %s, type 2: %s, type 3: %s)\n",
+        std::printf("  Record conflicts    %s (type 1: %s, type 2: %s, type 3: %s, not merged: %s)\n",
                     formatCount(c->conflictCount()).c_str(), formatCount(c->byType[1]).c_str(),
-                    formatCount(c->byType[2]).c_str(), formatCount(c->byType[3]).c_str());
+                    formatCount(c->byType[2]).c_str(), formatCount(c->byType[3]).c_str(),
+                    formatCount(c->byType[4]).c_str());
     size_t eligible = 0;
     for (const auto& pl : s.plugins)
         eligible += pl.eligibility == Eligibility::Eligible;

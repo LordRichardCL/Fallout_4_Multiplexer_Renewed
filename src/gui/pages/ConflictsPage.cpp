@@ -36,6 +36,7 @@ enum Column {
     ColType,
     ColEditorId,
     ColConflict,
+    ColHandling,
     ColSeverity,
     ColWinner,
     ColResolvedIn,
@@ -46,7 +47,11 @@ enum Column {
     ColId,
     ColOriginId,
     ColObjectId,
+    ColPreserved,
 };
+
+// Most serious first: hard conflicts, conflicts that are not merged, merges, overrides (conflictPriority).
+const QString kPriority = "CASE c.conflict_type WHEN 3 THEN 0 WHEN 4 THEN 1 WHEN 2 THEN 2 ELSE 3 END";
 
 // ORDER BY expression for each sortable column.
 QString sortExpression(int column)
@@ -55,7 +60,8 @@ QString sortExpression(int column)
     case ColFormId: return "c.form_id";
     case ColType: return "c.signature";
     case ColEditorId: return "c.editor_id COLLATE NOCASE";
-    case ColConflict: return "c.conflict_type";
+    case ColConflict: return kPriority;
+    case ColHandling: return "c.preserved";
     case ColSeverity: return "CASE c.severity WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END";
     case ColWinner: return "p.name COLLATE NOCASE";
     case ColOrigin: return "o.name COLLATE NOCASE";
@@ -83,7 +89,7 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     l->addWidget(makePageHeader("Conflict Centre",
                                 "Which plugin wins each record, why it wins, and what every other plugin tried to change.",
                                 {signature_, search_}));
-    chips_ = new FilterChips({"All", "Hard Conflicts", "Compatible Merges", "Simple Overrides", "Critical"});
+    chips_ = new FilterChips({"All", "Hard Conflicts", "Compatible Merges", "Simple Overrides", "Not Merged", "Critical"});
     plugin_ = new QComboBox;
     plugin_->setMinimumWidth(240);
     plugin_->setToolTip("Only show conflicts involving this plugin");
@@ -256,6 +262,8 @@ void ConflictsPage::reload()
         where += " AND conflict_type = 2";
     else if (chip == "Simple Overrides")
         where += " AND conflict_type = 1";
+    else if (chip == "Not Merged")
+        where += " AND preserved = 1";
     else if (chip == "Critical")
         where += " AND severity = 'Critical'";
     if (signature_->currentIndex() > 0) {
@@ -284,23 +292,23 @@ void ConflictsPage::reload()
         }
     }
 
-    QString order = "c.conflict_type DESC, CASE c.severity WHEN 'Critical' THEN 0 ELSE 1 END, c.form_id";
+    QString order = kPriority + ", CASE c.severity WHEN 'Critical' THEN 0 ELSE 1 END, c.form_id";
     if (sortColumn_ >= 0)
         order = sortExpression(sortColumn_) + (sortOrder_ == Qt::DescendingOrder ? " DESC" : " ASC") + ", c.form_id";
     const QString from = " FROM Conflicts c LEFT JOIN Plugins p ON p.id = c.winner_plugin_id "
                          "LEFT JOIN Plugins o ON o.id = c.origin_plugin_id WHERE " + where;
     QString sql = "SELECT c.form_id AS FormID, c.signature AS Type, c.editor_id AS 'Editor ID', c.type_name AS Conflict, "
-                  "c.severity AS Severity, p.name AS 'Winning Plugin', (SELECT g.output_plugin FROM "
+                  "CASE c.preserved WHEN 1 THEN 'Not merged' ELSE 'Merged' END AS Handling, c.severity AS Severity, p.name AS 'Winning Plugin', (SELECT g.output_plugin FROM "
                   "GeneratedRecords g WHERE g.origin_plugin_id = c.origin_plugin_id AND g.object_id = c.object_id "
                   "LIMIT 1) AS resolved_in, o.name AS 'Origin', c.chain_length AS Plugins, c.chain AS 'Override Chain', "
-                  "c.summary AS Summary, c.id, c.origin_plugin_id, c.object_id" +
+                  "c.summary AS Summary, c.id, c.origin_plugin_id, c.object_id, c.preserved" +
                   from + " ORDER BY " + order;
     model_->setMonoColumns({ColFormId});
     model_->setStatusColumns({ColSeverity});
     model_->setNumberColumns({ColPlugins});
     model_->load(app_->readDb(), sql, binds);
     model_->setHeaderData(ColResolvedIn, Qt::Horizontal, "Written To");
-    for (int c : {ColId, ColOriginId, ColObjectId})
+    for (int c : {ColId, ColOriginId, ColObjectId, ColPreserved})
         table_->hideColumn(c);
     fitColumns(table_);
 
@@ -393,7 +401,8 @@ void ConflictsPage::showConflict(int row)
     QStringList headers{"Field"};
     for (const auto& n : chainNames)
         headers << n;
-    headers << "Compiled Result";
+    const bool preserved = model_->value(row, ColPreserved).toInt() == 1;
+    headers << (preserved ? "Used in Game" : "Compiled Result");
     fields_->setHorizontalHeaderLabels(headers);
     fields_->setRowCount(static_cast<int>(fieldNames.size()));
     int r = 0;
@@ -404,7 +413,10 @@ void ConflictsPage::showConflict(int row)
             return c == row.end() ? FieldCell{} : c->second;
         };
         auto* name = new QTableWidgetItem((hard[fieldIndex] ? QStringLiteral("⚠ ") : QString()) + fieldName);
-        if (hard[fieldIndex]) {
+        if (preserved) {
+            name->setToolTip("Generic comparison: this record type is not described, so its fields are matched by "
+                             "position and are not merged");
+        } else if (hard[fieldIndex]) {
             name->setForeground(theme::kRed);
             name->setToolTip("Hard conflict: several plugins changed this field differently");
         }
@@ -448,6 +460,12 @@ void ConflictsPage::showConflict(int row)
                                  "that changed the field.");
     }
     resolution_->setEnabled(!originPlugin_.isEmpty());
+    if (preserved) {
+        resolution_->setEnabled(false);
+        resolutionNote_->setText(QString("Not merged: %1 records are preserved as they are, so the winning plugin's "
+                                         "version is used. Change the load order to choose a different version.")
+                                     .arg(model_->value(row, ColType).toString()));
+    }
 }
 
 void ConflictsPage::applyResolution()

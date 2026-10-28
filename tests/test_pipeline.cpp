@@ -1324,3 +1324,56 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
     CHECK(crea);
     CHECK(gmst);
 }
+
+// Record types without a layout are classified record by record and never shown as merged.
+TEST(types_that_are_not_merged_are_classified_record_by_record)
+{
+    auto root = buildInstall("notmerged");
+    auto data = root / "Game" / "Data";
+    auto gmst = [](uint32_t id, const char* edid, uint8_t v) {
+        return record("GMST", id, {zs("EDID", edid), raw("DATA", {v, 0, 0, 0})});
+    };
+    writePlugin(data / "ModG.esm", {"Fallout4.esm"},
+                {gmst(0x01000800, "fA", 1), gmst(0x01000801, "fB", 1), gmst(0x01000802, "fC", 1)}, ESM);
+    writePlugin(data / "ModX.esp", {"Fallout4.esm", "ModG.esm"}, {gmst(0x01000800, "fA", 2), gmst(0x01000801, "fB", 2)});
+    writePlugin(data / "ModY.esp", {"Fallout4.esm", "ModG.esm"}, {gmst(0x01000800, "fA", 3), gmst(0x01000802, "fC", 1)});
+    // ModZ is made against ModX's version and changes it further.
+    writePlugin(data / "ModZ.esp", {"Fallout4.esm", "ModG.esm", "ModX.esp"}, {gmst(0x01000801, "fB", 3)});
+    writeFile(root / "plugins.txt", "*ModG.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModX.esp\n*ModY.esp\n*ModZ.esp\n");
+
+    for (bool allTypes : {true, false}) {
+        auto cfg = configFor(root);
+        cfg.databasePath.clear();
+        cfg.conflicts.analyseAllRecordTypes = allTypes;
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        auto& s = p.session();
+        const auto origin = s.findPlugin("ModG.esm")->index;
+        const auto* a = p.conflicts()->find({origin, 0x800});
+        const auto* b = p.conflicts()->find({origin, 0x801});
+        const auto* c = p.conflicts()->find({origin, 0x802});
+        CHECK(a && b);
+        CHECK(c == nullptr); // identical-to-master chains are counted, not listed
+
+        // Two plugins changed it independently: the winner drops ModX's change. Not merged.
+        CHECK(a->preserved);
+        CHECK_EQ(int(a->type), int(ConflictType::RecordConflict));
+        CHECK(a->summary.find("drops the changes of ModX.esp") != std::string::npos);
+        CHECK(a->summary.find("Not merged") != std::string::npos);
+        for (const auto& f : a->fields) {
+            CHECK_EQ(f.result, f.cells.back().value); // the game uses the winner's version
+            for (const auto& cell : f.cells)
+                CHECK(cell.status != CellStatus::Merged);
+        }
+        CHECK_EQ(a->fields.empty(), !allTypes);
+
+        // ModZ builds on ModX's version: an override, nothing lost.
+        CHECK_EQ(int(b->type), int(ConflictType::SimpleOverride));
+        CHECK(b->summary.find("builds on") != std::string::npos);
+
+        // ModY repeats the master's version of fC: identical to master.
+        CHECK_EQ(s.findPlugin("ModY.esp")->itmCount, size_t(1));
+        CHECK(p.conflicts()->byType[4] >= 1);
+    }
+}

@@ -99,6 +99,7 @@ For each override chain, `MergeEngine::merge` compares every plugin's fields wit
 - **Type 1, Simple Override**: at most one plugin changed anything, and it is the winner.
 - **Type 2, Compatible Merge**: several plugins changed different fields (or lists), or the winner silently reverts someone else's edit. Last-plugin-wins loses edits here; merging recovers them.
 - **Type 3, Hard Conflict**: two plugins, neither made against the other, changed the same scalar field to different values (or the same keyed list entry).
+- **Conflict (Not Merged)**, record types without a layout (not compilable): classified record by record, never merged. An override changed the record when its bytes differ from the version it was made against (and, with field comparison on, the generic comparison does not find them identical: master order and compression change the bytes). The chain is a conflict when a changer's version differs from the winner's and the winner was not made against it; otherwise it is a Simple Override. Field differences, if shown, come from `MergeEngine` with merging off, so the last column is the winner's value.
 - **Critical** severity: the winner deletes a record the base did not delete.
 
 Chains whose overrides are all byte-identical to the base are reported as ITMs, not conflicts; with field analysis, an override identical to its own masters' version is an ITM. Every field carries per-plugin cell status (Base, Same, Winning, Merged, Replaced) and the compiled result. The Conflict Centre renders exactly this.

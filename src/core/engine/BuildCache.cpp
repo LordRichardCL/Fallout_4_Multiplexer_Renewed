@@ -14,7 +14,8 @@ namespace fo4mx {
 
 namespace {
 
-constexpr uint32_t kFormatVersion = 3; // 2: merges against own masters; 3: Editor IDs of all compressed records
+constexpr uint32_t kFormatVersion = 4; // 2: merges against own masters; 3: Editor IDs of all compressed records;
+                                       // 4: record-level classification of types that are not merged
 
 const char* kCacheSchema = R"SQL(
 CREATE TABLE IF NOT EXISTS Info (key TEXT PRIMARY KEY, value TEXT);

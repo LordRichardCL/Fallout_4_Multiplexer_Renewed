@@ -203,6 +203,7 @@ std::string conflictHtml(const ReportContext& ctx)
              {"Type 1 · Simple Override", formatCount(c.byType[1])},
              {"Type 2 · Compatible Merge", formatCount(c.byType[2])},
              {"Type 3 · Hard Conflict", formatCount(c.byType[3])},
+             {"Conflict · Not Merged", formatCount(c.byType[4])},
              {"ITM-only Chains", formatCount(c.identicalOverrides)}});
 
     h.h2("Most conflicting plugins");
@@ -226,8 +227,9 @@ std::string conflictHtml(const ReportContext& ctx)
     std::vector<const ConflictEntry*> list;
     for (const auto& e : c.entries)
         list.push_back(&e);
-    std::stable_sort(list.begin(), list.end(), [](auto a, auto b) { return a->type > b->type; });
-    h.tableStart({"Form", "Type", "Severity", "Winner", "Override chain", "Summary"});
+    std::stable_sort(list.begin(), list.end(),
+                     [](auto a, auto b) { return conflictPriority(a->type) < conflictPriority(b->type); });
+    h.tableStart({"Form", "Type", "Severity", "Winner", "Override chain", "Handling", "Summary"});
     shown = 0;
     for (auto e : list) {
         if (shown >= ctx.maxRows)
@@ -237,7 +239,7 @@ std::string conflictHtml(const ReportContext& ctx)
         for (auto p : e->chain)
             chain.push_back(s.pluginName(p));
         h.row({s.formLabel(e->key), conflictTypeName(e->type), conflictSeverityName(e->severity), s.pluginName(e->winner),
-               join(chain, " › "), e->summary},
+               join(chain, " › "), e->preserved ? "Not merged (kept as is)" : "Merged field by field", e->summary},
               {"mono", "", conflictSeverityName(e->severity)});
     }
     h.tableEnd(shown, list.size());
@@ -469,6 +471,7 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
         counts.set("simpleOverride", static_cast<uint64_t>(c.byType[1]));
         counts.set("compatibleMerge", static_cast<uint64_t>(c.byType[2]));
         counts.set("hardConflict", static_cast<uint64_t>(c.byType[3]));
+        counts.set("notMergedConflict", static_cast<uint64_t>(c.byType[4]));
         counts.set("itmOnly", static_cast<uint64_t>(c.identicalOverrides));
         root.set("counts", counts);
         json::Value list;
@@ -478,6 +481,8 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             o.set("signature", e.sig.str());
             o.set("editorId", e.editorId);
             o.set("type", static_cast<int>(e.type));
+            o.set("typeName", conflictTypeName(e.type));
+            o.set("merged", !e.preserved);
             o.set("severity", conflictSeverityName(e.severity));
             o.set("winner", s->pluginName(e.winner));
             json::Value chain;

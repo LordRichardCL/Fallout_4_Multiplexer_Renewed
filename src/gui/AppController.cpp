@@ -430,8 +430,9 @@ void AppController::runAnalyse()
     runTask("Analyse", [this](ProgressSink& p) {
         pipeline_->analyse(p);
         const auto* c = pipeline_->conflicts();
-        return QString("Found %1 conflicts (%2 hard)").arg(formatCount(qint64(c->conflictCount()))).arg(
-            formatCount(qint64(c->byType[3])));
+        return QString("Found %1 conflicts (%2 hard, %3 not merged)")
+            .arg(formatCount(qint64(c->conflictCount())), formatCount(qint64(c->byType[3])),
+                 formatCount(qint64(c->byType[4])));
     });
 }
 

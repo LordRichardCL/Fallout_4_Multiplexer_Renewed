@@ -134,7 +134,7 @@ void PluginsPage::reload()
             where += " AND eligibility IN ('Ineligible', 'Error')";
         sql = "SELECT load_order_hex AS '#', name AS 'Plugin Name', type AS Type, record_count AS 'Record Count', "
               "conflict_count AS 'Conflict Count', master_count AS 'Master Count', status AS Status, "
-              "eligibility AS Eligibility, source_mod AS Mod, id FROM Plugins WHERE " +
+              "eligibility AS Eligibility, source_mod AS Mod, support AS Support, id FROM Plugins WHERE " +
               where + " ORDER BY active DESC, CASE WHEN load_order < 0 THEN 99999 ELSE load_order END, name";
         model_->setNumberColumns({3, 4, 5});
         model_->setBytesColumns({});
@@ -143,9 +143,9 @@ void PluginsPage::reload()
     model_->setMonoColumns({0});
     model_->load(app_->readDb(), sql, binds);
     if (!generatedMode_ && !blockersMode_)
-        table_->hideColumn(9);
+        table_->hideColumn(10);
     else
-        table_->showColumn(9);
+        table_->showColumn(10);
     fitColumns(table_);
     if (blockersMode_) {
         QString held = meta("blocked_by_types"), all = meta("unlocked_by_all_types");
@@ -217,16 +217,16 @@ QString PluginsPage::exportText()
     // Every plugin.
     out << "[Plugins]"
         << "Load Order\tPlugin\tType\tHeader Flags\tActive\tEligibility\tReason\tRecords\tNew\tOverrides\t"
-           "Record Types\tMod\tMasters\tAuthor";
+           "Record Types\tMod\tMasters\tAuthor\tSupport";
     QSqlQuery all(db);
     all.exec("SELECT p.load_order_hex, p.name, p.type, printf('0x%08X', p.flags), p.active, p.eligibility, "
              "p.eligibility_reason, p.record_count, p.new_records, p.override_count, p.record_types, p.source_mod, "
-             "(SELECT group_concat(master_name, ', ') FROM Masters m WHERE m.plugin_id = p.id), p.author "
+             "(SELECT group_concat(master_name, ', ') FROM Masters m WHERE m.plugin_id = p.id), p.author, p.support "
              "FROM Plugins p ORDER BY p.active DESC, CASE WHEN p.load_order < 0 THEN 99999 ELSE p.load_order END, "
              "p.name");
     while (all.next()) {
         QStringList row;
-        for (int c = 0; c < 14; ++c) {
+        for (int c = 0; c < 15; ++c) {
             QString v = all.value(c).toString();
             if (c == 4)
                 v = all.value(c).toInt() ? "yes" : "no";
@@ -294,7 +294,7 @@ void PluginsPage::showDetails(int row)
         exclude_->setEnabled(false);
         return;
     }
-    qint64 id = model_->value(row, 9).toLongLong();
+    qint64 id = model_->value(row, 10).toLongLong();
     QSqlDatabase db = app_->readDb();
     QSqlQuery q(db);
     q.prepare("SELECT name, type, author, description, source_mod, path, record_count, new_records, override_count, "

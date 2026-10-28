@@ -94,7 +94,7 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     excluded_->setMaximumHeight(130);
     al->addWidget(excluded_);
     creationClub_ = new QCheckBox("Allow compiling Creation Club plugins");
-    allTypes_ = new QCheckBox("Field-level conflict analysis for every record type (slower, more detail)");
+    allTypes_ = new QCheckBox("Show field differences for record types that are not merged (slower, display only)");
     al->addWidget(creationClub_);
     al->addWidget(allTypes_);
     l->addWidget(analysisBox);

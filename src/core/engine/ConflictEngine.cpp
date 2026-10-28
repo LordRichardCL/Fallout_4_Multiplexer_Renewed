@@ -17,8 +17,21 @@ const char* conflictTypeName(ConflictType t)
     case ConflictType::SimpleOverride: return "Simple Override";
     case ConflictType::CompatibleMerge: return "Compatible Merge";
     case ConflictType::HardConflict: return "Hard Conflict";
+    case ConflictType::RecordConflict: return "Conflict (Not Merged)";
     }
     return "None";
+}
+
+int conflictPriority(ConflictType t)
+{
+    switch (t) {
+    case ConflictType::HardConflict: return 0;
+    case ConflictType::RecordConflict: return 1;
+    case ConflictType::CompatibleMerge: return 2;
+    case ConflictType::SimpleOverride: return 3;
+    case ConflictType::None: return 4;
+    }
+    return 4;
 }
 
 const char* conflictSeverityName(ConflictSeverity s)
@@ -39,6 +52,85 @@ const ConflictEntry* ConflictReport::find(FormKey key) const
     return it != entries.end() && it->key == key ? &*it : nullptr;
 }
 
+namespace {
+
+bool sameBytes(const RecordInstance& a, const RecordInstance& b)
+{
+    return a.hash == b.hash && a.dataSize == b.dataSize;
+}
+
+// True when chain entry b was made with a's version among its masters.
+bool isAncestor(const std::vector<size_t>& parents, size_t a, size_t b)
+{
+    while (b != 0) {
+        b = parents[b];
+        if (b == a)
+            return true;
+    }
+    return false;
+}
+
+// Record-level classification for record types that are not merged: each override is compared
+// whole with the version it was made against (its own masters', as xEdit does). `unchanged` marks
+// entries a field comparison found identical despite different bytes (master order, compression).
+void classifyRecordLevel(const Session& session, ConflictEntry& e, std::span<const RecordInstance> inst,
+                         const std::vector<size_t>& parents, const std::vector<bool>& unchanged)
+{
+    const size_t n = inst.size();
+    const size_t w = n - 1;
+    std::vector<size_t> changers;
+    e.itmPlugins.clear();
+    for (size_t c = 1; c < n; ++c) {
+        if (sameBytes(inst[c], inst[parents[c]]) || (c < unchanged.size() && unchanged[c]))
+            e.itmPlugins.push_back(inst[c].plugin);
+        else
+            changers.push_back(c);
+    }
+    std::vector<std::string> lost;
+    for (size_t a : changers)
+        if (a != w && !sameBytes(inst[a], inst[w]) && !isAncestor(parents, a, w))
+            lost.push_back(session.plugins[inst[a].plugin].name);
+
+    if (changers.empty()) {
+        e.type = ConflictType::None;
+        e.severity = ConflictSeverity::Low;
+        e.summary = "Identical to master";
+        return;
+    }
+    e.summary = std::to_string(changers.size()) + " plugin" + (changers.size() == 1 ? "" : "s") + " changed it";
+    if (lost.empty()) {
+        e.type = ConflictType::SimpleOverride;
+        e.severity = ConflictSeverity::Low;
+        e.summary += changers.size() == 1 ? "" : "; the winning version builds on the others";
+    } else {
+        e.type = e.preserved ? ConflictType::RecordConflict : ConflictType::HardConflict;
+        e.severity = ConflictSeverity::Medium;
+        e.winnerLosesChanges = true;
+        std::string names;
+        for (size_t i = 0; i < lost.size() && i < 3; ++i)
+            names += (i ? ", " : "") + lost[i];
+        if (lost.size() > 3)
+            names += " and " + std::to_string(lost.size() - 3) + " more";
+        e.summary += "; the winner drops the changes of " + names;
+    }
+    e.summary += e.preserved ? ". Not merged: " + session.defs.recordName(e.sig) +
+                                   " records are kept as they are, so the winning plugin's version is used"
+                             : ". Compared record by record";
+}
+
+// A winner that deletes a record its master did not delete is critical.
+void markDeletion(ConflictEntry& e, std::span<const RecordInstance> inst)
+{
+    bool baseDeleted = inst.front().flags & RecordFlags::Deleted;
+    bool winnerDeleted = inst.back().flags & RecordFlags::Deleted;
+    if (winnerDeleted && !baseDeleted && e.type != ConflictType::None) {
+        e.severity = ConflictSeverity::Critical;
+        e.summary += "; winner deletes the record";
+    }
+}
+
+} // namespace
+
 ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex, bool fieldLevel, bool keepDetails)
 {
     const FormGroup& g = session.groups[groupIndex];
@@ -47,6 +139,7 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
     e.group = groupIndex;
     e.key = inst[0].key;
     e.sig = inst[0].signature;
+    e.preserved = !session.defs.isCompilable(e.sig);
     for (const auto& i : inst)
         e.chain.push_back(i.plugin);
     e.winner = inst.back().plugin;
@@ -68,10 +161,10 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
         return e;
     }
 
+    const auto parents = session.overrideParents(inst);
     if (!fieldLevel) {
-        e.type = inst.size() == 2 ? ConflictType::SimpleOverride : ConflictType::HardConflict;
-        e.severity = inst.size() == 2 ? ConflictSeverity::Low : ConflictSeverity::Medium;
-        e.summary = "Record-level comparison only";
+        classifyRecordLevel(session, e, inst, parents, {});
+        markDeletion(e, inst);
         return e;
     }
 
@@ -82,51 +175,57 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
         chain.push_back(splitFields(norm.normalize(i), session.defs));
 
     MergeOptions mo;
-    mo.parents = session.overrideParents(inst);
+    mo.parents = parents;
+    // Types that are not merged: the field comparison only shows what differs; the result is the winner's.
+    mo.mergeCompatible = !e.preserved;
     MergeResult merged = MergeEngine::merge(chain, mo);
     const ChainAnalysis& a = merged.analysis;
     e.fieldsAnalysed = true;
-    e.winnerLosesChanges = a.winnerLosesChanges;
-    for (size_t c : a.itms)
-        e.itmPlugins.push_back(inst[c].plugin);
 
-    if (a.changers.empty())
-        e.type = ConflictType::None;
-    else if (a.hard)
-        e.type = ConflictType::HardConflict;
-    else if (a.changers.size() == 1 && !a.winnerLosesChanges)
-        e.type = ConflictType::SimpleOverride;
-    else
-        e.type = ConflictType::CompatibleMerge;
-
-    switch (e.type) {
-    case ConflictType::None: e.severity = ConflictSeverity::Low; break;
-    case ConflictType::SimpleOverride: e.severity = ConflictSeverity::Low; break;
-    case ConflictType::CompatibleMerge: e.severity = ConflictSeverity::Medium; break;
-    case ConflictType::HardConflict: e.severity = ConflictSeverity::High; break;
+    if (e.preserved) {
+        std::vector<bool> unchanged(inst.size(), false);
+        for (size_t c : a.itms)
+            unchanged[c] = true;
+        classifyRecordLevel(session, e, inst, parents, unchanged);
+    } else {
+        e.winnerLosesChanges = a.winnerLosesChanges;
+        for (size_t c : a.itms)
+            e.itmPlugins.push_back(inst[c].plugin);
+        if (a.changers.empty())
+            e.type = ConflictType::None;
+        else if (a.hard)
+            e.type = ConflictType::HardConflict;
+        else if (a.changers.size() == 1 && !a.winnerLosesChanges)
+            e.type = ConflictType::SimpleOverride;
+        else
+            e.type = ConflictType::CompatibleMerge;
     }
-    bool baseDeleted = inst.front().flags & RecordFlags::Deleted;
-    bool winnerDeleted = inst.back().flags & RecordFlags::Deleted;
-    if (winnerDeleted && !baseDeleted && e.type != ConflictType::None)
-        e.severity = ConflictSeverity::Critical;
 
-    // Summary.
-    size_t hardFields = 0;
-    std::string hardNames;
-    for (const auto& f : a.fields)
-        if (f.hard) {
-            if (hardFields < 4)
-                hardNames += (hardNames.empty() ? "" : ", ") + f.label;
-            ++hardFields;
+    if (!e.preserved) {
+        switch (e.type) {
+        case ConflictType::None: e.severity = ConflictSeverity::Low; break;
+        case ConflictType::SimpleOverride: e.severity = ConflictSeverity::Low; break;
+        case ConflictType::CompatibleMerge: e.severity = ConflictSeverity::Medium; break;
+        case ConflictType::HardConflict: e.severity = ConflictSeverity::High; break;
+        case ConflictType::RecordConflict: e.severity = ConflictSeverity::Medium; break;
         }
-    e.summary = std::to_string(a.fields.size()) + " field" + (a.fields.size() == 1 ? "" : "s") + " changed by " +
-                std::to_string(a.changers.size()) + " plugin" + (a.changers.size() == 1 ? "" : "s");
-    if (hardFields)
-        e.summary += "; " + std::to_string(hardFields) + " contested (" + hardNames + ")";
-    if (a.winnerLosesChanges)
-        e.summary += "; last-plugin-wins loses edits";
-    if (winnerDeleted && !baseDeleted)
-        e.summary += "; winner deletes the record";
+
+        size_t hardFields = 0;
+        std::string hardNames;
+        for (const auto& f : a.fields)
+            if (f.hard) {
+                if (hardFields < 4)
+                    hardNames += (hardNames.empty() ? "" : ", ") + f.label;
+                ++hardFields;
+            }
+        e.summary = std::to_string(a.fields.size()) + " field" + (a.fields.size() == 1 ? "" : "s") + " changed by " +
+                    std::to_string(a.changers.size()) + " plugin" + (a.changers.size() == 1 ? "" : "s");
+        if (hardFields)
+            e.summary += "; " + std::to_string(hardFields) + " contested (" + hardNames + ")";
+        if (a.winnerLosesChanges)
+            e.summary += "; last-plugin-wins loses edits";
+    }
+    markDeletion(e, inst);
 
     if (keepDetails) {
         // Tokens are rendered against the current load order when the report is finalised.
@@ -184,6 +283,7 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
             entry->group = overridden[i];
             entry->key = inst[0].key;
             entry->sig = inst[0].signature;
+            entry->preserved = !session.defs.isCompilable(entry->sig);
             entry->winner = inst.back().plugin;
             for (const auto& r : inst)
                 entry->chain.push_back(r.plugin);

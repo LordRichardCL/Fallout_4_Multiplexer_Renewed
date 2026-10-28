@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS Plugins (
     eligibility TEXT,
     eligibility_reason TEXT,
     archives TEXT,
-    record_types TEXT
+    record_types TEXT,
+    support TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_plugins_name ON Plugins(name);
 
@@ -99,7 +100,8 @@ CREATE TABLE IF NOT EXISTS Conflicts (
     chain_length INTEGER,
     chain TEXT,
     winner_loses_changes INTEGER,
-    summary TEXT
+    summary TEXT,
+    preserved INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_conflicts_type ON Conflicts(conflict_type);
 CREATE INDEX IF NOT EXISTS idx_conflicts_key ON Conflicts(origin_plugin_id, object_id);

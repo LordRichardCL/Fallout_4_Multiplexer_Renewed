@@ -186,7 +186,8 @@ void DashboardPage::refresh()
 
     conflictBar_->setSegments({{"Simple override", meta("conflicts_type1").toDouble(), theme::kBlue},
                                {"Compatible merge", meta("conflicts_type2").toDouble(), theme::kYellow},
-                               {"Hard conflict", meta("conflicts_type3").toDouble(), theme::kRed}});
+                               {"Hard conflict", meta("conflicts_type3").toDouble(), theme::kRed},
+                               {"Not merged", meta("conflicts_type4").toDouble(), theme::kMuted}});
     eligibilityBar_->setSegments({{"Eligible", double(eligibility.value("Eligible")), theme::kGreen},
                                   {"Retained", double(eligibility.value("Retained")), theme::kBlue},
                                   {"Ineligible", double(eligibility.value("Ineligible")), theme::kYellow},

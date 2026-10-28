@@ -28,6 +28,29 @@ std::string recordTypesSummary(const PluginInfo& p)
     return out;
 }
 
+// How much of a plugin the compiler understands: every record type described, or how many records
+// are of types that are not merged (kept as they are), or record types unknown to Fallout 4.
+std::string supportLevel(const Session& session, const PluginInfo& p)
+{
+    if (p.typeCounts.empty())
+        return "No records";
+    uint64_t total = 0, preserved = 0, unknown = 0;
+    for (const auto& [s, n] : p.typeCounts) {
+        total += n;
+        if (!session.defs.catalogueEntry(s))
+            unknown += n;
+        else if (!session.defs.isCompilable(s))
+            preserved += n;
+    }
+    if (unknown)
+        return "Unknown record types (" + std::to_string(unknown) + " records)";
+    if (!preserved)
+        return "All types merged";
+    if (preserved == total)
+        return "Not merged (all " + std::to_string(total) + " records)";
+    return "Partly: " + std::to_string(preserved) + " of " + std::to_string(total) + " records not merged";
+}
+
 std::string pluginStatus(const PluginInfo& p)
 {
     if (!p.error.empty())
@@ -49,16 +72,18 @@ void DatabaseWriter::initSchema()
 {
     db_.exec(kSchema);
     // Columns added after the first release: databases created earlier get them here.
-    auto ensureColumn = [&](const char* table, const char* column) {
+    auto ensureColumn = [&](const char* table, const char* column, const char* type = "TEXT") {
         auto q = db_.prepare(std::string("SELECT COUNT(*) FROM pragma_table_info('") + table + "') WHERE name = ?");
         q.bind(1, column);
         if (q.step() && q.columnText(0) == "0")
-            db_.exec(std::string("ALTER TABLE ") + table + " ADD COLUMN " + column + " TEXT;");
+            db_.exec(std::string("ALTER TABLE ") + table + " ADD COLUMN " + column + " " + type + ";");
     };
     ensureColumn("DependencyIssues", "cause");
     ensureColumn("ValidationResults", "cause");
     ensureColumn("EligibilityBlockers", "category");
     ensureColumn("EligibilityBlockers", "support");
+    ensureColumn("Conflicts", "preserved", "INTEGER");
+    ensureColumn("Plugins", "support");
     setMeta("schema_version", std::to_string(kSchemaVersion));
 }
 
@@ -75,8 +100,8 @@ void DatabaseWriter::writePlugins(const Session& session)
         "INSERT INTO Plugins(id, name, type, load_order, load_order_hex, active, base_game, creation_club, source_mod, "
         "path, file_size, header_version, author, description, flags, localized, record_count, new_records, "
         "override_count, injected_count, itm_count, deleted_count, conflict_count, hard_conflict_count, master_count, "
-        "status, eligibility, eligibility_reason, archives, record_types) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        "status, eligibility, eligibility_reason, archives, record_types, support) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     auto ms = db_.prepare(
         "INSERT INTO Masters(plugin_id, position, master_name, master_plugin_id, missing) VALUES(?,?,?,?,?)");
     for (const auto& p : session.plugins) {
@@ -109,7 +134,8 @@ void DatabaseWriter::writePlugins(const Session& session)
             .bind(27, eligibilityName(p.eligibility))
             .bind(28, join(p.reasons, "; "))
             .bind(29, join(p.archives, ", "))
-            .bind(30, recordTypesSummary(p));
+            .bind(30, recordTypesSummary(p))
+            .bind(31, supportLevel(session, p));
         st.run();
         for (size_t i = 0; i < p.header.masters.size(); ++i) {
             PluginIndex m = i < p.masters.size() ? p.masters[i] : kInvalidPlugin;
@@ -300,7 +326,7 @@ void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport&
 
     auto c = db_.prepare("INSERT INTO Conflicts(origin_plugin_id, object_id, form_id, signature, editor_id, "
                          "conflict_type, type_name, severity, winner_plugin_id, chain_length, chain, "
-                         "winner_loses_changes, summary) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                         "winner_loses_changes, summary, preserved) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     auto cf = db_.prepare("INSERT INTO ConflictFields(conflict_id, field_index, field, hard, position, plugin_id, "
                           "value, status) VALUES(?,?,?,?,?,?,?,?)");
     auto cp = db_.prepare("INSERT INTO ConflictPlugins(conflict_id, plugin_id) VALUES(?,?)");
@@ -321,7 +347,8 @@ void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport&
             .bind(10, static_cast<uint32_t>(e.chain.size()))
             .bind(11, join(names, " > "))
             .bind(12, e.winnerLosesChanges ? 1 : 0)
-            .bind(13, e.summary);
+            .bind(13, e.summary)
+            .bind(14, e.preserved ? 1 : 0);
         c.run();
         int64_t id = db_.lastInsertId();
         std::set<PluginIndex> uniq(e.chain.begin(), e.chain.end());
@@ -391,6 +418,7 @@ void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport&
     setMeta("conflicts_type1", std::to_string(conflicts.byType[1]));
     setMeta("conflicts_type2", std::to_string(conflicts.byType[2]));
     setMeta("conflicts_type3", std::to_string(conflicts.byType[3]));
+    setMeta("conflicts_type4", std::to_string(conflicts.byType[4]));
     setMeta("conflicts_total", std::to_string(conflicts.conflictCount()));
     setMeta("itm_chains", std::to_string(conflicts.identicalOverrides));
     setMeta("eligible_plugins", std::to_string(deps.eligiblePlugins));
