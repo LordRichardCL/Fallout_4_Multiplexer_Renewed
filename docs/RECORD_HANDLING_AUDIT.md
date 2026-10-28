@@ -123,6 +123,40 @@ Rules:
 
    This is the process already used for tier 1.
 
+## Stage 4 result: winner-only strategy
+
+Done, in two parts.
+
+**The strategy.** The catalogue's strategies are now *Specialised*, *Winner*, *Candidate* and *Preserve*.
+- *Winner* types compile with every FormID rewritten, but the winning version of each chain is taken whole: no field merging, no patch records, and nothing written when a retained plugin wins.
+- Their conflicts are classified record by record (Conflict Centre: **Winner only**).
+- *Candidate* types have a layout and are covered by the definition check, but are not compiled.
+
+**The evidence gate.** A candidate is confirmed only by a definition check on a real load order with:
+- no size problems;
+- no FormID-like values outside its described fields;
+- at least 99% of its FormIDs resolving.
+
+Promotion to *Winner* is then a one-word catalogue change.
+
+**First candidates** (16), transcribed from xEdit's `wbDefinitionsFO4.pas`:
+
+| Group | Types |
+|---|---|
+| Animation | `AACT` Action, `STAG` Animation Sound Tag Set, `ANIO` Animated Object |
+| Audio | `ASPC` Acoustic Space, `SNCT` Sound Category, `SOPM` Sound Output Model, `REVB` Reverb Parameters, `AECH` Audio Effect Chain |
+| Visual effects | `LGTM` Lighting Template, `GDRY` God Rays, `LENS` Lens Flare |
+| Game data | `COLL` Collision Layer, `OVIS` Object Visibility Manager, `DOBJ` Default Object Manager |
+| Other | `LAYR` Layer, `MOVT` Movement Type |
+
+None compiles yet: each needs a definition check on a real load order first.
+
+**Not included yet:**
+- `PKIN`: refers to its own cell, which keeps its plugin anyway.
+- `NOCM`: undecoded data.
+- `BPTD`, `IMAD`, `IMGS`: large layouts, better done one at a time.
+- `DEBR`: model list with per-model data.
+
 ## Stage 3 result: cleaning reports
 
 Done. **Dependencies → Cleaning** (also in the dependency report and the CLI) lists:
@@ -204,7 +238,7 @@ Each stage ships separately, keeps every existing test passing, and changes no m
 | **2. Honest analysis** *(done)* | Conflict classification by support level (record level without a layout). Conflict Centre and reports say "preserved, not merged" for those types. A **support level** column on the Plugins page and in exports. | Low: display and classification only | No more implied merges for types the app does not understand. |
 | **0. Merge against own masters** *(done)* | See [the fix above](#fixed-overrides-are-compared-with-their-own-masters-version). | Corrects merges where patches remove or revert their master's edits | Merge results match what each plugin's author intended. |
 | **3. Cleaning reports** *(done)* | ITM, UDR-candidate, deleted-navmesh, injected-record and circular leveled list findings per plugin, with likely causes (terms as in xEdit docs chapter 7). Findings in official master files are informational only. | Low: reporting only | Error-checking parity with the usual pre-merge checks. |
-| **4. Winner-only strategy** | For types confirmed to be single-value records, a merge strategy that takes the winning override whole: no field merging, still compiled. Candidates must still pass the definition check and have every FormID located. | Medium: only for types with full FormID coverage | More plugins compile without field-level merge risk. |
+| **4. Winner-only strategy** *(done: strategy and 16 candidates)* | For types confirmed to be single-value records, a merge strategy that takes the winning override whole: no field merging, still compiled. Candidates must still pass the definition check and have every FormID located. | Medium: only for types with full FormID coverage | More plugins compile without field-level merge risk. |
 | **5. Next layouts by evidence** | Describe further types in the order **Plugins → Blocking Types** ranks them across real load orders. Each needs a definition check on your data and tests. Likely early candidates (check against the xEdit Fallout 4 definitions, not assumed): `AACT`, `DOBJ`, `COLL`, `SNCT`, `SOPM`, `ASPC`, `REVB`, `AECH`, `ANIO`, `BPTD`, `DEBR`, `IMGS`, `IMAD`, `LGTM`, `GDRY`, `LENS`, `MOVT`, `STAG`, `NOCM`, `LAYR`, `OVIS`, `PKIN`. | Medium per type, controlled by evidence | Fewer plugins blocked by base-object types. |
 | **6. Group structure** | Parent context in the index; nested-group writing; tests that round-trip cells and dialogue topics byte-for-byte. Still no compiling of these types. | Medium: core reader and writer | Foundation for any future world or quest work. |
 | **7. Tier 2 (analysis first)** | `NPC_` overrides, `RACE`, `CLAS`, `PACK`, `LVSP`, … Layouts, field-level analysis and definition checks first; compiling only for overrides of existing records (no new FormIDs, no FaceGen impact), each separately justified. | High | Gated individually. |

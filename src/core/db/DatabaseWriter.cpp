@@ -28,27 +28,30 @@ std::string recordTypesSummary(const PluginInfo& p)
     return out;
 }
 
-// How much of a plugin the compiler understands: every record type described, or how many records
-// are of types that are not merged (kept as they are), or record types unknown to Fallout 4.
+// How much of a plugin the compiler understands: every record type merged, how many records are
+// compiled winner-only, how many are of types kept as they are, or record types unknown to Fallout 4.
 std::string supportLevel(const Session& session, const PluginInfo& p)
 {
     if (p.typeCounts.empty())
         return "No records";
-    uint64_t total = 0, preserved = 0, unknown = 0;
+    uint64_t total = 0, preserved = 0, winner = 0, unknown = 0;
     for (const auto& [s, n] : p.typeCounts) {
         total += n;
         if (!session.defs.catalogueEntry(s))
             unknown += n;
         else if (!session.defs.isCompilable(s))
             preserved += n;
+        else if (!session.defs.mergesFields(s))
+            winner += n;
     }
     if (unknown)
         return "Unknown record types (" + std::to_string(unknown) + " records)";
+    const std::string winnerNote = winner ? " (" + std::to_string(winner) + " winner-only)" : std::string();
     if (!preserved)
-        return "All types merged";
+        return (winner ? "All types compiled" : "All types merged") + winnerNote;
     if (preserved == total)
         return "Not merged (all " + std::to_string(total) + " records)";
-    return "Partly: " + std::to_string(preserved) + " of " + std::to_string(total) + " records not merged";
+    return "Partly: " + std::to_string(preserved) + " of " + std::to_string(total) + " records not merged" + winnerNote;
 }
 
 std::string pluginStatus(const PluginInfo& p)
@@ -349,7 +352,7 @@ void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport&
             .bind(11, join(names, " > "))
             .bind(12, e.winnerLosesChanges ? 1 : 0)
             .bind(13, e.summary)
-            .bind(14, e.preserved ? 1 : 0);
+            .bind(14, static_cast<int>(e.handling));
         c.run();
         int64_t id = db_.lastInsertId();
         std::set<PluginIndex> uniq(e.chain.begin(), e.chain.end());

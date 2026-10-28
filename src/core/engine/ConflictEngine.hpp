@@ -21,6 +21,14 @@ const char* conflictTypeName(ConflictType t);
 // Display order, most serious first: hard conflicts, conflicts that are not merged, merges, overrides.
 int conflictPriority(ConflictType t);
 
+// How compilation treats the record type of a conflict.
+enum class MergeHandling : uint8_t {
+    Merged = 0,      // Specialised: fields merged
+    NotCompiled = 1, // no layout or not enabled: kept in its plugin as it is
+    WinnerOnly = 2,  // Winner: compiled, the winning version taken whole
+};
+const char* mergeHandlingName(MergeHandling h);
+
 enum class ConflictSeverity : uint8_t { Low, Medium, High, Critical };
 const char* conflictSeverityName(ConflictSeverity s);
 
@@ -51,7 +59,9 @@ struct ConflictEntry {
     std::vector<PluginIndex> itmPlugins;
     bool fieldsAnalysed = false;
     bool winnerLosesChanges = false;
-    bool preserved = false; // record type not merged (no layout): classified record by record, kept as is
+    // Not Merged: classified record by record (never Compatible Merge or Hard Conflict).
+    MergeHandling handling = MergeHandling::Merged;
+    bool fieldsMerged() const { return handling == MergeHandling::Merged; }
     std::string summary;
     std::vector<ConflictField> fields;
 };

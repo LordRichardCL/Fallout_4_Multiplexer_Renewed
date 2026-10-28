@@ -94,6 +94,7 @@ struct RecordDef {
     Signature signature;
     std::string name;
     bool compilable = false;
+    bool layout = false; // every subrecord that can hold a FormID is described (compilable when the catalogue allows)
     std::unordered_map<Signature, FieldDef> fields;
     std::vector<RegionDef> regions;
     std::unordered_map<Signature, AssetRole> assets; // overrides the common asset subrecords (None = not a path)
@@ -119,12 +120,17 @@ public:
     // The record type catalogue: names, categories, placement, group order and strategy.
     const RecordCatalogue& catalogue() const { return catalogue_ ? *catalogue_ : RecordCatalogue::get(); }
     const CatalogueEntry* catalogueEntry(Signature s) const { return catalogue().find(s); }
-    // Specialised only when the catalogue says so and a compilable layout exists.
+    // The catalogue's strategy where the layout supports it: Specialised or Winner only with a layout
+    // (then compilable), Candidate only with a layout, Preserve otherwise.
     MergeStrategy strategy(Signature s) const;
+    // Compiled with fields merged (Specialised), as opposed to winner-only or not at all.
+    bool mergesFields(Signature s) const { return strategy(s) == MergeStrategy::Specialised; }
+    // A full layout exists (compiled types and candidates): the definition check covers it.
+    bool hasLayout(Signature s) const;
     // Plain-language support level for display ("Compiled", "Preserved: ...", "Unknown record type").
     std::string supportSummary(Signature s) const;
-    // Catalogue rows marked Specialised that have no compilable layout (should be empty).
-    const std::vector<Signature>& specialisedWithoutLayout() const { return specialisedWithoutLayout_; }
+    // Catalogue rows marked Specialised, Winner or Candidate that have no layout (should be empty).
+    const std::vector<Signature>& strategyWithoutLayout() const { return strategyWithoutLayout_; }
 
     // What the subrecord `sub` of a `record` loads as an asset path, if anything.
     AssetRole assetRole(Signature record, Signature sub) const;
@@ -143,10 +149,10 @@ public:
     std::unordered_map<Signature, std::string> names_;
     std::unordered_map<Signature, AssetRole> commonAssets_;
     const RecordCatalogue* catalogue_ = nullptr;
-    std::vector<Signature> specialisedWithoutLayout_;
+    std::vector<Signature> strategyWithoutLayout_;
     uint64_t fingerprint_ = 0;
 
-    // Compiling a type needs both a layout here and Specialised in the catalogue.
+    // Compiling a type needs both a layout here and Specialised or Winner in the catalogue.
     void applyCatalogue(const RecordCatalogue& catalogue);
     void computeFingerprint();
 };

@@ -54,7 +54,7 @@ TEST(catalogue_covers_the_xedit_record_list)
 TEST(catalogue_strategy_matches_the_layouts)
 {
     const auto& defs = RecordDefinitions::get();
-    CHECK(defs.specialisedWithoutLayout().empty());
+    CHECK(defs.strategyWithoutLayout().empty());
     size_t specialised = 0;
     for (const auto& e : defs.catalogue().entries())
         specialised += e.strategy == MergeStrategy::Specialised;
@@ -74,7 +74,7 @@ TEST(catalogue_strategy_matches_the_layouts)
     d.applyCatalogue(edited);
     CHECK(!d.isCompilable(Signature("WEAP")));
     CHECK(d.isCompilable(Signature("ARMO")));
-    CHECK(d.specialisedWithoutLayout().empty());
+    CHECK(d.strategyWithoutLayout().empty());
 
     // Marking a type without a layout Specialised does not make it compilable; it is reported.
     std::string promoted = readText("resources/record_catalogue.csv");
@@ -85,7 +85,7 @@ TEST(catalogue_strategy_matches_the_layouts)
     RecordDefinitions d2 = defs;
     d2.applyCatalogue(promotedCat);
     CHECK(!d2.isCompilable(Signature("NPC_")));
-    CHECK_EQ(d2.specialisedWithoutLayout().size(), size_t(1));
+    CHECK_EQ(d2.strategyWithoutLayout().size(), size_t(1));
 }
 
 TEST(catalogue_rejects_malformed_rows)

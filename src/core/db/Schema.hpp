@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS Conflicts (
     chain TEXT,
     winner_loses_changes INTEGER,
     summary TEXT,
-    preserved INTEGER
+    preserved INTEGER -- MergeHandling: 0 merged, 1 kept as is, 2 winner only (compiled)
 );
 CREATE INDEX IF NOT EXISTS idx_conflicts_type ON Conflicts(conflict_type);
 CREATE INDEX IF NOT EXISTS idx_conflicts_key ON Conflicts(origin_plugin_id, object_id);

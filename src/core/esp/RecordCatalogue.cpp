@@ -28,6 +28,8 @@ const char* strategyName(MergeStrategy s)
 {
     switch (s) {
     case MergeStrategy::Specialised: return "Specialised";
+    case MergeStrategy::Winner: return "Winner";
+    case MergeStrategy::Candidate: return "Candidate";
     case MergeStrategy::Preserve: return "Preserve";
     }
     return "";
@@ -123,6 +125,10 @@ RecordCatalogue RecordCatalogue::parse(std::string_view csv)
             fail("unknown placement '" + f[3] + "'");
         if (f[4] == "Specialised")
             e.strategy = MergeStrategy::Specialised;
+        else if (f[4] == "Winner")
+            e.strategy = MergeStrategy::Winner;
+        else if (f[4] == "Candidate")
+            e.strategy = MergeStrategy::Candidate;
         else if (f[4] == "Preserve")
             e.strategy = MergeStrategy::Preserve;
         else

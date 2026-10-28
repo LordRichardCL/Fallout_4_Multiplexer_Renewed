@@ -121,6 +121,7 @@ public:
         rd.signature = current_;
         rd.name = name;
         rd.compilable = compilable;
+        rd.layout = compilable;
         defs_.names_[current_] = name;
         if (compilable)
             defs_.compilable_.push_back(current_);
@@ -759,6 +760,68 @@ void buildOldGen(RecordDefinitions& d)
 
     b.record("CLFM", "Color", true).field("CNAM", noRefs()).field("FNAM", noRefs()).conditionRegion();
 
+    // Stage 4 candidates, transcribed from xEdit's wbDefinitionsFO4.pas (every subrecord it defines
+    // for the type). Whether they compile, and how, is set by the catalogue: they start as Candidate
+    // and become Winner (compiled, winning version taken whole) once the definition check confirms
+    // them on a real load order.
+    b.record("AACT", "Action", true)
+        .field("CNAM", noRefs())   // colour
+        .field("DNAM", zstring())  // notes
+        .field("TNAM", noRefs())   // keyword type
+        .field("DATA", formId());  // attraction rule
+    b.record("ASPC", "Acoustic Space", true)
+        .field("SNAM", formId())   // looping sound
+        .field("RDAT", formId())   // region sound
+        .field("BNAM", formId())   // environment type (REVB)
+        .field("XTRI", noRefs())
+        .field("WNAM", noRefs());
+    b.record("COLL", "Collision Layer", true)
+        .field("BNAM", noRefs())
+        .field("FNAM", noRefs())   // debug colour
+        .field("GNAM", noRefs())   // flags
+        .field("MNAM", zstring())  // name
+        .field("INTV", noRefs())
+        .field("CNAM", formIdArray()); // collides with
+    b.record("SNCT", "Sound Category", true)
+        .field("FNAM", noRefs())
+        .field("PNAM", formId())   // parent category
+        .field("ONAM", formId())   // menu slider category
+        .field("VNAM", noRefs())
+        .field("UNAM", noRefs())
+        .field("MNAM", noRefs())
+        .field("CNAM", noRefs());
+    b.record("SOPM", "Sound Output Model", true)
+        .field("NAM1", noRefs())
+        .field("MNAM", noRefs())
+        .field("VNAM", noRefs())
+        .field("ONAM", noRefs())
+        .field("ATTN", noRefs())
+        .field("ENAM", formId());  // effect chain (AECH)
+    b.record("REVB", "Reverb Parameters", true).field("DATA", noRefs()).field("ANAM", noRefs());
+    b.record("LAYR", "Layer", true).field("PNAM", formId());
+    b.record("MOVT", "Movement Type", true)
+        .field("MNAM", zstring())
+        .field("SPED", noRefs())   // speeds (floats; layout depends on form version)
+        .field("INAM", noRefs())
+        .field("JNAM", noRefs())
+        .field("LNAM", noRefs());
+    b.record("LGTM", "Lighting Template", true)
+        .field("DATA", noRefs())   // colours, fog and fade distances
+        .field("DALC", noRefs())   // directional ambient colours
+        .field("WGDR", formId());  // god rays
+    b.record("GDRY", "God Rays", true).field("DATA", noRefs());
+    b.record("LENS", "Lens Flare", true)
+        .field("CNAM", noRefs())
+        .field("LFSP", noRefs())   // sprite count
+        .field("DNAM", zstring())  // sprite ID
+        .field("FNAM", zstring())  // texture
+        .field("LFSD", noRefs());
+    b.record("STAG", "Animation Sound Tag Set", true).field("TNAM", structAt({0})); // sound, then the action text
+    b.record("AECH", "Audio Effect Chain", true).field("KNAM", noRefs()).field("DNAM", noRefs());
+    b.record("OVIS", "Object Visibility Manager", true).field("INDX", formId()).field("DATA", noRefs());
+    b.record("DOBJ", "Default Object Manager", true).field("DNAM", structArray(8, {4})); // (use, object) pairs
+    b.record("ANIO", "Animated Object", true).field("BNAM", zstring()); // model subrecords are common
+
     // Asset paths beyond the common model and icon subrecords. Names of every other record type
     // come from the catalogue (resources/record_catalogue.csv).
     // In armours and armour addons MODL holds FormIDs (armatures, additional races), not a mesh.
@@ -829,7 +892,7 @@ void RecordDefinitions::computeFingerprint()
     std::sort(recs.begin(), recs.end());
     for (const auto& r : recs) {
         const auto& rd = records_.at(Signature::fromString(r.c_str()));
-        text += "#" + r + (rd.compilable ? "+" : "-");
+        text += "#" + r + (rd.compilable ? "+" : "-") + strategyName(strategy(Signature::fromString(r)));
         for (const auto& [k, f] : sortedFields(rd.fields))
             addField(Signature::fromString(k.c_str()), *f);
         std::vector<std::pair<std::string, int>> assets;
@@ -894,24 +957,37 @@ std::string RecordDefinitions::recordName(Signature s) const
 void RecordDefinitions::applyCatalogue(const RecordCatalogue& catalogue)
 {
     catalogue_ = &catalogue;
-    specialisedWithoutLayout_.clear();
-    std::vector<Signature> kept;
-    for (Signature s : compilable_) {
+    strategyWithoutLayout_.clear();
+    compilable_.clear();
+    std::vector<Signature> sigs;
+    for (const auto& [s, _] : records_)
+        sigs.push_back(s);
+    std::sort(sigs.begin(), sigs.end());
+    for (Signature s : sigs) {
+        auto& rd = records_[s];
         auto e = catalogue.find(s);
-        if (e && e->strategy == MergeStrategy::Specialised)
-            kept.push_back(s);
-        else
-            records_[s].compilable = false; // turned off (or not listed) in the catalogue
+        rd.compilable = rd.layout && e &&
+                        (e->strategy == MergeStrategy::Specialised || e->strategy == MergeStrategy::Winner);
+        if (rd.compilable)
+            compilable_.push_back(s);
     }
-    compilable_ = std::move(kept);
     for (const auto& e : catalogue.entries())
-        if (e.strategy == MergeStrategy::Specialised && !isCompilable(e.sig))
-            specialisedWithoutLayout_.push_back(e.sig);
+        if (e.strategy != MergeStrategy::Preserve && !hasLayout(e.sig))
+            strategyWithoutLayout_.push_back(e.sig);
+}
+
+bool RecordDefinitions::hasLayout(Signature s) const
+{
+    auto r = record(s);
+    return r && r->layout;
 }
 
 MergeStrategy RecordDefinitions::strategy(Signature s) const
 {
-    return isCompilable(s) ? MergeStrategy::Specialised : MergeStrategy::Preserve;
+    auto e = catalogue().find(s);
+    if (!e || !hasLayout(s))
+        return MergeStrategy::Preserve;
+    return e->strategy;
 }
 
 std::string RecordDefinitions::supportSummary(Signature s) const
@@ -919,8 +995,13 @@ std::string RecordDefinitions::supportSummary(Signature s) const
     auto e = catalogue_ ? catalogue_->find(s) : nullptr;
     if (!e)
         return "Unknown record type: not part of Fallout 4";
-    if (isCompilable(s))
-        return "Compiled: described field by field";
+    switch (strategy(s)) {
+    case MergeStrategy::Specialised: return "Compiled: described field by field";
+    case MergeStrategy::Winner: return "Compiled: winning version taken whole (fields not merged)";
+    case MergeStrategy::Candidate:
+        return "Candidate: described, waiting for the definition check on a real load order (not compiled yet)";
+    case MergeStrategy::Preserve: break;
+    }
     switch (e->placement) {
     case RecordPlacement::Header: return "File header";
     case RecordPlacement::Cell:
@@ -928,8 +1009,8 @@ std::string RecordDefinitions::supportSummary(Signature s) const
     case RecordPlacement::TopicChild: return "Preserved: dialogue (stays in its plugin)";
     case RecordPlacement::Top: break;
     }
-    if (e->strategy == MergeStrategy::Specialised)
-        return "Preserved: marked Specialised but has no layout";
+    if (e->strategy != MergeStrategy::Preserve)
+        return std::string("Preserved: marked ") + strategyName(e->strategy) + " but has no layout";
     return "Preserved: not described yet (stays in its plugin)";
 }
 

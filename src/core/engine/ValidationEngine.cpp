@@ -322,7 +322,7 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
     auto wanted = [&](Signature sig) {
         if (!types.empty())
             return std::find(types.begin(), types.end(), sig) != types.end();
-        return session.defs.isCompilable(sig);
+        return session.defs.hasLayout(sig); // compiled types and candidates
     };
     std::vector<const FormGroup*> groups;
     for (const auto& g : session.groups)
@@ -434,7 +434,17 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
         return out;
     };
     std::map<Signature, std::pair<uint64_t, uint64_t>> perType; // resolved / FormIDs
+    std::map<Signature, std::vector<std::string>> candidateProblems;
     for (auto& [k, st] : stats) {
+        // Candidates must be fully confirmed before they compile: any doubt keeps them out.
+        if (session.defs.strategy(st.record) == MergeStrategy::Candidate) {
+            auto& problems = candidateProblems[st.record];
+            if (st.sizeIssues)
+                problems.push_back(st.sub.str() + " has an unexpected size in " + std::to_string(st.sizeIssues) + " records");
+            if (st.softRefs)
+                problems.push_back(st.sub.str() + (st.described ? "" : " (not described)") + " holds " +
+                                   std::to_string(st.softRefs) + " values that look like FormIDs");
+        }
         out.stats.push_back(st);
         perType[st.record].first += st.resolved;
         perType[st.record].second += st.formIds;
@@ -477,6 +487,25 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                sig.str() + " (" + session.defs.recordName(sig) + "): " + std::to_string(n) + " records decoded, " +
                    (total ? std::to_string(total) + " FormIDs, " + pct(res, total) + " resolve"
                           : std::string("no FormIDs to check")));
+    }
+    // Verdict per candidate type found in the load order.
+    for (const auto& [sig, n] : out.recordsByType) {
+        if (session.defs.strategy(sig) != MergeStrategy::Candidate)
+            continue;
+        auto problems = candidateProblems[sig];
+        auto [res, total] = perType[sig];
+        if (total && res * 100 < total * 99)
+            problems.push_back("only " + pct(res, total) + " of its FormIDs resolve (99% needed)");
+        const std::string label = sig.str() + " (" + session.defs.recordName(sig) + ")";
+        if (problems.empty()) {
+            out.readyCandidates.push_back(sig);
+            v.fail(Severity::Info, "Definitions",
+                   label + ": candidate confirmed by your load order (" + std::to_string(n) +
+                       " records). It can be compiled winner-only: send this result to the developer");
+        } else {
+            v.fail(Severity::Warning, "Definitions",
+                   label + ": candidate not confirmed: " + join(problems, "; ") + ". It stays out of compilation");
+        }
     }
     spdlog::info("Definition check: {} record types, {} subrecord layouts, {} warnings", out.recordsByType.size(),
                  out.stats.size(), v.warnings);

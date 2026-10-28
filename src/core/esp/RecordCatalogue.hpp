@@ -22,6 +22,8 @@ const char* placementName(RecordPlacement p);
 // How the compiler treats a record type. Set per type in the catalogue; never inferred.
 enum class MergeStrategy : uint8_t {
     Specialised, // described field by field: compiled, merged and patched
+    Winner,      // described (every FormID located): compiled, but the winning version is taken whole
+    Candidate,   // described, checked by the definition check, not compiled until a real load order confirms it
     Preserve,    // never written; a plugin containing it stays in the load order as it is
 };
 const char* strategyName(MergeStrategy s);

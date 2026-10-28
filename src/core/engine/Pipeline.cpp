@@ -11,8 +11,17 @@
 
 namespace fo4mx {
 
+namespace {
+
+const RecordDefinitions& definitions(const PipelineConfig& config)
+{
+    return config.definitions ? *config.definitions : RecordDefinitions::get(config.install.runtime);
+}
+
+} // namespace
+
 Pipeline::Pipeline(PipelineConfig config)
-    : config_(std::move(config)), session_(std::make_unique<Session>(RecordDefinitions::get(config_.install.runtime)))
+    : config_(std::move(config)), session_(std::make_unique<Session>(definitions(config_)))
 {
 }
 
@@ -74,7 +83,7 @@ ChangeReport Pipeline::checkForChanges(ProgressSink& progress)
     }
     auto current = ChangeDetector::captureQuick(config_.install, build ? &*build : nullptr, progress);
     uint64_t settings = ChangeDetector::settingsHash(config_.compile, config_.analysis.excludedPlugins,
-                                                     definitionsId(RecordDefinitions::get(config_.install.runtime)),
+                                                     definitionsId(definitions(config_)),
                                                      std::move(resolutions));
     changes_ = finishChangeReport(build, std::move(current), settings);
     if (db_)
@@ -85,7 +94,7 @@ ChangeReport Pipeline::checkForChanges(ProgressSink& progress)
 
 void Pipeline::scan(ProgressSink& progress)
 {
-    session_ = std::make_unique<Session>(RecordDefinitions::get(config_.install.runtime));
+    session_ = std::make_unique<Session>(definitions(config_));
     openCache();
     session_->cache = cache_.get();
     if (cache_)

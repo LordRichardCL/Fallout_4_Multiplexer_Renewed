@@ -1,24 +1,25 @@
 # Fallout 4 record catalogue: one row per record type. Primary source: the xEdit Fallout 4 record list
 # (fallout4_xedit_record_types.csv) plus the placed reference types defined in xEdit's wbDefinitionsFO4.pas.
 # Category: display grouping only. Placement: where the record lives in a plugin (header, top, cell, cell child, topic child).
-# Strategy: Specialised (described and compiled) or Preserve (never written; its plugin stays as it is).
-#   Specialised also needs a layout in RecordDefinitions.cpp; setting Preserve here turns compiling a type off.
+# Strategy: Specialised (described and compiled, fields merged), Winner (compiled, the winning version taken whole),
+#   Candidate (described and checked by the definition check, not compiled yet) or Preserve (never written; its
+#   plugin stays as it is). All but Preserve need a layout in RecordDefinitions.cpp; Preserve turns a type off.
 # Group Order: top-level group order in a written plugin (xEdit AddGroupOrder). Allocation Order: output grouping.
 Signature,Name,Category,Placement,Strategy,Group Order,Allocation Order,Notes
-AACT,Action,Animation,top,Preserve,3,,
+AACT,Action,Animation,top,Candidate,3,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 ACHR,Placed NPC,Placed References,cell child,Preserve,,,Tied to precombines and previs.
 ACTI,Activator,Base Objects,top,Specialised,20,,
 ADDN,Addon Node,Base Objects,top,Preserve,74,,
-AECH,Audio Effect Chain,Audio,top,Preserve,123,,
+AECH,Audio Effect Chain,Audio,top,Candidate,123,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 ALCH,Ingestible,Items,top,Specialised,42,9,
 AMDL,Aim Model,Item Components,top,Specialised,115,,
 AMMO,Ammunition,Items,top,Specialised,37,3,
-ANIO,Animated Object,Animation,top,Preserve,64,,
+ANIO,Animated Object,Animation,top,Candidate,64,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 AORU,Attraction Rule,Game Data,top,Specialised,125,,
 ARMA,Armor Addon,Item Components,top,Specialised,82,,
 ARMO,Armor,Items,top,Specialised,22,7,
 ARTO,Art Object,Visual Effects,top,Specialised,103,,
-ASPC,Acoustic Space,Audio,top,Preserve,15,,
+ASPC,Acoustic Space,Audio,top,Candidate,15,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 ASTP,Association Type,Actors,top,Preserve,101,,
 AVIF,Actor Value Information,Game Data,top,Specialised,75,,
 BNDS,Bendable Spline,Base Objects,top,Preserve,47,,
@@ -31,7 +32,7 @@ CLFM,Color,Visual Effects,top,Specialised,111,,
 CLMT,Climate,World,top,Preserve,51,,
 CMPO,Component,Item Components,top,Specialised,5,,
 COBJ,Constructible Object,Item Components,top,Specialised,117,17,
-COLL,Collision Layer,Game Data,top,Preserve,110,,
+COLL,Collision Layer,Game Data,top,Candidate,110,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 CONT,Container,Base Objects,top,Specialised,24,,
 CPTH,Camera Path,Visual Effects,top,Preserve,77,,
 CSTY,Combat Style,Actors,top,Preserve,61,,
@@ -41,7 +42,7 @@ DIAL,Dialog Topic,Quests and Dialogue,top,Preserve,,,Has a child group per topic
 DLBR,Dialog Branch,Quests and Dialogue,top,Preserve,95,,
 DLVW,Dialog View,Quests and Dialogue,top,Preserve,97,,
 DMGT,Damage Type,Combat,top,Specialised,8,,
-DOBJ,Default Object Manager,Game Data,top,Preserve,86,,
+DOBJ,Default Object Manager,Game Data,top,Candidate,86,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 DOOR,Door,Base Objects,top,Specialised,25,,
 DUAL,Dual Cast Data,Magic,top,Preserve,107,,
 ECZN,Encounter Zone,World,top,Preserve,83,,
@@ -56,7 +57,7 @@ FLST,FormID List,Lists,top,Specialised,71,16,
 FSTP,Footstep,Audio,top,Preserve,90,,
 FSTS,Footstep Set,Audio,top,Preserve,91,,
 FURN,Furniture,Base Objects,top,Specialised,35,,
-GDRY,God Rays,Visual Effects,top,Preserve,130,,
+GDRY,God Rays,Visual Effects,top,Candidate,130,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 GLOB,Global,Game Data,top,Specialised,7,,
 GMST,Game Setting,Game Data,top,Preserve,0,,
 GRAS,Grass,Base Objects,top,Preserve,32,,
@@ -75,11 +76,11 @@ KEYM,Key,Items,top,Specialised,41,12,
 KSSM,Sound Keyword Mapping,Audio,top,Specialised,122,,
 KYWD,Keyword,Game Data,top,Specialised,1,0,
 LAND,Landscape,World,cell child,Preserve,,,
-LAYR,Layer,World,top,Preserve,116,,
+LAYR,Layer,World,top,Candidate,116,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 LCRT,Location Reference Type,World,top,Specialised,2,,
 LCTN,Location,World,top,Preserve,84,,
-LENS,Lens Flare,Visual Effects,top,Preserve,129,,
-LGTM,Lighting Template,Visual Effects,top,Preserve,88,,
+LENS,Lens Flare,Visual Effects,top,Candidate,129,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
+LGTM,Lighting Template,Visual Effects,top,Candidate,88,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 LIGH,Light,Base Objects,top,Specialised,27,,
 LSCR,Load Screen,Interface,top,Specialised,62,,
 LTEX,Landscape Texture,World,top,Preserve,17,,
@@ -91,7 +92,7 @@ MATT,Material Type,Game Data,top,Preserve,79,,
 MESG,Message,Interface,top,Specialised,85,1,
 MGEF,Magic Effect,Magic,top,Specialised,16,,
 MISC,Misc. Item,Items,top,Specialised,28,4,
-MOVT,Movement Type,Actors,top,Preserve,105,,
+MOVT,Movement Type,Actors,top,Candidate,105,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 MSTT,Moveable Static,Base Objects,top,Specialised,31,,
 MSWP,Material Swap,Visual Effects,top,Specialised,119,,
 MUSC,Music Type,Audio,top,Preserve,89,,
@@ -103,7 +104,7 @@ NOTE,Note,Items,top,Specialised,44,11,
 NPC_,Non-Player Character,Actors,top,Preserve,38,,FaceGen paths tie new NPCs to their plugin.
 OMOD,Object Modification,Item Components,top,Specialised,118,5,
 OTFT,Outfit,Lists,top,Specialised,102,,
-OVIS,Object Visibility Manager,Game Data,top,Preserve,131,,
+OVIS,Object Visibility Manager,Game Data,top,Candidate,131,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 PACK,Package,Quests and Dialogue,top,Preserve,60,,
 PARW,Placed Arrow,Placed References,cell child,Preserve,,,From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list.
 PBAR,Placed Barrier,Placed References,cell child,Preserve,,,From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list.
@@ -122,7 +123,7 @@ RACE,Race,Actors,top,Preserve,13,,
 REFR,Placed Object,Placed References,cell child,Preserve,,,Tied to precombines and previs.
 REGN,Region,World,top,Preserve,54,,
 RELA,Relationship,Actors,top,Preserve,99,,
-REVB,Reverb Parameters,Audio,top,Preserve,112,,
+REVB,Reverb Parameters,Audio,top,Candidate,112,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 RFCT,Visual Effect,Visual Effects,top,Specialised,53,,
 RFGP,Reference Group,World,top,Preserve,114,,
 SCCO,Scene Collection,Quests and Dialogue,top,Preserve,124,,
@@ -132,13 +133,13 @@ SCSN,Audio Category Snapshot,Audio,top,Preserve,126,,
 SMBN,Story Manager Branch Node,Quests and Dialogue,top,Preserve,92,,
 SMEN,Story Manager Event Node,Quests and Dialogue,top,Preserve,94,,
 SMQN,Story Manager Quest Node,Quests and Dialogue,top,Preserve,93,,
-SNCT,Sound Category,Audio,top,Preserve,108,,
+SNCT,Sound Category,Audio,top,Candidate,108,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 SNDR,Sound Descriptor,Audio,top,Specialised,106,,
-SOPM,Sound Output Model,Audio,top,Preserve,109,,
+SOPM,Sound Output Model,Audio,top,Candidate,109,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 SOUN,Sound Marker,Base Objects,top,Specialised,14,,
 SPEL,Spell,Magic,top,Specialised,19,13,
 SPGD,Shader Particle Geometry,Visual Effects,top,Preserve,52,,
-STAG,Animation Sound Tag Set,Animation,top,Preserve,127,,
+STAG,Animation Sound Tag Set,Animation,top,Candidate,127,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 STAT,Static,Base Objects,top,Specialised,29,,
 TACT,Talking Activator,Base Objects,top,Preserve,21,,
 TERM,Terminal,Base Objects,top,Specialised,48,,

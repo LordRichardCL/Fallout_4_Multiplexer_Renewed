@@ -260,13 +260,16 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
         if (!inCompiled) {
             // Only retained plugins: last-plugin-wins already applies unless the patch
-            // merges the chain. Only described types can be rebuilt safely.
+            // merges the chain. Only types whose fields merge are patched (a winner-only type would just
+            // repeat the winner), unless the user chose another plugin's version.
             if (options.buildPatch && inst.size() > 1 && session.defs.isCompilable(inst[0].signature) &&
+                (session.defs.mergesFields(inst[0].signature) || forced >= 0) &&
                 (options.mergeCompatible || forced >= 0) && !options.skipPatchRecords.count(key.packed()))
                 candidates.push_back({gi, false, true, forced, true});
             continue;
         }
         out.sourceRecords += inCompiled;
+        const bool winnerOnly = !session.defs.mergesFields(inst[0].signature);
 
         bool originCompiled = key.valid() && out.compiledFlag_[key.origin];
         bool lastCompiled = out.compiledFlag_[inst.back().plugin];
@@ -278,10 +281,13 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                              session.pluginName(r.plugin) + " overrides " + session.formLabel(key) +
                                  " from a compiled plugin but stays in the load order",
                              key, session.pluginName(r.plugin));
-        } else if (!lastCompiled && !options.mergeCompatible && forced < 0) {
+        } else if (!lastCompiled && (!options.mergeCompatible || winnerOnly) && forced < 0) {
             out.retainedWins++;
             continue;
         }
+        // Winner-only types: the last plugin's version, taken whole (unless the user chose another).
+        if (winnerOnly && forced < 0)
+            forced = static_cast<int>(inst.size()) - 1;
         candidates.push_back({gi, originCompiled, !lastCompiled, forced, false});
     }
 

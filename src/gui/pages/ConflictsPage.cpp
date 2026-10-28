@@ -263,7 +263,7 @@ void ConflictsPage::reload()
     else if (chip == "Simple Overrides")
         where += " AND conflict_type = 1";
     else if (chip == "Not Merged")
-        where += " AND preserved = 1";
+        where += " AND preserved <> 0";
     else if (chip == "Critical")
         where += " AND severity = 'Critical'";
     if (signature_->currentIndex() > 0) {
@@ -298,7 +298,7 @@ void ConflictsPage::reload()
     const QString from = " FROM Conflicts c LEFT JOIN Plugins p ON p.id = c.winner_plugin_id "
                          "LEFT JOIN Plugins o ON o.id = c.origin_plugin_id WHERE " + where;
     QString sql = "SELECT c.form_id AS FormID, c.signature AS Type, c.editor_id AS 'Editor ID', c.type_name AS Conflict, "
-                  "CASE c.preserved WHEN 1 THEN 'Not merged' ELSE 'Merged' END AS Handling, c.severity AS Severity, p.name AS 'Winning Plugin', (SELECT g.output_plugin FROM "
+                  "CASE c.preserved WHEN 1 THEN 'Not merged' WHEN 2 THEN 'Winner only' ELSE 'Merged' END AS Handling, c.severity AS Severity, p.name AS 'Winning Plugin', (SELECT g.output_plugin FROM "
                   "GeneratedRecords g WHERE g.origin_plugin_id = c.origin_plugin_id AND g.object_id = c.object_id "
                   "LIMIT 1) AS resolved_in, o.name AS 'Origin', c.chain_length AS Plugins, c.chain AS 'Override Chain', "
                   "c.summary AS Summary, c.id, c.origin_plugin_id, c.object_id, c.preserved" +
@@ -401,8 +401,9 @@ void ConflictsPage::showConflict(int row)
     QStringList headers{"Field"};
     for (const auto& n : chainNames)
         headers << n;
-    const bool preserved = model_->value(row, ColPreserved).toInt() == 1;
-    headers << (preserved ? "Used in Game" : "Compiled Result");
+    const int handling = model_->value(row, ColPreserved).toInt(); // 0 merged, 1 kept as is, 2 winner only
+    const bool preserved = handling != 0;
+    headers << (handling == 1 ? "Used in Game" : handling == 2 ? "Compiled (Winner)" : "Compiled Result");
     fields_->setHorizontalHeaderLabels(headers);
     fields_->setRowCount(static_cast<int>(fieldNames.size()));
     int r = 0;
@@ -462,9 +463,14 @@ void ConflictsPage::showConflict(int row)
     resolution_->setEnabled(!originPlugin_.isEmpty());
     if (preserved) {
         resolution_->setEnabled(false);
-        resolutionNote_->setText(QString("Not merged: %1 records are preserved as they are, so the winning plugin's "
-                                         "version is used. Change the load order to choose a different version.")
-                                     .arg(model_->value(row, ColType).toString()));
+        resolutionNote_->setText(
+            handling == 2
+                ? QString("Winner only: %1 records are compiled as the winning plugin's version, without merging "
+                          "fields. Change the load order to choose a different version.")
+                      .arg(model_->value(row, ColType).toString())
+                : QString("Not merged: %1 records are preserved as they are, so the winning plugin's version is "
+                          "used. Change the load order to choose a different version.")
+                      .arg(model_->value(row, ColType).toString()));
     }
 }
 

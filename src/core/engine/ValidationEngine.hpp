@@ -58,6 +58,7 @@ struct DefinitionStat {
 struct DefinitionCheck {
     std::vector<DefinitionStat> stats;
     std::map<Signature, uint64_t> recordsByType;
+    std::vector<Signature> readyCandidates; // Candidate types the load order confirms (no problems found)
     ValidationReport report; // findings, never errors: the check does not block export
 };
 

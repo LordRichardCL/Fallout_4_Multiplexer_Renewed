@@ -44,12 +44,16 @@ The scanner indexes every record of every active plugin as a compact `RecordInst
 
 - **Name** and **Category** (display grouping only);
 - **Placement:** header, top-level group, cell, cell child or dialogue topic child;
-- **Strategy:** *Specialised* (compiled) or *Preserve* (never written; its plugin stays as it is);
+- **Strategy:**
+  - *Specialised*: compiled, fields merged;
+  - *Winner*: compiled, the last version of each chain taken whole: `MergeEngine` with that entry forced, never in the patch, and nothing written when a retained plugin wins;
+  - *Candidate*: layout described and covered by the definition check, not compiled;
+  - *Preserve*: never written; its plugin stays as it is;
 - **Group Order:** the top-level group order of a written plugin (xEdit's `AddGroupOrder`), used by `PluginWriter`;
 - **Allocation Order:** how the compiler groups types across outputs;
 - **Notes.**
 
-A type compiles only when the catalogue says *Specialised* **and** `RecordDefinitions` has a compilable layout for it. Setting *Preserve* turns a type off without touching code; marking a type *Specialised* without a layout does nothing and is reported (`specialisedWithoutLayout`, checked by a test). Signatures missing from the catalogue are reported as unknown record types: such a plugin is not compiled and its reason says it may be for another game or damaged. Asset path subrecords (`AssetRole`: mesh, texture, material, sound, icon) are part of the field definitions.
+A type compiles only when the catalogue says *Specialised* or *Winner* **and** `RecordDefinitions` has a layout for it (`RecordDef::layout`: every subrecord that can hold a FormID is described). Setting *Preserve* turns a type off without touching code. Any other strategy without a layout does nothing and is reported (`strategyWithoutLayout`, checked by a test). The definition check covers every type with a layout and gives each *Candidate* a verdict: confirmed only with no size problems, no FormID-like values outside the described fields, and at least 99% of its FormIDs resolving. Promotion from *Candidate* to *Winner* is a catalogue change made after such a result. Signatures missing from the catalogue are reported as unknown record types: such a plugin is not compiled and its reason says it may be for another game or damaged. Asset path subrecords (`AssetRole`: mesh, texture, material, sound, icon) are part of the field definitions.
 
 ## Record definitions and the FormID decoder
 

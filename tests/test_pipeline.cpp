@@ -1357,7 +1357,7 @@ TEST(types_that_are_not_merged_are_classified_record_by_record)
         CHECK(c == nullptr); // identical-to-master chains are counted, not listed
 
         // Two plugins changed it independently: the winner drops ModX's change. Not merged.
-        CHECK(a->preserved);
+        CHECK(a->handling == MergeHandling::NotCompiled);
         CHECK_EQ(int(a->type), int(ConflictType::RecordConflict));
         CHECK(a->summary.find("drops the changes of ModX.esp") != std::string::npos);
         CHECK(a->summary.find("Not merged") != std::string::npos);
@@ -1437,4 +1437,110 @@ TEST(cleaning_report_findings)
     // Nothing else is flagged: the unmodified fixture plugins have no deleted or injected records.
     CHECK(one("Deleted Reference", "ModA.esp") == nullptr);
     CHECK(one("Injected Record", "ModA.esp") == nullptr);
+}
+
+namespace {
+
+// Layers: LayerB's parent is LayerA. ModL2 renames LayerB; ModL3 (not made against ModL2) gives it a
+// new parent, LayerC. Both are made against ModL1.
+std::filesystem::path buildLayerInstall(const std::string& name)
+{
+    auto root = buildInstall(name);
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModL1.esp", {"Fallout4.esm"},
+                {record("LAYR", 0x01000800, {zs("EDID", "LayerA")}),
+                 record("LAYR", 0x01000801, {zs("EDID", "LayerB"), u32("PNAM", 0x01000800)})});
+    writePlugin(data / "ModL2.esp", {"Fallout4.esm", "ModL1.esp"},
+                {record("LAYR", 0x01000801, {zs("EDID", "LayerB_Renamed"), u32("PNAM", 0x01000800)})});
+    writePlugin(data / "ModL3.esp", {"Fallout4.esm", "ModL1.esp"},
+                {record("LAYR", 0x02000800, {zs("EDID", "LayerC")}),
+                 record("LAYR", 0x01000801, {zs("EDID", "LayerB"), u32("PNAM", 0x02000800)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModL1.esp\n*ModL2.esp\n*ModL3.esp\n");
+    return root;
+}
+
+} // namespace
+
+// Candidate types have a layout and are checked, but are not compiled until confirmed.
+TEST(candidate_types_are_checked_but_not_compiled)
+{
+    const auto& defs = RecordDefinitions::get();
+    CHECK(defs.strategy(Signature("LAYR")) == MergeStrategy::Candidate);
+    CHECK(!defs.isCompilable(Signature("LAYR")));
+    CHECK(defs.hasLayout(Signature("LAYR")));
+    CHECK(defs.supportSummary(Signature("LAYR")).find("Candidate") == 0);
+
+    auto root = buildLayerInstall("candidates");
+    // A candidate record carrying an undescribed subrecord that holds a FormID keeps the type unconfirmed.
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModS.esp", {"Fallout4.esm"},
+                {record("SNCT", 0x01000800, {zs("EDID", "Cat"), u32("PNAM", 0x01000801)}),
+                 record("SNCT", 0x01000801, {zs("EDID", "Parent"), u32("ZZZZ", 0x01000800)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModL1.esp\n*ModL2.esp\n*ModL3.esp\n*ModS.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK_EQ(p.session().findPlugin("ModL1.esp")->eligibility, Eligibility::Ineligible);
+
+    auto check = p.checkDefinitions();
+    CHECK(std::find(check.readyCandidates.begin(), check.readyCandidates.end(), Signature("LAYR")) !=
+          check.readyCandidates.end());
+    CHECK(std::find(check.readyCandidates.begin(), check.readyCandidates.end(), Signature("SNCT")) ==
+          check.readyCandidates.end());
+    bool confirmed = false, rejected = false;
+    for (const auto& is : check.report.issues) {
+        confirmed |= is.message.find("LAYR (Layer): candidate confirmed") == 0;
+        rejected |= is.message.find("SNCT (Sound Category): candidate not confirmed: ZZZZ (not described)") == 0;
+    }
+    CHECK(confirmed);
+    CHECK(rejected);
+}
+
+// Winner strategy: compiled, every FormID rewritten, the winning version taken whole.
+TEST(winner_types_compile_the_winning_version_whole)
+{
+    std::ifstream in(std::string(FO4MX_SOURCE_DIR) + "/resources/record_catalogue.csv", std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    auto pos = text.find("\nLAYR,");
+    auto cand = text.find("Candidate", pos);
+    text.replace(cand, std::string("Candidate").size(), "Winner");
+    static const RecordCatalogue catalogue = RecordCatalogue::parse(text);
+    static RecordDefinitions defs = [] {
+        RecordDefinitions d = RecordDefinitions::get();
+        d.applyCatalogue(catalogue);
+        d.computeFingerprint();
+        return d;
+    }();
+    CHECK(defs.isCompilable(Signature("LAYR")));
+    CHECK(!defs.mergesFields(Signature("LAYR")));
+
+    auto root = buildLayerInstall("winneronly");
+    auto cfg = configFor(root);
+    cfg.definitions = &defs;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    auto& s = p.session();
+    for (const char* n : {"ModL1.esp", "ModL2.esp", "ModL3.esp"})
+        CHECK_EQ(s.findPlugin(n)->eligibility, Eligibility::Eligible);
+
+    // Two independent changes: classified record by record, the winner drops ModL2's rename.
+    const auto* e = p.conflicts()->find({s.findPlugin("ModL1.esp")->index, 0x801});
+    CHECK(e != nullptr);
+    CHECK(e->handling == MergeHandling::WinnerOnly);
+    CHECK_EQ(int(e->type), int(ConflictType::RecordConflict));
+    CHECK(e->summary.find("Winner only") != std::string::npos);
+
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    auto result = p.exportOutputs();
+    OutputSet out(result.pluginFiles);
+    // Field merging would have produced "LayerB_Renamed" with LayerC as parent; winner-only keeps ModL3's record.
+    CHECK(out.byEditorId("LayerB_Renamed") == nullptr);
+    const auto* b = out.byEditorId("LayerB");
+    const auto* c = out.byEditorId("LayerC");
+    CHECK(b && c);
+    CHECK(out.resolve(*b, loadLE<uint32_t>(b->record.find(Signature("PNAM"))->data.data())) == out.identity(*c));
 }

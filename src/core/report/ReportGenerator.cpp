@@ -239,7 +239,7 @@ std::string conflictHtml(const ReportContext& ctx)
         for (auto p : e->chain)
             chain.push_back(s.pluginName(p));
         h.row({s.formLabel(e->key), conflictTypeName(e->type), conflictSeverityName(e->severity), s.pluginName(e->winner),
-               join(chain, " › "), e->preserved ? "Not merged (kept as is)" : "Merged field by field", e->summary},
+               join(chain, " › "), mergeHandlingName(e->handling), e->summary},
               {"mono", "", conflictSeverityName(e->severity)});
     }
     h.tableEnd(shown, list.size());
@@ -492,7 +492,8 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             o.set("editorId", e.editorId);
             o.set("type", static_cast<int>(e.type));
             o.set("typeName", conflictTypeName(e.type));
-            o.set("merged", !e.preserved);
+            o.set("merged", e.fieldsMerged());
+            o.set("handling", mergeHandlingName(e.handling));
             o.set("severity", conflictSeverityName(e.severity));
             o.set("winner", s->pluginName(e.winner));
             json::Value chain;

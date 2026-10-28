@@ -68,6 +68,7 @@ Select a type to see each plugin it blocks and everything else that plugin needs
 - **Not Merged**: record types the app does not describe field by field (cells, NPCs, quests, game settings, …; see **Plugins → Blocking Types**). They are never merged: the winning plugin's version is used as it is, and the **Handling** column says *Not merged*. They are compared record by record:
   - **Conflict (Not Merged)**: two plugins changed the record independently, so the winner drops the other's change. The summary names whose changes are dropped. Change the load order or make a patch in xEdit.
   - **Simple Override**: one plugin changed it, or each later plugin was made with the earlier one as a master and builds on its version.
+  - **Winner only**: types that are compiled but not merged field by field (strategy *Winner*). Their conflicts are classified the same way, and compiling writes the winning plugin's version whole, references rewritten. Choosing another plugin under **Winner when compiling** is not available for them.
   - The field table, when shown, is a generic comparison for information only. Its last column is **Used in Game** (the winner's version), not a compiled result, and **Winner when compiling** is disabled.
 - **Critical**: the winner deletes a record.
 
@@ -182,6 +183,7 @@ The app needs the exact layout of every record type it compiles. This check conf
 5. Read the rows:
    - **Info:** one line per record type, for example "ARMA (Armor Addon): 2,310 records decoded, 9,120 FormIDs, 99.9% resolve". Close to 100% is good.
    - **Warning:** a layout that looks wrong (few FormIDs resolve, unexpected sizes) or a field the app does not describe yet. Records are still protected: a wrong layout can block an export, but it cannot produce a broken plugin.
+   - **Candidates:** record types whose layout is described (from xEdit's definitions) but which are **not compiled yet**. They are checked too: "LAYR (Layer): candidate confirmed by your load order" means your files match the layout exactly. "candidate not confirmed: …" names what did not match, and the type stays out. Send the result to the developer: confirmed candidates are then switched to compile in the next version.
 6. Click **Save…** to write the rows shown to a text file (default `DefinitionCheck.txt` in Documents), or **Copy** to put them on the clipboard.
 
 ![Definition check](images/14-definition-check.png)
@@ -190,7 +192,7 @@ The same **Copy** and **Save…** buttons work for any filter. For example, afte
 
 Command line: `fo4mx check-definitions --mo2 "C:\Modding\MO2"` prints the same results (exit code 4 if there are warnings).
 
-`fo4mx record-types` lists every Fallout 4 record type the app knows: name, category, where it lives in a plugin, its strategy (*Specialised*: compiled; *Preserve*: stays in its plugin) and support level. The list comes from `resources/record_catalogue.csv`, built from xEdit's Fallout 4 record list.
+`fo4mx record-types` lists every Fallout 4 record type the app knows: name, category, where it lives in a plugin, its strategy (*Specialised*: compiled with fields merged; *Winner*: compiled, the winning version taken whole; *Candidate*: described and checked, not compiled yet; *Preserve*: stays in its plugin) and support level. The list comes from `resources/record_catalogue.csv`, built from xEdit's Fallout 4 record list.
 
 ## Rebuilding after switching over
 
