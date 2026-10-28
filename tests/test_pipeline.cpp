@@ -1259,7 +1259,11 @@ TEST(missing_references_get_a_likely_cause)
     // A mod that refers to its own record, which an update removed.
     writePlugin(data / "ModR.esp", {"Fallout4.esm"},
                 {record("FLST", 0x01000800, {zs("EDID", "ModR_List"), u32("LNAM", 0x01000F00)})});
-    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModA - Patch.esp\n*ModR.esp\n");
+    // An ESL-flagged mod referring to its own pre-compaction record, and a FFFFFF placeholder.
+    writePlugin(data / "ModEsl.esp", {"Fallout4.esm"},
+                {record("FLST", 0x01000800, {zs("EDID", "ModEsl_List"), u32("LNAM", 0x01007A13), u32("LNAM", 0x01FFFFFF)})},
+                RecordFlags::Light);
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModA - Patch.esp\n*ModR.esp\n*ModEsl.esp\n");
     auto cfg = configFor(root);
     cfg.databasePath.clear();
     Pipeline p(cfg);
@@ -1277,6 +1281,15 @@ TEST(missing_references_get_a_likely_cause)
     CHECK(summary);
     CHECK(version);
     CHECK(own);
+    bool eslOwn = false, placeholder = false;
+    for (const auto& is : p.dependencies()->issues)
+        if (is.category == "Missing Reference" && is.plugin == p.session().findPlugin("ModEsl.esp")->index) {
+            eslOwn |= is.cause.find("refers to its own record 007A13, but it is ESL-flagged") != std::string::npos;
+            placeholder |= is.cause.find("placeholder") != std::string::npos;
+            CHECK(is.cause.find("made for your version of ModEsl.esp") == std::string::npos);
+        }
+    CHECK(eslOwn);
+    CHECK(placeholder);
     for (const auto& is : p.dependencies()->issues)
         CHECK(!is.cause.empty());
 }

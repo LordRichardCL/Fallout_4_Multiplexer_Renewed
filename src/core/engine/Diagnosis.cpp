@@ -30,6 +30,13 @@ std::string missingReference(const Session& session, PluginIndex source, FormKey
 
     const PluginInfo& to = session.plugins[target.origin];
     const std::string id = formatFormId(target.objectId).substr(2);
+    if (target.objectId == 0xFFFFFF)
+        return src + " stores " + id + " in a reference field: a placeholder some tools write for \"none\", not a "
+                     "real record. The game reads it as none.";
+    if (target.origin == source && to.isLight() && target.objectId > 0xFFF)
+        return src + " refers to its own record " + id + ", but it is ESL-flagged and can only contain 800-FFF. The "
+                     "plugin was compacted and ESL-flagged after this reference was made, and the reference was not "
+                     "updated. The game reads it as none; reporting it to the mod author is the only fix.";
     if (to.isLight() && target.objectId > 0xFFF)
         return to.name + " is ESL-flagged, so it cannot contain object " + id +
                " (light plugins only use 800-FFF). The reference was made against an older version of " + to.name +
