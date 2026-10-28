@@ -28,6 +28,9 @@ struct DependencyIssue {
 struct TypeBlocker {
     Signature sig;
     std::string name;
+    std::string category;   // catalogue category; "Unknown" for signatures that are not Fallout 4 record types
+    std::string support;    // RecordDefinitions::supportSummary
+    bool known = true;      // listed in the record catalogue
     size_t plugins = 0;     // plugins containing the type (otherwise eligible or not)
     size_t records = 0;     // records of the type in those plugins
     size_t soleBlocker = 0; // plugins for which it is the only unsupported type

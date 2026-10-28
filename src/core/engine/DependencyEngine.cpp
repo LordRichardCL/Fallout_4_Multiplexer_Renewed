@@ -81,6 +81,10 @@ void reportBlockers(const Session& session, const std::vector<IntrinsicBlock>& b
             auto& t = byType[s];
             t.sig = s;
             t.name = session.defs.recordName(s);
+            auto entry = session.defs.catalogueEntry(s);
+            t.known = entry != nullptr;
+            t.category = entry ? entry->category : std::string("Unknown");
+            t.support = session.defs.supportSummary(s);
             t.plugins++;
             auto it = session.plugins[index].typeCounts.find(s);
             t.records += it == session.plugins[index].typeCounts.end() ? 0 : it->second;
@@ -176,12 +180,17 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
         p.eligibility = Eligibility::Eligible;
         auto& block = blocks[p.index];
         block.candidate = true;
-        std::vector<std::string> unsupported;
+        std::vector<std::string> unsupported, unknown;
         for (const auto& [s, n] : p.typeCounts)
             if (!session.defs.isCompilable(s)) {
-                unsupported.push_back(s.str() + " (" + std::to_string(n) + ")");
+                (session.defs.catalogueEntry(s) ? unsupported : unknown).push_back(s.str() + " (" + std::to_string(n) + ")");
                 block.types.push_back(s);
             }
+        if (!unknown.empty()) {
+            p.eligibility = Eligibility::Ineligible;
+            p.reasons.push_back("Contains record types that are not Fallout 4 record types: " + join(unknown, ", ") +
+                                ". The plugin may be for another game, or damaged");
+        }
         if (!unsupported.empty()) {
             p.eligibility = Eligibility::Ineligible;
             if (unsupported.size() > 6) {

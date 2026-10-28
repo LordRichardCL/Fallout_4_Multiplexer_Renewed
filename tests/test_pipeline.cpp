@@ -1279,3 +1279,48 @@ TEST(missing_references_get_a_likely_cause)
     for (const auto& is : p.dependencies()->issues)
         CHECK(!is.cause.empty());
 }
+
+// The catalogue names every type, compressed records of any type show their Editor ID, and record
+// types that are not Fallout 4 types are reported as such.
+TEST(catalogue_types_editor_ids_and_unknown_signatures)
+{
+    auto root = buildInstall("catalogue");
+    auto data = root / "Game" / "Data";
+    // A large (compressed) record of a type the compiler does not describe.
+    writePlugin(data / "ModL.esp", {"Fallout4.esm"},
+                {record("LAND", 0x01000800, {raw("DATA", std::vector<uint8_t>(20000, 1))}),
+                 record("GMST", 0x01000801, {zs("EDID", "fModSetting"), raw("DATA", std::vector<uint8_t>(20000, 2))})},
+                0, true);
+    // A record type that does not exist in Fallout 4 (an Oblivion creature).
+    writePlugin(data / "ModU.esp", {"Fallout4.esm"}, {record("CREA", 0x01000800, {zs("EDID", "OldCreature")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModL.esp\n*ModU.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    auto& s = p.session();
+
+    bool compressedEdid = false;
+    for (const auto& r : s.records)
+        if (r.plugin == s.findPlugin("ModL.esp")->index && r.signature == Signature("GMST"))
+            compressedEdid = r.editorId && s.strings.get(r.editorId) == "fModSetting";
+    CHECK(compressedEdid);
+
+    const auto* modU = s.findPlugin("ModU.esp");
+    CHECK_EQ(modU->eligibility, Eligibility::Ineligible);
+    bool unknownReason = false;
+    for (const auto& r : modU->reasons)
+        unknownReason |= r.find("not Fallout 4 record types: CREA (1)") != std::string::npos;
+    CHECK(unknownReason);
+
+    p.analyse();
+    bool crea = false, gmst = false;
+    for (const auto& b : p.dependencies()->blockers) {
+        if (b.sig == Signature("CREA"))
+            crea = !b.known && b.category == "Unknown" && b.support.find("Unknown record type") == 0;
+        if (b.sig == Signature("GMST"))
+            gmst = b.known && b.name == "Game Setting" && b.category == "Game Data";
+    }
+    CHECK(crea);
+    CHECK(gmst);
+}

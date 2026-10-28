@@ -110,7 +110,9 @@ CREATE TABLE IF NOT EXISTS EligibilityBlockers (
     plugins INTEGER,
     records INTEGER,
     sole_blocker INTEGER,
-    unlocks INTEGER
+    unlocks INTEGER,
+    category TEXT,
+    support TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ConflictFields (

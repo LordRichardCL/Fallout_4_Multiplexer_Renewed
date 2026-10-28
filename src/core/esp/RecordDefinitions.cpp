@@ -126,6 +126,17 @@ public:
             defs_.compilable_.push_back(current_);
         return *this;
     }
+    // Selects an already defined record to add to.
+    Builder& edit(const char* sig)
+    {
+        current_ = S(sig);
+        return *this;
+    }
+    Builder& asset(const char* sub, AssetRole role)
+    {
+        defs_.records_[current_].assets[S(sub)] = role;
+        return *this;
+    }
     Builder& field(const char* sub, FieldDef def)
     {
         defs_.records_[current_].fields[S(sub)] = std::move(def);
@@ -178,6 +189,10 @@ void buildCommon(RecordDefinitions& d)
 
     for (const char* m : {"MODL", "MOD2", "MOD3", "MOD4", "MOD5", "DMDL", "ICON", "MICO", "ICO2", "MIC2"})
         c[S(m)] = zstring();
+    for (const char* m : {"MODL", "MOD2", "MOD3", "MOD4", "MOD5", "DMDL"})
+        d.commonAssets_[S(m)] = AssetRole::Mesh;
+    for (const char* m : {"ICON", "MICO", "ICO2", "MIC2"})
+        d.commonAssets_[S(m)] = AssetRole::Icon;
     for (const char* m : {"MODT", "MO2T", "MO3T", "MO4T", "MO5T", "DMDT", "MODC", "MO2C", "MO3C", "MO4C", "MO5C",
                           "DMDC", "MODF", "MO2F", "MO3F", "MO4F", "MO5F"})
         c[S(m)] = noRefs();
@@ -744,23 +759,22 @@ void buildOldGen(RecordDefinitions& d)
 
     b.record("CLFM", "Color", true).field("CNAM", noRefs()).field("FNAM", noRefs()).conditionRegion();
 
-    // Record types analysed for conflicts but not yet compiled (future phases).
-    const std::pair<const char*, const char*> future[] = {
-        // Not described yet
-        {"OVIS", "Object Visibility"}, {"PKIN", "Pack-In"}, {"LGTM", "Lighting Template"}, {"IMGS", "Image Space"},
-        {"IMAD", "Image Space Modifier"}, {"DEBR", "Debris"}, {"COLL", "Collision Layer"}, {"SNCT", "Sound Category"},
-        {"SOPM", "Sound Output Model"}, {"ASPC", "Acoustic Space"}, {"ANIO", "Animated Object"}, {"ADDN", "Addon Node"},
-        {"BPTD", "Body Part Data"}, {"VTYP", "Voice Type"}, {"ECZN", "Encounter Zone"}, {"WATR", "Water"},
-        {"WTHR", "Weather"}, {"REGN", "Region"}, {"MUSC", "Music Type"}, {"SCCO", "Scene Collection"},
-        // Tier 2-4
-        {"NPC_", "Non-Player Character"}, {"RACE", "Race"}, {"CLAS", "Class"}, {"PACK", "Package"},
-        {"QUST", "Quest"}, {"DIAL", "Dialogue Topic"}, {"INFO", "Dialogue Response"}, {"SCEN", "Scene"},
-        {"IDLE", "Idle Animation"}, {"GMST", "Game Setting"}, {"LCTN", "Location"}, {"WRLD", "Worldspace"},
-        {"CELL", "Cell"}, {"REFR", "Reference"}, {"ACHR", "Placed NPC"}, {"PGRE", "Placed Grenade"},
-        {"PHZD", "Placed Hazard"}, {"NAVM", "Navmesh"}, {"LAND", "Landscape"},
-    };
-    for (auto [s, n] : future)
-        b.record(s, n, false);
+    // Asset paths beyond the common model and icon subrecords. Names of every other record type
+    // come from the catalogue (resources/record_catalogue.csv).
+    // In armours and armour addons MODL holds FormIDs (armatures, additional races), not a mesh.
+    b.edit("ARMO").asset("MODL", AssetRole::None);
+    b.edit("ARMA").asset("MODL", AssetRole::None);
+    b.edit("TXST");
+    for (const char* t : {"TX00", "TX01", "TX02", "TX03", "TX04", "TX05", "TX06", "TX07"})
+        b.asset(t, AssetRole::Texture);
+    b.asset("MNAM", AssetRole::Material);
+    // BNAM only names the material being replaced; the replacement (SNAM) is what loads.
+    b.edit("MSWP").asset("SNAM", AssetRole::Material);
+    b.edit("SNDR").asset("ANAM", AssetRole::Sound);
+    b.edit("EFSH").asset("NAM7", AssetRole::Texture).asset("NAM8", AssetRole::Texture).asset("NAM9", AssetRole::Texture);
+    b.edit("LIGH").asset("NAM0", AssetRole::Texture);
+    b.edit("PROJ").asset("NAM1", AssetRole::Mesh);
+    b.edit("AMMO").asset("NAM1", AssetRole::Mesh); // shell casing model
 }
 
 } // namespace
@@ -770,6 +784,7 @@ const RecordDefinitions& RecordDefinitions::get(RuntimeProfile profile)
     static const RecordDefinitions oldGen = [] {
         RecordDefinitions d;
         buildOldGen(d);
+        d.applyCatalogue(RecordCatalogue::get());
         d.computeFingerprint();
         return d;
     }();
@@ -780,6 +795,7 @@ const RecordDefinitions& RecordDefinitions::get(RuntimeProfile profile)
         RecordDefinitions d;
         buildOldGen(d);
         d.profileName_ = "Fallout 4 Next Gen (experimental, Old Gen layouts)";
+        d.applyCatalogue(RecordCatalogue::get());
         d.computeFingerprint();
         return d;
     }();
@@ -816,6 +832,12 @@ void RecordDefinitions::computeFingerprint()
         text += "#" + r + (rd.compilable ? "+" : "-");
         for (const auto& [k, f] : sortedFields(rd.fields))
             addField(Signature::fromString(k.c_str()), *f);
+        std::vector<std::pair<std::string, int>> assets;
+        for (const auto& [k, role] : rd.assets)
+            assets.emplace_back(k.str(), int(role));
+        std::sort(assets.begin(), assets.end());
+        for (const auto& [k, role] : assets)
+            text += "@" + k + "=" + std::to_string(role);
         for (const auto& reg : rd.regions) {
             text += "[" + reg.name + "]" + reg.end.str();
             for (auto s : reg.start)
@@ -824,6 +846,12 @@ void RecordDefinitions::computeFingerprint()
                 text += ">" + s.str();
         }
     }
+    std::vector<std::pair<std::string, int>> commonAssets;
+    for (const auto& [k, role] : commonAssets_)
+        commonAssets.emplace_back(k.str(), int(role));
+    std::sort(commonAssets.begin(), commonAssets.end());
+    for (const auto& [k, role] : commonAssets)
+        text += "@" + k + "=" + std::to_string(role);
     std::vector<std::pair<uint16_t, uint8_t>> params(conditionFormParams_.begin(), conditionFormParams_.end());
     std::sort(params.begin(), params.end());
     for (auto [fn, mask] : params)
@@ -857,8 +885,89 @@ bool RecordDefinitions::isCompilable(Signature s) const
 
 std::string RecordDefinitions::recordName(Signature s) const
 {
+    if (auto e = catalogue_ ? catalogue_->find(s) : nullptr)
+        return e->name;
     auto it = names_.find(s);
     return it == names_.end() ? s.str() : it->second;
+}
+
+void RecordDefinitions::applyCatalogue(const RecordCatalogue& catalogue)
+{
+    catalogue_ = &catalogue;
+    specialisedWithoutLayout_.clear();
+    std::vector<Signature> kept;
+    for (Signature s : compilable_) {
+        auto e = catalogue.find(s);
+        if (e && e->strategy == MergeStrategy::Specialised)
+            kept.push_back(s);
+        else
+            records_[s].compilable = false; // turned off (or not listed) in the catalogue
+    }
+    compilable_ = std::move(kept);
+    for (const auto& e : catalogue.entries())
+        if (e.strategy == MergeStrategy::Specialised && !isCompilable(e.sig))
+            specialisedWithoutLayout_.push_back(e.sig);
+}
+
+MergeStrategy RecordDefinitions::strategy(Signature s) const
+{
+    return isCompilable(s) ? MergeStrategy::Specialised : MergeStrategy::Preserve;
+}
+
+std::string RecordDefinitions::supportSummary(Signature s) const
+{
+    auto e = catalogue_ ? catalogue_->find(s) : nullptr;
+    if (!e)
+        return "Unknown record type: not part of Fallout 4";
+    if (isCompilable(s))
+        return "Compiled: described field by field";
+    switch (e->placement) {
+    case RecordPlacement::Header: return "File header";
+    case RecordPlacement::Cell:
+    case RecordPlacement::CellChild: return "Preserved: placed in cells (stays in its plugin)";
+    case RecordPlacement::TopicChild: return "Preserved: dialogue (stays in its plugin)";
+    case RecordPlacement::Top: break;
+    }
+    if (e->strategy == MergeStrategy::Specialised)
+        return "Preserved: marked Specialised but has no layout";
+    return "Preserved: not described yet (stays in its plugin)";
+}
+
+AssetRole RecordDefinitions::assetRole(Signature rec, Signature sub) const
+{
+    if (auto r = record(rec)) {
+        auto it = r->assets.find(sub);
+        if (it != r->assets.end())
+            return it->second;
+    }
+    auto it = commonAssets_.find(sub);
+    return it == commonAssets_.end() ? AssetRole::None : it->second;
+}
+
+const char* assetRoleName(AssetRole r)
+{
+    switch (r) {
+    case AssetRole::None: return "";
+    case AssetRole::Mesh: return "Mesh";
+    case AssetRole::Texture: return "Texture";
+    case AssetRole::Material: return "Material";
+    case AssetRole::Sound: return "Sound";
+    case AssetRole::Icon: return "Icon";
+    }
+    return "";
+}
+
+const char* assetRoot(AssetRole r)
+{
+    switch (r) {
+    case AssetRole::None: return "";
+    case AssetRole::Mesh: return "meshes\\";
+    case AssetRole::Texture:
+    case AssetRole::Icon: return "textures\\";
+    case AssetRole::Material: return "materials\\";
+    case AssetRole::Sound: return "sound\\";
+    }
+    return "";
 }
 
 bool RecordDefinitions::conditionParamIsForm(uint16_t function, int param) const

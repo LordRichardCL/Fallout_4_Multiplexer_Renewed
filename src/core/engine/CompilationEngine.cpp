@@ -201,14 +201,11 @@ std::vector<std::vector<uint32_t>> stronglyConnected(const std::vector<EmittedRe
     return sccs; // Tarjan emits a component only after everything it depends on
 }
 
-int typeRank(Signature s)
+// Allocation group of a record type (catalogue "Allocation Order"); unranked types share the last group.
+int typeRank(const RecordDefinitions& defs, Signature s)
 {
-    static const char* order[] = {"KYWD", "MESG", "FACT", "AMMO", "MISC", "OMOD", "WEAP", "ARMO", "INGR",
-                                  "ALCH", "BOOK", "NOTE", "KEYM", "SPEL", "PERK", "LVLI", "FLST", "COBJ"};
-    for (int i = 0; i < static_cast<int>(std::size(order)); ++i)
-        if (s == Signature::fromString(order[i]))
-            return i;
-    return static_cast<int>(std::size(order));
+    auto e = defs.catalogueEntry(s);
+    return e && e->allocationOrder >= 0 ? e->allocationOrder : defs.catalogue().allocationGroups() - 1;
 }
 
 } // namespace
@@ -576,7 +573,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         std::map<int, uint64_t> bucketSize;
         for (const auto& e : out.records)
             if (!e.patch)
-                bucketSize[typeRank(e.sig)] += e.size;
+                bucketSize[typeRank(session.defs, e.sig)] += e.size;
         // Outputs per bucket: one each, the rest proportional to size.
         std::map<int, std::pair<int, int>> range; // rank -> [first, count)
         int buckets = static_cast<int>(bucketSize.size());
@@ -616,7 +613,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             for (auto v : comp) {
                 if (out.records[v].patch)
                     continue;
-                int r = typeRank(out.records[v].sig);
+                int r = typeRank(session.defs, out.records[v].sig);
                 auto [first, cnt] = range[r];
                 uint64_t sz = std::max<uint64_t>(bucketSize[r], 1);
                 int o = first + static_cast<int>(std::min<uint64_t>((filled[r] * static_cast<uint64_t>(cnt)) / sz,

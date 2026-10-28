@@ -99,9 +99,10 @@ void PluginsPage::reload()
     QString like = "%" + search_->text().trimmed() + "%";
     if (blockersMode_) {
         sql = "SELECT signature AS Type, unlocks AS 'Would Unlock', sole_blocker AS 'Only Blocker In', "
-              "plugins AS 'Found In', records AS Records, name AS Name FROM EligibilityBlockers WHERE signature LIKE ? "
-              "OR name LIKE ? ORDER BY unlocks DESC, plugins DESC, signature";
-        binds << like << like;
+              "plugins AS 'Found In', records AS Records, name AS Name, category AS Category, support AS Support "
+              "FROM EligibilityBlockers WHERE signature LIKE ? OR name LIKE ? OR category LIKE ? "
+              "ORDER BY unlocks DESC, plugins DESC, signature";
+        binds << like << like << like;
         model_->setNumberColumns({1, 2, 3, 4});
         model_->setBytesColumns({});
         model_->setStatusColumns({});
@@ -175,14 +176,15 @@ QString PluginsPage::exportText()
 
     // Blocking types, each with the plugins it blocks and what else those plugins need.
     QSet<QString> unsupported;
-    out << "[Blocking record types]" << "Type\tName\tWould Unlock\tOnly Blocker In\tFound In\tRecords";
+    out << "[Blocking record types]"
+        << "Type\tName\tWould Unlock\tOnly Blocker In\tFound In\tRecords\tCategory\tSupport";
     QSqlQuery b(db);
-    b.exec("SELECT signature, name, unlocks, sole_blocker, plugins, records FROM EligibilityBlockers "
+    b.exec("SELECT signature, name, unlocks, sole_blocker, plugins, records, category, support FROM EligibilityBlockers "
            "ORDER BY unlocks DESC, plugins DESC, signature");
     QList<QStringList> blockers;
     while (b.next()) {
         QStringList row;
-        for (int c = 0; c < 6; ++c)
+        for (int c = 0; c < 8; ++c)
             row << b.value(c).toString();
         unsupported.insert(row[0]);
         blockers << row;
@@ -261,11 +263,14 @@ void PluginsPage::showBlocker(int row)
         rows << QString("%1 <span style='color:#8aa196'>— needs %2</span>")
                     .arg(q.value(0).toString().toHtmlEscaped(), blockers.join(", "));
     }
-    details_->setHtml(QString("<h3 style='color:#3ddc84'>%1 — %2</h3><p>%3 active plugins contain this type. Each line lists every "
+    details_->setHtml(QString("<h3 style='color:#3ddc84'>%1 — %2</h3><p style='color:#8aa196'>%5 · %6</p>"
+                              "<p>%3 active plugins contain this type. Each line lists every "
                               "unsupported type that plugin needs.</p><p>%4</p>")
                           .arg(sig.toHtmlEscaped(), model_->value(row, 5).toString().toHtmlEscaped())
                           .arg(rows.size())
-                          .arg(rows.join("<br>")));
+                          .arg(rows.join("<br>"))
+                          .arg(model_->value(row, 6).toString().toHtmlEscaped(),
+                               model_->value(row, 7).toString().toHtmlEscaped()));
     exclude_->setEnabled(false);
 }
 

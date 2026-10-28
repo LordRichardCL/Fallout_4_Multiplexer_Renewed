@@ -13,40 +13,6 @@ namespace fo4mx {
 
 namespace {
 
-// Record subrecords that hold asset paths, and the folder the engine resolves them against.
-const char* rootFor(Signature record, Signature sub)
-{
-    static const std::set<std::string> meshes = {"MODL", "MOD2", "MOD3", "MOD4", "MOD5", "DMDL"};
-    static const std::set<std::string> icons = {"ICON", "MICO", "ICO2", "MIC2"};
-    std::string s = sub.str();
-    // In armours and armour addons MODL holds FormIDs (armatures, additional races), not a mesh.
-    if (s == "MODL" && (record == sig::ARMO || record == Signature("ARMA")))
-        return nullptr;
-    if (meshes.count(s))
-        return "meshes\\";
-    if (record == Signature("TXST")) {
-        if (s.size() == 4 && s[0] == 'T' && s[1] == 'X' && s[2] == '0' && s[3] >= '0' && s[3] <= '7')
-            return "textures\\";
-        if (s == "MNAM")
-            return "materials\\";
-    }
-    // BNAM only names the material being replaced; the replacement (SNAM) is what loads.
-    if (record == Signature("MSWP") && s == "SNAM")
-        return "materials\\";
-    if (record == Signature("SNDR") && s == "ANAM")
-        return "sound\\";
-    if ((record == Signature("EFSH") && (s == "NAM7" || s == "NAM8" || s == "NAM9")) ||
-        (record == Signature("LIGH") && s == "NAM0"))
-        return "textures\\";
-    if (record == Signature("PROJ") && s == "NAM1")
-        return "meshes\\";
-    if (icons.count(s))
-        return "textures\\";
-    if (record == sig::AMMO && s == "NAM1")
-        return "meshes\\"; // shell casing model
-    return nullptr;
-}
-
 std::string underRoot(const std::string& value, const char* root)
 {
     std::string p = normalizeAssetPath(value);
@@ -152,20 +118,15 @@ AssetTrace AssetTracer::trace(Session& session, const CompiledOutput& compiled, 
             any = true;
         };
         auto visitSub = [&](const NormSub& s) {
-            const char* root = rootFor(rec.sig, s.sig);
-            if (!root || !s.refs.empty() || s.bytes.empty() || s.bytes.back() != 0)
+            const AssetRole assetRole = session.defs.assetRole(rec.sig, s.sig);
+            if (assetRole == AssetRole::None || !s.refs.empty() || s.bytes.empty() || s.bytes.back() != 0)
                 return;
+            const char* root = assetRoot(assetRole);
             std::string value(reinterpret_cast<const char*>(s.bytes.data()));
             std::string path = underRoot(value, root);
             if (path.size() <= std::string(root).size())
                 return;
-            const std::string r = root;
-            const std::string sub = s.sig.str();
-            const char* role = r == "meshes\\"      ? "Mesh"
-                               : r == "materials\\" ? "Material"
-                               : r == "sound\\"     ? "Sound"
-                               : (sub.rfind("ICO", 0) == 0 || sub.rfind("MIC", 0) == 0) ? "Icon"
-                                                                                        : "Texture";
+            const std::string role = assetRoleName(assetRole);
             add(path, role, {}, true);
             if (!followMeshes)
                 return;

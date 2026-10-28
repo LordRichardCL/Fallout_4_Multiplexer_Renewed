@@ -1,3 +1,7 @@
+include(${PROJECT_SOURCE_DIR}/cmake/EmbedText.cmake)
+fo4mx_embed_text(${PROJECT_SOURCE_DIR}/resources/record_catalogue.csv
+                 ${CMAKE_CURRENT_BINARY_DIR}/generated/RecordCatalogueData.cpp kRecordCatalogue)
+
 add_library(fo4mx_core STATIC
     util/Compression.cpp
     util/IniFile.cpp
@@ -10,7 +14,9 @@ add_library(fo4mx_core STATIC
     esp/PluginHeader.cpp
     esp/PluginWriter.cpp
     esp/Record.cpp
+    esp/RecordCatalogue.cpp
     esp/RecordDefinitions.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/RecordCatalogueData.cpp
     esp/StringTables.cpp
     ba2/Ba2Archive.cpp
     vfs/GameInstall.cpp

@@ -29,6 +29,9 @@ Usage:
   fo4mx check-definitions <install> [--types ARMA,MGEF,...]
                  decode every record of the supported types in the load order
                  and report layouts that look wrong
+  fo4mx record-types [--runtime oldgen|nextgen]
+                 list every Fallout 4 record type with its category, placement
+                 and how the compiler handles it (tab separated)
   fo4mx info     <plugin.esp>
   fo4mx dump     <plugin.esp> [--formid XXXXXXXX] [--limit N]
   fo4mx ba2      <archive.ba2> [--extract PATH --to FILE]
@@ -227,13 +230,14 @@ void printDashboard(const Pipeline& p)
         std::printf("\n  Record types that keep plugins out of compilation (%zu plugins held back; supporting all\n"
                     "  of them would unlock %zu):\n",
                     d->blockedByTypes, d->unlockedByAll);
-        std::printf("    %-6s %-28s %8s %10s %8s %8s\n", "Type", "Name", "Plugins", "Records", "Only", "Unlocks");
+        std::printf("    %-6s %-28s %-20s %8s %10s %8s %8s\n", "Type", "Name", "Category", "Plugins", "Records", "Only",
+                    "Unlocks");
         size_t shown = 0;
         for (const auto& b : d->blockers) {
             if (++shown > 20)
                 break;
-            std::printf("    %-6s %-28s %8zu %10zu %8zu %8zu\n", b.sig.str().c_str(), b.name.substr(0, 28).c_str(),
-                        b.plugins, b.records, b.soleBlocker, b.unlocks);
+            std::printf("    %-6s %-28s %-20s %8zu %10zu %8zu %8zu\n", b.sig.str().c_str(), b.name.substr(0, 28).c_str(),
+                        b.category.substr(0, 20).c_str(), b.plugins, b.records, b.soleBlocker, b.unlocks);
         }
     }
     if (auto c = p.compiledOutput()) {
@@ -247,6 +251,18 @@ void printDashboard(const Pipeline& p)
                             formatCount(op.records.size()).c_str(), op.masterNames.size());
     }
     std::printf("\n");
+}
+
+int cmdRecordTypes(const Args& a)
+{
+    const auto& defs =
+        RecordDefinitions::get(a.get("--runtime") == "nextgen" ? RuntimeProfile::NextGen : RuntimeProfile::OldGen_1_10_163);
+    std::printf("Signature\tName\tCategory\tPlacement\tStrategy\tSupport\tNotes\n");
+    for (const auto& e : defs.catalogue().entries())
+        std::printf("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.sig.str().c_str(), e.name.c_str(), e.category.c_str(),
+                    placementName(e.placement), strategyName(defs.strategy(e.sig)), defs.supportSummary(e.sig).c_str(),
+                    e.notes.c_str());
+    return 0;
 }
 
 int cmdInfo(const Args& a)
@@ -465,6 +481,8 @@ int main(int argc, char** argv)
             std::fputs(kUsage, stdout);
             return a.command.empty() ? 1 : 0;
         }
+        if (a.command == "record-types")
+            return cmdRecordTypes(a);
         if (a.command == "info")
             return cmdInfo(a);
         if (a.command == "dump")

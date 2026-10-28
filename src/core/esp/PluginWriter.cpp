@@ -1,6 +1,7 @@
 #include "esp/PluginWriter.hpp"
 
 #include "esp/FormId.hpp"
+#include "esp/RecordCatalogue.hpp"
 #include "util/Text.hpp"
 
 #include <algorithm>
@@ -11,25 +12,7 @@ namespace fo4mx {
 
 const std::vector<Signature>& PluginWriter::topLevelOrder()
 {
-    static const std::vector<Signature> order = [] {
-        const char* names[] = {
-            "GMST", "KYWD", "LCRT", "AACT", "TRNS", "CMPO", "TXST", "GLOB", "DMGT", "CLAS", "FACT", "HDPT",
-            "EYES", "RACE", "SOUN", "ASPC", "MGEF", "LTEX", "ENCH", "SPEL", "ACTI", "TACT", "ARMO", "BOOK",
-            "CONT", "DOOR", "INGR", "LIGH", "MISC", "STAT", "SCOL", "MSTT", "GRAS", "TREE", "FLOR", "FURN",
-            "WEAP", "AMMO", "NPC_", "PLYR", "LVLN", "KEYM", "ALCH", "IDLM", "NOTE", "PROJ", "HAZD", "BNDS",
-            "SLGM", "TERM", "LVLI", "WTHR", "CLMT", "SPGD", "RFCT", "REGN", "NAVI", "CELL", "WRLD", "QUST",
-            "IDLE", "PACK", "CSTY", "LSCR", "LVSP", "ANIO", "WATR", "EFSH", "EXPL", "DEBR", "IMGS", "IMAD",
-            "FLST", "PERK", "BPTD", "ADDN", "AVIF", "CAMS", "CPTH", "VTYP", "MATT", "IPCT", "IPDS", "ARMA",
-            "ECZN", "LCTN", "MESG", "DOBJ", "DFOB", "LGTM", "MUSC", "FSTP", "FSTS", "SMBN", "SMQN", "SMEN",
-            "DLBR", "MUST", "DLVW", "EQUP", "RELA", "SCEN", "ASTP", "OTFT", "ARTO", "MATO", "MOVT", "SNDR",
-            "SNCT", "SOPM", "COLL", "CLFM", "REVB", "PKIN", "RFGP", "AMDL", "LAYR", "COBJ", "OMOD", "MSWP",
-            "ZOOM", "INNR", "KSSM", "AECH", "SCCO", "AORU", "SCSN", "STAG", "NOCM", "LENS", "GDRY", "OVIS"};
-        std::vector<Signature> v;
-        for (const char* n : names)
-            v.push_back(Signature::fromString(n));
-        return v;
-    }();
-    return order;
+    return RecordCatalogue::get().groupOrder();
 }
 
 std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)

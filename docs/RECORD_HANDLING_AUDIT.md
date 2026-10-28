@@ -123,6 +123,25 @@ Rules:
 
    This is the process already used for tier 1.
 
+## Stage 1 result: the catalogue
+
+Done. `resources/record_catalogue.csv` (147 types: the supplied list plus `PARW`, `PBAR`, `PBEA`, `PCON`, `PFLA`, `PGRE`, `PHZD`, `PMIS`, which xEdit's `wbDefinitionsFO4.pas` defines as placed references but the supplied list omits) is now the single source for:
+
+- record names (the xEdit names) everywhere in the app;
+- the top-level group order of written plugins, now taken from xEdit's own Fallout 4 group order. The only differences from the old hard-coded list: `SLGM` (not a Fallout 4 group) is gone and `DUAL` is included. Neither is ever written, so outputs do not change;
+- the allocation grouping (same 18 ranked types, so outputs do not change);
+- the merge strategy, which must agree with the layouts.
+
+Also:
+- Asset path subrecords moved from `AssetTracer` into the definitions (`AssetRole`).
+- The future-names list is gone.
+- Editor IDs are read for compressed records of every type (only the start of the stream is inflated).
+- Signatures not in the catalogue are reported as unknown record types.
+- **Plugins → Blocking Types**, its export and the CLI dashboard show category and support level.
+- `fo4mx record-types` prints the whole catalogue.
+
+Still hard-coded and left for later stages: PERK/VMAD decoding context in `FieldDecoder` (structural, not a list) and the condition function table.
+
 ## xEdit documentation check
 
 What the xEdit documentation confirms or changes in this audit.
@@ -156,7 +175,7 @@ Each stage ships separately, keeps every existing test passing, and changes no m
 
 | Stage | Work | Risk | Outcome |
 |---|---|---|---|
-| **1. Catalogue** | Load the xEdit list into `RecordDefinitions` with name, category, placement and support columns. Replace the names list, the writer group order, `typeRank` and the asset table with catalogue data. Report unknown signatures separately. Read Editor IDs for compressed records of every type. | Low: data and display only | Every one of the 138 types is recognised and named. Blocking Types and reports show categories. |
+| **1. Catalogue** *(done)* | Load the xEdit list into `RecordDefinitions` with name, category, placement and support columns. Replace the names list, the writer group order, `typeRank` and the asset table with catalogue data. Report unknown signatures separately. Read Editor IDs for compressed records of every type. | Low: data and display only | Every one of the 138 types is recognised and named. Blocking Types and reports show categories. |
 | **2. Honest analysis** | Conflict classification by support level (record level without a layout). Conflict Centre and reports say "preserved, not merged" for those types. A **support level** column on the Plugins page and in exports. | Low: display and classification only | No more implied merges for types the app does not understand. |
 | **0. Merge against own masters** *(done)* | See [the fix above](#fixed-overrides-are-compared-with-their-own-masters-version). | Corrects merges where patches remove or revert their master's edits | Merge results match what each plugin's author intended. |
 | **3. Cleaning reports** | ITM, UDR-candidate, deleted-navmesh, injected-record and circular leveled list findings per plugin, with likely causes (terms as in xEdit docs chapter 7). Findings in official master files are informational only. | Low: reporting only | Error-checking parity with the usual pre-merge checks. |

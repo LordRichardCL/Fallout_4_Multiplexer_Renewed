@@ -3,6 +3,7 @@
 #include "engine/BuildCache.hpp"
 #include "engine/ParallelFor.hpp"
 #include "esp/PluginFile.hpp"
+#include "util/Compression.hpp"
 #include "util/Text.hpp"
 
 #include <algorithm>
@@ -31,30 +32,34 @@ PluginKind classify(const PluginInfo& p)
 }
 
 // Cheap EDID extraction: uncompressed records almost always start with EDID.
-std::string quickEditorId(const RecordLocation& loc, bool allowDecompress)
+std::string editorIdAt(std::span<const uint8_t> d)
+{
+    if (d.size() >= 6 && loadLE<uint32_t>(d.data()) == sig::EDID.value) {
+        uint16_t len = loadLE<uint16_t>(d.data() + 4);
+        if (6u + len <= d.size()) {
+            BinaryReader r(d.data() + 6, len);
+            return r.readZString();
+        }
+    }
+    return {};
+}
+
+// The Editor ID (always the first subrecord when present). For compressed records only the start
+// of the stream is inflated, so this stays cheap for large records of any type.
+std::string quickEditorId(const RecordLocation& loc)
 {
     try {
-        if (loc.header.compressed()) {
-            if (!allowDecompress)
-                return {};
-            auto data = Record::decompress(loc.header, loc.rawData);
-            if (data.size() >= 6 && loadLE<uint32_t>(data.data()) == sig::EDID.value) {
-                uint16_t len = loadLE<uint16_t>(data.data() + 4);
-                if (6u + len <= data.size()) {
-                    BinaryReader r(data.data() + 6, len);
-                    return r.readZString();
-                }
-            }
+        if (!loc.header.compressed())
+            return editorIdAt(loc.rawData);
+        if (loc.rawData.size() < 4)
             return {};
-        }
-        const auto& d = loc.rawData;
-        if (d.size() >= 6 && loadLE<uint32_t>(d.data()) == sig::EDID.value) {
-            uint16_t len = loadLE<uint16_t>(d.data() + 4);
-            if (6u + len <= d.size()) {
-                BinaryReader r(d.data() + 6, len);
-                return r.readZString();
-            }
-        }
+        const size_t full = loadLE<uint32_t>(loc.rawData.data());
+        const auto stream = std::span<const uint8_t>(loc.rawData).subspan(4);
+        auto head = zlibInflatePrefix(stream, std::min<size_t>(full, 6));
+        if (head.size() < 6 || loadLE<uint32_t>(head.data()) != sig::EDID.value)
+            return {};
+        size_t need = std::min<size_t>(full, 6u + loadLE<uint16_t>(head.data() + 4));
+        return editorIdAt(zlibInflatePrefix(stream, need));
     } catch (const std::exception&) {
     }
     return {};
@@ -220,7 +225,6 @@ void PluginScanner::discoverPlugins(Session& session, ProgressSink& progress)
 void PluginScanner::indexRecords(Session& session, const ScanOptions& options, ProgressSink& progress)
 {
     progress.stage("Scanning plugins");
-    const auto& defs = session.defs;
     std::vector<std::vector<RecordInstance>> perPlugin(session.loadOrder.size());
     struct PendingCache {
         bool store = false;
@@ -291,7 +295,7 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
                     r.key = session.resolve(p, loc.header.formId);
                     uint32_t flagsForHash = loc.header.flags & ~RecordFlags::Compressed;
                     r.hash = fnv1a64(loc.rawData.data(), loc.rawData.size(), 0xcbf29ce484222325ULL ^ flagsForHash);
-                    auto edid = quickEditorId(loc, defs.isCompilable(loc.header.signature));
+                    auto edid = quickEditorId(loc);
                     if (!edid.empty())
                         r.editorId = session.strings.intern(edid);
                     ++p.recordCount;

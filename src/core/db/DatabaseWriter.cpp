@@ -57,6 +57,8 @@ void DatabaseWriter::initSchema()
     };
     ensureColumn("DependencyIssues", "cause");
     ensureColumn("ValidationResults", "cause");
+    ensureColumn("EligibilityBlockers", "category");
+    ensureColumn("EligibilityBlockers", "support");
     setMeta("schema_version", std::to_string(kSchemaVersion));
 }
 
@@ -371,7 +373,8 @@ void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport&
     }
     db_.exec("DELETE FROM EligibilityBlockers;");
     auto eb = db_.prepare(
-        "INSERT INTO EligibilityBlockers(signature, name, plugins, records, sole_blocker, unlocks) VALUES(?,?,?,?,?,?)");
+        "INSERT INTO EligibilityBlockers(signature, name, plugins, records, sole_blocker, unlocks, category, support) "
+        "VALUES(?,?,?,?,?,?,?,?)");
     for (const auto& b : deps.blockers)
         eb.bind(1, b.sig.str())
             .bind(2, b.name)
@@ -379,6 +382,8 @@ void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport&
             .bind(4, static_cast<uint64_t>(b.records))
             .bind(5, static_cast<uint64_t>(b.soleBlocker))
             .bind(6, static_cast<uint64_t>(b.unlocks))
+            .bind(7, b.category)
+            .bind(8, b.support)
             .run();
     tx.commit();
     setMeta("blocked_by_types", std::to_string(deps.blockedByTypes));

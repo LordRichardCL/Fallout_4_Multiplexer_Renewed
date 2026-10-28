@@ -38,6 +38,19 @@ The origin is the plugin that owns the namespace: the master the index points at
 
 The scanner indexes every record of every active plugin as a compact `RecordInstance`: key, plugin, signature, flags, file offset and a content hash. It then sorts the index by `(FormKey, load order)`. Each run of equal keys is an **override chain** (`FormGroup`). Record bodies are loaded on demand from disk through a bounded file-handle cache, so memory scales with record count, not plugin size.
 
+## Record catalogue
+
+`resources/record_catalogue.csv` lists every Fallout 4 record type: the xEdit Fallout 4 record list plus the eight placed projectile reference types from xEdit's `wbDefinitionsFO4.pas`. It is embedded at build time (`cmake/EmbedText.cmake`) and read by `esp/RecordCatalogue`. Per type it holds:
+
+- **Name** and **Category** (display grouping only);
+- **Placement:** header, top-level group, cell, cell child or dialogue topic child;
+- **Strategy:** *Specialised* (compiled) or *Preserve* (never written; its plugin stays as it is);
+- **Group Order:** the top-level group order of a written plugin (xEdit's `AddGroupOrder`), used by `PluginWriter`;
+- **Allocation Order:** how the compiler groups types across outputs;
+- **Notes.**
+
+A type compiles only when the catalogue says *Specialised* **and** `RecordDefinitions` has a compilable layout for it. Setting *Preserve* turns a type off without touching code; marking a type *Specialised* without a layout does nothing and is reported (`specialisedWithoutLayout`, checked by a test). Signatures missing from the catalogue are reported as unknown record types: such a plugin is not compiled and its reason says it may be for another game or damaged. Asset path subrecords (`AssetRole`: mesh, texture, material, sound, icon) are part of the field definitions.
+
 ## Record definitions and the FormID decoder
 
 Rewriting references requires knowing exactly which bytes are FormIDs. `esp/RecordDefinitions.cpp` describes the supported record types for the 1.10.163 runtime profile (Phase One plus tier 1 base objects, effects, sounds and UI data; see the README for the list):

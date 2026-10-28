@@ -34,6 +34,32 @@ std::vector<uint8_t> zlibInflate(std::span<const uint8_t> compressed, size_t exp
     return out;
 }
 
+std::vector<uint8_t> zlibInflatePrefix(std::span<const uint8_t> compressed, size_t maxBytes)
+{
+    if (compressed.size() > std::numeric_limits<uInt>::max() || maxBytes > std::numeric_limits<uInt>::max())
+        throw FormatError("compressed block too large");
+
+    std::vector<uint8_t> out(maxBytes);
+    z_stream stream{};
+    stream.next_in = const_cast<Bytef*>(compressed.data());
+    stream.avail_in = static_cast<uInt>(compressed.size());
+    stream.next_out = out.data();
+    stream.avail_out = static_cast<uInt>(out.size());
+
+    if (inflateInit(&stream) != Z_OK)
+        throw FormatError("inflateInit failed");
+    int rc = Z_OK;
+    while (rc == Z_OK && stream.avail_out > 0)
+        rc = inflate(&stream, Z_SYNC_FLUSH);
+    size_t produced = stream.total_out;
+    inflateEnd(&stream);
+
+    if (rc != Z_OK && rc != Z_STREAM_END && !(rc == Z_BUF_ERROR && stream.avail_out == 0))
+        throw FormatError("zlib inflate failed (code " + std::to_string(rc) + ")");
+    out.resize(produced);
+    return out;
+}
+
 std::vector<uint8_t> zlibDeflate(std::span<const uint8_t> data, int level)
 {
     uLongf bound = compressBound(static_cast<uLong>(data.size()));

@@ -51,6 +51,7 @@ Filter by ESM/ESP/ESL, conflicting, disabled, eligible, ineligible, or **Generat
 - **Would Unlock:** plugins that become compilable if only this type were supported. This includes plugins currently kept because something depends on them.
 - **Only Blocker In:** plugins where it is the only unsupported type.
 - **Found In:** how many active plugins contain the type, and how many records.
+- **Category** and **Support:** the type's group (Items, World, Quests and Dialogue, …) and how the compiler treats it: *Compiled*, *Preserved* (stays in its plugin, with the reason), or *Unknown record type*. An unknown type is not part of Fallout 4: the plugin may be for another game, or damaged. The plugin's reason says so too.
 
 Select a type to see each plugin it blocks and everything else that plugin needs.
 
@@ -168,6 +169,8 @@ The app needs the exact layout of every record type it compiles. This check conf
 The same **Copy** and **Save…** buttons work for any filter. For example, after a compile, click **Errors** and then **Save…** to send the errors that blocked an export.
 
 Command line: `fo4mx check-definitions --mo2 "C:\Modding\MO2"` prints the same results (exit code 4 if there are warnings).
+
+`fo4mx record-types` lists every Fallout 4 record type the app knows: name, category, where it lives in a plugin, its strategy (*Specialised*: compiled; *Preserve*: stays in its plugin) and support level. The list comes from `resources/record_catalogue.csv`, built from xEdit's Fallout 4 record list.
 
 ## Rebuilding after switching over
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "esp/RecordCatalogue.hpp"
 #include "esp/Signature.hpp"
 #include "esp/StringTables.hpp"
 
@@ -84,12 +85,18 @@ struct RegionDef {
     bool contains(Signature s) const;
 };
 
+// What an asset path subrecord loads, which also fixes the folder the engine resolves it against.
+enum class AssetRole : uint8_t { None, Mesh, Texture, Material, Sound, Icon };
+const char* assetRoleName(AssetRole r);
+const char* assetRoot(AssetRole r); // "meshes\\", ...; empty for None
+
 struct RecordDef {
     Signature signature;
     std::string name;
     bool compilable = false;
     std::unordered_map<Signature, FieldDef> fields;
     std::vector<RegionDef> regions;
+    std::unordered_map<Signature, AssetRole> assets; // overrides the common asset subrecords (None = not a path)
 };
 
 // Runtime profile: which game build the definitions describe.
@@ -109,6 +116,19 @@ public:
     const std::vector<Signature>& compilableTypes() const { return compilable_; }
     std::string recordName(Signature s) const;
 
+    // The record type catalogue: names, categories, placement, group order and strategy.
+    const RecordCatalogue& catalogue() const { return catalogue_ ? *catalogue_ : RecordCatalogue::get(); }
+    const CatalogueEntry* catalogueEntry(Signature s) const { return catalogue().find(s); }
+    // Specialised only when the catalogue says so and a compilable layout exists.
+    MergeStrategy strategy(Signature s) const;
+    // Plain-language support level for display ("Compiled", "Preserved: ...", "Unknown record type").
+    std::string supportSummary(Signature s) const;
+    // Catalogue rows marked Specialised that have no compilable layout (should be empty).
+    const std::vector<Signature>& specialisedWithoutLayout() const { return specialisedWithoutLayout_; }
+
+    // What the subrecord `sub` of a `record` loads as an asset path, if anything.
+    AssetRole assetRole(Signature record, Signature sub) const;
+
     // Condition functions whose parameters are FormIDs.
     bool conditionParamIsForm(uint16_t function, int param) const;
     bool conditionFunctionKnown(uint16_t function) const;
@@ -121,8 +141,13 @@ public:
     std::vector<Signature> compilable_;
     std::unordered_map<uint16_t, uint8_t> conditionFormParams_; // bit0 = param1, bit1 = param2
     std::unordered_map<Signature, std::string> names_;
+    std::unordered_map<Signature, AssetRole> commonAssets_;
+    const RecordCatalogue* catalogue_ = nullptr;
+    std::vector<Signature> specialisedWithoutLayout_;
     uint64_t fingerprint_ = 0;
 
+    // Compiling a type needs both a layout here and Specialised in the catalogue.
+    void applyCatalogue(const RecordCatalogue& catalogue);
     void computeFingerprint();
 };
 
