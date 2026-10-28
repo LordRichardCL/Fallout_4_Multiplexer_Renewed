@@ -123,6 +123,46 @@ Rules:
 
    This is the process already used for tier 1.
 
+## Promotion: 23 candidates confirmed
+
+A definition check on a real load order confirmed all 23 candidates from stages 4 and 5:
+- no size problems;
+- no FormID-like values outside the described fields;
+- 100% of FormIDs resolve (over 55,000 FormIDs in the 14 types that have them; the other 9 have none);
+- no other definition warnings for any of the types.
+
+Their strategy is now **Winner**: compiled, every FormID rewritten, the winning version of each chain taken whole.
+
+| Type | Records checked |
+|---|---|
+| `LAYR` | 15,758 |
+| `HDPT` | 5,737 |
+| `ADDN` | 1,092 |
+| `LTEX` | 587 |
+| `IMAD` | 541 |
+| `SOPM` | 515 |
+| `IMGS` | 487 |
+| `GRAS` | 469 |
+| `ANIO` | 341 |
+| `BPTD` | 294 |
+| `LGTM` | 206 |
+| `AACT` | 191 |
+| `ASPC` | 148 |
+| `MOVT` | 131 |
+| `STAG` | 113 |
+| `GDRY` | 101 |
+| `SNCT` | 97 |
+| `REVB` | 77 |
+| `LENS` | 68 |
+| `COLL` | 64 |
+| `AECH` | 43 |
+| `DOBJ` | 2 |
+| `OVIS` | 1 |
+
+On that load order about 29 more plugins become compilable directly, among them grass, god-ray and lighting mods, headlamp patches, hair mods and dismemberment patches.
+
+Note for `HDPT`: as with every compiled record, saves and LooksMenu presets that use a compiled head part refer to its old FormID, so a new game is recommended (as for all compiled records).
+
 ## Stage 5 result: layouts by evidence (first batch)
 
 **Evidence.** The `DependencyReport.json` of a real load order (2,302 plugins):

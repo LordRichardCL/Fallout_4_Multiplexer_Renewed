@@ -50,16 +50,19 @@ TEST(catalogue_covers_the_xedit_record_list)
         CHECK(!e.category.empty());
 }
 
-// Compiling needs both a layout and Specialised in the catalogue; the two must agree.
+// Compiling needs both a layout and Specialised or Winner in the catalogue; the two must agree.
 TEST(catalogue_strategy_matches_the_layouts)
 {
     const auto& defs = RecordDefinitions::get();
     CHECK(defs.strategyWithoutLayout().empty());
-    size_t specialised = 0;
-    for (const auto& e : defs.catalogue().entries())
+    size_t specialised = 0, winner = 0;
+    for (const auto& e : defs.catalogue().entries()) {
         specialised += e.strategy == MergeStrategy::Specialised;
-    CHECK_EQ(specialised, defs.compilableTypes().size());
-    CHECK_EQ(defs.compilableTypes().size(), size_t(61));
+        winner += e.strategy == MergeStrategy::Winner;
+    }
+    CHECK_EQ(specialised, size_t(61));
+    CHECK_EQ(winner, size_t(23)); // stages 4 and 5, confirmed by a real load order
+    CHECK_EQ(specialised + winner, defs.compilableTypes().size());
     CHECK_EQ(defs.recordName(Signature("MISC")), std::string("Misc. Item"));
     CHECK_EQ(defs.recordName(Signature("XYZW")), std::string("XYZW"));
 
@@ -164,8 +167,9 @@ TEST(stage5_layouts)
 {
     const auto& d = RecordDefinitions::get();
     for (const char* t : {"ADDN", "HDPT", "IMAD", "LTEX", "GRAS", "IMGS", "BPTD"}) {
-        CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Candidate);
-        CHECK(!d.isCompilable(Signature::fromString(t)));
+        CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Winner);
+        CHECK(d.isCompilable(Signature::fromString(t)));
+        CHECK(!d.mergesFields(Signature::fromString(t)));
     }
     const Signature imad("IMAD");
     // "\x00IAD" and "@IAD" (index 0 and 0x40) up to "\x14IAD" / "TIAD".

@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <memory>
 
 using namespace fo4mx;
 using namespace fo4mx::fixtures;
@@ -1461,14 +1462,36 @@ std::filesystem::path buildLayerInstall(const std::string& name)
 
 } // namespace
 
+// Definitions with some catalogue strategies changed (a trial catalogue), kept alive for the run.
+const RecordDefinitions* trialDefinitions(const std::vector<std::pair<std::string, std::string>>& strategies)
+{
+    static std::vector<std::unique_ptr<RecordCatalogue>> catalogues;
+    static std::vector<std::unique_ptr<RecordDefinitions>> definitions;
+    std::ifstream in(std::string(FO4MX_SOURCE_DIR) + "/resources/record_catalogue.csv", std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    for (const auto& [sig, strategy] : strategies) {
+        size_t start = text.find("\n" + sig + ",") + 1;
+        size_t field = start;
+        for (int i = 0; i < 4; ++i) // the strategy is the fifth column
+            field = text.find(',', field) + 1;
+        text.replace(field, text.find(',', field) - field, strategy);
+    }
+    catalogues.push_back(std::make_unique<RecordCatalogue>(RecordCatalogue::parse(text)));
+    auto d = std::make_unique<RecordDefinitions>(RecordDefinitions::get());
+    d->applyCatalogue(*catalogues.back());
+    d->computeFingerprint();
+    definitions.push_back(std::move(d));
+    return definitions.back().get();
+}
+
 // Candidate types have a layout and are checked, but are not compiled until confirmed.
 TEST(candidate_types_are_checked_but_not_compiled)
 {
-    const auto& defs = RecordDefinitions::get();
-    CHECK(defs.strategy(Signature("LAYR")) == MergeStrategy::Candidate);
-    CHECK(!defs.isCompilable(Signature("LAYR")));
-    CHECK(defs.hasLayout(Signature("LAYR")));
-    CHECK(defs.supportSummary(Signature("LAYR")).find("Candidate") == 0);
+    const auto* defs = trialDefinitions({{"LAYR", "Candidate"}, {"SNCT", "Candidate"}});
+    CHECK(defs->strategy(Signature("LAYR")) == MergeStrategy::Candidate);
+    CHECK(!defs->isCompilable(Signature("LAYR")));
+    CHECK(defs->hasLayout(Signature("LAYR")));
+    CHECK(defs->supportSummary(Signature("LAYR")).find("Candidate") == 0);
 
     auto root = buildLayerInstall("candidates");
     // A candidate record carrying an undescribed subrecord that holds a FormID keeps the type unconfirmed.
@@ -1479,6 +1502,7 @@ TEST(candidate_types_are_checked_but_not_compiled)
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModL1.esp\n*ModL2.esp\n*ModL3.esp\n*ModS.esp\n");
     auto cfg = configFor(root);
     cfg.databasePath.clear();
+    cfg.definitions = defs;
     Pipeline p(cfg);
     p.scan();
     p.analyse();
@@ -1501,24 +1525,12 @@ TEST(candidate_types_are_checked_but_not_compiled)
 // Winner strategy: compiled, every FormID rewritten, the winning version taken whole.
 TEST(winner_types_compile_the_winning_version_whole)
 {
-    std::ifstream in(std::string(FO4MX_SOURCE_DIR) + "/resources/record_catalogue.csv", std::ios::binary);
-    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    auto pos = text.find("\nLAYR,");
-    auto cand = text.find("Candidate", pos);
-    text.replace(cand, std::string("Candidate").size(), "Winner");
-    static const RecordCatalogue catalogue = RecordCatalogue::parse(text);
-    static RecordDefinitions defs = [] {
-        RecordDefinitions d = RecordDefinitions::get();
-        d.applyCatalogue(catalogue);
-        d.computeFingerprint();
-        return d;
-    }();
+    const auto& defs = RecordDefinitions::get(); // LAYR is Winner since a real load order confirmed it
     CHECK(defs.isCompilable(Signature("LAYR")));
     CHECK(!defs.mergesFields(Signature("LAYR")));
 
     auto root = buildLayerInstall("winneronly");
     auto cfg = configFor(root);
-    cfg.definitions = &defs;
     Pipeline p(cfg);
     p.scan();
     p.analyse();
@@ -1561,6 +1573,7 @@ TEST(body_part_data_candidate_is_confirmed_by_the_definition_check)
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n");
     auto cfg = configFor(root);
     cfg.databasePath.clear();
+    cfg.definitions = trialDefinitions({{"BPTD", "Candidate"}});
     Pipeline p(cfg);
     auto check = p.checkDefinitions({Signature("BPTD")});
     CHECK(std::find(check.readyCandidates.begin(), check.readyCandidates.end(), Signature("BPTD")) !=
