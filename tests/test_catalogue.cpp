@@ -158,3 +158,24 @@ TEST(zlib_inflate_prefix)
     auto all = zlibInflatePrefix(z, 200000);
     CHECK_EQ(all.size(), data.size());
 }
+
+// Stage 5 layouts: binary IMAD signatures and record-specific overrides of common subrecords.
+TEST(stage5_layouts)
+{
+    const auto& d = RecordDefinitions::get();
+    for (const char* t : {"ADDN", "HDPT", "IMAD", "LTEX", "GRAS", "IMGS", "BPTD"}) {
+        CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Candidate);
+        CHECK(!d.isCompilable(Signature::fromString(t)));
+    }
+    const Signature imad("IMAD");
+    // "\x00IAD" and "@IAD" (index 0 and 0x40) up to "\x14IAD" / "TIAD".
+    CHECK(d.field(imad, Signature(0x44414900u)).kind == FieldKind::NoRefs);
+    CHECK(d.field(imad, Signature(0x44414954u)).kind == FieldKind::NoRefs);
+    CHECK(d.field(imad, Signature(0x44414915u)).kind == FieldKind::Unknown); // index 0x15 does not exist
+    // YNAM is a FormID in most records, an interpolator in IMAD.
+    CHECK(d.field(Signature("WEAP"), Signature("YNAM")).kind == FieldKind::FormId);
+    CHECK(d.field(imad, Signature("YNAM")).kind == FieldKind::NoRefs);
+    const auto& bpnd = d.field(Signature("BPTD"), Signature("BPND"));
+    CHECK_EQ(bpnd.requiredSize, uint16_t(101));
+    CHECK_EQ(bpnd.offsets.size(), size_t(11));
+}

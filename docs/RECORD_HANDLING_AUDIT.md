@@ -123,6 +123,48 @@ Rules:
 
    This is the process already used for tier 1.
 
+## Stage 5 result: layouts by evidence (first batch)
+
+**Evidence.** The `DependencyReport.json` of a real load order (2,302 plugins):
+- 1,504 plugins are held back by record types.
+- 961 of those have no other reason and at most 6 types.
+
+Plugins those 961 would gain, by type:
+
+| Type | Plugins where it is the only blocker | Extra plugins unlocked (after the stage 4 candidates) |
+|---|---|---|
+| `NPC_` | 203 | (tier 2) |
+| `QUST` | 177 | (not planned) |
+| `ADDN` | 8 | 8 |
+| `HDPT` | 6 | 6 |
+| `GMST` | 6 | 6 |
+| `IMAD` | 4 | 4 |
+| `WTHR` | 4 | 4 |
+| `LTEX` | 2 | 2 |
+| `BPTD`, `IMGS` | 1 each | 1 each |
+
+- The stage 4 candidates alone unlock 4 more.
+- Every remaining base-object type together adds about 35.
+- The large lever is `NPC_` overrides and `QUST`: tier 2 and *Not planned*.
+
+**Batch (Candidate, from xEdit's `wbDefinitionsFO4.pas`):**
+
+| Type | Notes |
+|---|---|
+| `ADDN` Addon Node | |
+| `HDPT` Head Part | |
+| `IMAD` Image Space Adapter | Its indexed subrecords have binary signatures (`\x00IAD`–`\x14IAD`, `@IAD`–`TIAD`), confirmed in xEdit's `wbDefinitionsSignatures.pas`. `YNAM` is an interpolator there, not the common FormID. |
+| `LTEX` Landscape Texture | |
+| `GRAS` Grass | |
+| `IMGS` Image Space | |
+| `BPTD` Body Part Data | Node data has FormIDs at unaligned offsets 67, 79, 83, 87 and 91 of a 101-byte struct. |
+
+Like stage 4, none compiles before a definition check on a real load order confirms it.
+
+**Left out:**
+- `GMST`: string settings hold localized string IDs depending on the Editor ID prefix, which the field model cannot express safely.
+- `WTHR`: its layout lives in xEdit's shared multi-game definitions with per-game branches. It will be transcribed separately after this batch is confirmed.
+
 ## Stage 4 result: winner-only strategy
 
 Done, in two parts.
@@ -239,7 +281,7 @@ Each stage ships separately, keeps every existing test passing, and changes no m
 | **0. Merge against own masters** *(done)* | See [the fix above](#fixed-overrides-are-compared-with-their-own-masters-version). | Corrects merges where patches remove or revert their master's edits | Merge results match what each plugin's author intended. |
 | **3. Cleaning reports** *(done)* | ITM, UDR-candidate, deleted-navmesh, injected-record and circular leveled list findings per plugin, with likely causes (terms as in xEdit docs chapter 7). Findings in official master files are informational only. | Low: reporting only | Error-checking parity with the usual pre-merge checks. |
 | **4. Winner-only strategy** *(done: strategy and 16 candidates)* | For types confirmed to be single-value records, a merge strategy that takes the winning override whole: no field merging, still compiled. Candidates must still pass the definition check and have every FormID located. | Medium: only for types with full FormID coverage | More plugins compile without field-level merge risk. |
-| **5. Next layouts by evidence** | Describe further types in the order **Plugins → Blocking Types** ranks them across real load orders. Each needs a definition check on your data and tests. Likely early candidates (check against the xEdit Fallout 4 definitions, not assumed): `AACT`, `DOBJ`, `COLL`, `SNCT`, `SOPM`, `ASPC`, `REVB`, `AECH`, `ANIO`, `BPTD`, `DEBR`, `IMGS`, `IMAD`, `LGTM`, `GDRY`, `LENS`, `MOVT`, `STAG`, `NOCM`, `LAYR`, `OVIS`, `PKIN`. | Medium per type, controlled by evidence | Fewer plugins blocked by base-object types. |
+| **5. Next layouts by evidence** *(first batch done)* | Describe further types in the order **Plugins → Blocking Types** ranks them across real load orders. Each needs a definition check on your data and tests. Likely early candidates (check against the xEdit Fallout 4 definitions, not assumed): `AACT`, `DOBJ`, `COLL`, `SNCT`, `SOPM`, `ASPC`, `REVB`, `AECH`, `ANIO`, `BPTD`, `DEBR`, `IMGS`, `IMAD`, `LGTM`, `GDRY`, `LENS`, `MOVT`, `STAG`, `NOCM`, `LAYR`, `OVIS`, `PKIN`. | Medium per type, controlled by evidence | Fewer plugins blocked by base-object types. |
 | **6. Group structure** | Parent context in the index; nested-group writing; tests that round-trip cells and dialogue topics byte-for-byte. Still no compiling of these types. | Medium: core reader and writer | Foundation for any future world or quest work. |
 | **7. Tier 2 (analysis first)** | `NPC_` overrides, `RACE`, `CLAS`, `PACK`, `LVSP`, … Layouts, field-level analysis and definition checks first; compiling only for overrides of existing records (no new FormIDs, no FaceGen impact), each separately justified. | High | Gated individually. |
 | **Not planned** | Compiling new NPCs, quests, dialogue, scenes, cells, worldspaces, navmeshes and placed references. See `DEPENDENCY_SCENARIOS.md`: precombines, previs, FaceGen and voice paths, quest alias indexes and script name references tie them to their file. They stay **Preserve**, with full conflict analysis. | — | — |

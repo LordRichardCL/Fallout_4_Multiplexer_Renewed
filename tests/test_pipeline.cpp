@@ -1544,3 +1544,33 @@ TEST(winner_types_compile_the_winning_version_whole)
     CHECK(b && c);
     CHECK(out.resolve(*b, loadLE<uint32_t>(b->record.find(Signature("PNAM"))->data.data())) == out.identity(*c));
 }
+
+// BPTD node data holds FormIDs at unaligned offsets; the definition check confirms the layout when
+// every described slot names a real record.
+TEST(body_part_data_candidate_is_confirmed_by_the_definition_check)
+{
+    auto root = buildInstall("bptd");
+    auto data = root / "Game" / "Data";
+    std::vector<uint8_t> bpnd(101, 0);
+    for (uint16_t off : {4, 8, 16, 20, 52, 56, 67, 79, 83, 87, 91})
+        storeLE<uint32_t>(bpnd.data() + off, 0x01000801); // the keyword below: any existing record resolves
+    writePlugin(data / "ModP.esp", {"Fallout4.esm"},
+                {record("BPTD", 0x01000800, {zs("EDID", "Bodies"), zs("BPNN", "Head"), zs("BPNT", "Head"),
+                                             raw("BPND", bpnd), zs("NAM1", ""), zs("NAM4", "")}),
+                 record("KYWD", 0x01000801, {zs("EDID", "Target")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    auto check = p.checkDefinitions({Signature("BPTD")});
+    CHECK(std::find(check.readyCandidates.begin(), check.readyCandidates.end(), Signature("BPTD")) !=
+          check.readyCandidates.end());
+    uint64_t formIds = 0, resolved = 0;
+    for (const auto& st : check.stats)
+        if (st.record == Signature("BPTD") && st.sub == Signature("BPND")) {
+            formIds = st.formIds;
+            resolved = st.resolved;
+        }
+    CHECK_EQ(formIds, uint64_t(11));
+    CHECK_EQ(resolved, uint64_t(11));
+}

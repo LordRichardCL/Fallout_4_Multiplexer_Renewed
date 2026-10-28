@@ -138,6 +138,11 @@ public:
         defs_.records_[current_].assets[S(sub)] = role;
         return *this;
     }
+    Builder& field(Signature sub, FieldDef def)
+    {
+        defs_.records_[current_].fields[sub] = std::move(def);
+        return *this;
+    }
     Builder& field(const char* sub, FieldDef def)
     {
         defs_.records_[current_].fields[S(sub)] = std::move(def);
@@ -821,6 +826,65 @@ void buildOldGen(RecordDefinitions& d)
     b.record("OVIS", "Object Visibility Manager", true).field("INDX", formId()).field("DATA", noRefs());
     b.record("DOBJ", "Default Object Manager", true).field("DNAM", structArray(8, {4})); // (use, object) pairs
     b.record("ANIO", "Animated Object", true).field("BNAM", zstring()); // model subrecords are common
+
+    // Stage 5 candidates, in the order the Blocking Types ranking of a real load order put them, from
+    // xEdit's wbDefinitionsFO4.pas. GMST is left out: string settings store localized string IDs
+    // depending on their Editor ID, which the field model cannot express.
+    b.record("ADDN", "Addon Node", true)
+        .field("DATA", noRefs())   // addon index (NIFs refer to it by index)
+        .field("SNAM", formId())   // sound
+        .field("LNAM", formId())   // light
+        .field("DNAM", noRefs());  // particle cap, flags
+    b.record("HDPT", "Head Part", true)
+        .field("DATA", noRefs())   // flags
+        .field("PNAM", noRefs())   // type
+        .field("HNAM", formIdList()) // extra parts
+        .field("NAM0", noRefs())   // part type
+        .field("NAM1", zstring())  // part file name
+        .field("TNAM", formId())   // texture set
+        .field("CNAM", formId())   // colour
+        .field("RNAM", formId())   // valid races (form list)
+        .conditionRegion();
+    b.record("IMAD", "Image Space Adapter", true).field("DNAM", noRefs());
+    // Interpolator arrays only (no FormIDs). YNAM is listed so the common YNAM (a FormID) does not apply.
+    for (const char* sub : {"BNAM", "VNAM", "TNAM", "NAM3", "RNAM", "SNAM", "UNAM", "NAM1", "NAM2", "WNAM", "XNAM",
+                            "YNAM", "NAM5", "NAM6", "NAM4"})
+        b.field(sub, noRefs());
+    for (uint32_t i = 0; i <= 0x14; ++i) { // index byte + "IAD": HDR and cinematic multiply / add interpolators
+        const uint32_t iad = (uint32_t('I') << 8) | (uint32_t('A') << 16) | (uint32_t('D') << 24);
+        b.field(Signature(iad | i), noRefs());
+        b.field(Signature(iad | (i + 0x40)), noRefs());
+    }
+    b.record("LTEX", "Landscape Texture", true)
+        .field("TNAM", formId())   // texture set
+        .field("MNAM", formId())   // material type
+        .field("HNAM", noRefs())   // havok data
+        .field("GNAM", formIdList()); // grasses
+    b.record("GRAS", "Grass", true).field("DATA", noRefs());
+    b.record("IMGS", "Image Space", true)
+        .field("ENAM", noRefs())
+        .field("HNAM", noRefs())
+        .field("CNAM", noRefs())
+        .field("TNAM", noRefs())
+        .field("DNAM", noRefs())
+        .field("TX00", zstring()); // LUT texture
+    b.record("BPTD", "Body Part Data", true)
+        .field("BPTN", lstring())  // part name
+        .field("BPNN", zstring())
+        .field("BPNT", zstring())
+        // Node data: debris, explosions, impact data sets, actor value and crippling effects.
+        .field("BPND", structAt({4, 8, 16, 20, 52, 56, 67, 79, 83, 87, 91}, 101))
+        .field("NAM1", zstring())
+        .field("NAM4", zstring())
+        .field("NAM5", noRefs())   // model info
+        .field("ENAM", zstring())
+        .field("FNAM", zstring())
+        .field("BNAM", formId())   // dismember blood art
+        .field("INAM", formId())   // blood impact material
+        .field("JNAM", formId())   // cripple blood impact material
+        .field("CNAM", formId())   // meat cap texture set
+        .field("NAM2", formId())   // collar texture set
+        .field("DNAM", zstring()); // twist variable prefix
 
     // Asset paths beyond the common model and icon subrecords. Names of every other record type
     // come from the catalogue (resources/record_catalogue.csv).

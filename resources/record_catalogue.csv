@@ -9,7 +9,7 @@ Signature,Name,Category,Placement,Strategy,Group Order,Allocation Order,Notes
 AACT,Action,Animation,top,Candidate,3,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 ACHR,Placed NPC,Placed References,cell child,Preserve,,,Tied to precombines and previs.
 ACTI,Activator,Base Objects,top,Specialised,20,,
-ADDN,Addon Node,Base Objects,top,Preserve,74,,
+ADDN,Addon Node,Base Objects,top,Candidate,74,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 AECH,Audio Effect Chain,Audio,top,Candidate,123,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 ALCH,Ingestible,Items,top,Specialised,42,9,
 AMDL,Aim Model,Item Components,top,Specialised,115,,
@@ -24,7 +24,7 @@ ASTP,Association Type,Actors,top,Preserve,101,,
 AVIF,Actor Value Information,Game Data,top,Specialised,75,,
 BNDS,Bendable Spline,Base Objects,top,Preserve,47,,
 BOOK,Book,Items,top,Specialised,23,10,
-BPTD,Body Part Data,Actors,top,Preserve,73,,
+BPTD,Body Part Data,Actors,top,Candidate,73,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 CAMS,Camera Shot,Visual Effects,top,Preserve,76,,
 CELL,Cell,World,cell,Preserve,56,,Interior cells in block groups; exterior cells inside their worldspace.
 CLAS,Class,Actors,top,Preserve,9,,
@@ -60,13 +60,13 @@ FURN,Furniture,Base Objects,top,Specialised,35,,
 GDRY,God Rays,Visual Effects,top,Candidate,130,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 GLOB,Global,Game Data,top,Specialised,7,,
 GMST,Game Setting,Game Data,top,Preserve,0,,
-GRAS,Grass,Base Objects,top,Preserve,32,,
+GRAS,Grass,Base Objects,top,Candidate,32,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 HAZD,Hazard,Combat,top,Specialised,46,,
-HDPT,Head Part,Actors,top,Preserve,11,,
+HDPT,Head Part,Actors,top,Candidate,11,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 IDLE,Idle Animation,Animation,top,Preserve,59,,
 IDLM,Idle Marker,Base Objects,top,Preserve,43,,
-IMAD,Image Space Adapter,Visual Effects,top,Preserve,70,,
-IMGS,Image Space,Visual Effects,top,Preserve,69,,
+IMAD,Image Space Adapter,Visual Effects,top,Candidate,70,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
+IMGS,Image Space,Visual Effects,top,Candidate,69,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 INFO,Dialog response,Quests and Dialogue,topic child,Preserve,,,Child of a dialogue topic; tied to voice file paths.
 INGR,Ingredient,Items,top,Specialised,26,8,
 INNR,Instance Naming Rules,Item Components,top,Specialised,121,,
@@ -83,7 +83,7 @@ LENS,Lens Flare,Visual Effects,top,Candidate,129,,Layout from xEdit wbDefinition
 LGTM,Lighting Template,Visual Effects,top,Candidate,88,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 LIGH,Light,Base Objects,top,Specialised,27,,
 LSCR,Load Screen,Interface,top,Specialised,62,,
-LTEX,Landscape Texture,World,top,Preserve,17,,
+LTEX,Landscape Texture,World,top,Candidate,17,,Layout from xEdit wbDefinitionsFO4.pas; compiled once the definition check confirms it.
 LVLI,Leveled Item,Lists,top,Specialised,49,15,
 LVLN,Leveled NPC,Lists,top,Specialised,40,,
 LVSP,Leveled Spell,Lists,top,Preserve,63,,
