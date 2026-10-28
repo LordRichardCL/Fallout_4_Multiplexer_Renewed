@@ -78,6 +78,8 @@ std::string forCategory(const std::string& category, const std::string& message)
     if (category == "Record Decoding")
         return "Part of the record does not match the layout the app expects. That part is copied as it is and "
                "scanned for references instead of being decoded.";
+    if (category == "Definitions" && message.find("records decoded") != std::string::npos)
+        return {}; // a per-type summary line, not a finding
     if (category == "Definitions")
         return "A self-check of the app's record layouts against your files. It never blocks export; send these "
                "findings to the developer so the layout can be described.";
