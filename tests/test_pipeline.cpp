@@ -1728,8 +1728,13 @@ TEST(auto_merger_relinks_scripts_and_configs)
     CHECK(kw != nullptr);
 
     // The script: GetFormFromFile points at the output and the new FormID; IsPluginInstalled at the output.
-    std::ifstream in(result.directory / "scripts" / "modsuser.pex", std::ios::binary);
-    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    // Read whole files and close them: Windows does not delete files that are still open.
+    auto slurp = [](const std::filesystem::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    };
+    const std::string pexText = slurp(result.directory / "scripts" / "modsuser.pex");
+    std::vector<uint8_t> bytes(pexText.begin(), pexText.end());
     auto scan = pex::scan(bytes);
     CHECK(scan.ok);
     CHECK_EQ(scan.getFormFromFile.size(), size_t(1));
@@ -1743,8 +1748,7 @@ TEST(auto_merger_relinks_scripts_and_configs)
         CHECK(toLower(str) != "mods.esp");
 
     // The MCM config: the pair rewritten, the requirement renamed, the other plugin's name untouched.
-    std::ifstream cj(result.directory / "mcm" / "config" / "mods" / "config.json");
-    std::string json((std::istreambuf_iterator<char>(cj)), std::istreambuf_iterator<char>());
+    const std::string json = slurp(result.directory / "mcm" / "config" / "mods" / "config.json");
     char id[16];
     std::snprintf(id, sizeof(id), "%03X", kw->objectId);
     CHECK(json.find("\"" + kw->outputPlugin + "|" + id + "\"") != std::string::npos);

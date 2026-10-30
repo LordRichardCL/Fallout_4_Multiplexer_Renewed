@@ -1,5 +1,7 @@
 #include "Test.hpp"
 
+#include <cstdlib>
+
 #include <spdlog/spdlog.h>
 
 #include <cstring>
@@ -19,6 +21,9 @@ int main(int argc, char** argv)
         } catch (const std::exception& e) {
             ++failed;
             std::printf("[ FAIL ] %s\n         %s\n", t.name, e.what());
+            // On GitHub Actions, also as an annotation: readable without the full log.
+            if (std::getenv("GITHUB_ACTIONS"))
+                std::printf("::error title=%s::%s\n", t.name, e.what());
         }
     }
     std::printf("\n%d tests, %d failed\n", run, failed);
