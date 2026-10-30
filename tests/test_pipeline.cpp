@@ -1600,3 +1600,73 @@ TEST(body_part_data_candidate_is_confirmed_by_the_definition_check)
     CHECK_EQ(formIds, uint64_t(11));
     CHECK_EQ(resolved, uint64_t(11));
 }
+
+// NPC_ compiles only as overrides: a plugin that adds a new NPC stays out (FaceGen data is stored
+// under the defining plugin's name), a plugin that only overrides one compiles.
+TEST(npc_overrides_only)
+{
+    const auto* defs = trialDefinitions({{"NPC_", "Winner"}});
+    CHECK(defs->isCompilable(Signature("NPC_")));
+    CHECK(defs->overridesOnly(Signature("NPC_")));
+
+    auto root = buildInstall("npcoverrides");
+    auto data = root / "Game" / "Data";
+    auto item = [](uint32_t form, uint32_t count) {
+        std::vector<uint8_t> b(8);
+        storeLE<uint32_t>(b.data(), form);
+        storeLE<uint32_t>(b.data() + 4, count);
+        return raw("CNTO", b);
+    };
+    writePlugin(data / "ModN.esm", {"Fallout4.esm"},
+                {record("NPC_", 0x01000800, {zs("EDID", "Raider"), zs("FULL", "Raider"), u32("COCT", 1), item(0x1000, 1)})},
+                ESM);
+    writePlugin(data / "ModNO.esp", {"Fallout4.esm", "ModN.esm"},
+                {record("NPC_", 0x01000800, {zs("EDID", "Raider"), zs("FULL", "Raider Boss"), u32("COCT", 1), item(0x1000, 2)})});
+    writePlugin(data / "ModNN.esp", {"Fallout4.esm"}, {record("NPC_", 0x01000800, {zs("EDID", "NewGuy")})});
+    writeFile(root / "plugins.txt", "*ModN.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModNO.esp\n*ModNN.esp\n");
+    auto cfg = configFor(root);
+    cfg.definitions = defs;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    auto& s = p.session();
+    CHECK_EQ(s.findPlugin("ModNO.esp")->eligibility, Eligibility::Eligible);
+    for (const char* name : {"ModNN.esp", "ModN.esm"}) {
+        const auto* pl = s.findPlugin(name);
+        CHECK_EQ(pl->eligibility, Eligibility::Ineligible);
+        bool reason = false;
+        for (const auto& r : pl->reasons)
+            reason |= r.find("Adds new records of types compiled only as overrides: NPC_ (1)") == 0;
+        CHECK(reason);
+    }
+
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    OutputSet out(p.exportOutputs().pluginFiles);
+    const OutputSet::Rec* boss = nullptr;
+    for (const auto& r : out.records)
+        if (r.record.header.signature == Signature("NPC_"))
+            boss = &r;
+    CHECK(boss != nullptr);
+    CHECK(out.identity(*boss) == std::make_pair(std::string("ModN.esm"), 0x800u)); // still an override
+    CHECK_EQ(text(boss->record.find(sig::FULL)), std::string("Raider Boss"));
+    auto cnto = boss->record.find(Signature("CNTO"));
+    CHECK(out.resolve(*boss, loadLE<uint32_t>(cnto->data.data())) == std::make_pair(std::string("Fallout4.esm"), 0x1000u));
+}
+
+// Every report is also written as plain text with aligned columns.
+TEST(text_reports)
+{
+    auto root = buildInstall("textreports");
+    auto cfg = configFor(root);
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    auto files = p.writeReports(root / "Text");
+    CHECK(std::find(files.begin(), files.end(), root / "Text" / "ConflictReport.txt") != files.end());
+    std::ifstream in(root / "Text" / "ConflictReport.txt");
+    std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(txt.rfind("Conflict Report\n===============\n", 0) == 0);
+    CHECK(txt.find("Pistol10mm [WEAP:00001000]") != std::string::npos);
+    CHECK(txt.find('<') == std::string::npos); // no markup
+}

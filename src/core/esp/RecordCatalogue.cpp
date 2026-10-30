@@ -17,6 +17,7 @@ const char* placementName(RecordPlacement p)
     switch (p) {
     case RecordPlacement::Header: return "header";
     case RecordPlacement::Top: return "top";
+    case RecordPlacement::TopWithChildren: return "top with children";
     case RecordPlacement::Cell: return "cell";
     case RecordPlacement::CellChild: return "cell child";
     case RecordPlacement::TopicChild: return "topic child";
@@ -104,7 +105,7 @@ RecordCatalogue RecordCatalogue::parse(std::string_view csv)
         };
         if (f.size() < 5)
             fail("expected at least 5 columns");
-        f.resize(8);
+        f.resize(9);
         if (f[0].size() != 4)
             fail("bad signature '" + f[0] + "'");
         CatalogueEntry e;
@@ -115,6 +116,8 @@ RecordCatalogue RecordCatalogue::parse(std::string_view csv)
             e.placement = RecordPlacement::Header;
         else if (f[3] == "top")
             e.placement = RecordPlacement::Top;
+        else if (f[3] == "top with children")
+            e.placement = RecordPlacement::TopWithChildren;
         else if (f[3] == "cell")
             e.placement = RecordPlacement::Cell;
         else if (f[3] == "cell child")
@@ -136,6 +139,10 @@ RecordCatalogue RecordCatalogue::parse(std::string_view csv)
         e.groupOrder = parseOrder(f[5], lineNo);
         e.allocationOrder = parseOrder(f[6], lineNo);
         e.notes = f[7];
+        if (f[8] == "overrides")
+            e.overridesOnly = true;
+        else if (!f[8].empty())
+            fail("unknown scope '" + f[8] + "'");
         if (cat.index_.count(e.sig))
             fail("duplicate signature " + f[0]);
         if (e.groupOrder >= 0)

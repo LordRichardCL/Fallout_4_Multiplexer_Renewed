@@ -33,8 +33,10 @@ class ReportGenerator {
 public:
     static std::string html(ReportKind kind, const ReportContext& ctx);
     static std::string json(ReportKind kind, const ReportContext& ctx);
+    // Plain text with aligned columns, for reading in any text editor.
+    static std::string text(ReportKind kind, const ReportContext& ctx);
 
-    // Writes <dir>/<Kind>Report.html and .json for every report that has data.
+    // Writes <dir>/<Kind>Report.html, .json and .txt for every report that has data.
     static std::vector<std::filesystem::path> writeAll(const ReportContext& ctx, const std::filesystem::path& dir);
 };
 

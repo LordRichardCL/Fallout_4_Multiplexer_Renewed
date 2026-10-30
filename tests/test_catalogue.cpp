@@ -1,8 +1,10 @@
 #include "Test.hpp"
 
+#include "esp/FieldDecoder.hpp"
 #include "esp/PluginWriter.hpp"
 #include "esp/RecordCatalogue.hpp"
 #include "esp/RecordDefinitions.hpp"
+#include "util/Binary.hpp"
 #include "util/Compression.hpp"
 
 #include <algorithm>
@@ -123,7 +125,8 @@ TEST(catalogue_group_and_allocation_order)
     CHECK(order.back() == Signature("OVIS"));
     for (Signature s : order) { // CELL has a top-level group too (interior cell blocks)
         auto p = RecordCatalogue::get().find(s)->placement;
-        CHECK(p == RecordPlacement::Top || (p == RecordPlacement::Cell && s == Signature("CELL")));
+        CHECK(p == RecordPlacement::Top || p == RecordPlacement::TopWithChildren ||
+              (p == RecordPlacement::Cell && s == Signature("CELL")));
     }
     CHECK(std::find(order.begin(), order.end(), Signature("REFR")) == order.end());
 
@@ -182,4 +185,62 @@ TEST(stage5_layouts)
     const auto& bpnd = d.field(Signature("BPTD"), Signature("BPND"));
     CHECK_EQ(bpnd.requiredSize, uint16_t(101));
     CHECK_EQ(bpnd.offsets.size(), size_t(11));
+}
+
+// Layouts of this update: structural guards, position-dependent subrecords and string tables.
+TEST(update_layouts_and_guards)
+{
+    const auto& d = RecordDefinitions::get();
+    // Requested types are Candidates; those stored inside cells, worldspaces or topics can never compile.
+    for (const char* t : {"REFR", "ACHR", "PGRE", "PARW", "PMIS", "PHZD", "LAND", "INFO", "WRLD", "DIAL"}) {
+        CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Candidate);
+        CHECK(d.supportSummary(Signature::fromString(t)).find("not compiled") != std::string::npos);
+    }
+    CHECK(d.strategy(Signature("NPC_")) == MergeStrategy::Candidate);
+    CHECK(d.overridesOnly(Signature("NPC_")));
+    CHECK(d.strategy(Signature("WTHR")) == MergeStrategy::Candidate);
+    CHECK(d.strategy(Signature("QUST")) == MergeStrategy::Preserve);
+
+    // Same subrecord, different meaning per record.
+    CHECK(d.field(Signature("RACE"), Signature("ZNAM")).kind == FieldKind::ZString);
+    CHECK(d.field(Signature("NPC_"), Signature("ZNAM")).kind == FieldKind::FormId);
+    CHECK(d.field(Signature("RACE"), Signature("NAM2")).kind == FieldKind::Struct); // empty marker or FormID
+    CHECK(d.field(Signature("ACHR"), Signature("TNAM")).kind == FieldKind::FormId); // topic
+    CHECK(d.field(Signature("REFR"), Signature("TNAM")).kind == FieldKind::NoRefs); // map marker
+    // String tables as in xEdit: INFO text from ILSTRINGS except RNAM; LSCR DESC from STRINGS.
+    CHECK(d.field(Signature("INFO"), Signature("NAM1")).kind == FieldKind::ILString);
+    CHECK(d.field(Signature("INFO"), Signature("RNAM")).kind == FieldKind::LString);
+    CHECK(d.field(Signature("LSCR"), Signature("DESC")).kind == FieldKind::LString);
+    CHECK(d.field(Signature("ARMO"), Signature("DESC")).kind == FieldKind::DLString);
+    // WTHR cloud layers 00TX .. O0TX.
+    for (const char* sub : {"00TX", "90TX", ":0TX", "@0TX", "A0TX", "O0TX"})
+        CHECK(d.field(Signature("WTHR"), Signature::fromString(sub)).kind == FieldKind::ZString);
+
+    // Turning a cell child into Winner in the catalogue still does not compile it.
+    std::string text = readText("resources/record_catalogue.csv");
+    auto pos = text.find("\nREFR,");
+    auto cand = text.find("Candidate", pos);
+    text.replace(cand, std::string("Candidate").size(), "Winner");
+    auto trial = RecordCatalogue::parse(text);
+    RecordDefinitions t = d;
+    t.applyCatalogue(trial);
+    CHECK(!t.isCompilable(Signature("REFR")));
+    CHECK(t.strategy(Signature("REFR")) == MergeStrategy::Candidate);
+}
+
+TEST(struct_array_with_header)
+{
+    // WRLD RNAM: cell Y, X, count, then (reference, Y, X) entries.
+    std::vector<uint8_t> rnam(8 + 2 * 8, 0);
+    storeLE<uint32_t>(rnam.data() + 4, 2);
+    storeLE<uint32_t>(rnam.data() + 8, 0x01000800);
+    storeLE<uint32_t>(rnam.data() + 16, 0x01000801);
+    Subrecord sr;
+    sr.signature = Signature("RNAM");
+    sr.data = rnam;
+    auto layout = decodeLayout(RecordDefinitions::get(), Signature("WRLD"), {sr});
+    CHECK(layout.issues.empty());
+    CHECK_EQ(layout.formIdSlots.size(), size_t(2));
+    CHECK_EQ(layout.formIdSlots[0].offset, uint32_t(8));
+    CHECK_EQ(layout.formIdSlots[1].offset, uint32_t(16));
 }

@@ -1,13 +1,15 @@
 # Fallout 4 record catalogue: one row per record type. Primary source: the xEdit Fallout 4 record list
 # (fallout4_xedit_record_types.csv) plus the placed reference types defined in xEdit's wbDefinitionsFO4.pas.
-# Category: display grouping only. Placement: where the record lives in a plugin (header, top, cell, cell child, topic child).
+# Category: display grouping only. Placement: where the record lives in a plugin (header, top, top with children,
+#   cell, cell child, topic child). Only 'top' types can be compiled: the plugin writer does not write nested groups.
 # Strategy: Specialised (described and compiled, fields merged), Winner (compiled, the winning version taken whole),
 #   Candidate (described and checked by the definition check, not compiled yet) or Preserve (never written; its
 #   plugin stays as it is). All but Preserve need a layout in RecordDefinitions.cpp; Preserve turns a type off.
 # Group Order: top-level group order in a written plugin (xEdit AddGroupOrder). Allocation Order: output grouping.
-Signature,Name,Category,Placement,Strategy,Group Order,Allocation Order,Notes
+# Scope (optional, last column): 'overrides' = only overrides of the type are compiled; new records keep their plugin.
+Signature,Name,Category,Placement,Strategy,Group Order,Allocation Order,Notes,Scope
 AACT,Action,Animation,top,Winner,3,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
-ACHR,Placed NPC,Placed References,cell child,Preserve,,,Tied to precombines and previs.
+ACHR,Placed NPC,Placed References,cell child,Candidate,,,"Tied to precombines and previs. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
 ACTI,Activator,Base Objects,top,Specialised,20,,
 ADDN,Addon Node,Base Objects,top,Winner,74,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 AECH,Audio Effect Chain,Audio,top,Winner,123,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
@@ -22,30 +24,30 @@ ARTO,Art Object,Visual Effects,top,Specialised,103,,
 ASPC,Acoustic Space,Audio,top,Winner,15,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 ASTP,Association Type,Actors,top,Preserve,101,,
 AVIF,Actor Value Information,Game Data,top,Specialised,75,,
-BNDS,Bendable Spline,Base Objects,top,Preserve,47,,
+BNDS,Bendable Spline,Base Objects,top,Candidate,47,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 BOOK,Book,Items,top,Specialised,23,10,
 BPTD,Body Part Data,Actors,top,Winner,73,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
-CAMS,Camera Shot,Visual Effects,top,Preserve,76,,
+CAMS,Camera Shot,Visual Effects,top,Candidate,76,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 CELL,Cell,World,cell,Preserve,56,,Interior cells in block groups; exterior cells inside their worldspace.
-CLAS,Class,Actors,top,Preserve,9,,
+CLAS,Class,Actors,top,Candidate,9,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 CLFM,Color,Visual Effects,top,Specialised,111,,
-CLMT,Climate,World,top,Preserve,51,,
+CLMT,Climate,World,top,Candidate,51,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 CMPO,Component,Item Components,top,Specialised,5,,
 COBJ,Constructible Object,Item Components,top,Specialised,117,17,
 COLL,Collision Layer,Game Data,top,Winner,110,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 CONT,Container,Base Objects,top,Specialised,24,,
-CPTH,Camera Path,Visual Effects,top,Preserve,77,,
-CSTY,Combat Style,Actors,top,Preserve,61,,
-DEBR,Debris,Visual Effects,top,Preserve,68,,
+CPTH,Camera Path,Visual Effects,top,Candidate,77,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+CSTY,Combat Style,Actors,top,Candidate,61,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+DEBR,Debris,Visual Effects,top,Candidate,68,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 DFOB,Default Object,Game Data,top,Specialised,87,,
-DIAL,Dialog Topic,Quests and Dialogue,top,Preserve,,,Has a child group per topic holding its INFO records.
-DLBR,Dialog Branch,Quests and Dialogue,top,Preserve,95,,
+DIAL,Dialog Topic,Quests and Dialogue,top with children,Candidate,,,"Has a child group per topic holding its INFO records. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
+DLBR,Dialog Branch,Quests and Dialogue,top,Candidate,95,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 DLVW,Dialog View,Quests and Dialogue,top,Preserve,97,,
 DMGT,Damage Type,Combat,top,Specialised,8,,
 DOBJ,Default Object Manager,Game Data,top,Winner,86,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 DOOR,Door,Base Objects,top,Specialised,25,,
 DUAL,Dual Cast Data,Magic,top,Preserve,107,,
-ECZN,Encounter Zone,World,top,Preserve,83,,
+ECZN,Encounter Zone,World,top,Candidate,83,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 EFSH,Effect Shader,Visual Effects,top,Specialised,66,,
 ENCH,Enchantment,Magic,top,Specialised,18,,
 EQUP,Equip Type,Game Data,top,Specialised,98,,
@@ -54,8 +56,8 @@ EYES,Eyes,Actors,top,Preserve,12,,
 FACT,Faction,Actors,top,Specialised,10,2,
 FLOR,Flora,Base Objects,top,Specialised,34,,
 FLST,FormID List,Lists,top,Specialised,71,16,
-FSTP,Footstep,Audio,top,Preserve,90,,
-FSTS,Footstep Set,Audio,top,Preserve,91,,
+FSTP,Footstep,Audio,top,Candidate,90,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+FSTS,Footstep Set,Audio,top,Candidate,91,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 FURN,Furniture,Base Objects,top,Specialised,35,,
 GDRY,God Rays,Visual Effects,top,Winner,130,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 GLOB,Global,Game Data,top,Specialised,7,,
@@ -63,11 +65,11 @@ GMST,Game Setting,Game Data,top,Preserve,0,,
 GRAS,Grass,Base Objects,top,Winner,32,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 HAZD,Hazard,Combat,top,Specialised,46,,
 HDPT,Head Part,Actors,top,Winner,11,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve). LooksMenu presets and saves that use a compiled head part refer to its old FormID.
-IDLE,Idle Animation,Animation,top,Preserve,59,,
-IDLM,Idle Marker,Base Objects,top,Preserve,43,,
+IDLE,Idle Animation,Animation,top,Candidate,59,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+IDLM,Idle Marker,Base Objects,top,Candidate,43,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 IMAD,Image Space Adapter,Visual Effects,top,Winner,70,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 IMGS,Image Space,Visual Effects,top,Winner,69,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
-INFO,Dialog response,Quests and Dialogue,topic child,Preserve,,,Child of a dialogue topic; tied to voice file paths.
+INFO,Dialog response,Quests and Dialogue,topic child,Candidate,,,"Child of a dialogue topic; tied to voice file paths. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
 INGR,Ingredient,Items,top,Specialised,26,8,
 INNR,Instance Naming Rules,Item Components,top,Specialised,121,,
 IPCT,Impact,Combat,top,Specialised,80,,
@@ -75,10 +77,10 @@ IPDS,Impact Data Set,Combat,top,Specialised,81,,
 KEYM,Key,Items,top,Specialised,41,12,
 KSSM,Sound Keyword Mapping,Audio,top,Specialised,122,,
 KYWD,Keyword,Game Data,top,Specialised,1,0,
-LAND,Landscape,World,cell child,Preserve,,,
+LAND,Landscape,World,cell child,Candidate,,,"Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
 LAYR,Layer,World,top,Winner,116,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 LCRT,Location Reference Type,World,top,Specialised,2,,
-LCTN,Location,World,top,Preserve,84,,
+LCTN,Location,World,top,Candidate,84,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 LENS,Lens Flare,Visual Effects,top,Winner,129,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 LGTM,Lighting Template,Visual Effects,top,Winner,88,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 LIGH,Light,Base Objects,top,Specialised,27,,
@@ -88,68 +90,68 @@ LVLI,Leveled Item,Lists,top,Specialised,49,15,
 LVLN,Leveled NPC,Lists,top,Specialised,40,,
 LVSP,Leveled Spell,Lists,top,Preserve,63,,
 MATO,Material Object,Visual Effects,top,Specialised,104,,
-MATT,Material Type,Game Data,top,Preserve,79,,
+MATT,Material Type,Game Data,top,Candidate,79,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 MESG,Message,Interface,top,Specialised,85,1,
 MGEF,Magic Effect,Magic,top,Specialised,16,,
 MISC,Misc. Item,Items,top,Specialised,28,4,
 MOVT,Movement Type,Actors,top,Winner,105,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 MSTT,Moveable Static,Base Objects,top,Specialised,31,,
 MSWP,Material Swap,Visual Effects,top,Specialised,119,,
-MUSC,Music Type,Audio,top,Preserve,89,,
-MUST,Music Track,Audio,top,Preserve,96,,
+MUSC,Music Type,Audio,top,Candidate,89,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+MUST,Music Track,Audio,top,Candidate,96,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 NAVI,Navmesh Info Map,World,top,Preserve,55,,
 NAVM,Navmesh,World,cell child,Preserve,,,Deleting navmeshes can crash the game (xEdit docs 7.5.4).
 NOCM,Navmesh Obstacle Manager,World,top,Preserve,128,,
 NOTE,Note,Items,top,Specialised,44,11,
-NPC_,Non-Player Character,Actors,top,Preserve,38,,FaceGen paths tie new NPCs to their plugin.
+NPC_,Non-Player Character,Actors,top,Candidate,38,,Layout from xEdit wbDefinitionsFO4.pas. Overrides only: new NPCs keep their plugin (FaceGen data is stored under its name).,overrides
 OMOD,Object Modification,Item Components,top,Specialised,118,5,
 OTFT,Outfit,Lists,top,Specialised,102,,
 OVIS,Object Visibility Manager,Game Data,top,Winner,131,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 PACK,Package,Quests and Dialogue,top,Preserve,60,,
-PARW,Placed Arrow,Placed References,cell child,Preserve,,,From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list.
-PBAR,Placed Barrier,Placed References,cell child,Preserve,,,From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list.
-PBEA,Placed Beam,Placed References,cell child,Preserve,,,From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list.
-PCON,Placed Cone/Voice,Placed References,cell child,Preserve,,,From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list.
+PARW,Placed Arrow,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
+PBAR,Placed Barrier,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
+PBEA,Placed Beam,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
+PCON,Placed Cone/Voice,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
 PERK,Perk,Magic,top,Specialised,72,14,
-PFLA,Placed Flame,Placed References,cell child,Preserve,,,From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list.
-PGRE,Placed Projectile,Placed References,cell child,Preserve,,,From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list.
-PHZD,Placed Hazard,Placed References,cell child,Preserve,,,From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list.
-PKIN,Pack-In,Base Objects,top,Preserve,113,,
+PFLA,Placed Flame,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
+PGRE,Placed Projectile,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
+PHZD,Placed Hazard,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
+PKIN,Pack-In,Base Objects,top,Candidate,113,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 PLYR,Player Reference,Placed References,top,Preserve,39,,Placeholder for the player reference.
-PMIS,Placed Missile,Placed References,cell child,Preserve,,,From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list.
+PMIS,Placed Missile,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
 PROJ,Projectile,Combat,top,Specialised,45,,
 QUST,Quest,Quests and Dialogue,top,Preserve,58,,Alias indexes and scripts tie quests to their plugin.
-RACE,Race,Actors,top,Preserve,13,,
-REFR,Placed Object,Placed References,cell child,Preserve,,,Tied to precombines and previs.
-REGN,Region,World,top,Preserve,54,,
-RELA,Relationship,Actors,top,Preserve,99,,
+RACE,Race,Actors,top,Candidate,13,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+REFR,Placed Object,Placed References,cell child,Candidate,,,"Tied to precombines and previs. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
+REGN,Region,World,top,Candidate,54,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+RELA,Relationship,Actors,top,Candidate,99,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 REVB,Reverb Parameters,Audio,top,Winner,112,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 RFCT,Visual Effect,Visual Effects,top,Specialised,53,,
-RFGP,Reference Group,World,top,Preserve,114,,
-SCCO,Scene Collection,Quests and Dialogue,top,Preserve,124,,
-SCEN,Scene,Quests and Dialogue,top,Preserve,100,,
+RFGP,Reference Group,World,top,Candidate,114,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+SCCO,Scene Collection,Quests and Dialogue,top,Candidate,124,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+SCEN,Scene,Quests and Dialogue,top,Candidate,100,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 SCOL,Static Collection,Base Objects,top,Specialised,30,,
-SCSN,Audio Category Snapshot,Audio,top,Preserve,126,,
+SCSN,Audio Category Snapshot,Audio,top,Candidate,126,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 SMBN,Story Manager Branch Node,Quests and Dialogue,top,Preserve,92,,
-SMEN,Story Manager Event Node,Quests and Dialogue,top,Preserve,94,,
+SMEN,Story Manager Event Node,Quests and Dialogue,top,Candidate,94,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 SMQN,Story Manager Quest Node,Quests and Dialogue,top,Preserve,93,,
 SNCT,Sound Category,Audio,top,Winner,108,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 SNDR,Sound Descriptor,Audio,top,Specialised,106,,
 SOPM,Sound Output Model,Audio,top,Winner,109,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 SOUN,Sound Marker,Base Objects,top,Specialised,14,,
 SPEL,Spell,Magic,top,Specialised,19,13,
-SPGD,Shader Particle Geometry,Visual Effects,top,Preserve,52,,
+SPGD,Shader Particle Geometry,Visual Effects,top,Candidate,52,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 STAG,Animation Sound Tag Set,Animation,top,Winner,127,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 STAT,Static,Base Objects,top,Specialised,29,,
-TACT,Talking Activator,Base Objects,top,Preserve,21,,
+TACT,Talking Activator,Base Objects,top,Candidate,21,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 TERM,Terminal,Base Objects,top,Specialised,48,,
 TES4,Main File Header,Header,header,Preserve,,,File header; written by the app for every output.
 TREE,Tree,Base Objects,top,Preserve,33,,
 TRNS,Transform,Game Data,top,Specialised,4,,
 TXST,Texture Set,Visual Effects,top,Specialised,6,,
-VTYP,Voice Type,Actors,top,Preserve,78,,
-WATR,Water,World,top,Preserve,65,,
+VTYP,Voice Type,Actors,top,Candidate,78,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+WATR,Water,World,top,Candidate,65,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 WEAP,Weapon,Items,top,Specialised,36,6,
-WRLD,Worldspace,World,top,Preserve,57,,"Has child groups (persistent cell, blocks, cells)."
-WTHR,Weather,World,top,Preserve,50,,
+WRLD,Worldspace,World,top with children,Candidate,57,,"Has child groups (persistent cell, blocks, cells). Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
+WTHR,Weather,World,top,Candidate,50,,Layout from xEdit wbDefinitionsFO4.pas and the shared weather definitions; compiled once the definition check confirms it.
 ZOOM,Zoom,Item Components,top,Specialised,120,,

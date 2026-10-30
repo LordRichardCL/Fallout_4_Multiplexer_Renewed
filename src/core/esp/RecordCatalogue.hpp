@@ -13,6 +13,7 @@ namespace fo4mx {
 enum class RecordPlacement : uint8_t {
     Header,     // TES4
     Top,        // in its own top-level group
+    TopWithChildren, // top-level group whose records own child groups (DIAL: INFO; WRLD: cells)
     Cell,       // CELL: interior block groups, or inside its worldspace
     CellChild,  // placed references, landscape, navmeshes: in a cell's child groups
     TopicChild, // INFO: in its dialogue topic's child group
@@ -37,6 +38,10 @@ struct CatalogueEntry {
     int groupOrder = -1;      // top-level group position in a written plugin, -1 = not a top-level group
     int allocationOrder = -1; // output grouping for allocation, -1 = the shared last group
     std::string notes;
+    // Compiled scope: false = every record; true = only overrides of records defined elsewhere (a
+    // plugin that adds new records of the type is not compiled). Used where new records are tied to
+    // their file (NPC_: FaceGen data is stored under the defining plugin's name).
+    bool overridesOnly = false;
 };
 
 // The record types of Fallout 4 (resources/record_catalogue.csv, embedded at build time). The

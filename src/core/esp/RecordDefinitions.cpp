@@ -718,6 +718,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("DATA", noRefs()); // flags
 
     b.record("LSCR", "Load Screen", true)
+        .field("DESC", lstring()) // the one DESC read from STRINGS, not DLSTRINGS (xEdit's localization rules)
         .field("NNAM", formId()) // loading screen model (static)
         .field("TNAM", formId()) // transform
         .field("ZNAM", unknown()) // 8 bytes here, not the common put-down sound
@@ -886,6 +887,624 @@ void buildOldGen(RecordDefinitions& d)
         .field("NAM2", formId())   // collar texture set
         .field("DNAM", zstring()); // twist variable prefix
 
+    // Stage 7a: NPC_, transcribed from xEdit's wbDefinitionsFO4.pas (and the shared wbFaction,
+    // wbActorSounds and wbNPCTemplateActorEntry). The catalogue compiles only overrides of it: new
+    // NPCs are tied to their plugin by FaceGen data stored under the plugin's name.
+    FieldDef npcFaction = structAt({0}); // faction, rank (no padding in Fallout 4)
+    npcFaction.merge = MergeMode::Keyed;
+    FieldDef spellList = formIdList(MergeMode::Set);
+    spellList.countSig = S("SPCT");
+    spellList.countWidth = 4;
+    FieldDef perk = structAt({0}); // perk, rank
+    perk.merge = MergeMode::Keyed;
+    perk.countSig = S("PRKZ");
+    perk.countWidth = 4;
+    b.record("NPC_", "Non-Player Character", true)
+        .field("ACBS", noRefs())   // configuration: flags, levels, template flags
+        .field("SNAM", npcFaction)
+        .field("INAM", formId())   // death item
+        .field("VTCK", formId())   // voice type
+        .field("TPLT", formId())   // default template
+        .field("LTPT", formId())   // legendary template
+        .field("LTPC", formId())   // legendary chance (global)
+        .field("TPTA", structAt({0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48}, 52)) // template actors
+        .field("RNAM", formId())   // race
+        .field("SPCT", noRefs())
+        .field("SPLO", spellList)  // actor effects
+        .field("WNAM", formId())   // skin
+        .field("ANAM", formId())   // far away model
+        .field("ATKR", formId())   // attack race
+        .field("ATKD", structAt({8}, 44)) // attack data: spell at +8
+        .field("ATKE", zstring())
+        .field("ATKW", formId())   // weapon slot
+        .field("ATKS", formId())   // required slot
+        .field("ATKT", zstring())
+        .field("SPOR", formId())
+        .field("OCOR", formId())
+        .field("GWOR", formId())
+        .field("ECOR", formId())
+        .field("FCPL", formId())
+        .field("RCLR", formId())   // override package lists
+        .field("PRKZ", noRefs())
+        .field("PRKR", perk)
+        .field("FTYP", formId())   // forced location ref type
+        .field("NTRM", formId())   // native terminal
+        .field("COCT", noRefs())
+        .field("CNTO", cnto)       // inventory
+        .field("COED", structAt({0}, 12, true))
+        .field("AIDT", noRefs())   // AI data
+        .field("PKID", formIdList(MergeMode::Multiset)) // packages (ordered)
+        .field("CNAM", formId())   // class
+        .field("SHRT", lstring())  // short name
+        .field("DATA", noRefs())   // marker
+        .field("DNAM", noRefs())   // calculated health, action points, far away distance
+        .field("PNAM", formIdList()) // head parts
+        .field("HCLF", formId())   // hair colour
+        .field("BCLF", formId())   // facial hair colour
+        .field("ZNAM", formId())   // combat style
+        .field("GNAM", formId())   // gift filter
+        .field("NAM5", unknown())  // undecoded in xEdit: scanned
+        .field("NAM6", noRefs())
+        .field("NAM7", noRefs())
+        .field("NAM4", noRefs())   // height
+        .field("MWGT", noRefs())   // weight
+        .field("NAM8", noRefs())   // sound level
+        .field("CS2H", noRefs())
+        .field("CS2K", formId())   // sound keyword
+        .field("CS2D", formId())   // sound
+        .field("CS2E", noRefs())
+        .field("CS2F", noRefs())
+        .field("CSCR", formId())   // inherits sounds from
+        .field("PFRN", formId())   // power armour stand
+        .field("DOFT", formId())   // default outfit
+        .field("SOFT", formId())   // sleeping outfit
+        .field("DPLT", formId())   // default package list
+        .field("CRIF", formId())   // crime faction
+        .field("FTST", formId())   // head texture
+        .field("QNAM", noRefs())   // texture lighting
+        .field("MSDK", noRefs())   // morph keys
+        .field("MSDV", noRefs())   // morph values
+        .field("TETI", noRefs())   // tint layer index
+        .field("TEND", noRefs())   // tint layer data
+        .field("MRSV", noRefs())   // body morph regions
+        .field("FMRI", noRefs())   // face morph index
+        .field("FMRS", noRefs())   // face morph values
+        .field("FMIN", noRefs())   // morph intensity
+        .add(region("Attack", {"ATKD"}, {"ATKD", "ATKE", "ATKW", "ATKS", "ATKT"}))
+        .add(region("Sound", {"CS2K"}, {"CS2K", "CS2D"}))
+        .add(region("Tint Layer", {"TETI"}, {"TETI", "TEND"}))
+        .add(region("Face Morph", {"FMRI"}, {"FMRI", "FMRS"}))
+        .modelRegions();
+
+    // WTHR, from xEdit's wbDefinitionsFO4.pas and the shared weather definitions
+    // (wbDefinitionsCommon.pas, Fallout 4 branches).
+    FieldDef weatherSound = structAt({0}, 8); // sound, type
+    weatherSound.merge = MergeMode::Multiset;
+    b.record("WTHR", "Weather", true)
+        .field("LNAM", noRefs())   // max cloud layers
+        .field("MNAM", formId())   // precipitation (SPGD)
+        .field("NNAM", formId())   // visual effect (RFCT)
+        .field("ONAM", noRefs())
+        .field("RNAM", noRefs())
+        .field("QNAM", noRefs())   // cloud speeds
+        .field("PNAM", noRefs())   // cloud colours
+        .field("JNAM", noRefs())   // cloud alphas
+        .field("NAM0", noRefs())   // weather colours
+        .field("NAM4", noRefs())
+        .field("FNAM", noRefs())   // fog distance
+        .field("DATA", noRefs())   // wind, transitions, flags, lightning colour
+        .field("NAM1", noRefs())   // disabled cloud layers
+        .field("SNAM", weatherSound)
+        .field("TNAM", formIdList()) // sky statics
+        .field("IMSP", structAt({0, 4, 8, 12, 16, 20, 24, 28}, 32)) // image spaces per time of day
+        .field("WGDR", structAt({0, 4, 8, 12, 16, 20, 24, 28}, 32)) // god rays per time of day
+        .field("DALC", noRefs())   // directional ambient colours
+        .field("GNAM", formId())   // sun glare lens flare
+        .field("UNAM", structAt({0, 8})) // magic: lightning strike spell, weather activate spell
+        .field("VNAM", noRefs())
+        .field("WNAM", noRefs())
+        .modelRegions(); // aurora model
+    // Cloud texture layers: "00TX" .. "?0TX", "@0TX", "A0TX" .. "O0TX" (32 layers).
+    for (int i = 0; i < 32; ++i) {
+        const char c = static_cast<char>(i < 17 ? '0' + i : 'A' + (i - 17));
+        const char sub[5] = {c, '0', 'T', 'X', 0};
+        b.field(sub, zstring());
+    }
+
+    // Further types requested for analysis, transcribed from xEdit's wbDefinitionsFO4.pas. All start as
+    // Candidates: described for conflict analysis and the definition check, compiled only once confirmed.
+    b.record("VTYP", "Voice Type", true).field("DNAM", noRefs());
+    b.record("ECZN", "Encounter Zone", true).field("DATA", structAt({0, 4}, 12)); // owner, location, levels
+    b.record("RFGP", "Reference Group", true)
+        .field("NNAM", zstring())
+        .field("RNAM", formId())   // reference
+        .field("PNAM", formId());  // pack-in
+    b.record("PKIN", "Pack-In", true)
+        .field("FLTR", zstring())
+        .field("CNAM", formId())   // cell
+        .field("VNAM", noRefs());
+    b.record("CLAS", "Class", true).field("DATA", noRefs()); // FULL, DESC, ICON, PRPS are common
+    b.record("CLMT", "Climate", true)
+        .field("WLST", structArray(12, {0, 8})) // weather, chance, global
+        .field("FNAM", zstring())  // sun texture
+        .field("GNAM", zstring())  // sun glare texture
+        .field("TNAM", noRefs());  // timing
+    b.record("DLBR", "Dialog Branch", true)
+        .field("QNAM", formId())   // quest
+        .field("TNAM", noRefs())
+        .field("DNAM", noRefs())
+        .field("SNAM", formId());  // starting topic
+    b.record("IDLE", "Idle Animation", true)
+        .field("DNAM", zstring())  // behaviour graph
+        .field("ENAM", zstring())  // animation event
+        .field("ANAM", structAt({0, 4}, 8)) // parent, previous
+        .field("DATA", noRefs())
+        .field("GNAM", zstring())  // animation file
+        .conditionRegion();
+    b.record("MUSC", "Music Type", true)
+        .field("FNAM", noRefs())
+        .field("PNAM", noRefs())
+        .field("WNAM", noRefs())
+        .field("TNAM", formIdArray(MergeMode::Multiset)); // tracks
+    b.record("MUST", "Music Track", true)
+        .field("CNAM", noRefs())
+        .field("FLTV", noRefs())
+        .field("DNAM", noRefs())
+        .field("ANAM", zstring())  // track file
+        .field("BNAM", zstring())  // finale file
+        .field("LNAM", noRefs())   // loop data
+        .field("SNAM", formIdArray(MergeMode::Multiset)) // tracks
+        .conditionRegion();
+    b.record("RELA", "Relationship", true).field("DATA", structAt({0, 4, 12}, 16)); // parent, child, association
+    b.record("IDLM", "Idle Marker", true)
+        .field("IDLF", noRefs())
+        .field("IDLC", noRefs())
+        .field("IDLT", noRefs())
+        .field("IDLA", formIdArray(MergeMode::Multiset)) // animations
+        .field("IDLB", unknown())  // undecoded in xEdit: scanned
+        .field("PNAM", formId())   // anim archetype keyword
+        .field("QNAM", formId())   // flavour anim keyword
+        .modelRegions();
+    b.record("TACT", "Talking Activator", true)
+        .field("PNAM", unknown())  // undecoded in xEdit: scanned
+        .field("SNAM", formId())   // looping sound
+        .field("FNAM", unknown())  // undecoded in xEdit: scanned
+        .field("VNAM", formId())   // voice type
+        .modelRegions();
+    b.record("FSTS", "Footstep Set", true)
+        .field("XCNT", noRefs())   // counts
+        .field("DATA", formIdArray(MergeMode::Multiset)); // footsteps
+    b.record("FSTP", "Footstep", true).field("DATA", formId()).field("ANAM", zstring());
+    b.record("MATT", "Material Type", true)
+        .field("PNAM", formId())   // parent
+        .field("MNAM", zstring())
+        .field("CNAM", noRefs())
+        .field("BNAM", noRefs())
+        .field("FNAM", noRefs())
+        .field("HNAM", formId())   // havok impact data set
+        .field("ANAM", zstring()); // breakable FX
+    FieldDef categoryMultiplier = structAt({0}, 8); // category, multiplier
+    categoryMultiplier.merge = MergeMode::Keyed;
+    b.record("SCSN", "Audio Category Snapshot", true)
+        .field("PNAM", noRefs())
+        .field("CNAM", categoryMultiplier);
+    b.record("BNDS", "Bendable Spline", true).field("DNAM", noRefs()).field("TNAM", formId());
+    b.record("SMEN", "Story Manager Event Node", true)
+        .field("PNAM", formId())   // parent node
+        .field("SNAM", formId())   // previous node
+        .field("DNAM", noRefs())
+        .field("XNAM", noRefs())
+        .field("ENAM", noRefs())   // event type
+        .conditionRegion();
+    b.record("CAMS", "Camera Shot", true)
+        .field("DATA", noRefs())
+        .field("MNAM", formId())   // image space modifier
+        .conditionRegion()
+        .modelRegions();
+    b.record("CPTH", "Camera Path", true)
+        .field("ANAM", structAt({0, 4}, 8)) // parent, previous
+        .field("DATA", noRefs())
+        .field("SNAM", formIdList(MergeMode::Multiset)) // camera shots
+        .conditionRegion();
+    b.record("SPGD", "Shader Particle Geometry", true).field("DATA", noRefs()).field("MNAM", zstring());
+    b.record("SCCO", "Scene Collection", true)
+        .field("QNAM", formId())   // quest
+        .field("SNAM", formId())   // scene
+        .field("XNAM", noRefs())   // coordinates
+        .field("VNAM", unknown())  // undecoded in xEdit: scanned
+        .add(region("Scene", {"SNAM"}, {"SNAM", "XNAM"}));
+    b.record("LCTN", "Location", true)
+        .field("ACPR", structArray(12, {0, 4})) // persistent references: ref, world/cell, grid
+        .field("LCPR", structArray(12, {0, 4}))
+        .field("RCPR", formIdArray())
+        .field("ACUN", structArray(12, {0, 4, 8})) // unique NPCs: NPC, actor ref, location
+        .field("LCUN", structArray(12, {0, 4, 8}))
+        .field("RCUN", formIdArray())
+        .field("ACSR", structArray(16, {0, 4, 8})) // special references: type, ref, world/cell, grid
+        .field("LCSR", structArray(16, {0, 4, 8}))
+        .field("RCSR", formIdArray())
+        .field("ACEC", structAt({0}))  // worldspace, then cell coordinates
+        .field("LCEC", structAt({0}))
+        .field("RCEC", structAt({0}))
+        .field("ACID", formIdArray())  // initially disabled references
+        .field("LCID", formIdArray())
+        .field("ACEP", structArray(12, {0, 4})) // enable parents: ref, parent, flags
+        .field("LCEP", structArray(12, {0, 4}))
+        .field("PNAM", formId())   // parent location
+        .field("NAM1", formId())   // music
+        .field("FNAM", formId())   // unreported crime faction
+        .field("MNAM", formId())   // world location marker
+        .field("RNAM", noRefs())
+        .field("CNAM", noRefs());
+    b.record("CSTY", "Combat Style", true) // numbers and flags only
+        .field("CSGD", noRefs())
+        .field("CSMD", unknown())  // undecoded in xEdit: scanned
+        .field("CSME", noRefs())
+        .field("CSCR", noRefs())
+        .field("CSLR", noRefs())
+        .field("CSFL", noRefs())
+        .field("DATA", noRefs());
+    b.record("WATR", "Water", true)
+        .field("ANAM", noRefs())
+        .field("FNAM", noRefs())
+        .field("TNAM", formId())   // material
+        .field("SNAM", formId())   // open sound
+        .field("XNAM", formId())   // consume spell
+        .field("YNAM", formId())   // contact spell
+        .field("INAM", formId())   // image space
+        .field("DATA", noRefs())
+        .field("DNAM", noRefs())   // visual data
+        .field("GNAM", noRefs())
+        .field("NAM0", noRefs())
+        .field("NAM1", noRefs())
+        .field("NAM2", zstring())  // noise textures
+        .field("NAM3", zstring())
+        .field("NAM4", zstring());
+    b.record("REGN", "Region", true)
+        .field("RCLR", noRefs())
+        .field("WNAM", formId())   // worldspace
+        .field("RPLI", noRefs())
+        .field("RPLD", noRefs())   // area points
+        .field("RDAT", noRefs())   // data entry header
+        .field("RDMO", formId())   // music
+        .field("RDSA", structArray(12, {0})) // sounds: sound, flags, chance
+        .field("RDMP", lstring())  // map name
+        .field("RDOT", structArray(52, {0})) // objects
+        .field("RDGS", structArray(8, {0}))  // grasses
+        .field("RDWT", structArray(12, {0, 8})) // weathers: weather, chance, global
+        .field("RLDM", noRefs())
+        .field("ANAM", noRefs())
+        .add(region("Region Data Entry", {"RDAT"}, {"RDAT", "ICON", "RDMO", "RDSA", "RDMP", "RDOT", "RDGS", "RDWT", "RLDM", "ANAM"}));
+    b.record("DEBR", "Debris", true).field("DATA", noRefs()); // percentage, model file, collision; MODT is common
+    // RACE: several subrecords repeat with different roles (empty gender markers, strings); each is
+    // described by what it can hold in any position (NAM2: empty marker or the collar texture set).
+    b.record("RACE", "Race", true)
+        .field("SPCT", noRefs())
+        .field("SPLO", spellList)  // actor effects
+        .field("WNAM", formId())   // skin
+        .field("BOD2", noRefs())   // biped body template
+        // Data: severable / explodable explosion, debris, impact data set; crippling; subsegment explosion.
+        .field("DATA", structAt({146, 150, 154, 158, 162, 166, 176, 180, 184, 188}, 200))
+        .field("MNAM", noRefs())   // male marker
+        .field("FNAM", noRefs())   // female marker
+        .field("ANAM", zstring())  // skeletal model
+        .field("NAM0", noRefs())
+        .field("NAM1", noRefs())
+        .field("NAM2", structAt({0})) // empty marker, or the collar texture set
+        .field("NAM3", noRefs())
+        .field("MTNM", zstring())  // movement type names
+        .field("VTCK", formIdArray(MergeMode::Multiset)) // voices: male, female
+        .field("HCLF", formIdArray(MergeMode::Multiset)) // default hair colours: male, female
+        .field("TINL", noRefs())
+        .field("PNAM", noRefs())
+        .field("UNAM", noRefs())   // FaceGen clamps
+        .field("ATKR", formId())   // attack race
+        .field("ATKD", structAt({8}, 44))
+        .field("ATKE", zstring())
+        .field("ATKW", formId())
+        .field("ATKS", formId())
+        .field("ATKT", zstring())
+        .field("INDX", noRefs())   // body / head part index
+        .field("GNAM", formId())   // body part data
+        .field("NAM4", formId())   // impact material type
+        .field("NAM5", formId())   // impact data set
+        .field("NAM7", formId())   // dismember blood art
+        .field("CNAM", formId())   // meat cap texture set
+        .field("ONAM", formId())   // open corpse sound
+        .field("LNAM", formId())   // close corpse sound
+        .field("NAME", zstring())  // biped object names
+        .field("RBPC", formIdArray(MergeMode::Multiset)) // biped object conditions (AVIF)
+        .field("MTYP", formId())   // movement type override
+        .field("SPED", noRefs())
+        .field("VNAM", noRefs())   // equipment flags
+        .field("QNAM", formId())   // equip slot
+        .field("ZNAM", zstring())  // equip slot node (not the common combat style FormID)
+        .field("UNWP", formId())   // unarmed weapon
+        .field("PHTN", zstring())
+        .field("PHWT", noRefs())   // phoneme targets
+        .field("WKMV", formId())
+        .field("SWMV", formId())
+        .field("FLMV", formId())
+        .field("SNMV", formId())   // base movement defaults
+        .field("NNAM", noRefs())   // neck fat adjustments
+        .field("HEAD", formId())   // head part
+        .field("RPRM", formIdList(MergeMode::Multiset)) // race presets
+        .field("RPRF", formIdList(MergeMode::Multiset))
+        .field("AHCM", formIdList(MergeMode::Multiset)) // hair colours
+        .field("AHCF", formIdList(MergeMode::Multiset))
+        .field("FTSM", formIdList())  // face details
+        .field("FTSF", formIdList())
+        .field("DFTM", formId())   // default face texture
+        .field("DFTF", formId())
+        .field("TTGP", lstring())  // tint group / option name
+        .field("TETI", noRefs())
+        .field("TTEF", noRefs())
+        .field("TTET", zstring())  // tint textures
+        .field("TTEB", noRefs())
+        .field("TTEC", structArray(14, {0})) // template colours: colour, alpha, index, blend
+        .field("TTED", noRefs())
+        .field("TTGE", noRefs())
+        .field("MPGN", zstring())  // morph groups
+        .field("MPPC", noRefs())
+        .field("MPPI", noRefs())
+        .field("MPPN", lstring())
+        .field("MPPM", zstring())
+        .field("MPPT", formId())   // morph preset texture
+        .field("MPPF", noRefs())
+        .field("MPPK", noRefs())
+        .field("MPGS", noRefs())
+        .field("FMRI", noRefs())   // face morphs
+        .field("FMRN", lstring())
+        .field("WMAP", zstring())  // wrinkle map
+        .field("NAM8", formId())   // morph race
+        .field("RNAM", formId())   // armour race
+        .field("SRAC", formId())   // subgraph template race
+        .field("SADD", formId())   // subgraph additive race
+        .field("SAKD", formIdList(MergeMode::Multiset)) // subgraph actor keywords
+        .field("SGNM", zstring())
+        .field("SAPT", zstring())
+        .field("STKD", formIdList(MergeMode::Multiset)) // subgraph target keywords
+        .field("SRAF", noRefs())
+        .field("PTOP", noRefs())
+        .field("NTOP", noRefs())
+        .field("MSID", noRefs())
+        .field("MSM0", zstring())
+        .field("MSM1", zstring())
+        .field("MLSI", noRefs())
+        .field("HNAM", zstring())  // hair colour lookup texture
+        .field("HLTX", zstring())
+        .field("QSTI", formId())   // dialogue quest
+        .field("BMMP", noRefs())   // bone scale data
+        .field("BSMP", noRefs())
+        .field("BSMB", zstring())
+        .field("BSMS", noRefs())
+        .add(region("Attack", {"ATKD"}, {"ATKD", "ATKE", "ATKW", "ATKS", "ATKT"}));
+    // SCEN: phases, actors and actions. HTID is an actor ID array, an empty marker or a sound FormID
+    // depending on the action type, so it is left undescribed (scanned).
+    b.record("SCEN", "Scene", true)
+        .field("FNAM", noRefs())
+        .field("HNAM", noRefs())   // phase markers
+        .field("NAM0", zstring())  // phase / action name
+        .field("NEXT", noRefs())
+        .field("WNAM", noRefs())
+        .field("SCQS", noRefs())   // set parent quest stage
+        .field("ALID", noRefs())   // actor (alias) IDs
+        .field("LNAM", noRefs())
+        .field("DNAM", noRefs())
+        .field("ANAM", noRefs())   // action type
+        .field("INAM", noRefs())
+        .field("SNAM", noRefs())   // start phase / timer
+        .field("ENAM", noRefs())
+        .field("DATA", formId())   // topic
+        .field("DMAX", noRefs())
+        .field("DMIN", noRefs())
+        .field("CRIS", noRefs())
+        .field("DEMO", noRefs())
+        .field("DEVA", noRefs())
+        .field("HTID", unknown())
+        .field("DTID", noRefs())   // NPC headtracking actor IDs
+        .field("VENC", formId())
+        .field("PLVD", formId())
+        .field("JOUT", formId())
+        .field("DALC", formId())   // dialogue subtypes (keywords)
+        .field("ONAM", formId())   // audio output override
+        .field("PNAM", formId())   // parent quest / anim archetype / package
+        .field("TNAM", noRefs())
+        .field("PTOP", formId())
+        .field("NTOP", formId())
+        .field("NETO", formId())
+        .field("QTOP", formId())   // player responses (topics)
+        .field("NPOT", formId())
+        .field("NNGT", formId())
+        .field("NNUT", formId())
+        .field("NQUT", formId())   // NPC responses (topics)
+        .field("NPOS", formId())
+        .field("NNGS", formId())
+        .field("NNUS", formId())
+        .field("NQUS", formId())   // NPC response subtypes (keywords)
+        .field("DTGT", noRefs())
+        .field("STSC", formId())   // topic
+        .field("LCEP", formId())   // start scene
+        .field("INTT", noRefs())
+        .field("SSPN", zstring())
+        .field("VNAM", noRefs())   // actor behaviour settings
+        .field("CNAM", noRefs())
+        .field("ACTV", noRefs())
+        .field("NNAM", zstring())  // notes
+        .field("XNAM", noRefs())
+        .conditionRegion();
+    b.record("DIAL", "Dialog Topic", true)
+        .field("PNAM", noRefs())   // priority
+        .field("BNAM", formId())   // branch
+        .field("QNAM", formId())   // quest
+        .field("KNAM", formId())   // keyword
+        .field("DATA", noRefs())   // flags, category, subtype
+        .field("SNAM", noRefs())   // subtype name (4 characters)
+        .field("TIFC", noRefs());  // info count
+    b.record("INFO", "Dialog response", true)
+        .field("ENAM", noRefs())   // response flags
+        .field("TPIC", formId())   // previous topic
+        .field("PNAM", formId())   // previous INFO
+        .field("DNAM", formId())   // shared INFO
+        .field("GNAM", formId())   // INFO group
+        .field("IOVR", zstring())  // override file name
+        .field("TRDA", structAt({0, 5}, 20)) // response data: emotion keyword, sound
+        .field("NAM1", FieldDef{FieldKind::ILString}) // response text (dialogue strings)
+        .field("NAM2", zstring())
+        .field("NAM3", zstring())
+        .field("NAM4", zstring())
+        .field("SNAM", formId())   // speaker idle
+        .field("LNAM", formId())   // listener idle
+        .field("TNAM", noRefs())
+        .field("NAM9", noRefs())   // text hash
+        .field("SRAF", formId())   // camera path
+        .field("WZMD", noRefs())
+        .field("RNAM", lstring())  // prompt (STRINGS, unlike the other INFO strings)
+        .field("ANAM", formId())   // speaker
+        .field("TSCE", formId())   // start scene
+        .field("ALFA", noRefs())
+        .field("ONAM", formId())   // audio output override
+        .field("GREE", noRefs())
+        .field("TIQS", noRefs())
+        .field("NAM0", zstring())  // start scene phase
+        .field("INCC", noRefs())   // challenge
+        .field("MODQ", formId())   // reset global
+        .field("INAM", noRefs())   // subtitle priority
+        .add(region("Response", {"TRDA"}, {"TRDA", "NAM1", "NAM2", "NAM3", "NAM4", "SNAM", "LNAM", "TNAM", "NAM9", "SRAF", "WZMD"}))
+        .conditionRegion();
+    // Large references: cell Y, X, a 32-bit count, then (reference, Y, X) entries.
+    FieldDef largeRefs = structArray(8, {0}, MergeMode::Scalar);
+    largeRefs.arrayStart = 8;
+    b.record("WRLD", "Worldspace", true)
+        .field("RNAM", largeRefs)
+        .field("MHDT", noRefs())   // max height data
+        .field("WCTR", noRefs())   // fixed centre cell
+        .field("LTMP", formId())   // interior lighting
+        .field("XEZN", formId())   // encounter zone
+        .field("XLCN", formId())   // location
+        .field("WNAM", formId())   // parent worldspace
+        .field("PNAM", noRefs())   // parent flags
+        .field("CNAM", formId())   // climate
+        .field("NAM2", formId())   // water
+        .field("NAM3", formId())   // LOD water
+        .field("NAM4", noRefs())
+        .field("DNAM", noRefs())   // land data
+        .field("ICON", zstring())  // map image
+        .field("MNAM", noRefs())   // map data
+        .field("ONAM", noRefs())   // map offset
+        .field("NAMA", noRefs())
+        .field("DATA", noRefs())   // flags
+        .field("NAM0", noRefs())
+        .field("NAM9", noRefs())   // object bounds
+        .field("ZNAM", formId())   // music
+        .field("NNAM", zstring())
+        .field("XWEM", zstring())
+        .field("TNAM", zstring())
+        .field("UNAM", zstring())  // HD LOD textures
+        .field("WLEV", noRefs())
+        .field("OFST", noRefs())
+        .field("CLSZ", noRefs())
+        .modelRegions(); // cloud model
+    b.record("LAND", "Landscape", true)
+        .field("DATA", noRefs())
+        .field("VNML", noRefs())   // normals
+        .field("VHGT", noRefs())   // heights
+        .field("VCLR", noRefs())   // vertex colours
+        .field("BTXT", structAt({0}, 8)) // base layer: landscape texture, quadrant, layer
+        .field("ATXT", structAt({0}, 8)) // alpha layer header
+        .field("VTXT", noRefs())   // alpha layer data
+        .field("MPCD", noRefs());  // hi-res heightfield
+
+    // Placed references (REFR, ACHR and the placed projectile types), from xEdit's REFR, ACHR and
+    // ReferenceRecord definitions. They live inside cells, so they are analysed and checked, never compiled.
+    auto placed = [&](const char* sig, const char* name) -> Builder& {
+        b.record(sig, name, true)
+            .field("NAME", formId())   // base object / projectile
+            .field("XEZN", formId())   // encounter zone
+            .field("XHTW", noRefs())
+            .field("XFVC", noRefs())
+            .field("XPWR", structAt({0}))   // reflected / refracted by: water reference, type
+            .field("XLKR", structAt({0, 4})) // linked reference: keyword, reference
+            .field("XAPD", noRefs())
+            .field("XAPR", structAt({0}, 8)) // activate parent: reference, delay
+            .field("XASP", formId())   // acoustic parent
+            .field("XATP", noRefs())
+            .field("XAMC", noRefs())
+            .field("XLKT", noRefs())
+            .field("XLYR", formId())   // layer
+            .field("XMSP", formId())   // material swap
+            .field("XRFG", formId())   // reference group
+            .field("XCVR", noRefs())
+            .field("XESP", structAt({0}, 8)) // enable parent: reference, flags
+            .field("XOWN", structAt({0}))    // owner (Fallout 4: owner, unused, no crime)
+            .field("XRNK", noRefs())
+            .field("XRGD", noRefs())   // ragdoll bones
+            .field("XRGB", noRefs())
+            .field("XHLT", noRefs())
+            .field("XEMI", formId())   // emittance
+            .field("XMBR", formId())   // multibound reference
+            .field("XIS2", noRefs())
+            .field("XIBS", noRefs())
+            .field("XLRT", formIdArray()) // location ref types
+            .field("XLRL", formId())   // location reference
+            .field("XSCL", noRefs())
+            .field("XLOD", noRefs())
+            .field("XLTW", formIdList()) // lit water
+            .field("XPRD", noRefs())   // patrol idle time
+            .field("XPPA", noRefs())
+            .field("INAM", formId())   // patrol idle / image space
+            .field("PDTO", unknown())  // topic reference or 4-character subtype: scanned
+            .field("XLCM", noRefs())
+            .field("XCNT", noRefs())
+            .field("XRDS", noRefs())
+            .field("XATR", formId())   // attach ref
+            .field("XWCN", noRefs())
+            .field("XWCU", noRefs())   // water current velocities
+            .field("XPLK", structAt({0})) // spline connection
+            .field("XACT", noRefs())   // action flag
+            .field("XLOC", structAt({4})) // lock: level, key
+            .field("ONAM", noRefs())   // open by default
+            .field("DATA", noRefs())   // position, rotation
+            .field("MNAM", zstring()); // comments
+        return b;
+    };
+    placed("REFR", "Placed Object")
+        .field("XMBO", noRefs())
+        .field("XPRM", noRefs())   // primitive
+        .field("XPOD", formIdArray(MergeMode::Multiset)) // portals: origin, destination
+        .field("XPTL", noRefs())
+        .field("XORD", formIdArray(MergeMode::Multiset)) // linked occlusion references
+        .field("XOCP", noRefs())
+        .field("XRMR", noRefs())
+        .field("LNAM", formId())   // room lighting template
+        .field("XLRM", formIdList()) // linked rooms
+        .field("XMBP", noRefs())
+        .field("XLIG", noRefs())   // light data
+        .field("XALP", noRefs())
+        .field("XTEL", structAt({0, 32})) // teleport: door, position/rotation, flags, transition interior
+        .field("XTNM", formId())   // teleport location name
+        .field("XRDO", noRefs())   // radio
+        .field("XBSD", noRefs())   // spline
+        .field("XPDD", noRefs())   // projected decal
+        .field("XSPC", formId())   // spawn container
+        .field("XLIB", formId())   // leveled item base object
+        .field("XTRI", noRefs())   // collision layer index
+        .field("XNDP", structAt({0}, 8)) // navmesh door link: navmesh, triangle
+        .field("XMRK", noRefs())
+        .field("FNAM", noRefs())   // map flags
+        .field("TNAM", noRefs())   // map marker type
+        .field("XWPG", noRefs())
+        .field("XWPN", structAt({0, 4, 8}, 12)) // power grid connection: node, node, line
+        .field("XCVL", noRefs())
+        .field("XCZR", formId())   // water current reference
+        .field("XCZC", formId())   // water current cell
+        .field("XCZA", unknown()); // undecoded in xEdit: scanned
+    placed("ACHR", "Placed NPC").field("TNAM", formId()); // patrol topic
+    for (auto [sig, name] : {std::pair{"PARW", "Placed Arrow"}, {"PBAR", "Placed Barrier"}, {"PBEA", "Placed Beam"},
+                             {"PCON", "Placed Cone/Voice"}, {"PFLA", "Placed Flame"}, {"PGRE", "Placed Projectile"},
+                             {"PHZD", "Placed Hazard"}, {"PMIS", "Placed Missile"}})
+        placed(sig, name);
+
     // Asset paths beyond the common model and icon subrecords. Names of every other record type
     // come from the catalogue (resources/record_catalogue.csv).
     // In armours and armour addons MODL holds FormIDs (armatures, additional races), not a mesh.
@@ -934,7 +1553,7 @@ void RecordDefinitions::computeFingerprint()
     std::string text = profileName_;
     auto addField = [&](Signature sub, const FieldDef& f) {
         text += "|" + sub.str() + ":" + std::to_string(int(f.kind)) + "/" + std::to_string(int(f.merge)) + "/" +
-                std::to_string(f.stride) + "/" + std::to_string(f.requiredSize) + "/" + std::to_string(f.partial) +
+                std::to_string(f.stride) + "+" + std::to_string(f.arrayStart) + "/" + std::to_string(f.requiredSize) + "/" + std::to_string(f.partial) +
                 "/" + f.countSig.str() + std::to_string(f.countWidth) + "/" + f.companion.str();
         for (auto o : f.offsets)
             text += "," + std::to_string(o);
@@ -1030,7 +1649,9 @@ void RecordDefinitions::applyCatalogue(const RecordCatalogue& catalogue)
     for (Signature s : sigs) {
         auto& rd = records_[s];
         auto e = catalogue.find(s);
-        rd.compilable = rd.layout && e &&
+        // Only records in their own top-level group can be written: the plugin writer has no nested
+        // groups (cells, worldspaces, dialogue topics), so those types never compile.
+        rd.compilable = rd.layout && e && e->placement == RecordPlacement::Top &&
                         (e->strategy == MergeStrategy::Specialised || e->strategy == MergeStrategy::Winner);
         if (rd.compilable)
             compilable_.push_back(s);
@@ -1051,7 +1672,16 @@ MergeStrategy RecordDefinitions::strategy(Signature s) const
     auto e = catalogue().find(s);
     if (!e || !hasLayout(s))
         return MergeStrategy::Preserve;
+    // A described type that cannot be written is analysed and checked, never compiled.
+    if (e->placement != RecordPlacement::Top && e->strategy != MergeStrategy::Preserve)
+        return MergeStrategy::Candidate;
     return e->strategy;
+}
+
+bool RecordDefinitions::overridesOnly(Signature s) const
+{
+    auto e = catalogue().find(s);
+    return e && e->overridesOnly;
 }
 
 std::string RecordDefinitions::supportSummary(Signature s) const
@@ -1061,13 +1691,20 @@ std::string RecordDefinitions::supportSummary(Signature s) const
         return "Unknown record type: not part of Fallout 4";
     switch (strategy(s)) {
     case MergeStrategy::Specialised: return "Compiled: described field by field";
-    case MergeStrategy::Winner: return "Compiled: winning version taken whole (fields not merged)";
+    case MergeStrategy::Winner:
+        return e->overridesOnly ? "Compiled: overrides only (new records keep their plugin), winning version taken whole"
+                                : "Compiled: winning version taken whole (fields not merged)";
     case MergeStrategy::Candidate:
-        return "Candidate: described, waiting for the definition check on a real load order (not compiled yet)";
+        if (e->placement != RecordPlacement::Top)
+            return "Described (analysed and checked); not compiled: stored inside cells, worldspaces or dialogue "
+                   "topics, which the app does not write";
+        return std::string("Candidate: described, waiting for the definition check on a real load order (not compiled "
+                           "yet") + (e->overridesOnly ? "; overrides only once enabled)" : ")");
     case MergeStrategy::Preserve: break;
     }
     switch (e->placement) {
     case RecordPlacement::Header: return "File header";
+    case RecordPlacement::TopWithChildren: return "Preserved: owns child groups (stays in its plugin)";
     case RecordPlacement::Cell:
     case RecordPlacement::CellChild: return "Preserved: placed in cells (stays in its plugin)";
     case RecordPlacement::TopicChild: return "Preserved: dialogue (stays in its plugin)";

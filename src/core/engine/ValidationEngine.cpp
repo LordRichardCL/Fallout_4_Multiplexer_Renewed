@@ -499,9 +499,15 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
         const std::string label = sig.str() + " (" + session.defs.recordName(sig) + ")";
         if (problems.empty()) {
             out.readyCandidates.push_back(sig);
+            const auto* entry = session.defs.catalogueEntry(sig);
+            const bool writable = entry && entry->placement == RecordPlacement::Top;
             v.fail(Severity::Info, "Definitions",
-                   label + ": candidate confirmed by your load order (" + std::to_string(n) +
-                       " records). It can be compiled winner-only: send this result to the developer");
+                   label + ": candidate confirmed by your load order (" + std::to_string(n) + " records). " +
+                       (writable ? std::string("It can be compiled winner-only") +
+                                       (entry->overridesOnly ? " (overrides only)" : "") +
+                                       ": send this result to the developer"
+                                 : std::string("Its layout is used for conflict analysis and checks; it is not "
+                                               "compiled (stored inside cells, worldspaces or dialogue topics)")));
         } else {
             v.fail(Severity::Warning, "Definitions",
                    label + ": candidate not confirmed: " + join(problems, "; ") + ". It stays out of compilation");

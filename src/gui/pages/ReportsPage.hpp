@@ -23,6 +23,7 @@ private:
     QTextBrowser* preview_;
     QPushButton* html_;
     QPushButton* json_;
+    QPushButton* txt_;
     QPushButton* pdf_;
     QPushButton* all_;
     QString currentHtml_;

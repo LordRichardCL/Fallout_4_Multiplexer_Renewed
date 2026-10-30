@@ -247,7 +247,7 @@ Every finding on the **Validation** page and under **Dependencies → Missing Re
 
 ## Reports
 
-**Reports** previews each report and exports it as HTML, JSON or PDF. **Export All** writes every report to a folder.
+**Reports** previews each report and exports it as HTML, JSON, TXT or PDF. **Export All** writes every report to a folder in all three file formats (HTML, JSON and TXT). The TXT reports are plain text with aligned columns, for reading in any text editor. The command line's `--reports DIR` writes them too.
 
 ## Command line
 

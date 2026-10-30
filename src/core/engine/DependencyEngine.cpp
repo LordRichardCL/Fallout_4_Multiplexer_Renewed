@@ -119,6 +119,19 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
     for (const auto& e : options.excludedPlugins)
         excluded.insert(toLower(e));
 
+    // New records of types that are compiled only as overrides (per plugin, per type).
+    std::map<PluginIndex, std::map<Signature, size_t>> newOverrideOnly;
+    {
+        std::unordered_set<Signature> scoped;
+        for (Signature sig : session.defs.compilableTypes())
+            if (session.defs.overridesOnly(sig))
+                scoped.insert(sig);
+        if (!scoped.empty())
+            for (const auto& r : session.records)
+                if (r.plugin == r.key.origin && scoped.count(r.signature))
+                    ++newOverrideOnly[r.plugin][r.signature];
+    }
+
     // Plugin-named asset folders (FaceGen, voice files) tie assets to the file name.
     std::map<std::string, size_t> namedAssets;
     for (const auto& e : session.assets.entries) {
@@ -180,7 +193,18 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
         p.eligibility = Eligibility::Eligible;
         auto& block = blocks[p.index];
         block.candidate = true;
-        std::vector<std::string> unsupported, unknown;
+        std::vector<std::string> unsupported, unknown, newOfOverrideTypes;
+        if (auto it = newOverrideOnly.find(p.index); it != newOverrideOnly.end())
+            for (const auto& [s, n] : it->second) {
+                newOfOverrideTypes.push_back(s.str() + " (" + std::to_string(n) + ")");
+                block.types.push_back(s);
+            }
+        if (!newOfOverrideTypes.empty()) {
+            p.eligibility = Eligibility::Ineligible;
+            p.reasons.push_back("Adds new records of types compiled only as overrides: " + join(newOfOverrideTypes, ", ") +
+                                ". New records of these types are tied to their plugin (new NPCs: FaceGen data is stored "
+                                "under the plugin's name)");
+        }
         for (const auto& [s, n] : p.typeCounts)
             if (!session.defs.isCompilable(s)) {
                 (session.defs.catalogueEntry(s) ? unsupported : unknown).push_back(s.str() + " (" + std::to_string(n) + ")");

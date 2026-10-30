@@ -123,6 +123,40 @@ Rules:
 
    This is the process already used for tier 1.
 
+## Update: NPC_ overrides (stage 7a), WTHR and 44 more layouts
+
+**Infrastructure**
+- **Compile scope** (catalogue column *Scope*): `overrides` compiles only overrides of a type. A plugin that adds new records of the type keeps its plugin out, with the reason.
+- **Placement guard:** only types in their own top-level group can compile, because the plugin writer has no nested groups. Anything stored inside cells, worldspaces or dialogue topics stays analysis-only, whatever the catalogue says. DIAL and WRLD are now `top with children`.
+- **Arrays with a header** (`FieldDef::arrayStart`), for WRLD's large-reference list.
+
+**New layouts.** All are transcribed from xEdit's `wbDefinitionsFO4.pas` and its shared definitions, and all start as **Candidate**: described for conflict analysis and the definition check, compiled only after a real load order confirms them. Cell, worldspace and topic children never compile.
+
+| Group | Types | Notes |
+|---|---|---|
+| Stage 7a | `NPC_` | Scope `overrides`. New NPCs are tied to their plugin by FaceGen data stored under its name. On the reference load order, 154 of the 207 plugins blocked only by NPC_ contain overrides only. |
+| Weather | `WTHR` | Includes its 32 cloud texture layers (`00TX`–`O0TX`). |
+| Top-level | `RACE`, `LCTN`, `CSTY`, `SCEN`, `RFGP`, `VTYP`, `ECZN`, `IDLE`, `PKIN`, `MUSC`, `MUST`, `WATR`, `DLBR`, `REGN`, `RELA`, `IDLM`, `CLAS`, `CLMT`, `TACT`, `SCCO`, `FSTS`, `CAMS`, `CPTH`, `FSTP`, `MATT`, `SCSN`, `SPGD`, `BNDS`, `SMEN`, `DEBR` | |
+| Never compiled (stored inside cells, worldspaces or topics) | `REFR`, `ACHR`, `PGRE`, `PHZD`, `PARW`, `PMIS`, `PBAR`, `PBEA`, `PCON`, `PFLA`, `LAND`, `INFO`, `WRLD`, `DIAL` | Analysed and checked only. |
+
+**Position-dependent subrecords.** A subrecord whose meaning changes with its position is described by everything it can hold:
+- RACE `NAM2` is an empty marker or the collar texture set.
+- RACE `ZNAM` is a string there, not the common FormID.
+
+Where size cannot tell the cases apart, the subrecord stays undescribed (scanned) and the definition check decides:
+- SCEN `HTID`: actor ID array, empty marker or sound.
+- Placed reference `PDTO`: topic or 4-character subtype.
+
+**String tables** follow xEdit's localization rules:
+- INFO strings come from ILSTRINGS, except `RNAM` (STRINGS).
+- **Fix:** `LSCR DESC` is read from STRINGS, not DLSTRINGS. Load-screen text from localized plugins could previously come out wrong in compiled output.
+
+**Not included:**
+- `QUST`, `GMST`, `SMQN`, `SMBN`, `PACK`, `NAVM`, `NAVI`, `CELL` and the remaining types stay Preserve.
+- The definition check now covers every described type, including millions of placed references, so it takes longer on large load orders. `--types` limits it.
+
+**Reports** are also written as plain text (`.txt`).
+
 ## Promotion: 23 candidates confirmed
 
 A definition check on a real load order confirmed all 23 candidates from stages 4 and 5:
@@ -323,7 +357,7 @@ Each stage ships separately, keeps every existing test passing, and changes no m
 | **4. Winner-only strategy** *(done: strategy and 16 candidates)* | For types confirmed to be single-value records, a merge strategy that takes the winning override whole: no field merging, still compiled. Candidates must still pass the definition check and have every FormID located. | Medium: only for types with full FormID coverage | More plugins compile without field-level merge risk. |
 | **5. Next layouts by evidence** *(first batch done)* | Describe further types in the order **Plugins → Blocking Types** ranks them across real load orders. Each needs a definition check on your data and tests. Likely early candidates (check against the xEdit Fallout 4 definitions, not assumed): `AACT`, `DOBJ`, `COLL`, `SNCT`, `SOPM`, `ASPC`, `REVB`, `AECH`, `ANIO`, `BPTD`, `DEBR`, `IMGS`, `IMAD`, `LGTM`, `GDRY`, `LENS`, `MOVT`, `STAG`, `NOCM`, `LAYR`, `OVIS`, `PKIN`. | Medium per type, controlled by evidence | Fewer plugins blocked by base-object types. |
 | **6. Group structure** | Parent context in the index; nested-group writing; tests that round-trip cells and dialogue topics byte-for-byte. Still no compiling of these types. | Medium: core reader and writer | Foundation for any future world or quest work. |
-| **7. Tier 2 (analysis first)** | `NPC_` overrides, `RACE`, `CLAS`, `PACK`, `LVSP`, … Layouts, field-level analysis and definition checks first; compiling only for overrides of existing records (no new FormIDs, no FaceGen impact), each separately justified. | High | Gated individually. |
+| **7. Tier 2 (analysis first)** *(started: NPC_ overrides, RACE and CLAS as Candidates)* | `NPC_` overrides, `RACE`, `CLAS`, `PACK`, `LVSP`, … Layouts, field-level analysis and definition checks first; compiling only for overrides of existing records (no new FormIDs, no FaceGen impact), each separately justified. | High | Gated individually. |
 | **Not planned** | Compiling new NPCs, quests, dialogue, scenes, cells, worldspaces, navmeshes and placed references. See `DEPENDENCY_SCENARIOS.md`: precombines, previs, FaceGen and voice paths, quest alias indexes and script name references tie them to their file. They stay **Preserve**, with full conflict analysis. | — | — |
 
 ### What this means for the weapon mod you tested

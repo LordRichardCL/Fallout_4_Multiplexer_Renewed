@@ -196,7 +196,8 @@ FieldSet splitFields(const NormRecord& rec, const RecordDefinitions& defs)
         }
 
         const FieldDef& def = defs.field(rec.sig, s.sig);
-        if (def.merge != MergeMode::Scalar && def.isPackedArray()) {
+        // Arrays with a header (arrayStart) stay whole: their items do not start at offset 0.
+        if (def.merge != MergeMode::Scalar && def.isPackedArray() && def.arrayStart == 0) {
             std::string key = "array:" + s.sig.str();
             Field* existing = set.find(key);
             if (!existing) {

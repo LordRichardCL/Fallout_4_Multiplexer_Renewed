@@ -46,6 +46,7 @@ struct FieldDef {
     FieldKind kind = FieldKind::Unknown;
     std::vector<uint16_t> offsets; // Struct / StructArray FormID offsets
     uint16_t stride = 0;           // StructArray element size
+    uint16_t arrayStart = 0;       // StructArray: header bytes before the first element (no FormIDs)
     uint16_t requiredSize = 0;     // FormId / Struct: expected size (0 = any)
     bool partial = false;          // bytes outside `offsets` may hold undescribed FormIDs
     std::vector<std::pair<uint16_t, uint16_t>> plain; // partial structs: [begin, end) known to hold no FormIDs
@@ -125,6 +126,8 @@ public:
     MergeStrategy strategy(Signature s) const;
     // Compiled with fields merged (Specialised), as opposed to winner-only or not at all.
     bool mergesFields(Signature s) const { return strategy(s) == MergeStrategy::Specialised; }
+    // Only overrides of the type are compiled; new records of it keep their plugin out.
+    bool overridesOnly(Signature s) const;
     // A full layout exists (compiled types and candidates): the definition check covers it.
     bool hasLayout(Signature s) const;
     // Plain-language support level for display ("Compiled", "Preserved: ...", "Unknown record type").

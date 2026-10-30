@@ -48,10 +48,11 @@ ReportsPage::ReportsPage(AppController* app, QWidget* parent) : Page(app, parent
     l->setSpacing(10);
     html_ = makeButton("Export HTML");
     json_ = makeButton("Export JSON");
+    txt_ = makeButton("Export TXT");
     pdf_ = makeButton("Export PDF");
     all_ = makeButton("Export All…", "Primary");
     l->addWidget(makePageHeader("Reports", "Conflict, asset, dependency, compilation and validation reports.",
-                                {html_, json_, pdf_, all_}));
+                                {html_, json_, txt_, pdf_, all_}));
     auto* split = new QSplitter(Qt::Horizontal);
     list_ = new QListWidget;
     list_->setMaximumWidth(280);
@@ -75,6 +76,7 @@ ReportsPage::ReportsPage(AppController* app, QWidget* parent) : Page(app, parent
     connect(list_, &QListWidget::currentRowChanged, this, [this] { showReport(); });
     connect(html_, &QPushButton::clicked, this, [this] { exportReport("html"); });
     connect(json_, &QPushButton::clicked, this, [this] { exportReport("json"); });
+    connect(txt_, &QPushButton::clicked, this, [this] { exportReport("txt"); });
     connect(pdf_, &QPushButton::clicked, this, [this] { exportReport("pdf"); });
     connect(all_, &QPushButton::clicked, this, [this] { exportAll(); });
 }
@@ -97,7 +99,7 @@ void ReportsPage::showReport()
     ctx.style = fo4mx::ReportStyle::Preview;
     QString preview = row >= 0 ? qs(fo4mx::ReportGenerator::html(static_cast<ReportKind>(row), ctx)) : QString();
     bool have = !currentHtml_.isEmpty();
-    for (auto* b : {html_, json_, pdf_})
+    for (auto* b : {html_, json_, txt_, pdf_})
         b->setEnabled(have);
     all_->setEnabled(ctx.session != nullptr);
     if (!have) {
@@ -116,7 +118,10 @@ void ReportsPage::exportReport(const QString& format)
     auto kind = static_cast<ReportKind>(row);
     QString base = QString("%1Report.%2").arg(fo4mx::reportKindName(kind), format);
     QString path = QFileDialog::getSaveFileName(this, "Export report", base,
-                                                format == "pdf" ? "PDF (*.pdf)" : format == "json" ? "JSON (*.json)" : "HTML (*.html)");
+                                                format == "pdf"    ? "PDF (*.pdf)"
+                                                : format == "json" ? "JSON (*.json)"
+                                                : format == "txt"  ? "Text (*.txt)"
+                                                                   : "HTML (*.html)");
     if (path.isEmpty())
         return;
     if (format == "pdf") {
@@ -130,7 +135,9 @@ void ReportsPage::exportReport(const QString& format)
         doc.setHtml(qs(fo4mx::ReportGenerator::html(kind, ctx)));
         doc.print(&writer);
     } else {
-        QString content = format == "json" ? qs(fo4mx::ReportGenerator::json(kind, contextFor(app_))) : currentHtml_;
+        QString content = format == "json"  ? qs(fo4mx::ReportGenerator::json(kind, contextFor(app_)))
+                          : format == "txt" ? qs(fo4mx::ReportGenerator::text(kind, contextFor(app_)))
+                                            : currentHtml_;
         QFile f(path);
         if (!f.open(QIODevice::WriteOnly)) {
             QMessageBox::warning(this, "Export", "Cannot write " + path);
