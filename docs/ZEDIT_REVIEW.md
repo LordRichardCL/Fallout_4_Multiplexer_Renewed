@@ -83,6 +83,13 @@ A quest flagged *Start Game Enabled* in an ESP needs its FormID in `seq\<plugin>
 - **Archive extraction or a merged archive:** our archive loaders and INI registration keep archives in place and keep mod-manager priority.
 - **Field-level merging:** zEdit has none (whole records, last plugin wins). We already go further with Specialised types and the patch.
 
+## Status
+
+- The relinker (idea 1) is built as the separate, opt-in **Advanced Users Auto-Merger** (its own tab and report).
+  - **Scripts:** a strict Fallout 4 `.pex` reader. The layout follows Champollion's reader and Caprica's writer, and the whole file must read back exactly, object sizes included. String table rewrite plus in-place FormID and file-name patches.
+  - **Configs:** `Plugin|FormID` pairs.
+- FaceGen relocation, ITPO and DR checks: not started.
+
 ## Suggested order
 
 1. **Relinker** for scripts and configs: largest gain (about 105 plugins), self-contained, testable with fixtures. Unsupported cases are reported and their plugins stay out.

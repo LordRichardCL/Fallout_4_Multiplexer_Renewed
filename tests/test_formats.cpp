@@ -1,4 +1,5 @@
 #include "Fixtures.hpp"
+#include "papyrus/Pex.hpp"
 #include "Test.hpp"
 
 #include "assets/AssetPreview.hpp"
@@ -264,4 +265,43 @@ TEST(pex_and_config_plugin_names)
     CHECK_EQ(names.size(), size_t(2));
     CHECK(std::find(names.begin(), names.end(), "some mod - patch.esp") != names.end());
     CHECK(std::find(names.begin(), names.end(), "other.esm") != names.end());
+}
+
+// Compiled Fallout 4 scripts: the scanner walks the whole file and finds GetFormFromFile calls; any
+// inconsistency (wrong size, truncation, Skyrim byte order) leaves the script untouched.
+TEST(pex_scan_and_rewrite)
+{
+    auto script = testScript(0x812, "ModS.esp");
+    auto scan = pex::scan(script);
+    CHECK(scan.ok);
+    CHECK_EQ(scan.getFormFromFile.size(), size_t(1));
+    const auto& call = scan.getFormFromFile[0];
+    CHECK(call.formIdLiteral && call.fileLiteral);
+    CHECK_EQ(call.formId, int32_t(0x812));
+    CHECK_EQ(scan.strings[call.fileString], std::string("ModS.esp"));
+    CHECK(scan.usedElsewhere[call.fileString]); // IsPluginInstalled uses the same string
+
+    // Rewrite: a new string for the call, the old one renamed, the FormID patched in place.
+    auto strings = scan.strings;
+    strings[call.fileString] = "Dummy_Plugin_01.esp";
+    strings.push_back("Dummy_Plugin_02.esp");
+    std::vector<pex::Patch> patches{{call.formIdOffset, {0x34, 0x12, 0, 0}},
+                                    {call.fileStringOffset, {static_cast<uint8_t>(strings.size() - 1), 0}}};
+    auto out = pex::rewrite(script, scan, strings, patches);
+    auto again = pex::scan(out);
+    CHECK(again.ok);
+    CHECK_EQ(again.getFormFromFile[0].formId, int32_t(0x1234));
+    CHECK_EQ(again.strings[again.getFormFromFile[0].fileString], std::string("Dummy_Plugin_02.esp"));
+    CHECK_EQ(again.strings[call.fileString], std::string("Dummy_Plugin_01.esp"));
+
+    CHECK(!pex::scan(testScript(0x812, "ModS.esp", 1)).ok); // object size disagrees
+    auto truncated = script;
+    truncated.pop_back();
+    CHECK(!pex::scan(truncated).ok);
+    auto skyrim = script;
+    std::swap(skyrim[0], skyrim[3]);
+    std::swap(skyrim[1], skyrim[2]);
+    CHECK(!pex::scan(skyrim).ok);
+    // Some compilers count the size field itself: accepted.
+    CHECK(pex::scan(testScript(0x812, "ModS.esp", 4)).ok);
 }

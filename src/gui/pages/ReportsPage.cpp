@@ -34,6 +34,7 @@ fo4mx::ReportContext contextFor(AppController* app)
         ctx.dependencies = p->dependencies();
         ctx.compiled = p->compiledOutput();
         ctx.validation = p->validation();
+        ctx.autoMerge = p->autoMerge();
     }
     ctx.maxRows = 2000;
     return ctx;
@@ -61,7 +62,8 @@ ReportsPage::ReportsPage(AppController* app, QWidget* parent) : Page(app, parent
         {"Asset Report", "Asset conflicts, archive load order"},
         {"Dependency Report", "Masters, eligibility, missing requirements"},
         {"Compilation Report", "Output plugins and FormID mappings"},
-        {"Validation Report", "Every check that failed or warned"}};
+        {"Validation Report", "Every check that failed or warned"},
+        {"Auto-Merger Report", "Advanced: relinked scripts and configs"}};
     for (auto [t, d] : items) {
         auto* it = new QListWidgetItem(QString("%1\n%2").arg(t, d));
         it->setSizeHint(QSize(240, 54));

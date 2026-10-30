@@ -240,6 +240,7 @@ void AppController::loadSettings()
     c.lightOutputsWhenPossible = s.value("compile/light", false).toBool();
     c.buildPatch = s.value("compile/patch", false).toBool();
     c.patchOnly = s.value("compile/patchOnly", false).toBool();
+    c.autoMerge = s.value("compile/autoMerge", false).toBool();
     c.rewriteHeuristicReferences = s.value("compile/rewriteHeuristic", false).toBool();
     c.rules.clear();
     for (const auto& r : s.value("compile/rules").toStringList()) {
@@ -283,6 +284,7 @@ void AppController::saveSettings()
     s.setValue("compile/light", c.lightOutputsWhenPossible);
     s.setValue("compile/patch", c.buildPatch);
     s.setValue("compile/patchOnly", c.patchOnly);
+    s.setValue("compile/autoMerge", c.autoMerge);
     s.setValue("compile/rewriteHeuristic", c.rewriteHeuristicReferences);
     QStringList rules;
     for (const auto& r : c.rules)

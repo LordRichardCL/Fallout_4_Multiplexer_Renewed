@@ -3,6 +3,7 @@
 #include "assets/AssetScanner.hpp"
 #include "db/Database.hpp"
 #include "engine/AssetTracer.hpp"
+#include "engine/AutoMerger.hpp"
 #include "engine/BuildCache.hpp"
 #include "engine/ChangeDetector.hpp"
 #include "engine/CompilationEngine.hpp"
@@ -80,6 +81,8 @@ public:
     const CompiledOutput* compiledOutput() const { return compiled_ ? &*compiled_ : nullptr; }
     const ValidationReport* validation() const { return validation_ ? &*validation_ : nullptr; }
     const std::optional<ExportResult>& exportResult() const { return exported_; }
+    // Advanced Users Auto-Merger results (null when it is off or before Analyse).
+    const AutoMergeReport* autoMerge() const { return autoMerge_ ? &*autoMerge_ : nullptr; }
     db::Database* database() { return db_ ? db_.get() : nullptr; }
 
     // Re-evaluate eligibility after the user changes exclusions (no rescan needed).
@@ -100,6 +103,7 @@ private:
     std::optional<ValidationReport> validation_;
     std::vector<ArchivePriorityChange> archiveChanges_;
     std::optional<ExportResult> exported_;
+    std::optional<AutoMergeReport> autoMerge_;
     std::unique_ptr<BuildCache> cache_;
     AssetTrace assetTrace_;
     ChangeReport changes_;

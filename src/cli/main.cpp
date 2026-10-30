@@ -57,6 +57,8 @@ Compile options:
   --patch              also write Multiplexer_Patch.esp, merging conflicts between
                        plugins that stay in the load order (like a Bashed Patch)
   --patch-only         write only the patch; compile no plugins
+  --auto-merge         Advanced Users Auto-Merger: also compile plugins named in
+                       scripts/configs that can be relinked, and write relinked copies
   --exclude PLUGIN     never compile PLUGIN (repeatable)
   --out DIR            output folder (default: MO2 mod folder or Data)
   --reports DIR        report folder
@@ -88,7 +90,7 @@ struct Args {
 
 Args parseArgs(int argc, char** argv)
 {
-    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--patch", "--patch-only", "--dry-run", "--no-cache",
+    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
                                                    "--verbose", "-v"};
     Args a;
     for (int i = 1; i < argc; ++i) {
@@ -189,6 +191,7 @@ PipelineConfig makeConfig(const Args& a)
     c.mergeCompatible = !a.has("--no-merge");
     c.lightOutputsWhenPossible = a.has("--light");
     c.patchOnly = a.has("--patch-only");
+    c.autoMerge = a.has("--auto-merge");
     c.buildPatch = c.patchOnly || a.has("--patch");
     cfg.analysis.excludedPlugins = a.all("--exclude");
     cfg.useCache = !a.has("--no-cache");

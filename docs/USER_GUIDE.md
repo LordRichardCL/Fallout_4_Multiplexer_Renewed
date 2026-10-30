@@ -245,6 +245,32 @@ Every finding on the **Validation** page and under **Dependencies → Missing Re
 
 **Missing References (summary)** rows group all references from one plugin to another (for example *ImprovedAREnclaveNWBBEPatch.esp -> BlackBirdElitePA.esp: 173 references*). Other categories (missing assets, archive priority, kept out automatically, missing masters and so on) carry a general explanation. Likely causes are included in **Copy**, **Save…** and the HTML and JSON reports.
 
+## Advanced Users Auto-Merger
+
+An optional, separate mode for experienced users (left sidebar: **Advanced Users Auto-Merger**). It is off by default; the normal compiler never needs it.
+
+**What it does.** Some plugins are named by file in scripts or config files, so they are normally kept in the load order ("Referenced by file name in N script/config files"). With the Auto-Merger on:
+
+1. **Analyse** checks every such file:
+   - **Scripts (.pex):** each `Game.GetFormFromFile(id, "Plugin.esp")` call can be pointed at the output plugin and the record's new FormID. Other mentions of the plugin name (for example `IsPluginInstalled`) point at the output that holds most of its records.
+   - **MCM `config.json`:** `"Plugin.esp|FormID"` pairs are rewritten and other mentions renamed.
+   - **Other configs** (RobCo Patcher INIs, other F4SE plugin configs): `"Plugin.esp|FormID"` pairs are rewritten.
+2. A plugin whose files can **all** be relinked is compiled like any other.
+3. **Export** writes relinked copies of those files into the output folder (`Multiplexer_Relinked.txt` lists them). The copies must override the originals:
+   - Mod Organizer 2: keep the output mod below (after) the mods it relinks.
+   - Vortex: let the output win the file conflicts.
+   - Turning the Auto-Merger off removes the copies at the next export.
+
+**What keeps a plugin out** (the reason is shown per plugin and per file):
+- a script that does not read back exactly, or that passes a FormID or file name computed at run time to `GetFormFromFile`;
+- F4SE DLLs (compiled code);
+- Transfer Settlements blueprints (saved settlement data);
+- a config that names the plugin without a FormID (what it does with the name is unknown).
+
+The tab lists every plugin named in scripts or configs (**Kept Out**, **Relinkable**, **Compiled and Relinked**) and every file with what was found and changed. **Export HTML / JSON / TXT** saves its own report, also written by **Export All** as `AutoMergerReport`. On the command line: `--auto-merge`.
+
+Start a new game when using it, and keep backups of your mod setup.
+
 ## Reports
 
 **Reports** previews each report and exports it as HTML, JSON, TXT or PDF. **Export All** writes every report to a folder in all three file formats (HTML, JSON and TXT). The TXT reports are plain text with aligned columns, for reading in any text editor. The command line's `--reports DIR` writes them too.

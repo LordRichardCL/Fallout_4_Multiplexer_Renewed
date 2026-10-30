@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -144,6 +145,8 @@ public:
     StringPool strings;
 
     std::vector<PluginNameReference> nameReferences;
+    // Advanced Users Auto-Merger: plugins named in scripts/configs that can all be relinked.
+    std::set<PluginIndex> autoMergeRelinkable;
     std::vector<RecordEdge> recordEdges; // references of winning compilable records
     std::unordered_set<std::string> userRetained; // lowercase plugin names the user excluded
     // Plugins kept out of compilation because validation found records it cannot write safely

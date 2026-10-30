@@ -305,6 +305,26 @@ CREATE TABLE IF NOT EXISTS UserResolutions (
     winner_plugin TEXT NOT NULL,
     PRIMARY KEY (origin_plugin, object_id)
 );
+
+CREATE TABLE IF NOT EXISTS AutoMergePlugins (
+    plugin_id INTEGER,
+    plugin TEXT,
+    files INTEGER,
+    status TEXT,
+    reason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS AutoMergeFiles (
+    path TEXT,
+    mod TEXT,
+    kind TEXT,
+    plugins TEXT,
+    calls INTEGER,
+    pairs INTEGER,
+    mentions INTEGER,
+    problem TEXT,
+    result TEXT
+);
 )SQL";
 
 } // namespace fo4mx::db

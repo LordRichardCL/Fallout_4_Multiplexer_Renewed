@@ -14,6 +14,7 @@ add_executable(Fallout4MultiplexerRenewed WIN32
     models/SqlModel.cpp
     pages/Page.hpp
     pages/AssetsPage.cpp
+    pages/AutoMergerPage.cpp
     pages/ChangesPage.cpp
     pages/CompilationPage.cpp
     pages/ConflictsPage.cpp

@@ -9,6 +9,7 @@
 #include "pages/DashboardPage.hpp"
 #include "pages/DependenciesPage.hpp"
 #include "pages/PluginsPage.hpp"
+#include "pages/AutoMergerPage.hpp"
 #include "pages/ReportsPage.hpp"
 #include "pages/SettingsPage.hpp"
 #include "pages/ValidationPage.hpp"
@@ -43,7 +44,7 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
 
     auto* navPanel = new QWidget;
     navPanel->setObjectName("NavPanel");
-    navPanel->setFixedWidth(220);
+    navPanel->setFixedWidth(250); // fits "Advanced Users Auto-Merger"
     auto* nl = new QVBoxLayout(navPanel);
     nl->setContentsMargins(0, 0, 0, 0);
     nl->setSpacing(0);
@@ -75,6 +76,7 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
     addPage("Compilation", new CompilationPage(app_));
     addPage("Validation", new ValidationPage(app_));
     addPage("Reports", new ReportsPage(app_));
+    addPage("Advanced Users Auto-Merger", new AutoMergerPage(app_));
     addPage("Settings", new SettingsPage(app_));
 
     connect(nav_, &QListWidget::currentRowChanged, this, [this](int row) {

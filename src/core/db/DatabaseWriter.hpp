@@ -1,6 +1,7 @@
 #pragma once
 
 #include "db/Database.hpp"
+#include "engine/AutoMerger.hpp"
 #include "engine/AssetTracer.hpp"
 #include "engine/ChangeDetector.hpp"
 #include "engine/CompilationEngine.hpp"
@@ -29,6 +30,8 @@ public:
                        ProgressSink& progress = nullProgress());
     void writeCompilation(const Session& session, const CompiledOutput& compiled);
     void writeValidation(const std::string& stage, const ValidationReport& report, bool clearPrevious);
+    // Advanced Users Auto-Merger results (report null: the Auto-Merger is off, tables are cleared).
+    void writeAutoMerge(const Session& session, const AutoMergeReport* report, const CompiledOutput* compiled);
     void updatePlugins(const Session& session);
     void writeAssetTrace(const CompiledOutput& compiled, const AssetTrace& trace);
 

@@ -192,3 +192,82 @@ inline Subrecord weaponData(uint32_t ammo, uint8_t fill)
 }
 
 } // namespace fo4mx::fixtures
+
+// A compiled Fallout 4 script (layout as written by the Papyrus compiler and Caprica) with one
+// function: ::temp0 = Game.GetFormFromFile(formId, plugin); Game.IsPluginInstalled(plugin); return.
+// sizeAdjust corrupts the object's recorded size (0 keeps it right).
+inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugin, int sizeAdjust = 0)
+{
+    using namespace fo4mx;
+    const std::vector<std::string> strings = {"TestScript", "", "OnInit", "Game", "GetFormFromFile", "::temp0", "Form",
+                                              plugin, "IsPluginInstalled", "::temp1", "Bool", "None", "::NoneVar"};
+    auto idx = [&](const std::string& s) {
+        for (size_t i = 0; i < strings.size(); ++i)
+            if (strings[i] == s)
+                return static_cast<uint16_t>(i);
+        return uint16_t(0);
+    };
+    BinaryWriter w;
+    w.write<uint32_t>(0xFA57C0DE);
+    w.write<uint8_t>(3);
+    w.write<uint8_t>(9);
+    w.write<uint16_t>(2);
+    w.write<uint64_t>(0);
+    w.writeWString("TestScript.psc");
+    w.writeWString("user");
+    w.writeWString("pc");
+    w.write<uint16_t>(static_cast<uint16_t>(strings.size()));
+    for (const auto& s : strings)
+        w.writeWString(s);
+    w.write<uint8_t>(0);  // no debug info
+    w.write<uint16_t>(0); // user flags
+    w.write<uint16_t>(1); // objects
+
+    BinaryWriter o; // object body after the size field
+    o.write<uint16_t>(idx(""));    // parent
+    o.write<uint16_t>(idx(""));    // doc
+    o.write<uint8_t>(0);           // const
+    o.write<uint32_t>(0);          // user flags
+    o.write<uint16_t>(idx(""));    // auto state
+    o.write<uint16_t>(0);          // structs
+    o.write<uint16_t>(0);          // variables
+    o.write<uint16_t>(0);          // properties
+    o.write<uint16_t>(1);          // states
+    o.write<uint16_t>(idx(""));    // default state
+    o.write<uint16_t>(1);          // functions
+    o.write<uint16_t>(idx("OnInit"));
+    o.write<uint16_t>(idx("None")); // return type
+    o.write<uint16_t>(idx(""));     // doc
+    o.write<uint32_t>(0);
+    o.write<uint8_t>(0);
+    o.write<uint16_t>(0); // params
+    o.write<uint16_t>(2); // locals
+    o.write<uint16_t>(idx("::temp0"));
+    o.write<uint16_t>(idx("Form"));
+    o.write<uint16_t>(idx("::temp1"));
+    o.write<uint16_t>(idx("Bool"));
+    o.write<uint16_t>(3); // instructions
+    auto ident = [&](const std::string& s) { o.write<uint8_t>(1); o.write<uint16_t>(idx(s)); };
+    auto string = [&](const std::string& s) { o.write<uint8_t>(2); o.write<uint16_t>(idx(s)); };
+    auto integer = [&](int32_t v) { o.write<uint8_t>(3); o.write<int32_t>(v); };
+    o.write<uint8_t>(0x19); // callstatic Game.GetFormFromFile -> ::temp0
+    ident("Game");
+    ident("GetFormFromFile");
+    ident("::temp0");
+    integer(2);
+    integer(static_cast<int32_t>(formId));
+    string(plugin);
+    o.write<uint8_t>(0x19); // callstatic Game.IsPluginInstalled -> ::temp1
+    ident("Game");
+    ident("IsPluginInstalled");
+    ident("::temp1");
+    integer(1);
+    string(plugin);
+    o.write<uint8_t>(0x1A); // return none
+    o.write<uint8_t>(0);
+
+    w.write<uint16_t>(idx("TestScript"));
+    w.write<uint32_t>(static_cast<uint32_t>(static_cast<int>(o.size()) + sizeAdjust));
+    w.writeBytes(o.buffer());
+    return w.take();
+}

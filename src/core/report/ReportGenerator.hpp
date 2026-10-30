@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/AutoMerger.hpp"
 #include "engine/CompilationEngine.hpp"
 #include "engine/ConflictEngine.hpp"
 #include "engine/DependencyEngine.hpp"
@@ -12,7 +13,7 @@
 
 namespace fo4mx {
 
-enum class ReportKind : uint8_t { Conflict, Asset, Dependency, Compilation, Validation };
+enum class ReportKind : uint8_t { Conflict, Asset, Dependency, Compilation, Validation, AutoMerger };
 const char* reportKindName(ReportKind k);
 
 // Rich: modern CSS for browsers. Preview/Print: the CSS subset Qt's rich text
@@ -25,6 +26,7 @@ struct ReportContext {
     const DependencyReport* dependencies = nullptr;
     const CompiledOutput* compiled = nullptr;
     const ValidationReport* validation = nullptr;
+    const AutoMergeReport* autoMerge = nullptr; // Advanced Users Auto-Merger (when enabled)
     size_t maxRows = 5000; // per table in HTML output
     ReportStyle style = ReportStyle::Rich;
 };

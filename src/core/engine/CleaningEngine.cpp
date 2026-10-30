@@ -116,6 +116,13 @@ void CleaningEngine::analyse(const Session& session, const ConflictReport& confl
     // Identical to master: one summary per plugin; those that undo other plugins' changes one by one.
     std::map<PluginIndex, std::pair<size_t, std::vector<std::string>>> itmPerPlugin;
     for (const auto& itm : conflicts.itms) {
+        // Cells, worldspaces and dialogue topics are copied unchanged into any plugin that edits what they
+        // contain (placed objects, dialogue): they are required parents, not dirty edits, and xEdit does not
+        // clean them either. Whether such a copy loading last overrides cell settings is a load order
+        // conflict, shown in the Conflict Centre.
+        if (const auto* entry = session.defs.catalogueEntry(itm.sig);
+            entry && (entry->placement == RecordPlacement::Cell || entry->placement == RecordPlacement::TopWithChildren))
+            continue;
         const auto* g = session.findGroup(itm.key);
         const RecordInstance* inst = nullptr;
         if (g)
@@ -173,6 +180,13 @@ void CleaningEngine::analyse(const Session& session, const ConflictReport& confl
 
     circularLeveledLists(session, report);
 
+    // Most serious first, so reports that show only the first rows still show every error.
+    std::stable_sort(report.issues.begin() + static_cast<std::ptrdiff_t>(before), report.issues.end(),
+                     [](const DependencyIssue& a, const DependencyIssue& b) {
+                         if (a.severity != b.severity)
+                             return a.severity > b.severity;
+                         return a.category < b.category;
+                     });
     for (size_t i = before; i < report.issues.size(); ++i) {
         auto& is = report.issues[i];
         const bool fromOfficial = is.plugin < session.plugins.size() && official(session.plugins[is.plugin]);

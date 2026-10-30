@@ -646,4 +646,54 @@ std::unordered_map<uint64_t, PluginIndex> DatabaseWriter::loadResolutions(const 
     return out;
 }
 
+void DatabaseWriter::writeAutoMerge(const Session& session, const AutoMergeReport* report, const CompiledOutput* compiled)
+{
+    Transaction tx(db_);
+    db_.exec("DELETE FROM AutoMergePlugins; DELETE FROM AutoMergeFiles;");
+    setMeta("auto_merge_enabled", report ? "1" : "0");
+    if (!report) {
+        tx.commit();
+        return;
+    }
+    auto pl = db_.prepare("INSERT INTO AutoMergePlugins(plugin_id, plugin, files, status, reason) VALUES(?,?,?,?,?)");
+    for (const auto& [p, files] : report->filesOf) {
+        std::string reason;
+        for (size_t i : files)
+            if (!report->files[i].problem.empty()) {
+                reason = report->files[i].path + ": " + report->files[i].problem;
+                break;
+            }
+        const char* status = !report->relinkable.count(p)                ? "Kept out"
+                             : compiled && compiled->isCompiled(p) ? "Compiled and relinked"
+                                                                       : "Relinkable";
+        pl.bind(1, p).bind(2, session.pluginName(p)).bind(3, static_cast<uint64_t>(files.size())).bind(4, status).bind(5, reason);
+        pl.run();
+    }
+    auto fl = db_.prepare("INSERT INTO AutoMergeFiles(path, mod, kind, plugins, calls, pairs, mentions, problem, result) "
+                          "VALUES(?,?,?,?,?,?,?,?,?)");
+    for (const auto& f : report->files) {
+        std::vector<std::string> names;
+        for (PluginIndex p : f.plugins)
+            names.push_back(session.pluginName(p));
+        std::string result = !f.problem.empty() ? "Not relinkable"
+                             : f.written ? "Relinked: " + std::to_string(f.changedCalls) + " calls, " +
+                                               std::to_string(f.changedPairs) + " pairs, " + std::to_string(f.renamed) +
+                                               " names"
+                                         : "Relinkable";
+        for (const auto& n : f.notes)
+            result += "; " + n;
+        fl.bind(1, f.path)
+            .bind(2, f.mod)
+            .bind(3, relinkKindName(f.kind))
+            .bind(4, join(names, ", "))
+            .bind(5, static_cast<uint64_t>(f.formCalls))
+            .bind(6, static_cast<uint64_t>(f.pairs))
+            .bind(7, static_cast<uint64_t>(f.mentions))
+            .bind(8, f.problem)
+            .bind(9, result);
+        fl.run();
+    }
+    tx.commit();
+}
+
 } // namespace fo4mx::db

@@ -47,6 +47,9 @@ struct CompileOptions {
     // of the same name (archive loaders) instead of the INI list. Only possible when the output
     // folder is a mod-manager mod that overrides the original files (Mod Organizer 2).
     bool archiveLoaders = false;
+    // Advanced Users Auto-Merger (opt-in): compile plugins whose names appear in scripts or configs
+    // when every such file can be relinked, and write relinked copies into the output (AutoMerger).
+    bool autoMerge = false;
 
     std::string author = "Fallout 4 Multiplexer Renewed";
     std::filesystem::path previousFormMap; // reuse FormIDs from an earlier compilation

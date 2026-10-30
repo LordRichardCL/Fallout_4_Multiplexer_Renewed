@@ -224,7 +224,11 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
             }
             p.reasons.push_back("Contains record types not yet compiled: " + join(unsupported, ", "));
         }
-        if (auto it = nameRefs.find(p.index); it != nameRefs.end()) {
+        if (auto it = nameRefs.find(p.index); it != nameRefs.end() && session.autoMergeRelinkable.count(p.index)) {
+            p.reasons.push_back("Named in " + std::to_string(it->second.size()) + " script/config file" +
+                                (it->second.size() == 1 ? "" : "s") +
+                                ": relinked by the Advanced Users Auto-Merger when compiled");
+        } else if (it != nameRefs.end()) {
             block.otherReason = true;
             p.eligibility = Eligibility::Ineligible;
             std::string where = it->second.front()->assetPath;

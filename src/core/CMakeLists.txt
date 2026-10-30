@@ -26,6 +26,7 @@ add_library(fo4mx_core STATIC
     assets/AssetScanner.cpp
     engine/BuildCache.cpp
     engine/AssetTracer.cpp
+    engine/AutoMerger.cpp
     engine/ChangeDetector.cpp
     engine/CleaningEngine.cpp
     engine/CompilationEngine.cpp
@@ -42,6 +43,7 @@ add_library(fo4mx_core STATIC
     engine/ValidationEngine.cpp
     db/Database.cpp
     db/DatabaseWriter.cpp
+    papyrus/Pex.cpp
     report/ReportGenerator.cpp
 )
 

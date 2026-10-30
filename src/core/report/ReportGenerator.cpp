@@ -21,6 +21,7 @@ const char* reportKindName(ReportKind k)
     case ReportKind::Dependency: return "Dependency";
     case ReportKind::Compilation: return "Compilation";
     case ReportKind::Validation: return "Validation";
+    case ReportKind::AutoMerger: return "AutoMerger";
     }
     return "Report";
 }
@@ -538,6 +539,84 @@ json::Value pluginJson(const PluginInfo& p)
     return o;
 }
 
+// Advanced Users Auto-Merger: which plugins named in scripts/configs can be relinked, and what was changed.
+std::string pluginStatus(const ReportContext& ctx, PluginIndex p)
+{
+    const auto& am = *ctx.autoMerge;
+    if (!am.relinkable.count(p))
+        return "Kept out";
+    return ctx.compiled && ctx.compiled->isCompiled(p) ? "Compiled and relinked" : "Relinkable";
+}
+
+template <class W>
+std::string autoMergerReport(const ReportContext& ctx)
+{
+    W h("Advanced Users Auto-Merger Report", subtitle(ctx), ctx.style);
+    const auto& s = *ctx.session;
+    const auto& am = *ctx.autoMerge;
+    size_t written = 0;
+    for (const auto& f : am.files)
+        written += f.written;
+    h.cards({{"Files Naming Plugins", formatCount(am.files.size())},
+             {"Plugins Named", formatCount(am.filesOf.size())},
+             {"Relinkable Plugins", formatCount(am.relinkable.size())},
+             {"Files Relinked", formatCount(written)},
+             {"Relink Errors", formatCount(am.errors.size())}});
+    h.note("Plugins whose file names appear in scripts or config files are compiled only when every such file can be "
+           "relinked. Relinked copies are written into the output folder and override the originals.");
+
+    h.h2("Plugins");
+    h.tableStart({"Plugin", "Files", "Status", "Reason"});
+    size_t shown = 0;
+    for (const auto& [p, files] : am.filesOf) {
+        if (shown++ >= ctx.maxRows)
+            break;
+        std::string reason;
+        for (size_t i : files)
+            if (!am.files[i].problem.empty()) {
+                reason = am.files[i].path + ": " + am.files[i].problem;
+                break;
+            }
+        std::string status = pluginStatus(ctx, p);
+        h.row({s.pluginName(p), formatCount(files.size()), status, reason},
+              {"", "", status == "Kept out" ? "Warning" : "ok", ""});
+    }
+    h.tableEnd(std::min(shown, am.filesOf.size()), am.filesOf.size());
+
+    h.h2("Files");
+    h.tableStart({"File", "Mod", "Kind", "Plugins", "GetFormFromFile", "Pairs", "Other Mentions", "Result"});
+    shown = 0;
+    for (const auto& f : am.files) {
+        if (shown++ >= ctx.maxRows)
+            break;
+        std::vector<std::string> names;
+        for (PluginIndex p : f.plugins)
+            names.push_back(s.pluginName(p));
+        std::string result;
+        if (!f.problem.empty())
+            result = "Not relinkable: " + f.problem;
+        else if (f.written)
+            result = "Relinked: " + std::to_string(f.changedCalls) + " calls, " + std::to_string(f.changedPairs) +
+                     " pairs, " + std::to_string(f.renamed) + " names";
+        else
+            result = "Relinkable";
+        for (const auto& n : f.notes)
+            result += "; " + n;
+        h.row({f.path, f.mod, relinkKindName(f.kind), join(names, ", "), std::to_string(f.formCalls),
+               std::to_string(f.pairs), std::to_string(f.mentions), result},
+              {"mono", "", f.problem.empty() ? "ok" : "Warning"});
+    }
+    h.tableEnd(std::min(shown, am.files.size()), am.files.size());
+    if (!am.errors.empty()) {
+        h.h2("Relink errors");
+        h.tableStart({"File and error"});
+        for (const auto& e : am.errors)
+            h.row({e}, {"Error"});
+        h.tableEnd(am.errors.size(), am.errors.size());
+    }
+    return h.finish();
+}
+
 } // namespace
 
 std::string ReportGenerator::html(ReportKind kind, const ReportContext& ctx)
@@ -548,6 +627,7 @@ std::string ReportGenerator::html(ReportKind kind, const ReportContext& ctx)
     case ReportKind::Dependency: return ctx.session ? dependencyReport<Html>(ctx) : std::string();
     case ReportKind::Compilation: return ctx.session && ctx.compiled ? compilationReport<Html>(ctx) : std::string();
     case ReportKind::Validation: return ctx.validation ? validationReport<Html>(ctx) : std::string();
+    case ReportKind::AutoMerger: return ctx.session && ctx.autoMerge ? autoMergerReport<Html>(ctx) : std::string();
     }
     return {};
 }
@@ -560,6 +640,7 @@ std::string ReportGenerator::text(ReportKind kind, const ReportContext& ctx)
     case ReportKind::Dependency: return ctx.session ? dependencyReport<Text>(ctx) : std::string();
     case ReportKind::Compilation: return ctx.session && ctx.compiled ? compilationReport<Text>(ctx) : std::string();
     case ReportKind::Validation: return ctx.validation ? validationReport<Text>(ctx) : std::string();
+    case ReportKind::AutoMerger: return ctx.session && ctx.autoMerge ? autoMergerReport<Text>(ctx) : std::string();
     }
     return {};
 }
@@ -748,6 +829,50 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
         root.set("issues", issues);
         break;
     }
+    case ReportKind::AutoMerger: {
+        if (!s || !ctx.autoMerge)
+            return {};
+        const auto& am = *ctx.autoMerge;
+        json::Value plugins;
+        for (const auto& [p, files] : am.filesOf) {
+            json::Value o;
+            o.set("plugin", s->pluginName(p));
+            o.set("files", static_cast<uint64_t>(files.size()));
+            o.set("status", pluginStatus(ctx, p));
+            plugins.push(o);
+        }
+        root.set("plugins", plugins);
+        json::Value files;
+        for (const auto& f : am.files) {
+            json::Value o;
+            o.set("path", f.path);
+            o.set("mod", f.mod);
+            o.set("kind", relinkKindName(f.kind));
+            json::Value names;
+            for (PluginIndex p : f.plugins)
+                names.push(s->pluginName(p));
+            o.set("plugins", names);
+            o.set("getFormFromFileCalls", static_cast<uint64_t>(f.formCalls));
+            o.set("pairs", static_cast<uint64_t>(f.pairs));
+            o.set("mentions", static_cast<uint64_t>(f.mentions));
+            o.set("problem", f.problem);
+            o.set("relinked", f.written);
+            o.set("changedCalls", static_cast<uint64_t>(f.changedCalls));
+            o.set("changedPairs", static_cast<uint64_t>(f.changedPairs));
+            o.set("renamed", static_cast<uint64_t>(f.renamed));
+            json::Value notes;
+            for (const auto& n : f.notes)
+                notes.push(n);
+            o.set("notes", notes);
+            files.push(o);
+        }
+        root.set("files", files);
+        json::Value errors;
+        for (const auto& e : am.errors)
+            errors.push(e);
+        root.set("errors", errors);
+        break;
+    }
     }
     return root.dump();
 }
@@ -757,7 +882,7 @@ std::vector<std::filesystem::path> ReportGenerator::writeAll(const ReportContext
     std::filesystem::create_directories(dir);
     std::vector<std::filesystem::path> written;
     for (auto kind : {ReportKind::Conflict, ReportKind::Asset, ReportKind::Dependency, ReportKind::Compilation,
-                      ReportKind::Validation}) {
+                      ReportKind::Validation, ReportKind::AutoMerger}) {
         std::string base = std::string(reportKindName(kind)) + "Report";
         auto h = html(kind, ctx);
         if (h.empty())

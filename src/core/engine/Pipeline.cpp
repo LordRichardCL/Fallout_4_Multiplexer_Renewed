@@ -161,12 +161,22 @@ void Pipeline::analyse(ProgressSink& progress)
         scan(progress);
     progress.stage("Analyse");
     conflicts_ = ConflictEngine::analyse(*session_, config_.conflicts, progress);
+    if (config_.compile.autoMerge) {
+        progress.stage("Auto-Merger: checking scripts and configs");
+        autoMerge_ = AutoMerger::analyse(*session_);
+        session_->autoMergeRelinkable = autoMerge_->relinkable;
+    } else {
+        autoMerge_.reset();
+        session_->autoMergeRelinkable.clear();
+    }
     dependencies_ = DependencyEngine::analyse(*session_, config_.analysis, progress);
     CleaningEngine::analyse(*session_, *conflicts_, *dependencies_);
     compiled_.reset();
     validation_.reset();
     if (db_)
         db::DatabaseWriter(*db_).writeAnalysis(*session_, *conflicts_, *dependencies_, progress);
+    if (db_)
+        db::DatabaseWriter(*db_).writeAutoMerge(*session_, autoMerge(), nullptr);
 }
 
 void Pipeline::refreshEligibility()
@@ -399,6 +409,20 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         }
     }
     auto post = ValidationEngine::validateWrittenFiles(*compiled_, result.pluginFiles);
+    {
+        // Relinked scripts and configs (or removal of an earlier export's copies when it is off).
+        AutoMergeReport none;
+        AutoMergeReport& am = config_.compile.autoMerge && autoMerge_ ? *autoMerge_ : none;
+        AutoMerger::relink(*session_, *compiled_, result.directory, am);
+        for (const auto& e : am.errors)
+            post.fail(Severity::Error, "Auto-Merger",
+                      e + ". The plugin was compiled but this file still names it: re-enable it or turn the "
+                          "Auto-Merger off and compile again");
+        if (am.enabled)
+            post.pass(am.written.size());
+        if (db_)
+            db::DatabaseWriter(*db_).writeAutoMerge(*session_, autoMerge(), &*compiled_);
+    }
     validation_->merge(post);
     if (db_)
         db::DatabaseWriter(*db_).writeValidation("post-export", post, false);
@@ -432,6 +456,7 @@ std::vector<std::filesystem::path> Pipeline::writeReports(const std::filesystem:
     ctx.dependencies = dependencies();
     ctx.compiled = compiledOutput();
     ctx.validation = validation();
+    ctx.autoMerge = autoMerge();
     auto files = ReportGenerator::writeAll(ctx, directory);
     spdlog::info("Wrote {} report files to {}", files.size(), pathToUtf8(directory));
     return files;

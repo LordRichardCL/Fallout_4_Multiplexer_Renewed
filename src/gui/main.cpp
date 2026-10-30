@@ -39,6 +39,7 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
     cfg.databasePath = gui::toPath(args.value("db"));
     cfg.exportOptions.outputDirectory = gui::toPath(args.value("out"));
     cfg.compile.outputCount = 10;
+    cfg.compile.autoMerge = args.isSet("auto-merge");
 
     QDir outDir(args.value("screenshots"));
     outDir.mkpath(".");
@@ -72,7 +73,7 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
     }
 
     const QStringList pages = {"Dashboard", "Changes", "Plugins", "Conflicts", "Assets", "Dependencies",
-                               "Compilation", "Validation", "Reports", "Settings"};
+                               "Compilation", "Validation", "Reports", "Settings", "Advanced Users Auto-Merger"};
     for (int i = 0; i < pages.size(); ++i) {
         window.showPage(pages[i]);
         // Select the first row of the main table so detail panes are populated.
@@ -219,6 +220,7 @@ int main(int argc, char** argv)
     for (const char* opt : {"screenshots", "game", "mo2", "plugins", "ini-dir", "db", "out", "record"})
         args.addOption(QCommandLineOption(opt, QString("Developer screenshot mode: %1").arg(opt), "value"));
     args.addOption(QCommandLineOption("check-only", "Developer screenshot mode: only check for changes"));
+    args.addOption(QCommandLineOption("auto-merge", "Developer screenshot mode: turn the Auto-Merger on"));
     args.process(app);
 
     fo4mx::log::init(fo4mx::platform::applicationDataDir() / "logs" / "multiplexer.log");

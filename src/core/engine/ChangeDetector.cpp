@@ -526,6 +526,7 @@ uint64_t ChangeDetector::settingsHash(const CompileOptions& c, const std::vector
     std::string s = std::to_string(c.outputCount) + "|" + c.outputPrefix + "|" + std::to_string(int(c.strategy)) + "|" +
                     std::to_string(c.mergeCompatible) + std::to_string(c.lightOutputsWhenPossible) +
                     std::to_string(c.rewriteHeuristicReferences) + std::to_string(c.buildPatch) + std::to_string(c.patchOnly) +
+                    (c.autoMerge ? "|automerge" : "") +
                     "|" + c.patchName + "|" + runtimeName;
     for (const auto& r : c.rules)
         s += "|" + toLower(r.pattern) + "=" + std::to_string(r.output);

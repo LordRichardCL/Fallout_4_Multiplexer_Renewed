@@ -6,6 +6,8 @@
 #include "engine/Pipeline.hpp"
 #include "esp/FieldDecoder.hpp"
 #include "esp/PluginFile.hpp"
+#include "papyrus/Pex.hpp"
+#include "util/Text.hpp"
 
 #include <fstream>
 #include <iterator>
@@ -1669,4 +1671,90 @@ TEST(text_reports)
     CHECK(txt.rfind("Conflict Report\n===============\n", 0) == 0);
     CHECK(txt.find("Pistol10mm [WEAP:00001000]") != std::string::npos);
     CHECK(txt.find('<') == std::string::npos); // no markup
+}
+
+// Advanced Users Auto-Merger: a plugin named in a script and an MCM config is compiled when both can
+// be relinked; relinked copies point at the output plugin and the record's new FormID. A plugin named
+// in a config without a FormID stays out.
+TEST(auto_merger_relinks_scripts_and_configs)
+{
+    auto root = buildInstall("automerger");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModS.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000812, {zs("EDID", "ModS_Keyword")})});
+    writePlugin(data / "ModT.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000800, {zs("EDID", "ModT_Keyword")})});
+    writeBytes(data / "Scripts" / "ModSUser.pex", testScript(0x812, "ModS.esp"));
+    writeFile(data / "MCM" / "Config" / "ModS" / "config.json",
+              "{\"modName\": \"ModS\", \"pluginRequirements\": [\"ModS.esp\"],\n"
+              " \"content\": [{\"sourceForm\": \"ModS.esp|812\"}, {\"other\": \"Not ModS.esp|800\"}]}\n");
+    writeFile(data / "F4SE" / "Plugins" / "RobCo_Patcher" / "modt.ini", "filterByPlugin=ModT.esp\n");
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModS.esp\n*ModT.esp\n");
+
+    {
+        Pipeline off(configFor(root));
+        off.scan();
+        off.analyse();
+        CHECK_EQ(off.session().findPlugin("ModS.esp")->eligibility, Eligibility::Ineligible);
+        CHECK(off.autoMerge() == nullptr);
+    }
+
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    auto& s = p.session();
+    const auto* modS = s.findPlugin("ModS.esp");
+    const auto* modT = s.findPlugin("ModT.esp");
+    CHECK_EQ(modS->eligibility, Eligibility::Eligible);
+    CHECK_EQ(modT->eligibility, Eligibility::Ineligible);
+    const auto* am = p.autoMerge();
+    CHECK(am != nullptr);
+    CHECK(am->relinkable.count(modS->index) == 1);
+    CHECK(am->relinkable.count(modT->index) == 0);
+    bool plain = false;
+    for (const auto& f : am->files)
+        if (f.path == "f4se\\plugins\\robco_patcher\\modt.ini")
+            plain = f.problem.find("without a FormID") != std::string::npos;
+    CHECK(plain);
+
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const FormMapping* kw = nullptr;
+    for (const auto& m : p.compiledOutput()->mappings)
+        if (m.editorId == "ModS_Keyword")
+            kw = &m;
+    CHECK(kw != nullptr);
+
+    // The script: GetFormFromFile points at the output and the new FormID; IsPluginInstalled at the output.
+    std::ifstream in(result.directory / "scripts" / "modsuser.pex", std::ios::binary);
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    auto scan = pex::scan(bytes);
+    CHECK(scan.ok);
+    CHECK_EQ(scan.getFormFromFile.size(), size_t(1));
+    CHECK_EQ(scan.getFormFromFile[0].formId, static_cast<int32_t>(kw->objectId));
+    CHECK_EQ(scan.strings[scan.getFormFromFile[0].fileString], kw->outputPlugin);
+    bool renamed = false;
+    for (size_t i = 0; i < scan.strings.size(); ++i)
+        renamed |= scan.usedElsewhere[i] && scan.strings[i] == kw->outputPlugin;
+    CHECK(renamed);
+    for (const auto& str : scan.strings)
+        CHECK(toLower(str) != "mods.esp");
+
+    // The MCM config: the pair rewritten, the requirement renamed, the other plugin's name untouched.
+    std::ifstream cj(result.directory / "mcm" / "config" / "mods" / "config.json");
+    std::string json((std::istreambuf_iterator<char>(cj)), std::istreambuf_iterator<char>());
+    char id[16];
+    std::snprintf(id, sizeof(id), "%03X", kw->objectId);
+    CHECK(json.find("\"" + kw->outputPlugin + "|" + id + "\"") != std::string::npos);
+    CHECK(json.find("[\"" + kw->outputPlugin + "\"]") != std::string::npos);
+    CHECK(json.find("Not ModS.esp|800") != std::string::npos);
+    CHECK(std::filesystem::exists(result.directory / "Multiplexer_Relinked.txt"));
+
+    // Turning it off removes the relinked copies at the next export.
+    p.config().compile.autoMerge = false;
+    p.exportOutputs();
+    CHECK(!std::filesystem::exists(result.directory / "scripts" / "modsuser.pex"));
+    CHECK(!std::filesystem::exists(result.directory / "Multiplexer_Relinked.txt"));
 }
