@@ -8,6 +8,21 @@
 
 namespace fo4mx::pex {
 
+const char* stringUseName(StringUse u)
+{
+    switch (u) {
+    case StringUse::GetFormFromFile: return "Game.GetFormFromFile";
+    case StringUse::IsPluginInstalled: return "Game.IsPluginInstalled";
+    case StringUse::CallArgument: return "function argument";
+    case StringUse::Assignment: return "assignment";
+    case StringUse::Comparison: return "comparison";
+    case StringUse::Concatenation: return "text concatenation";
+    case StringUse::Default: return "default value";
+    case StringUse::Other: return "other instruction";
+    }
+    return "";
+}
+
 namespace {
 
 constexpr uint32_t kMagic = 0xFA57C0DE; // little endian: Fallout 4 (Skyrim scripts are big endian)
@@ -97,10 +112,18 @@ private:
         }
         return v;
     }
-    void markString(const Value& v)
+    void markString(const Value& v, StringUse use = StringUse::Other, const std::string& function = {})
     {
-        if (v.type == 2)
-            out_.usedElsewhere[v.string] = true;
+        if (v.type != 2)
+            return;
+        out_.usedElsewhere[v.string] = true;
+        StringUsage u;
+        u.string = v.string;
+        u.use = use;
+        u.offset = v.offset;
+        u.function = function;
+        u.where = where_;
+        out_.uses.push_back(std::move(u));
     }
 
     void debugInfo()
@@ -129,7 +152,7 @@ private:
 
     void object()
     {
-        str(); // name
+        object_ = out_.strings[str()]; // name
         const uint32_t size = r_.read<uint32_t>();
         const size_t start = r_.position();
         strs(2); // parent class, doc
@@ -143,7 +166,7 @@ private:
             for (uint16_t m = 0; m < members; ++m) {
                 strs(2);
                 r_.read<uint32_t>();
-                markString(value());
+                markString(value(), StringUse::Default);
                 r_.read<uint8_t>();
                 str();
             }
@@ -152,14 +175,16 @@ private:
         for (uint16_t i = 0; i < variables; ++i) {
             strs(2);
             r_.read<uint32_t>();
-            markString(value());
+            markString(value(), StringUse::Default);
             r_.read<uint8_t>();
         }
         const uint16_t properties = r_.read<uint16_t>();
         for (uint16_t i = 0; i < properties; ++i) {
-            strs(3); // name, type, doc
+            const std::string property = out_.strings[str()];
+            strs(2); // type, doc
             r_.read<uint32_t>();
             const uint8_t flags = r_.read<uint8_t>();
+            where_ = object_ + "." + property;
             if (flags & 4) {
                 str(); // auto variable
             } else {
@@ -171,10 +196,11 @@ private:
         }
         const uint16_t states = r_.read<uint16_t>();
         for (uint16_t i = 0; i < states; ++i) {
-            str();
+            const std::string state = out_.strings[str()];
             const uint16_t functions = r_.read<uint16_t>();
             for (uint16_t f = 0; f < functions; ++f) {
-                str();
+                const std::string fn = out_.strings[str()];
+                where_ = object_ + (state.empty() ? "" : "." + state) + "." + fn;
                 function();
             }
         }
@@ -229,19 +255,52 @@ private:
             c.fileString = varargs[1].string;
             c.fileStringOffset = varargs[1].offset;
             out_.getFormFromFile.push_back(c);
-            markString(varargs[0]);
+            markString(varargs[0], StringUse::CallArgument, "Game.GetFormFromFile");
             for (const auto& a : args)
                 markString(a);
+            if (varargs[1].type == 2) {
+                StringUsage u;
+                u.string = varargs[1].string;
+                u.use = StringUse::GetFormFromFile;
+                u.offset = varargs[1].offset;
+                u.function = "Game.GetFormFromFile";
+                u.where = where_;
+                u.formIdLiteral = c.formIdLiteral;
+                u.formId = c.formId;
+                u.formIdOffset = c.formIdOffset;
+                out_.uses.push_back(std::move(u));
+            }
             return;
         }
+
+        // The called function, for call arguments.
+        std::string function;
+        if (op == kCallStatic && args.size() == 3 && args[1].type == 1)
+            function = (args[0].type == 1 || args[0].type == 2 ? out_.strings[args[0].string] + "." : std::string()) +
+                       out_.strings[args[1].string];
+        else if ((op == kCallMethod || op == kCallParent) && !args.empty() && args[0].type == 1)
+            function = out_.strings[args[0].string];
+        const bool isPluginInstalled = op == kCallStatic && iequals(function, "Game.IsPluginInstalled") &&
+                                       varargs.size() == 1;
+
+        StringUse use = StringUse::Other;
+        if (op == kCallMethod || op == kCallParent || op == kCallStatic)
+            use = isPluginInstalled ? StringUse::IsPluginInstalled : StringUse::CallArgument;
+        else if (op == 0x0D || op == 0x1D) // assign, propset
+            use = StringUse::Assignment;
+        else if (op >= 0x0F && op <= 0x13) // cmp_eq .. cmp_ge
+            use = StringUse::Comparison;
+        else if (op == 0x1B) // strcat
+            use = StringUse::Concatenation;
         for (const auto& a : args)
-            markString(a);
+            markString(a, use == StringUse::IsPluginInstalled ? StringUse::Other : use, function);
         for (const auto& a : varargs)
-            markString(a);
+            markString(a, use, function);
     }
 
     BinaryReader r_;
     Scan& out_;
+    std::string object_, where_;
 };
 
 } // namespace

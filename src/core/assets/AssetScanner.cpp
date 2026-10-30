@@ -1,6 +1,7 @@
 #include "assets/AssetScanner.hpp"
 
 #include "engine/ParallelFor.hpp"
+#include "engine/ReferenceScanner.hpp"
 #include "util/Binary.hpp"
 #include "util/Text.hpp"
 
@@ -188,77 +189,12 @@ void AssetScanner::scan(Session& session, const AssetScanOptions& options, Progr
     spdlog::info("Assets: {} unique files, {} archives, {} loose files, {} conflicting", idx.entries.size(),
                  idx.archives.size(), idx.looseFileCount(), idx.conflictCount());
 
-    // 4. Files that refer to plugins by name.
-    session.nameReferences.clear();
-    std::unordered_map<std::string, PluginIndex> names;
-    for (auto pi : session.loadOrder)
-        if (!session.plugins[pi].baseGame)
-            names[session.plugins[pi].key] = pi;
-
-    std::mutex refMutex;
-    auto record = [&](const std::string& lowerName, const std::string& path, const std::string& mod) {
-        auto it = names.find(lowerName);
-        if (it == names.end())
-            return;
-        std::lock_guard lock(refMutex);
-        session.nameReferences.push_back({it->second, path, mod});
-    };
-
-    std::vector<uint32_t> candidates;
-    for (uint32_t i = 0; i < idx.entries.size(); ++i) {
-        const auto& e = idx.entries[i];
-        const auto& p = idx.path(e);
-        bool script = options.scanScriptsForPluginNames && iendsWith(p, ".pex");
-        bool config = options.scanConfigsForPluginNames &&
-                      (istartsWith(p, "f4se\\plugins\\") || istartsWith(p, "mcm\\config\\") ||
-                       istartsWith(p, "mcm\\settings\\")) &&
-                      (iendsWith(p, ".ini") || iendsWith(p, ".json") || iendsWith(p, ".txt") || iendsWith(p, ".toml") ||
-                       iendsWith(p, ".xml"));
-        if (script || config)
-            candidates.push_back(i);
-    }
-
-    progress.stage("Scanning scripts and configs for plugin names");
-    std::atomic<size_t> scanned{0};
-    parallelFor(
-        candidates.size(),
-        [&](size_t i) {
-            const auto& e = idx.entries[candidates[i]];
-            const auto& path = idx.path(e);
-            const auto& mod = idx.modName(e.winner());
-            try {
-                if (iendsWith(path, ".pex")) {
-                    auto bytes = idx.read(e, e.sources.size() - 1, vfs, 512 * 1024);
-                    for (const auto& s : pexStrings(bytes)) {
-                        if (iendsWith(s, ".esp") || iendsWith(s, ".esm") || iendsWith(s, ".esl"))
-                            record(toLower(s), path, mod);
-                    }
-                } else {
-                    auto bytes = idx.read(e, e.sources.size() - 1, vfs, 4 * 1024 * 1024);
-                    std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-                    for (const auto& n : pluginNamesInText(text))
-                        record(n, path, mod);
-                }
-            } catch (const std::exception& ex) {
-                spdlog::debug("Could not read {}: {}", path, ex.what());
-            }
-            size_t n = ++scanned;
-            if ((n & 0xFF) == 0 || n == candidates.size())
-                progress.progress(n, candidates.size(), path);
-        },
-        progress, options.threads);
-
-    // Deduplicate.
-    std::sort(session.nameReferences.begin(), session.nameReferences.end(),
-              [](const PluginNameReference& a, const PluginNameReference& b) {
-                  return std::tie(a.plugin, a.assetPath) < std::tie(b.plugin, b.assetPath);
-              });
-    session.nameReferences.erase(std::unique(session.nameReferences.begin(), session.nameReferences.end(),
-                                             [](const PluginNameReference& a, const PluginNameReference& b) {
-                                                 return a.plugin == b.plugin && a.assetPath == b.assetPath;
-                                             }),
-                                 session.nameReferences.end());
-    spdlog::info("{} script/config references to plugin file names", session.nameReferences.size());
+    // 4. Files that refer to plugins by name, classified by what they are and how they use the name.
+    ReferenceScanOptions refs;
+    refs.scripts = options.scanScriptsForPluginNames;
+    refs.configs = options.scanConfigsForPluginNames;
+    refs.threads = options.threads;
+    ReferenceScanner::scan(session, refs, progress);
     session.assetsScanned = true;
 }
 

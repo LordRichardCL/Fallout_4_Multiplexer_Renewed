@@ -111,12 +111,57 @@ struct FormGroup {
     uint32_t size() const { return end - begin; }
 };
 
-// A script or config file that refers to a plugin by file name. Such plugins
-// cannot be renamed away, so they must stay in the load order.
-struct PluginNameReference {
+// What kind of thing names a plugin by its file name.
+enum class ReferenceKind : uint8_t {
+    PluginName, // the plugin name itself, where its use is known only as a name (e.g. a presence check)
+    FilePath,   // a file whose name contains the plugin name
+    Directory,  // a folder named after the plugin
+    Papyrus,    // a script (compiled .pex or source .psc)
+    Config,     // a text configuration file (INI, JSON, TOML, XML, TXT)
+    Binary,     // compiled code or another binary file (F4SE DLL)
+    Unknown,
+};
+const char* referenceKindName(ReferenceKind k);
+
+// What compiling the plugin would mean for the reference. The most restrictive class of a plugin's
+// references decides whether it can be compiled; their number never does.
+enum class ReferenceClass : uint8_t {
+    Safe,                  // unaffected: comments, Papyrus sources, names not used by code
+    Rewritable,            // can be changed exactly and checked (Advanced Users Auto-Merger)
+    CompatibilityRequired, // a known engine convention that would need the plugin's files moved: not implemented
+    Unsafe,                // cannot be preserved: binary code, run-time FormIDs, saved settlement data
+    Unknown,               // the name is used in a way whose meaning cannot be established
+};
+const char* referenceClassName(ReferenceClass c);
+
+// One place a plugin's file name appears outside the plugin (ReferenceScanner).
+struct PluginReference {
     PluginIndex plugin = kInvalidPlugin;
-    std::string assetPath;
-    std::string source; // mod providing the referencing file
+    std::string assetPath; // data-relative, lowercase (a folder ends with a backslash)
+    std::string source;    // mod providing the referencing file
+    ReferenceKind kind = ReferenceKind::Unknown;
+    std::string format;    // PEX, PSC, INI, JSON, TOML, XML, TXT, DLL, Folder, File name
+    std::string text;      // the reference as found
+    std::string context;   // how it is used: "Game.GetFormFromFile", "comment", "Plugin|FormID pair", ...
+    std::string location;  // "line 12", "Object.State.Function", file count for folders
+    ReferenceClass cls = ReferenceClass::Unknown;
+    std::string reason;
+    // Exact place to change (Rewritable only). Text: byte spans of the name and the FormID.
+    // Scripts: offset of the string index (and of the FormID for GetFormFromFile).
+    size_t nameBegin = 0, nameEnd = 0;
+    size_t idBegin = 0, idEnd = 0;
+    bool hasFormId = false;
+    uint32_t formId = 0;
+    size_t pexStringOffset = 0, pexFormIdOffset = 0;
+};
+using PluginNameReference = PluginReference; // earlier name
+
+// The combined verdict on a plugin's references.
+struct ReferenceDecision {
+    ReferenceClass cls = ReferenceClass::Safe; // most restrictive class present
+    size_t counts[5] = {};                     // per ReferenceClass
+    size_t total = 0;
+    std::string summary; // "7 references: 2 rewritable, 5 unknown"
 };
 
 struct RecordEdge {
@@ -144,9 +189,13 @@ public:
     std::vector<FormGroup> groups;
     StringPool strings;
 
-    std::vector<PluginNameReference> nameReferences;
-    // Advanced Users Auto-Merger: plugins named in scripts/configs that can all be relinked.
-    std::set<PluginIndex> autoMergeRelinkable;
+    std::vector<PluginReference> nameReferences; // every place a plugin's file name appears (ReferenceScanner)
+    // Advanced Users Auto-Merger on: plugins whose references are only safe or rewritable are compiled.
+    bool autoMergeEnabled = false;
+    std::map<PluginIndex, ReferenceDecision> referenceDecisions;
+    // Copies the Auto-Merger wrote into the output folder (path -> content hash, from its manifest).
+    // They are never read as originals.
+    std::unordered_map<std::string, uint64_t> relinkedCopies; // per plugin with references (eligibility)
     std::vector<RecordEdge> recordEdges; // references of winning compilable records
     std::unordered_set<std::string> userRetained; // lowercase plugin names the user excluded
     // Plugins kept out of compilation because validation found records it cannot write safely

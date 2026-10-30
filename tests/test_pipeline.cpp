@@ -1740,12 +1740,13 @@ TEST(auto_merger_relinks_scripts_and_configs)
     CHECK_EQ(scan.getFormFromFile.size(), size_t(1));
     CHECK_EQ(scan.getFormFromFile[0].formId, static_cast<int32_t>(kw->objectId));
     CHECK_EQ(scan.strings[scan.getFormFromFile[0].fileString], kw->outputPlugin);
-    bool renamed = false;
-    for (size_t i = 0; i < scan.strings.size(); ++i)
-        renamed |= scan.usedElsewhere[i] && scan.strings[i] == kw->outputPlugin;
-    CHECK(renamed);
-    for (const auto& str : scan.strings)
-        CHECK(toLower(str) != "mods.esp");
+    // Each use points at a string naming the output; the original name is left, unused.
+    size_t toOutput = 0;
+    for (const auto& u : scan.uses) {
+        CHECK(toLower(scan.strings[u.string]) != "mods.esp");
+        toOutput += scan.strings[u.string] == kw->outputPlugin;
+    }
+    CHECK_EQ(toOutput, size_t(2));
 
     // The MCM config: the pair rewritten, the requirement renamed, the other plugin's name untouched.
     const std::string json = slurp(result.directory / "mcm" / "config" / "mods" / "config.json");
@@ -1754,11 +1755,11 @@ TEST(auto_merger_relinks_scripts_and_configs)
     CHECK(json.find("\"" + kw->outputPlugin + "|" + id + "\"") != std::string::npos);
     CHECK(json.find("[\"" + kw->outputPlugin + "\"]") != std::string::npos);
     CHECK(json.find("Not ModS.esp|800") != std::string::npos);
-    CHECK(std::filesystem::exists(result.directory / "Multiplexer_Relinked.txt"));
+    CHECK(std::filesystem::exists(result.directory / "Multiplexer_Relinked.tsv"));
 
     // Turning it off removes the relinked copies at the next export.
     p.config().compile.autoMerge = false;
     p.exportOutputs();
     CHECK(!std::filesystem::exists(result.directory / "scripts" / "modsuser.pex"));
-    CHECK(!std::filesystem::exists(result.directory / "Multiplexer_Relinked.txt"));
+    CHECK(!std::filesystem::exists(result.directory / "Multiplexer_Relinked.tsv"));
 }

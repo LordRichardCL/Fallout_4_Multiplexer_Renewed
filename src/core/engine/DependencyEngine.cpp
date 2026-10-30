@@ -5,6 +5,7 @@
 #include "engine/FieldModel.hpp"
 #include "engine/Normalizer.hpp"
 #include "engine/ParallelFor.hpp"
+#include "engine/ReferenceScanner.hpp"
 #include "util/Text.hpp"
 
 #include <algorithm>
@@ -132,24 +133,13 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
                     ++newOverrideOnly[r.plugin][r.signature];
     }
 
-    // Plugin-named asset folders (FaceGen, voice files) tie assets to the file name.
-    std::map<std::string, size_t> namedAssets;
-    for (const auto& e : session.assets.entries) {
-        const auto& p = session.assets.path(e);
-        for (const char* prefix : {"meshes\\actors\\character\\facegendata\\facegeom\\",
-                                   "textures\\actors\\character\\facecustomization\\", "sound\\voice\\"}) {
-            if (!istartsWith(p, prefix))
-                continue;
-            auto rest = std::string_view(p).substr(std::strlen(prefix));
-            auto slash = rest.find('\\');
-            if (slash != std::string_view::npos)
-                namedAssets[toLower(rest.substr(0, slash))]++;
-        }
-    }
-
-    std::map<PluginIndex, std::vector<const PluginNameReference*>> nameRefs;
+    // Places that name plugins by file name, grouped per plugin. Their classes decide, never their number.
+    std::map<PluginIndex, std::vector<const PluginReference*>> nameRefs;
     for (const auto& r : session.nameReferences)
         nameRefs[r.plugin].push_back(&r);
+    session.referenceDecisions.clear();
+    for (const auto& [plugin, refs] : nameRefs)
+        session.referenceDecisions[plugin] = ReferenceScanner::decide(refs);
 
     for (auto& p : session.plugins) {
         p.reasons.clear();
@@ -224,21 +214,34 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
             }
             p.reasons.push_back("Contains record types not yet compiled: " + join(unsupported, ", "));
         }
-        if (auto it = nameRefs.find(p.index); it != nameRefs.end() && session.autoMergeRelinkable.count(p.index)) {
-            p.reasons.push_back("Named in " + std::to_string(it->second.size()) + " script/config file" +
-                                (it->second.size() == 1 ? "" : "s") +
-                                ": relinked by the Advanced Users Auto-Merger when compiled");
-        } else if (it != nameRefs.end()) {
-            block.otherReason = true;
-            p.eligibility = Eligibility::Ineligible;
-            std::string where = it->second.front()->assetPath;
-            p.reasons.push_back("Referenced by file name in " + std::to_string(it->second.size()) + " script/config file" +
-                                (it->second.size() == 1 ? "" : "s") + " (e.g. " + where + ")");
-        }
-        if (auto it = namedAssets.find(p.key); it != namedAssets.end()) {
-            block.otherReason = true;
-            p.eligibility = Eligibility::Ineligible;
-            p.reasons.push_back(std::to_string(it->second) + " assets are stored in folders named after the plugin");
+        if (auto it = nameRefs.find(p.index); it != nameRefs.end()) {
+            const auto& d = session.referenceDecisions[p.index];
+            if (d.cls == ReferenceClass::Safe) {
+                p.reasons.push_back(d.summary + ": none depends on the plugin's file name");
+            } else if (d.cls == ReferenceClass::Rewritable && session.autoMergeEnabled) {
+                p.reasons.push_back(d.summary + ": the rewritable ones are rewritten by the Advanced Users "
+                                                "Auto-Merger when compiled, and checked");
+            } else {
+                block.otherReason = true;
+                p.eligibility = Eligibility::Ineligible;
+                if (d.cls == ReferenceClass::Rewritable) {
+                    p.reasons.push_back(d.summary + ". All can be rewritten: turn on the Advanced Users Auto-Merger "
+                                                    "to compile it");
+                } else {
+                    // The references that decide, most restrictive first.
+                    std::vector<const PluginReference*> deciding;
+                    for (const auto* r : it->second)
+                        if (r->cls == d.cls)
+                            deciding.push_back(r);
+                    std::vector<std::string> examples;
+                    for (size_t i = 0; i < deciding.size() && i < 3; ++i)
+                        examples.push_back(deciding[i]->assetPath + " (" + deciding[i]->context + ": " +
+                                           deciding[i]->reason + ")");
+                    if (deciding.size() > 3)
+                        examples.push_back("+" + std::to_string(deciding.size() - 3) + " more");
+                    p.reasons.push_back(d.summary + ". " + referenceClassName(d.cls) + ": " + join(examples, "; "));
+                }
+            }
         }
     }
 

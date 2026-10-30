@@ -122,6 +122,10 @@ void Pipeline::scan(ProgressSink& progress)
                  session_->vfs.roots().size());
 
     PluginScanner::scan(*session_, config_.scan, progress);
+    // The Auto-Merger's copies in the output folder are never read as originals.
+    session_->relinkedCopies = AutoMerger::readManifest(config_.exportOptions.outputDirectory.empty()
+                                                            ? Exporter::defaultOutputDirectory(*session_)
+                                                            : config_.exportOptions.outputDirectory);
     AssetScanner::scan(*session_, config_.assets, progress);
     DependencyEngine::evaluateEligibility(*session_, config_.analysis);
 
@@ -161,13 +165,12 @@ void Pipeline::analyse(ProgressSink& progress)
         scan(progress);
     progress.stage("Analyse");
     conflicts_ = ConflictEngine::analyse(*session_, config_.conflicts, progress);
+    session_->autoMergeEnabled = config_.compile.autoMerge;
     if (config_.compile.autoMerge) {
         progress.stage("Auto-Merger: checking scripts and configs");
         autoMerge_ = AutoMerger::analyse(*session_);
-        session_->autoMergeRelinkable = autoMerge_->relinkable;
     } else {
         autoMerge_.reset();
-        session_->autoMergeRelinkable.clear();
     }
     dependencies_ = DependencyEngine::analyse(*session_, config_.analysis, progress);
     CleaningEngine::analyse(*session_, *conflicts_, *dependencies_);
@@ -248,13 +251,23 @@ bool Pipeline::compile(ProgressSink& progress)
         }
     }
     std::map<std::string, std::string> isolatedPatchRecords; // record label -> finding
+    if (autoMerge_)
+        autoMerge_->keptOut.clear();
     for (int round = 0;; ++round) {
         DependencyEngine::evaluateEligibility(*session_, config_.analysis, dependencies_ ? &*dependencies_ : nullptr);
         compiled_ = CompilationEngine::compile(*session_, options, progress);
         validation_ = ValidationEngine::validate(*session_, *compiled_, progress);
+        size_t isolated = 0;
+        // Advanced Users Auto-Merger: plan and check the rewritten copies; a plugin whose copy fails a
+        // check stays in the load order (fail closed) and the compilation runs again.
+        if (autoMerge_)
+            for (const auto& [pi, why] : AutoMerger::plan(*session_, *compiled_, outputDir, *autoMerge_))
+                if (session_->autoRetained.emplace(session_->plugins[pi].key, why).second)
+                    ++isolated;
+        if (isolated && round < 8)
+            continue;
         if (!validation_->critical() || !config_.autoIsolate || round >= 8)
             break;
-        size_t isolated = 0;
         for (const auto& is : validation_->issues) {
             if (is.severity != Severity::Error || !is.record.valid())
                 continue;
@@ -288,10 +301,24 @@ bool Pipeline::compile(ProgressSink& progress)
     for (const auto& [key, reason] : session_->autoRetained) {
         const auto* p = session_->findPlugin(key);
         validation_->fail(Severity::Warning, "Kept Out Automatically",
-                          (p ? p->name : key) + " stays in the load order because one of its records could not be "
-                                                "written safely: " + reason,
+                          (p ? p->name : key) +
+                              (reason.rfind("Advanced Users Auto-Merger", 0) == 0
+                                   ? " stays in the load order: " + reason
+                                   : " stays in the load order because one of its records could not be written "
+                                     "safely: " + reason),
                           p ? p->name : key);
     }
+    if (autoMerge_)
+        for (const auto& f : autoMerge_->files) {
+            if (f.validation.empty())
+                continue;
+            for (auto pi : f.plugins)
+                if (compiled_->isCompiled(pi))
+                    validation_->fail(Severity::Error, "Auto-Merger",
+                                      session_->plugins[pi].name + " is compiled but " + f.path +
+                                          " could not be rewritten safely: " + f.validation,
+                                      session_->plugins[pi].name);
+        }
     for (const auto& [label, reason] : isolatedPatchRecords)
         validation_->fail(Severity::Warning, "Kept Out Automatically",
                           label + " was left out of the patch (last plugin wins for it): " + reason);
@@ -413,7 +440,7 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         // Relinked scripts and configs (or removal of an earlier export's copies when it is off).
         AutoMergeReport none;
         AutoMergeReport& am = config_.compile.autoMerge && autoMerge_ ? *autoMerge_ : none;
-        AutoMerger::relink(*session_, *compiled_, result.directory, am);
+        AutoMerger::relink(*session_, result.directory, am);
         for (const auto& e : am.errors)
             post.fail(Severity::Error, "Auto-Merger",
                       e + ". The plugin was compiled but this file still names it: re-enable it or turn the "
