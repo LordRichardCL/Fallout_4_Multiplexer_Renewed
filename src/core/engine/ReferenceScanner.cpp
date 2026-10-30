@@ -242,11 +242,20 @@ std::vector<std::string> binaryNames(const std::vector<uint8_t>& b)
     return out;
 }
 
-const char* const kEngineFolders[] = {
-    "meshes\\actors\\character\\facegendata\\facegeom\\",
-    "textures\\actors\\character\\facecustomization\\",
-    "sound\\voice\\",
-    "textures\\terrain\\lodgen\\",
+// Folders found by the plugin's name: by the game, or by a tool that loads them only for an
+// installed plugin of that name.
+struct NamedFolder {
+    const char* prefix;
+    const char* what;
+};
+const NamedFolder kEngineFolders[] = {
+    {"meshes\\actors\\character\\facegendata\\facegeom\\", "FaceGen meshes"},
+    {"textures\\actors\\character\\facecustomization\\", "FaceGen textures"},
+    {"sound\\voice\\", "voice files"},
+    {"textures\\terrain\\lodgen\\", "LOD billboards"},
+    {"meshes\\precombined\\", "precombined meshes"},
+    {"vis\\", "previs data"},
+    {"f4se\\plugins\\f4ee\\overlays\\", "LooksMenu overlays (loaded only for an installed plugin of this name)"},
 };
 
 bool contentCandidate(const std::string& p, const ReferenceScanOptions& o)
@@ -507,11 +516,17 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
     }
     for (const auto& [key, value] : folders) {
         const auto& [plugin, folder] = key;
-        bool engine = false;
-        for (const char* prefix : kEngineFolders)
-            engine |= folder == std::string(prefix) + session.plugins[plugin].key + "\\";
+        const NamedFolder* engine = nullptr;
+        for (const auto& nf : kEngineFolders)
+            if (folder == std::string(nf.prefix) + session.plugins[plugin].key + "\\")
+                engine = &nf;
         auto r = make(engine ? Fact::EngineFolder : Fact::OtherFolder, plugin, folder, "Folder",
                       session.plugins[plugin].key, std::to_string(value.first) + " files");
+        if (engine) {
+            r.context = engine->what;
+            r.reason = std::string(engine->what) + " are found by the plugin's file name; moving them to the output "
+                                                   "is not implemented";
+        }
         r.source = value.second;
         session.nameReferences.push_back(std::move(r));
     }

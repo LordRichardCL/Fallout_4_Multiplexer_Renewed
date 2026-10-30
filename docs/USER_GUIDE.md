@@ -255,13 +255,13 @@ Every place an active plugin's name appears is found and **classified by what it
 |---|---|---|---|
 | **Safe** | Unaffected by compiling | comment lines in INI/TOML/TXT, Papyrus sources (`.psc`), a name in a script's string table that its code never uses, RobCo Patcher INI file names | eligible |
 | **Rewritable** | Can be changed exactly and checked | `GetFormFromFile` with a fixed FormID, `IsPluginInstalled`, `Plugin.esp\|FormID` pairs, MCM `pluginRequirements` | eligible only with the Advanced Users Auto-Merger on |
-| **Compatibility Required** | A game convention that would need the plugin's files moved (not implemented) | FaceGen, face textures, voice and LOD billboard folders named after the plugin; `seq\<plugin>.seq` | kept |
+| **Compatibility Required** | A game convention that would need the plugin's files moved (not implemented) | FaceGen, face textures, voice, LOD billboard, precombined mesh and previs folders named after the plugin; LooksMenu overlay folders (`F4SE\Plugins\F4EE\Overlays\<plugin>`); `seq\<plugin>.seq` | kept |
 | **Unsafe** | Cannot be preserved | F4SE DLLs (compiled code), `GetFormFromFile` with a FormID computed at run time, Transfer Settlements blueprints | kept |
 | **Unknown** | Its meaning cannot be established | the name assigned, compared or joined in a script; a config naming the plugin without a FormID; other files or folders named after it; a script that does not read back exactly | kept |
 
 Where they are found: compiled scripts and Papyrus sources anywhere, configuration files under `F4SE\Plugins`, `MCM\Config` and `MCM\Settings`, F4SE DLLs (ASCII and UTF-16 strings), and every folder and file name, in loose files and archives. Names are matched whatever their letter case, as whole names (`MyModS.esp` is not `ModS.esp`); when a longer active plugin name ends at the same place (`Power Armor.esp`), it wins.
 
-**Where to see them.** The **Dependency Report** (HTML, TXT, JSON) has a block per plugin: the number of references, each reference with its type, use, location, classification and reason, then the overall classification, the reason and the recommended action. The **Asset Report** lists every reference, and the **Plugins** page shows them in the plugin's details.
+**Where to see them.** The **Dependency Report** (HTML, TXT, JSON) has a block per plugin: the number of references, each reference (up to 200 per plugin in HTML and TXT; JSON has all) with its type, use, location, classification and reason, then the overall classification, the reason and the recommended action. The **Asset Report** lists every reference, and the **Plugins** page shows them in the plugin's details.
 
 ## Advanced Users Auto-Merger
 

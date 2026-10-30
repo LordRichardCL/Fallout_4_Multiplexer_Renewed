@@ -436,7 +436,7 @@ std::string dependencyReport(const ReportContext& ctx)
         h.note("Every place a plugin's file name appears outside the plugin. The most restrictive classification "
                "decides; the number of references never does. Safe: unaffected. Rewritable: changed exactly by "
                "the Advanced Users Auto-Merger. Compatibility Required, Unsafe, Unknown: the plugin stays.");
-        size_t rows = 0;
+        const size_t perPlugin = std::min<size_t>(ctx.maxRows, 200);
         for (auto pi : s.loadOrder) {
             auto it = s.referenceDecisions.find(pi);
             if (it == s.referenceDecisions.end())
@@ -449,8 +449,7 @@ std::string dependencyReport(const ReportContext& ctx)
             for (const auto& r : s.nameReferences) {
                 if (r.plugin != pi)
                     continue;
-                if (rows < ctx.maxRows) {
-                    ++rows;
+                if (shown < perPlugin) {
                     ++shown;
                     h.row({r.assetPath, referenceKindName(r.kind), r.context, r.location, referenceClassName(r.cls),
                            r.reason},

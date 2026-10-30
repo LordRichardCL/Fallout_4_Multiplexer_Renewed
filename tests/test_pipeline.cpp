@@ -1938,6 +1938,7 @@ TEST(references_folder_and_path)
     writeFile(data / "Meshes" / "Actors" / "Character" / "FaceGenData" / "FaceGeom" / "ModS.esp" / "00000812.nif", "x");
     writeFile(data / "Meshes" / "Actors" / "Character" / "FaceGenData" / "FaceGeom" / "ModS.esp" / "00000813.nif", "x");
     writeFile(data / "Textures" / "ModT.esp_readme.txt", "x");
+    writeFile(data / "Vis" / "ModT.esp" / "0000ABCD.uvd", "x");
     auto cfg = configFor(root);
     cfg.compile.autoMerge = true;
     Pipeline p(cfg);
@@ -1949,11 +1950,14 @@ TEST(references_folder_and_path)
     CHECK_EQ(refs[0]->kind, ReferenceKind::Directory);
     CHECK_EQ(refs[0]->cls, ReferenceClass::CompatibilityRequired);
     CHECK_EQ(refs[0]->location, std::string("2 files"));
+    CHECK_EQ(refs[0]->context, std::string("FaceGen meshes"));
     CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Ineligible);
     auto t = referencesOf(s, "ModT.esp");
-    CHECK_EQ(t.size(), size_t(1));
+    CHECK_EQ(t.size(), size_t(2));
     CHECK_EQ(t[0]->kind, ReferenceKind::FilePath);
     CHECK_EQ(t[0]->cls, ReferenceClass::Unknown);
+    CHECK_EQ(t[1]->context, std::string("previs data"));
+    CHECK_EQ(t[1]->cls, ReferenceClass::CompatibilityRequired);
     CHECK_EQ(s.findPlugin("ModT.esp")->eligibility, Eligibility::Ineligible);
 }
 
