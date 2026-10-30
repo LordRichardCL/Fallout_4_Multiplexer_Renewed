@@ -88,6 +88,8 @@ void DatabaseWriter::initSchema()
     ensureColumn("Conflicts", "preserved", "INTEGER");
     ensureColumn("Plugins", "support");
     ensureColumn("DependencyIssues", "cleaning", "INTEGER");
+    for (const char* c : {"kind", "format", "text", "context", "location", "class", "reason"})
+        ensureColumn("NameReferences", c);
     setMeta("schema_version", std::to_string(kSchemaVersion));
 }
 
@@ -301,9 +303,20 @@ void DatabaseWriter::writeScan(const Session& session, ProgressSink& progress)
             progress.progress(i, assets.entries.size(), "assets");
     }
 
-    auto nr = db_.prepare("INSERT INTO NameReferences(plugin_id, asset_path, source) VALUES(?,?,?)");
+    auto nr = db_.prepare("INSERT INTO NameReferences(plugin_id, asset_path, source, kind, format, text, context, "
+                          "location, class, reason) VALUES(?,?,?,?,?,?,?,?,?,?)");
     for (const auto& r : session.nameReferences)
-        nr.bind(1, r.plugin).bind(2, r.assetPath).bind(3, r.source).run();
+        nr.bind(1, r.plugin)
+            .bind(2, r.assetPath)
+            .bind(3, r.source)
+            .bind(4, referenceKindName(r.kind))
+            .bind(5, r.format)
+            .bind(6, r.text)
+            .bind(7, r.context)
+            .bind(8, r.location)
+            .bind(9, referenceClassName(r.cls))
+            .bind(10, r.reason)
+            .run();
 
     tx.commit();
     setMeta("game_path", pathToUtf8(session.install.gamePath));
@@ -663,7 +676,11 @@ void DatabaseWriter::writeAutoMerge(const Session& session, const AutoMergeRepor
                 reason = report->files[i].path + ": " + report->files[i].problem;
                 break;
             }
-        const char* status = !report->relinkable.count(p)                ? "Kept out"
+        auto kept = report->keptOut.find(p);
+        if (kept != report->keptOut.end())
+            reason = kept->second;
+        const char* status = !report->relinkable.count(p)              ? "Kept out"
+                             : kept != report->keptOut.end()           ? "Kept out by a failed check"
                              : compiled && compiled->isCompiled(p) ? "Compiled and relinked"
                                                                        : "Relinkable";
         pl.bind(1, p).bind(2, session.pluginName(p)).bind(3, static_cast<uint64_t>(files.size())).bind(4, status).bind(5, reason);
@@ -675,7 +692,9 @@ void DatabaseWriter::writeAutoMerge(const Session& session, const AutoMergeRepor
         std::vector<std::string> names;
         for (PluginIndex p : f.plugins)
             names.push_back(session.pluginName(p));
-        std::string result = !f.problem.empty() ? "Not relinkable"
+        std::string result = !f.problem.empty()     ? "Not relinkable"
+                             : !f.validation.empty() ? "Check failed: " + f.validation
+                             : f.cls == ReferenceClass::Safe ? "Nothing to change (safe)"
                              : f.written ? "Relinked: " + std::to_string(f.changedCalls) + " calls, " +
                                                std::to_string(f.changedPairs) + " pairs, " + std::to_string(f.renamed) +
                                                " names"

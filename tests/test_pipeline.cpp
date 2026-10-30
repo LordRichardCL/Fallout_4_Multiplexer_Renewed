@@ -4,15 +4,18 @@
 #include "ba2/Ba2Archive.hpp"
 #include "db/Database.hpp"
 #include "engine/Pipeline.hpp"
+#include "engine/ReferenceScanner.hpp"
 #include "esp/FieldDecoder.hpp"
 #include "esp/PluginFile.hpp"
 #include "papyrus/Pex.hpp"
 #include "util/Text.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <set>
 
 using namespace fo4mx;
 using namespace fo4mx::fixtures;
@@ -1762,4 +1765,432 @@ TEST(auto_merger_relinks_scripts_and_configs)
     p.exportOutputs();
     CHECK(!std::filesystem::exists(result.directory / "scripts" / "modsuser.pex"));
     CHECK(!std::filesystem::exists(result.directory / "Multiplexer_Relinked.tsv"));
+}
+
+// ---- Filename references --------------------------------------------------------------------------
+namespace {
+
+// ModS.esp and ModT.esp each add one keyword (compilable), plus whatever files `files` writes.
+std::filesystem::path referenceInstall(const std::string& name)
+{
+    auto root = buildInstall(name);
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModS.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000812, {zs("EDID", "ModS_Keyword")})});
+    writePlugin(data / "ModT.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000800, {zs("EDID", "ModT_Keyword")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModS.esp\n*ModT.esp\n");
+    return root;
+}
+
+std::vector<const PluginReference*> referencesOf(const Session& s, const std::string& plugin)
+{
+    std::vector<const PluginReference*> out;
+    const auto* p = s.findPlugin(plugin);
+    for (const auto& r : s.nameReferences)
+        if (p && r.plugin == p->index)
+            out.push_back(&r);
+    return out;
+}
+
+bool hasReason(const PluginInfo& p, const std::string& text)
+{
+    for (const auto& r : p.reasons)
+        if (r.find(text) != std::string::npos)
+            return true;
+    return false;
+}
+
+std::vector<uint8_t> bytesOf(const std::string& s)
+{
+    return std::vector<uint8_t>(s.begin(), s.end());
+}
+
+std::string slurpFile(const std::filesystem::path& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+const ReferenceScanner::PluginNames kNames = {{"mods.esp", 1}, {"modt.esp", 2}, {"modm.esm", 3}, {"modl.esl", 4},
+                                              {"power mods.esp", 5}};
+
+} // namespace
+
+// 1. A plugin no file names: no references, no decision, eligible.
+TEST(references_none)
+{
+    auto root = referenceInstall("refnone");
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    CHECK(referencesOf(s, "ModS.esp").empty());
+    CHECK(s.referenceDecisions.count(s.findPlugin("ModS.esp")->index) == 0);
+    CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+}
+
+// 2. One reference in a comment line: safe, the plugin stays eligible without the Auto-Merger.
+TEST(references_one_safe_text_reference)
+{
+    auto root = referenceInstall("refonesafe");
+    writeFile(root / "Game" / "Data" / "F4SE" / "Plugins" / "RobCo_Patcher" / "keywords.ini",
+              "; made for ModS.esp\nfilterByKeyword=Fallout4.esm|800\n");
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    auto refs = referencesOf(s, "ModS.esp");
+    CHECK_EQ(refs.size(), size_t(1));
+    CHECK_EQ(refs[0]->cls, ReferenceClass::Safe);
+    CHECK_EQ(refs[0]->context, std::string("comment"));
+    CHECK_EQ(refs[0]->location, std::string("line 1"));
+    CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+    CHECK(hasReason(*s.findPlugin("ModS.esp"), "1 filename reference: 1 safe"));
+}
+
+// 3. Many safe references (comments, a Papyrus source, an unused script string): the number does not
+//    matter, the plugin stays eligible.
+TEST(references_many_safe)
+{
+    auto root = referenceInstall("refmanysafe");
+    auto data = root / "Game" / "Data";
+    std::string ini;
+    for (int i = 0; i < 40; ++i)
+        ini += "# ModS.esp note " + std::to_string(i) + "\n";
+    writeFile(data / "F4SE" / "Plugins" / "RobCo_Patcher" / "notes.ini", ini);
+    writeFile(data / "Scripts" / "Source" / "User" / "ModSQuest.psc",
+              "Form f = Game.GetFormFromFile(0x812, \"ModS.esp\")\n");
+    ScriptOptions unused;
+    unused.unused = "ModS.esp";
+    writeBytes(data / "Scripts" / "Other.pex", testScript(0x800, "Fallout4.esm", unused));
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    auto refs = referencesOf(s, "ModS.esp");
+    CHECK_EQ(refs.size(), size_t(42));
+    for (const auto* r : refs)
+        CHECK_EQ(r->cls, ReferenceClass::Safe);
+    CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+    const auto& d = s.referenceDecisions.at(s.findPlugin("ModS.esp")->index);
+    CHECK_EQ(d.total, size_t(42));
+    CHECK_EQ(d.cls, ReferenceClass::Safe);
+}
+
+// 4. Papyrus source: the game runs the compiled script, never the source.
+TEST(references_psc_source)
+{
+    auto refs = ReferenceScanner::inspect(kNames, "scripts\\source\\user\\a.psc",
+                                          bytesOf("Scriptname A\nForm f = Game.GetFormFromFile(0x812, \"ModS.esp\")\n"));
+    CHECK_EQ(refs.size(), size_t(1));
+    CHECK_EQ(refs[0].kind, ReferenceKind::Papyrus);
+    CHECK_EQ(refs[0].cls, ReferenceClass::Safe);
+    CHECK_EQ(refs[0].format, std::string("PSC"));
+    CHECK_EQ(refs[0].location, std::string("line 2"));
+}
+
+// 5. Compiled scripts: each use of the name is classified by what the code does with it.
+TEST(references_pex_uses)
+{
+    auto classes = [](const std::vector<PluginReference>& refs) {
+        std::multiset<std::string> out;
+        for (const auto& r : refs)
+            out.insert(std::string(referenceClassName(r.cls)) + ":" + r.context);
+        return out;
+    };
+    // Fixed FormID and a presence check: both rewritable, with the exact places to change.
+    auto fixed = ReferenceScanner::inspect(kNames, "scripts\\a.pex", testScript(0x812, "ModS.esp"));
+    CHECK(classes(fixed) == (std::multiset<std::string>{"Rewritable:Game.GetFormFromFile(00000812)",
+                                                         "Rewritable:Game.IsPluginInstalled"}));
+    for (const auto& r : fixed) {
+        CHECK(r.pexStringOffset > 0);
+        CHECK_EQ(r.location, std::string("TestScript.OnInit"));
+    }
+    // FormID from a variable: the new FormID cannot be supplied.
+    ScriptOptions runtime;
+    runtime.runtimeFormId = true;
+    auto rt = ReferenceScanner::inspect(kNames, "scripts\\a.pex", testScript(0x812, "ModS.esp", runtime));
+    CHECK(classes(rt).count("Unsafe:Game.GetFormFromFile") == 1);
+    // The name assigned to a variable: its meaning is unknown.
+    ScriptOptions assign;
+    assign.assignName = true;
+    auto as = ReferenceScanner::inspect(kNames, "scripts\\a.pex", testScript(0x812, "ModS.esp", assign));
+    CHECK(classes(as).count("Unknown:assignment") == 1);
+    // A script that does not read back exactly: unknown.
+    auto bad = ReferenceScanner::inspect(kNames, "scripts\\a.pex", testScript(0x812, "ModS.esp", 1));
+    CHECK_EQ(bad.size(), size_t(1));
+    CHECK_EQ(bad[0].cls, ReferenceClass::Unknown);
+    CHECK_EQ(bad[0].context, std::string("unreadable script"));
+    // In the string table only: safe.
+    ScriptOptions unused;
+    unused.unused = "ModT.esp";
+    auto un = ReferenceScanner::inspect(kNames, "scripts\\a.pex", testScript(0x812, "Fallout4.esm", unused));
+    CHECK_EQ(un.size(), size_t(1));
+    CHECK_EQ(un[0].cls, ReferenceClass::Safe);
+    CHECK_EQ(un[0].context, std::string("string table"));
+}
+
+// 6. Folders the game finds by the plugin's name keep it out, with or without the Auto-Merger; other
+//    folders and file names named after it are unknown.
+TEST(references_folder_and_path)
+{
+    auto root = referenceInstall("refpaths");
+    auto data = root / "Game" / "Data";
+    writeFile(data / "Meshes" / "Actors" / "Character" / "FaceGenData" / "FaceGeom" / "ModS.esp" / "00000812.nif", "x");
+    writeFile(data / "Meshes" / "Actors" / "Character" / "FaceGenData" / "FaceGeom" / "ModS.esp" / "00000813.nif", "x");
+    writeFile(data / "Textures" / "ModT.esp_readme.txt", "x");
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    auto refs = referencesOf(s, "ModS.esp");
+    CHECK_EQ(refs.size(), size_t(1)); // one folder, not one per file
+    CHECK_EQ(refs[0]->kind, ReferenceKind::Directory);
+    CHECK_EQ(refs[0]->cls, ReferenceClass::CompatibilityRequired);
+    CHECK_EQ(refs[0]->location, std::string("2 files"));
+    CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Ineligible);
+    auto t = referencesOf(s, "ModT.esp");
+    CHECK_EQ(t.size(), size_t(1));
+    CHECK_EQ(t[0]->kind, ReferenceKind::FilePath);
+    CHECK_EQ(t[0]->cls, ReferenceClass::Unknown);
+    CHECK_EQ(s.findPlugin("ModT.esp")->eligibility, Eligibility::Ineligible);
+}
+
+// 7. Safe and unsafe references together: the most restrictive decides.
+TEST(references_mixed_safe_and_unsafe)
+{
+    auto root = referenceInstall("refmixed");
+    auto data = root / "Game" / "Data";
+    writeFile(data / "F4SE" / "Plugins" / "RobCo_Patcher" / "notes.ini", "; ModS.esp\n");
+    std::string dll = std::string("MZ\0\0", 4) + std::string("ModS.esp", 8) + std::string("\0\0", 2);
+    writeFile(data / "F4SE" / "Plugins" / "ModSHelper.dll", dll);
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    const auto* modS = s.findPlugin("ModS.esp");
+    const auto& d = s.referenceDecisions.at(modS->index);
+    CHECK_EQ(d.total, size_t(2));
+    CHECK_EQ(d.cls, ReferenceClass::Unsafe);
+    CHECK_EQ(d.summary, std::string("2 filename references: 1 unsafe, 1 safe"));
+    CHECK_EQ(modS->eligibility, Eligibility::Ineligible);
+    CHECK(hasReason(*modS, "f4se\\plugins\\modshelper.dll"));
+    CHECK(!d.action.empty());
+
+    // The per-plugin block in the dependency report.
+    p.writeReports(root / "Text");
+    const auto txt = slurpFile(root / "Text" / "DependencyReport.txt");
+    const auto block = txt.find("Plugin: ModS.esp\nFilename references: 2\n");
+    CHECK(block != std::string::npos);
+    CHECK(txt.find("Overall classification: Unsafe\nReason: Unsafe: f4se\\plugins\\modshelper.dll", block) != std::string::npos);
+    CHECK(txt.find("Recommended action: Leave it in the load order", block) != std::string::npos);
+    const auto json = slurpFile(root / "Text" / "DependencyReport.json");
+    CHECK(json.find("\"filenameReferences\"") != std::string::npos);
+    CHECK(json.find("\"recommendedAction\"") != std::string::npos);
+}
+
+// 8. Binary files: names in compiled code (ASCII or UTF-16) cannot be changed.
+TEST(references_unknown_binary)
+{
+    std::string utf16;
+    for (char c : std::string("ModT.esp"))
+        utf16 += std::string(1, c) + std::string(1, '\0');
+    auto refs = ReferenceScanner::inspect(kNames, "f4se\\plugins\\x.dll", bytesOf(std::string("\0\0", 2) + utf16 + std::string("\0\0", 2)));
+    CHECK_EQ(refs.size(), size_t(1));
+    CHECK_EQ(refs[0].kind, ReferenceKind::Binary);
+    CHECK_EQ(refs[0].cls, ReferenceClass::Unsafe);
+    CHECK_EQ(refs[0].text, std::string("modt.esp"));
+}
+
+// 9. A rewrite that cannot be done safely (a script whose string table is full) keeps its plugin
+//    out, and nothing is written for it (fail closed).
+TEST(references_failed_transformation_fails_closed)
+{
+    auto root = referenceInstall("reffail");
+    ScriptOptions full;
+    full.filler = 0xFFFF - 17; // 65535 strings: no room for the output's name
+    writeBytes(root / "Game" / "Data" / "Scripts" / "Full.pex", testScript(0x812, "ModS.esp", full));
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto* modS = p.session().findPlugin("ModS.esp");
+    CHECK_EQ(modS->eligibility, Eligibility::Eligible); // rewritable
+    CHECK(p.compile());
+    CHECK(!p.compiledOutput()->isCompiled(modS->index));
+    CHECK(hasReason(*modS, "string table is full"));
+    CHECK(p.autoMerge()->keptOut.count(modS->index) == 1);
+    bool warned = false;
+    for (const auto& is : p.validation()->issues)
+        warned |= is.category == "Kept Out Automatically" && is.message.find("ModS.esp") != std::string::npos;
+    CHECK(warned);
+    auto result = p.exportOutputs();
+    CHECK(!std::filesystem::exists(result.directory / "scripts" / "full.pex"));
+    CHECK(!std::filesystem::exists(result.directory / AutoMerger::kManifest));
+}
+
+// 10. A successful rewrite: the copy is scanned again and depends on no compiled plugin; the manifest
+//     records every change with its old and new value; the original file is unchanged.
+TEST(references_successful_transformation_rescans_clean)
+{
+    auto root = referenceInstall("refok");
+    auto data = root / "Game" / "Data";
+    writeBytes(data / "Scripts" / "ModSUser.pex", testScript(0x812, "ModS.esp"));
+    writeFile(data / "F4SE" / "Plugins" / "RobCo_Patcher" / "mods.ini",
+              "; ModS.esp keyword\nfilterByKeyword=ModS.esp|812:Fallout4.esm|800\n");
+    const auto originalScript = slurpFile(data / "Scripts" / "ModSUser.pex");
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto& s = p.session();
+    const FormMapping* kw = nullptr;
+    for (const auto& m : p.compiledOutput()->mappings)
+        if (m.editorId == "ModS_Keyword")
+            kw = &m;
+    CHECK(kw != nullptr);
+
+    auto names = ReferenceScanner::pluginNames(s);
+    for (const char* file : {"scripts/modsuser.pex", "f4se/plugins/robco_patcher/mods.ini"}) {
+        std::string relative = file;
+        std::replace(relative.begin(), relative.end(), '/', '\\');
+        auto copy = bytesOf(slurpFile(result.directory / file));
+        CHECK(!copy.empty());
+        for (const auto& r : ReferenceScanner::inspect(names, relative, copy))
+            if (r.plugin == s.findPlugin("ModS.esp")->index)
+                CHECK_EQ(r.cls, ReferenceClass::Safe); // the comment and the unused string only
+    }
+    const auto ini = slurpFile(result.directory / "f4se" / "plugins" / "robco_patcher" / "mods.ini");
+    char id[16];
+    std::snprintf(id, sizeof(id), "%03X", kw->objectId);
+    CHECK_EQ(ini, "; ModS.esp keyword\nfilterByKeyword=" + kw->outputPlugin + "|" + id + ":Fallout4.esm|800\n");
+    CHECK(slurpFile(data / "Scripts" / "ModSUser.pex") == originalScript); // the user's mod is not changed
+
+    const auto manifest = slurpFile(result.directory / AutoMerger::kManifest);
+    CHECK(manifest.find("f4se\\plugins\\robco_patcher\\mods.ini\t") != std::string::npos);
+    CHECK(manifest.find("\tModS.esp|812\t" + kw->outputPlugin + "|" + id + "\n") != std::string::npos);
+    CHECK(manifest.find("scripts\\modsuser.pex\t") != std::string::npos);
+    CHECK(manifest.find("Game.IsPluginInstalled\tModS.esp\t" + kw->outputPlugin + "\n") != std::string::npos);
+}
+
+// 11. Export is a transaction: when a copy cannot be written, nothing changes and the earlier copies
+//     stay as they were; rollback removes every copy. A file in the output folder that this app did
+//     not write is never replaced: its plugin is kept out instead.
+TEST(references_rollback)
+{
+    auto root = referenceInstall("refrollback");
+    auto data = root / "Game" / "Data";
+    writeBytes(data / "Scripts" / "ModSUser.pex", testScript(0x812, "ModS.esp"));
+    writeFile(data / "MCM" / "Config" / "ModS" / "config.json", "{\"pluginRequirements\": [\"ModS.esp\"]}\n");
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    auto result = p.exportOutputs();
+    const auto dir = result.directory;
+    const auto script = slurpFile(dir / "scripts" / "modsuser.pex");
+    const auto json = slurpFile(dir / "mcm" / "config" / "mods" / "config.json");
+    CHECK(!script.empty());
+    CHECK(json.find("ModS.esp") == std::string::npos);
+
+    // Block one temporary file: the export fails as a whole.
+    std::filesystem::create_directories(dir / "scripts" / "modsuser.pex.fo4mx-new" / "blocked");
+    p.exportOutputs();
+    CHECK(p.validation()->errors > 0);
+    CHECK(!p.autoMerge()->errors.empty());
+    CHECK(slurpFile(dir / "scripts" / "modsuser.pex") == script);
+    CHECK(slurpFile(dir / "mcm" / "config" / "mods" / "config.json") == json);
+    CHECK(!std::filesystem::exists(dir / "mcm" / "config" / "mods" / "config.json.fo4mx-new"));
+    std::filesystem::remove_all(dir / "scripts" / "modsuser.pex.fo4mx-new");
+
+    CHECK_EQ(AutoMerger::rollback(dir), size_t(2));
+    CHECK(!std::filesystem::exists(dir / "scripts" / "modsuser.pex"));
+    CHECK(!std::filesystem::exists(dir / AutoMerger::kManifest));
+
+    // A user's own file where a copy would go: never replaced, the plugin stays.
+    writeFile(dir / "scripts" / "modsuser.pex", "user file");
+    Pipeline q(cfg);
+    q.scan();
+    q.analyse();
+    CHECK(q.compile());
+    CHECK(!q.compiledOutput()->isCompiled(q.session().findPlugin("ModS.esp")->index));
+    CHECK(hasReason(*q.session().findPlugin("ModS.esp"), "never replaced"));
+    q.exportOutputs();
+    CHECK_EQ(slurpFile(dir / "scripts" / "modsuser.pex"), std::string("user file"));
+}
+
+// 12. One file naming two plugins: only the compiled plugin's references change.
+TEST(references_two_plugins_in_one_file)
+{
+    auto root = referenceInstall("reftwo");
+    writeFile(root / "Game" / "Data" / "F4SE" / "Plugins" / "RobCo_Patcher" / "both.ini",
+              "filterByKeyword=ModS.esp|812\nfilterByKeyword=ModT.esp|800\n");
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    cfg.analysis.excludedPlugins = {"ModT.esp"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto& s = p.session();
+    CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
+    CHECK(!p.compiledOutput()->isCompiled(s.findPlugin("ModT.esp")->index));
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto ini = slurpFile(result.directory / "f4se" / "plugins" / "robco_patcher" / "both.ini");
+    CHECK(ini.find("ModS.esp") == std::string::npos);
+    CHECK(ini.find("\nfilterByKeyword=ModT.esp|800\n") != std::string::npos);
+}
+
+// 13. Letter case: names are found whatever their case, and only as whole names (the longest active
+//     plugin name wins: "Power ModS.esp" is that plugin, not ModS.esp).
+TEST(references_case_variations)
+{
+    auto all = ReferenceScanner::inspect(
+        kNames, "f4se\\plugins\\robco_patcher\\a.ini",
+        bytesOf("a=MODS.ESP|0x812\nb=mods.esp|812\nc=Power ModS.esp\nd=ModS.esp2\ne=ModS.Esp\nf=MyModS.esp\n"));
+    std::vector<PluginReference> refs;
+    size_t power = 0;
+    for (const auto& r : all)
+        if (r.plugin == 1)
+            refs.push_back(r);
+        else if (r.plugin == 5)
+            ++power;
+    CHECK_EQ(power, size_t(1));
+    CHECK_EQ(refs.size(), size_t(3));
+    CHECK(refs[0].hasFormId && refs[0].formId == 0x812u && refs[0].text == "MODS.ESP|0x812");
+    CHECK(refs[1].hasFormId && refs[1].formId == 0x812u);
+    CHECK(!refs[2].hasFormId);
+    CHECK_EQ(refs[2].cls, ReferenceClass::Unknown);
+    CHECK_EQ(refs[2].location, std::string("line 5"));
+    auto pex = ReferenceScanner::inspect(kNames, "scripts\\a.pex", testScript(0x812, "MODS.ESP"));
+    CHECK_EQ(pex.size(), size_t(2));
+}
+
+// 14. .esp, .esm and .esl names are all recognised.
+TEST(references_esp_esm_esl)
+{
+    auto refs = ReferenceScanner::inspect(kNames, "mcm\\config\\x\\config.json",
+                                          bytesOf("{\"pluginRequirements\": [\"ModM.esm\", \"ModL.esl\"],\n"
+                                                  " \"form\": \"ModS.esp|800\"}\n"));
+    std::set<std::pair<PluginIndex, std::string>> found;
+    for (const auto& r : refs)
+        found.insert({r.plugin, r.context});
+    CHECK(found == (std::set<std::pair<PluginIndex, std::string>>{
+                       {3, "MCM pluginRequirements"}, {4, "MCM pluginRequirements"}, {1, "Plugin|FormID pair"}}));
+    for (const auto& r : refs)
+        CHECK_EQ(r.cls, ReferenceClass::Rewritable);
+    std::string dll = std::string("\0", 1) + "ModL.esl" + std::string("\0", 1) + "ModM.esm" + std::string("\0", 1);
+    CHECK_EQ(ReferenceScanner::inspect(kNames, "f4se\\plugins\\x.dll", bytesOf(dll)).size(), size_t(2));
 }

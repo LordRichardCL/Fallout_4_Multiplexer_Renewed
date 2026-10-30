@@ -329,7 +329,9 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
         f.planned = false;
         f.changes.clear();
         f.output.clear();
-        f.validation.clear();
+        // A failed check of an earlier round of this compilation stays on record (its plugins are kept out).
+        if (std::none_of(f.plugins.begin(), f.plugins.end(), [&](PluginIndex p) { return report.keptOut.count(p); }))
+            f.validation.clear();
         f.notes.clear();
         f.originalHash = f.outputHash = 0;
         f.changedCalls = f.changedPairs = f.renamed = 0;
@@ -430,7 +432,7 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                         ++f.renamed;
                     }
                     const size_t index = indexOf(to);
-                    if (index > 0xFFFF)
+                    if (strings.size() > 0xFFFF)
                         throw std::runtime_error("the script's string table is full (65535 strings)");
                     pex::Patch use{r->pexStringOffset, std::vector<uint8_t>(2)};
                     storeLE<uint16_t>(use.bytes.data(), static_cast<uint16_t>(index));

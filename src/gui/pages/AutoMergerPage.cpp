@@ -134,7 +134,7 @@ void AutoMergerPage::refresh()
     fitColumns(files_, 520);
 
     const qint64 named = scalar("SELECT COUNT(*) FROM AutoMergePlugins").toLongLong();
-    const qint64 relinkable = scalar("SELECT COUNT(*) FROM AutoMergePlugins WHERE status <> 'Kept out'").toLongLong();
+    const qint64 relinkable = scalar("SELECT COUNT(*) FROM AutoMergePlugins WHERE status NOT LIKE 'Kept out%'").toLongLong();
     const qint64 relinked = scalar("SELECT COUNT(*) FROM AutoMergeFiles WHERE result LIKE 'Relinked%'").toLongLong();
     if (!app_->config().compile.autoMerge)
         summary_->setText("Off. Plugins named in scripts or configs stay in the load order.");

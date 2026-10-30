@@ -351,6 +351,30 @@ void PluginsPage::showDetails(int row)
         dependents << d.value(0).toString().toHtmlEscaped();
     html += "<p><b>Required by (" + QString::number(dependents.size()) + "):</b><br>" +
             (dependents.isEmpty() ? "none" : dependents.mid(0, 50).join("<br>")) + "</p>";
+
+    // Every place the plugin's file name appears, with its classification.
+    QSqlQuery n(db);
+    n.prepare("SELECT asset_path, kind, context, location, class, reason FROM NameReferences WHERE plugin_id = ? "
+              "ORDER BY CASE class WHEN 'Safe' THEN 1 ELSE 0 END, asset_path");
+    n.addBindValue(id);
+    n.exec();
+    QStringList refs;
+    while (n.next()) {
+        if (refs.size() >= 50) {
+            refs << "…";
+            break;
+        }
+        const QString cls = n.value(4).toString();
+        refs << QString("<span style='font-family:monospace'>%1</span> · %2 · %3%4 · <span style='color:%5'>%6</span>"
+                        "<br><span style='color:#8aa196'>%7</span>")
+                    .arg(n.value(0).toString().toHtmlEscaped(), n.value(1).toString().toHtmlEscaped(),
+                         n.value(2).toString().toHtmlEscaped(),
+                         n.value(3).toString().isEmpty() ? QString() : " (" + n.value(3).toString().toHtmlEscaped() + ")",
+                         cls == "Safe" ? "#3ddc84" : cls == "Rewritable" ? "#e0b84c" : "#ff5c5c", cls.toHtmlEscaped(),
+                         n.value(5).toString().toHtmlEscaped());
+    }
+    if (!refs.isEmpty())
+        html += "<p><b>Filename references:</b><br>" + refs.join("<br>") + "</p>";
     details_->setHtml(html);
 
     bool excluded = app_->excludedPlugins().contains(selectedPlugin_, Qt::CaseInsensitive);

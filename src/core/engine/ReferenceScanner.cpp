@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cctype>
 #include <map>
+#include <set>
 #include <mutex>
 
 #include <spdlog/spdlog.h>
@@ -271,13 +272,10 @@ std::vector<ReferenceScanner::Mention> ReferenceScanner::mentions(std::string_vi
         const size_t end = at + lowerName.size();
         if (end < text.size() && (std::isalnum(static_cast<unsigned char>(text[end])) || text[end] == '_'))
             continue; // "My Mod.esp2"
-        // The whole name up to the previous delimiter must be this plugin's.
-        size_t start = at;
-        while (start > 0 && !delimiter(text[start - 1]))
-            --start;
-        while (start < at && text[start] == ' ')
-            ++start;
-        if (start != at)
+        // The name starts at a word boundary ("MyModS.esp" is not "ModS.esp"). A longer active plugin
+        // name ending at the same place ("Power Armor.esp" for "Armor.esp") is preferred by inspect().
+        if (at > 0 && (std::isalnum(static_cast<unsigned char>(text[at - 1])) || text[at - 1] == '_' ||
+                       text[at - 1] == '-' || text[at - 1] == '.' || static_cast<unsigned char>(text[at - 1]) >= 0x80))
             continue;
         Mention m{at, end};
         if (end < text.size() && text[end] == '|') {
@@ -377,16 +375,34 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
         // Text: Papyrus sources and configuration files.
         std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
         const std::string lower = toLower(std::string(text));
-        std::vector<std::string> candidates = AssetScanner::pluginNamesInText(text);
-        std::sort(candidates.begin(), candidates.end());
-        candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+        // Every active plugin name that ends at an ".esp/.esm/.esl" in the text (mentions() then
+        // checks that it is the whole name).
+        std::set<size_t> lengths;
+        for (const auto& kv : names)
+            lengths.insert(kv.first.size());
+        std::set<std::string> candidates;
+        for (size_t dot = lower.find(".es"); dot != std::string::npos; dot = lower.find(".es", dot + 1)) {
+            const size_t end = dot + 4;
+            if (end > lower.size() || (lower[dot + 3] != 'p' && lower[dot + 3] != 'm' && lower[dot + 3] != 'l'))
+                continue;
+            for (size_t len : lengths)
+                if (len <= end && names.count(lower.substr(end - len, len)))
+                    candidates.insert(lower.substr(end - len, len));
+        }
         const bool mcm = istartsWith(path, "mcm\\config\\") && iendsWith(path, ".json");
         const bool blueprint = istartsWith(path, "f4se\\plugins\\transfersettlements\\");
+        // The longest candidate ending at each place wins.
+        std::map<size_t, size_t> longest; // end -> length
+        for (const auto& name : candidates)
+            for (const auto& m : mentions(text, name))
+                longest[m.end] = std::max(longest[m.end], name.size());
         for (const auto& name : candidates) {
             auto it = names.find(name);
             if (it == names.end())
                 continue;
             for (const auto& m : mentions(text, name)) {
+                if (longest[m.end] != name.size())
+                    continue;
                 Fact f;
                 if (format == "PSC")
                     f = Fact::PscSource;

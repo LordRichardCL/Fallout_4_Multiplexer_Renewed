@@ -138,8 +138,11 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
     for (const auto& r : session.nameReferences)
         nameRefs[r.plugin].push_back(&r);
     session.referenceDecisions.clear();
-    for (const auto& [plugin, refs] : nameRefs)
-        session.referenceDecisions[plugin] = ReferenceScanner::decide(refs);
+    for (const auto& [plugin, refs] : nameRefs) {
+        auto& d = session.referenceDecisions[plugin] = ReferenceScanner::decide(refs);
+        d.reason = "not evaluated: the plugin is not a compilation candidate";
+        d.action = "None";
+    }
 
     for (auto& p : session.plugins) {
         p.reasons.clear();
@@ -215,32 +218,42 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
             p.reasons.push_back("Contains record types not yet compiled: " + join(unsupported, ", "));
         }
         if (auto it = nameRefs.find(p.index); it != nameRefs.end()) {
-            const auto& d = session.referenceDecisions[p.index];
+            auto& d = session.referenceDecisions[p.index];
             if (d.cls == ReferenceClass::Safe) {
-                p.reasons.push_back(d.summary + ": none depends on the plugin's file name");
+                d.reason = "none of them depends on the plugin's file name";
+                d.action = "None: compiled like any other plugin";
             } else if (d.cls == ReferenceClass::Rewritable && session.autoMergeEnabled) {
-                p.reasons.push_back(d.summary + ": the rewritable ones are rewritten by the Advanced Users "
-                                                "Auto-Merger when compiled, and checked");
+                d.reason = "every reference that depends on the file name can be rewritten exactly and checked";
+                d.action = "None: the Advanced Users Auto-Merger writes rewritten copies into the output folder "
+                           "(Multiplexer_Relinked.tsv lists every change)";
+            } else if (d.cls == ReferenceClass::Rewritable) {
+                d.reason = "the references can be rewritten, but the Advanced Users Auto-Merger is off";
+                d.action = "Turn on the Advanced Users Auto-Merger to compile it, or leave it in the load order";
             } else {
+                // The references that decide.
+                std::vector<const PluginReference*> deciding;
+                for (const auto* r : it->second)
+                    if (r->cls == d.cls)
+                        deciding.push_back(r);
+                std::vector<std::string> examples;
+                for (size_t i = 0; i < deciding.size() && i < 3; ++i)
+                    examples.push_back(deciding[i]->assetPath + " (" + deciding[i]->context + ": " +
+                                       deciding[i]->reason + ")");
+                if (deciding.size() > 3)
+                    examples.push_back("+" + std::to_string(deciding.size() - 3) + " more");
+                d.reason = std::string(referenceClassName(d.cls)) + ": " + join(examples, "; ");
+                d.action = d.cls == ReferenceClass::CompatibilityRequired
+                               ? "Leave it in the load order: moving plugin-named files is not implemented"
+                           : d.cls == ReferenceClass::Unsafe
+                               ? "Leave it in the load order: the reference cannot be preserved"
+                               : "Leave it in the load order; check what uses the listed files";
+            }
+            p.reasons.push_back(d.summary + ". " + d.reason);
+            if (d.cls != ReferenceClass::Safe && !(d.cls == ReferenceClass::Rewritable && session.autoMergeEnabled)) {
                 block.otherReason = true;
                 p.eligibility = Eligibility::Ineligible;
-                if (d.cls == ReferenceClass::Rewritable) {
-                    p.reasons.push_back(d.summary + ". All can be rewritten: turn on the Advanced Users Auto-Merger "
-                                                    "to compile it");
-                } else {
-                    // The references that decide, most restrictive first.
-                    std::vector<const PluginReference*> deciding;
-                    for (const auto* r : it->second)
-                        if (r->cls == d.cls)
-                            deciding.push_back(r);
-                    std::vector<std::string> examples;
-                    for (size_t i = 0; i < deciding.size() && i < 3; ++i)
-                        examples.push_back(deciding[i]->assetPath + " (" + deciding[i]->context + ": " +
-                                           deciding[i]->reason + ")");
-                    if (deciding.size() > 3)
-                        examples.push_back("+" + std::to_string(deciding.size() - 3) + " more");
-                    p.reasons.push_back(d.summary + ". " + referenceClassName(d.cls) + ": " + join(examples, "; "));
-                }
+                if (d.cls == ReferenceClass::Rewritable)
+                    p.reasons.back() += ": turn on the Advanced Users Auto-Merger to compile it";
             }
         }
     }

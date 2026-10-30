@@ -245,29 +245,52 @@ Every finding on the **Validation** page and under **Dependencies → Missing Re
 
 **Missing References (summary)** rows group all references from one plugin to another (for example *ImprovedAREnclaveNWBBEPatch.esp -> BlackBirdElitePA.esp: 173 references*). Other categories (missing assets, archive priority, kept out automatically, missing masters and so on) carry a general explanation. Likely causes are included in **Copy**, **Save…** and the HTML and JSON reports.
 
+## Filename references
+
+Some files find a plugin by its **file name** rather than by its records: a script calling `Game.GetFormFromFile(0x812, "MyMod.esp")`, an MCM menu that requires `MyMod.esp`, a RobCo Patcher line `MyMod.esp|812`, FaceGen meshes in a folder called `MyMod.esp`. If that plugin were compiled away, those files would point at a plugin that is no longer loaded.
+
+Every place an active plugin's name appears is found and **classified by what it is and how it is used**. The most restrictive class decides; **the number of references never does** (forty comment lines are still safe, one DLL is not).
+
+| Class | Meaning | Examples | Plugin |
+|---|---|---|---|
+| **Safe** | Unaffected by compiling | comment lines in INI/TOML/TXT, Papyrus sources (`.psc`), a name in a script's string table that its code never uses, RobCo Patcher INI file names | eligible |
+| **Rewritable** | Can be changed exactly and checked | `GetFormFromFile` with a fixed FormID, `IsPluginInstalled`, `Plugin.esp\|FormID` pairs, MCM `pluginRequirements` | eligible only with the Advanced Users Auto-Merger on |
+| **Compatibility Required** | A game convention that would need the plugin's files moved (not implemented) | FaceGen, face textures, voice and LOD billboard folders named after the plugin; `seq\<plugin>.seq` | kept |
+| **Unsafe** | Cannot be preserved | F4SE DLLs (compiled code), `GetFormFromFile` with a FormID computed at run time, Transfer Settlements blueprints | kept |
+| **Unknown** | Its meaning cannot be established | the name assigned, compared or joined in a script; a config naming the plugin without a FormID; other files or folders named after it; a script that does not read back exactly | kept |
+
+Where they are found: compiled scripts and Papyrus sources anywhere, configuration files under `F4SE\Plugins`, `MCM\Config` and `MCM\Settings`, F4SE DLLs (ASCII and UTF-16 strings), and every folder and file name, in loose files and archives. Names are matched whatever their letter case, as whole names (`MyModS.esp` is not `ModS.esp`); when a longer active plugin name ends at the same place (`Power Armor.esp`), it wins.
+
+**Where to see them.** The **Dependency Report** (HTML, TXT, JSON) has a block per plugin: the number of references, each reference with its type, use, location, classification and reason, then the overall classification, the reason and the recommended action. The **Asset Report** lists every reference, and the **Plugins** page shows them in the plugin's details.
+
 ## Advanced Users Auto-Merger
 
 An optional, separate mode for experienced users (left sidebar: **Advanced Users Auto-Merger**). It is off by default; the normal compiler never needs it.
 
-**What it does.** Some plugins are named by file in scripts or config files, so they are normally kept in the load order ("Referenced by file name in N script/config files"). With the Auto-Merger on:
+**What it does.** With the Auto-Merger on, a plugin whose filename references are all **Safe** or **Rewritable** is compiled, and exactly its Rewritable references are changed, in copies written into the output folder:
 
-1. **Analyse** checks every such file:
-   - **Scripts (.pex):** each `Game.GetFormFromFile(id, "Plugin.esp")` call can be pointed at the output plugin and the record's new FormID. Other mentions of the plugin name (for example `IsPluginInstalled`) point at the output that holds most of its records.
-   - **MCM `config.json`:** `"Plugin.esp|FormID"` pairs are rewritten and other mentions renamed.
-   - **Other configs** (RobCo Patcher INIs, other F4SE plugin configs): `"Plugin.esp|FormID"` pairs are rewritten.
-2. A plugin whose files can **all** be relinked is compiled like any other.
-3. **Export** writes relinked copies of those files into the output folder (`Multiplexer_Relinked.txt` lists them). The copies must override the originals:
-   - Mod Organizer 2: keep the output mod below (after) the mods it relinks.
-   - Vortex: let the output win the file conflicts.
-   - Turning the Auto-Merger off removes the copies at the next export.
+- **Scripts (.pex):** `GetFormFromFile` gets the output plugin and the record's new FormID; `IsPluginInstalled` gets the output that holds most of the plugin's records. Each changed use points at its own string, so a string the script uses elsewhere is never renamed. A FormID the plugin does not define is left as it was (the game found nothing before either).
+- **Configs:** `Plugin.esp|FormID` pairs get the output plugin and the new FormID, with the same number of digits; MCM `pluginRequirements` entries get the output plugin.
 
-**What keeps a plugin out** (the reason is shown per plugin and per file):
-- a script that does not read back exactly, or that passes a FormID or file name computed at run time to `GetFormFromFile`;
-- F4SE DLLs (compiled code);
-- Transfer Settlements blueprints (saved settlement data);
-- a config that names the plugin without a FormID (what it does with the name is unknown).
+Nothing else in a file changes, and compiled files are never patched by blind byte replacement: every change is made at the exact place the scanner recorded.
 
-The tab lists every plugin named in scripts or configs (**Kept Out**, **Relinkable**, **Compiled and Relinked**) and every file with what was found and changed. **Export HTML / JSON / TXT** saves its own report, also written by **Export All** as `AutoMergerReport`. On the command line: `--auto-merge`.
+**Checks (fail closed).** During **Compile**, before anything is written, every copy is:
+1. scanned again;
+2. checked to contain exactly the expected changes;
+3. checked that no reference to a compiled plugin remains that depends on its file name;
+4. checked that every reference to other plugins, and every safe one, is unchanged;
+5. compared byte for byte with the original outside the changed places (scripts must also read back exactly);
+6. checked to name only outputs of this build.
+
+A copy that fails any check keeps its plugins in the load order (**Kept Out Automatically**, with the reason) and the compilation runs again without them.
+
+**Export is a transaction.** All copies are written beside their targets and read back; only then are they moved into place. If any step fails, nothing changes: earlier copies are restored and the error is shown. `Multiplexer_Relinked.tsv` in the output folder lists every change: file, written and original checksums, plugin, location, use, old value and new value.
+- **Your mods are never changed.** A file already in the output folder that this app did not write is never replaced: its plugin is kept out instead (with Vortex or a manual install, where the output folder is Data, choose a separate output folder).
+- Copies must override the originals: in Mod Organizer 2 keep the output mod below (after) the mods it relinks.
+- **To undo**, turn the Auto-Merger off and export again, or delete the files listed in the manifest. Copies changed since they were written are left alone.
+- The output folder's own copies are never read as originals when scanning.
+
+The tab lists every plugin with filename references (**Kept Out**, **Kept Out by a Failed Check**, **Relinkable**, **Compiled and Relinked**), every file with its classification and result, and every change. **Export HTML / JSON / TXT** saves its own report, also written by **Export All** as `AutoMergerReport`. On the command line: `--auto-merge`.
 
 Start a new game when using it, and keep backups of your mod setup.
 

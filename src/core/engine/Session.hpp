@@ -161,7 +161,9 @@ struct ReferenceDecision {
     ReferenceClass cls = ReferenceClass::Safe; // most restrictive class present
     size_t counts[5] = {};                     // per ReferenceClass
     size_t total = 0;
-    std::string summary; // "7 references: 2 rewritable, 5 unknown"
+    std::string summary; // "7 filename references: 2 rewritable, 5 unknown"
+    std::string reason;  // why the class decides as it does (eligibility)
+    std::string action;  // what the user can do
 };
 
 struct RecordEdge {

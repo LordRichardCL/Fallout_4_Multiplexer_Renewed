@@ -86,8 +86,9 @@ A quest flagged *Start Game Enabled* in an ESP needs its FormID in `seq\<plugin>
 ## Status
 
 - The relinker (idea 1) is built as the separate, opt-in **Advanced Users Auto-Merger** (its own tab and report).
-  - **Scripts:** a strict Fallout 4 `.pex` reader. The layout follows Champollion's reader and Caprica's writer, and the whole file must read back exactly, object sizes included. String table rewrite plus in-place FormID and file-name patches.
-  - **Configs:** `Plugin|FormID` pairs.
+  - Unlike zEdit, it does not rename the plugin name in the script's string table: a string can be used by other code. Every reference is classified first (see the User Guide, *Filename references*), and only uses whose meaning is established (`GetFormFromFile` with a fixed FormID, `IsPluginInstalled`, `Plugin|FormID` pairs, MCM requirements) are pointed at a new string or rewritten in place.
+  - **Scripts:** a strict Fallout 4 `.pex` reader. The layout follows Champollion's reader and Caprica's writer, and the whole file must read back exactly, object sizes included.
+  - Every copy is checked at compile time and a failure keeps its plugin out; export is a transaction with a manifest.
 - FaceGen relocation, ITPO and DR checks: not started.
 
 ## Suggested order

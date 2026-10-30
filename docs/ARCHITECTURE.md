@@ -192,7 +192,22 @@ Post-export, every written plugin is re-read: the master list must match the pla
 2. per active plugin in load order: `<name> - Main.ba2`, `<name> - Textures.ba2`, `<name> - Voices_<lang>.ba2`;
 3. loose files, which override all archives, by mod priority (the MO2 overwrite folder highest).
 
-Every source of every path is recorded, so the Asset Conflict Viewer shows the winner, the reason and every alternative. The scanner also reads the string table of every winning `.pex` and every F4SE/MCM config file to find plugins that are referenced by file name.
+Every source of every path is recorded, so the Asset Conflict Viewer shows the winner, the reason and every alternative.
+
+## Filename references
+
+```text
+ReferenceScanner ──> detectors ──> PluginReference ──> classifier ──> ReferenceDecision ──> AutoMerger::plan ──> check ──> AutoMerger::relink
+ (AssetScanner      PEX uses,       (kind, use,         (one table:     (most restrictive      (exact edits at      (rescan,      (transaction,
+  step 4)           PSC, config     location, exact      fact -> class    class per plugin;      recorded offsets)    fail closed)  manifest)
+                    lines, DLL,     offsets)             and reason)      DependencyEngine)
+                    folders, names
+```
+
+- `engine/ReferenceScanner` finds every place an active plugin's file name appears (scripts, Papyrus sources, F4SE/MCM configs, F4SE DLLs, folder and file names; loose files and archives) and records **facts**: a `GetFormFromFile` call with a constant FormID, a comment line, a `Plugin|FormID` pair, a DLL string, an engine folder. One table (`rule()`) turns each fact into a `ReferenceKind`, a `ReferenceClass` (Safe, Rewritable, Compatibility Required, Unsafe, Unknown) and a reason; nothing else decides.
+- `papyrus/Pex` walks the whole script and records every use of every string constant with its context (the `GetFormFromFile` file argument and its FormID, an `IsPluginInstalled` argument, other call arguments, assignments, comparisons, concatenations, defaults).
+- `DependencyEngine` groups references per plugin (`ReferenceScanner::decide`): only Safe is eligible; Rewritable is eligible when the Auto-Merger is on; anything else keeps the plugin. The count never decides.
+- `AutoMerger::plan` runs inside the compile isolation loop: it rewrites exactly the Rewritable references of compiled plugins, checks the copy (rescan, expected changes, protected references, identical bytes elsewhere) and returns plugins to keep out on failure, so the loop compiles again without them. `AutoMerger::relink` writes the planned copies at export as one transaction with `Multiplexer_Relinked.tsv` (old and new values, checksums). `Session::relinkedCopies` keeps the scanner from reading those copies as originals.
 
 ## Mod managers
 

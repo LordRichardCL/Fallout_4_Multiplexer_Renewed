@@ -99,6 +99,10 @@ public:
         else
             out_ += std::string("<h3 style=\"color:") + pal_.text + "\">" + htmlEscape(s) + "</h3>";
     }
+    void h3(const std::string& s)
+    {
+        out_ += std::string("<h4 style=\"color:") + pal_.text + "\">" + htmlEscape(s) + "</h4>";
+    }
     void note(const std::string& s)
     {
         if (style_ == ReportStyle::Rich)
@@ -197,6 +201,7 @@ public:
             out_ += subtitle + "\n";
     }
     void h2(const std::string& s) { out_ += "\n" + s + "\n" + std::string(s.size(), '-') + "\n"; }
+    void h3(const std::string& s) { out_ += "\n" + s + "\n"; }
     void note(const std::string& s) { out_ += s + "\n"; }
     void cards(const std::vector<std::pair<std::string, std::string>>& items)
     {
@@ -381,11 +386,18 @@ std::string assetReport(const ReportContext& ctx)
 
     if (!s.nameReferences.empty()) {
         h.h2("Plugins referenced by file name");
-        h.note("Scripts and configuration files that name a plugin keep that plugin in the load order.");
-        h.tableStart({"Plugin", "Referenced in", "Provided by"});
-        for (const auto& r : s.nameReferences)
-            h.row({s.pluginName(r.plugin), r.assetPath, r.source});
-        h.tableEnd(s.nameReferences.size(), s.nameReferences.size());
+        h.note("Each place a plugin's file name appears, classified by how it is used. The Dependency Report "
+               "has the verdict per plugin.");
+        h.tableStart({"Plugin", "Referenced in", "Provided by", "Type", "Use", "Classification"});
+        size_t shown = 0;
+        for (const auto& r : s.nameReferences) {
+            if (shown++ >= ctx.maxRows)
+                break;
+            h.row({s.pluginName(r.plugin), r.assetPath, r.source, referenceKindName(r.kind), r.context,
+                   referenceClassName(r.cls)},
+                  {"", "mono", "", "", "", r.cls == ReferenceClass::Safe ? "ok" : ""});
+        }
+        h.tableEnd(std::min(shown, s.nameReferences.size()), s.nameReferences.size());
     }
     return h.finish();
 }
@@ -418,6 +430,39 @@ std::string dependencyReport(const ReportContext& ctx)
               {"mono", "", "", "", p.eligibility == Eligibility::Eligible ? "ok" : (p.eligibility == Eligibility::Error ? "Error" : "")});
     }
     h.tableEnd(s.loadOrder.size(), s.loadOrder.size());
+
+    if (!s.referenceDecisions.empty()) {
+        h.h2("Filename references");
+        h.note("Every place a plugin's file name appears outside the plugin. The most restrictive classification "
+               "decides; the number of references never does. Safe: unaffected. Rewritable: changed exactly by "
+               "the Advanced Users Auto-Merger. Compatibility Required, Unsafe, Unknown: the plugin stays.");
+        size_t rows = 0;
+        for (auto pi : s.loadOrder) {
+            auto it = s.referenceDecisions.find(pi);
+            if (it == s.referenceDecisions.end())
+                continue;
+            const auto& d = it->second;
+            h.h3("Plugin: " + s.plugins[pi].name);
+            h.note("Filename references: " + std::to_string(d.total));
+            h.tableStart({"Reference", "Type", "Use", "Location", "Classification", "Reason"});
+            size_t shown = 0;
+            for (const auto& r : s.nameReferences) {
+                if (r.plugin != pi)
+                    continue;
+                if (rows < ctx.maxRows) {
+                    ++rows;
+                    ++shown;
+                    h.row({r.assetPath, referenceKindName(r.kind), r.context, r.location, referenceClassName(r.cls),
+                           r.reason},
+                          {"mono", "", "", "", r.cls == ReferenceClass::Safe ? "ok" : ""});
+                }
+            }
+            h.tableEnd(shown, d.total);
+            h.note(std::string("Overall classification: ") + referenceClassName(d.cls));
+            h.note("Reason: " + d.reason);
+            h.note("Recommended action: " + d.action);
+        }
+    }
 
     for (bool cleaning : {false, true}) {
         if (!ctx.dependencies)
@@ -545,6 +590,8 @@ std::string pluginStatus(const ReportContext& ctx, PluginIndex p)
     const auto& am = *ctx.autoMerge;
     if (!am.relinkable.count(p))
         return "Kept out";
+    if (am.keptOut.count(p))
+        return "Kept out by a failed check";
     return ctx.compiled && ctx.compiled->isCompiled(p) ? "Compiled and relinked" : "Relinkable";
 }
 
@@ -562,8 +609,10 @@ std::string autoMergerReport(const ReportContext& ctx)
              {"Relinkable Plugins", formatCount(am.relinkable.size())},
              {"Files Relinked", formatCount(written)},
              {"Relink Errors", formatCount(am.errors.size())}});
-    h.note("Plugins whose file names appear in scripts or config files are compiled only when every such file can be "
-           "relinked. Relinked copies are written into the output folder and override the originals.");
+    h.note("A plugin whose file name appears in other files is compiled only when every such reference is Safe or "
+           "Rewritable. Exactly the Rewritable references are changed, in copies written into the output folder "
+           "that override the originals; each copy is scanned again and checked before anything is written, and a "
+           "plugin whose copy fails a check stays in the load order. Multiplexer_Relinked.tsv lists every change.");
 
     h.h2("Plugins");
     h.tableStart({"Plugin", "Files", "Status", "Reason"});
@@ -577,14 +626,17 @@ std::string autoMergerReport(const ReportContext& ctx)
                 reason = am.files[i].path + ": " + am.files[i].problem;
                 break;
             }
+        if (auto k = am.keptOut.find(p); k != am.keptOut.end())
+            reason = k->second;
         std::string status = pluginStatus(ctx, p);
         h.row({s.pluginName(p), formatCount(files.size()), status, reason},
-              {"", "", status == "Kept out" ? "Warning" : "ok", ""});
+              {"", "", status.rfind("Kept out", 0) == 0 ? "Warning" : "ok", ""});
     }
     h.tableEnd(std::min(shown, am.filesOf.size()), am.filesOf.size());
 
     h.h2("Files");
-    h.tableStart({"File", "Mod", "Kind", "Plugins", "GetFormFromFile", "Pairs", "Other Mentions", "Result"});
+    h.tableStart({"File", "Mod", "Kind", "Plugins", "Classification", "GetFormFromFile", "Pairs", "Presence Checks",
+                  "Result"});
     shown = 0;
     for (const auto& f : am.files) {
         if (shown++ >= ctx.maxRows)
@@ -595,6 +647,10 @@ std::string autoMergerReport(const ReportContext& ctx)
         std::string result;
         if (!f.problem.empty())
             result = "Not relinkable: " + f.problem;
+        else if (!f.validation.empty())
+            result = "Check failed, plugins kept out: " + f.validation;
+        else if (f.cls == ReferenceClass::Safe)
+            result = "Nothing to change (safe)";
         else if (f.written)
             result = "Relinked: " + std::to_string(f.changedCalls) + " calls, " + std::to_string(f.changedPairs) +
                      " pairs, " + std::to_string(f.renamed) + " names";
@@ -602,11 +658,25 @@ std::string autoMergerReport(const ReportContext& ctx)
             result = "Relinkable";
         for (const auto& n : f.notes)
             result += "; " + n;
-        h.row({f.path, f.mod, relinkKindName(f.kind), join(names, ", "), std::to_string(f.formCalls),
-               std::to_string(f.pairs), std::to_string(f.mentions), result},
-              {"mono", "", f.problem.empty() ? "ok" : "Warning"});
+        h.row({f.path, f.mod, relinkKindName(f.kind), join(names, ", "), referenceClassName(f.cls),
+               std::to_string(f.formCalls), std::to_string(f.pairs), std::to_string(f.mentions), result},
+              {"mono", "", "", "", f.problem.empty() && f.validation.empty() ? "ok" : "Warning"});
     }
     h.tableEnd(std::min(shown, am.files.size()), am.files.size());
+
+    size_t changes = 0;
+    for (const auto& f : am.files)
+        changes += f.planned ? f.changes.size() : 0;
+    if (changes) {
+        h.h2("Changes");
+        h.tableStart({"File", "Plugin", "Location", "Use", "Before", "After"});
+        shown = 0;
+        for (const auto& f : am.files)
+            for (const auto& c : f.planned ? f.changes : std::vector<RelinkChange>{})
+                if (shown++ < ctx.maxRows)
+                    h.row({f.path, s.pluginName(c.plugin), c.location, c.context, c.before, c.after}, {"mono"});
+        h.tableEnd(std::min(shown, changes), changes);
+    }
     if (!am.errors.empty()) {
         h.h2("Relink errors");
         h.tableStart({"File and error"});
@@ -729,6 +799,9 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             o.set("plugin", s->pluginName(r.plugin));
             o.set("file", r.assetPath);
             o.set("source", r.source);
+            o.set("type", referenceKindName(r.kind));
+            o.set("use", r.context);
+            o.set("classification", referenceClassName(r.cls));
             refs.push(o);
         }
         root.set("pluginNameReferences", refs);
@@ -747,6 +820,37 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             plugins.push(o);
         }
         root.set("plugins", plugins);
+        json::Value decisions;
+        for (auto pi : s->loadOrder) {
+            auto it = s->referenceDecisions.find(pi);
+            if (it == s->referenceDecisions.end())
+                continue;
+            json::Value o;
+            o.set("plugin", s->plugins[pi].name);
+            o.set("filenameReferences", static_cast<uint64_t>(it->second.total));
+            o.set("classification", referenceClassName(it->second.cls));
+            o.set("reason", it->second.reason);
+            o.set("recommendedAction", it->second.action);
+            json::Value refs;
+            for (const auto& r : s->nameReferences) {
+                if (r.plugin != pi)
+                    continue;
+                json::Value x;
+                x.set("file", r.assetPath);
+                x.set("source", r.source);
+                x.set("type", referenceKindName(r.kind));
+                x.set("format", r.format);
+                x.set("text", r.text);
+                x.set("use", r.context);
+                x.set("location", r.location);
+                x.set("classification", referenceClassName(r.cls));
+                x.set("reason", r.reason);
+                refs.push(x);
+            }
+            o.set("references", refs);
+            decisions.push(o);
+        }
+        root.set("filenameReferences", decisions);
         if (ctx.dependencies) {
             json::Value issues;
             for (const auto& is : ctx.dependencies->issues) {
@@ -839,6 +943,8 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             o.set("plugin", s->pluginName(p));
             o.set("files", static_cast<uint64_t>(files.size()));
             o.set("status", pluginStatus(ctx, p));
+            if (auto k = am.keptOut.find(p); k != am.keptOut.end())
+                o.set("reason", k->second);
             plugins.push(o);
         }
         root.set("plugins", plugins);
@@ -855,7 +961,20 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             o.set("getFormFromFileCalls", static_cast<uint64_t>(f.formCalls));
             o.set("pairs", static_cast<uint64_t>(f.pairs));
             o.set("mentions", static_cast<uint64_t>(f.mentions));
+            o.set("classification", referenceClassName(f.cls));
             o.set("problem", f.problem);
+            o.set("checkFailed", f.validation);
+            json::Value changes;
+            for (const auto& c : f.changes) {
+                json::Value x;
+                x.set("plugin", s->pluginName(c.plugin));
+                x.set("location", c.location);
+                x.set("use", c.context);
+                x.set("before", c.before);
+                x.set("after", c.after);
+                changes.push(x);
+            }
+            o.set("changes", changes);
             o.set("relinked", f.written);
             o.set("changedCalls", static_cast<uint64_t>(f.changedCalls));
             o.set("changedPairs", static_cast<uint64_t>(f.changedPairs));

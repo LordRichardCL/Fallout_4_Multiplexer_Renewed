@@ -178,7 +178,14 @@ CREATE INDEX IF NOT EXISTS idx_asset_sources ON AssetSources(asset_id);
 CREATE TABLE IF NOT EXISTS NameReferences (
     plugin_id INTEGER NOT NULL,
     asset_path TEXT NOT NULL,
-    source TEXT
+    source TEXT,
+    kind TEXT,
+    format TEXT,
+    text TEXT,
+    context TEXT,
+    location TEXT,
+    class TEXT,
+    reason TEXT
 );
 
 CREATE TABLE IF NOT EXISTS Dependencies (

@@ -196,11 +196,27 @@ inline Subrecord weaponData(uint32_t ammo, uint8_t fill)
 // A compiled Fallout 4 script (layout as written by the Papyrus compiler and Caprica) with one
 // function: ::temp0 = Game.GetFormFromFile(formId, plugin); Game.IsPluginInstalled(plugin); return.
 // sizeAdjust corrupts the object's recorded size (0 keeps it right).
-inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugin, int sizeAdjust = 0)
+// Variants: the FormID passed to GetFormFromFile comes from a variable (`runtimeFormId`); the plugin
+// name is also assigned to a string variable (`assignName`, a use whose meaning is unknown); `filler`
+// unused strings are appended to the string table (a full table has 65535).
+struct ScriptOptions {
+    int sizeAdjust = 0;
+    bool runtimeFormId = false;
+    bool assignName = false;
+    size_t filler = 0;
+    std::string unused; // one more unused string (e.g. another plugin's name)
+};
+
+inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugin, const ScriptOptions& opt)
 {
     using namespace fo4mx;
-    const std::vector<std::string> strings = {"TestScript", "", "OnInit", "Game", "GetFormFromFile", "::temp0", "Form",
-                                              plugin, "IsPluginInstalled", "::temp1", "Bool", "None", "::NoneVar"};
+    std::vector<std::string> strings = {"TestScript", "", "OnInit", "Game", "GetFormFromFile", "::temp0", "Form",
+                                        plugin, "IsPluginInstalled", "::temp1", "Bool", "None", "::NoneVar",
+                                        "::temp2", "String", "aiFormID", "Int"};
+    if (!opt.unused.empty())
+        strings.push_back(opt.unused);
+    for (size_t i = 0; i < opt.filler; ++i)
+        strings.push_back("filler" + std::to_string(i));
     auto idx = [&](const std::string& s) {
         for (size_t i = 0; i < strings.size(); ++i)
             if (strings[i] == s)
@@ -241,12 +257,16 @@ inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugi
     o.write<uint32_t>(0);
     o.write<uint8_t>(0);
     o.write<uint16_t>(0); // params
-    o.write<uint16_t>(2); // locals
+    o.write<uint16_t>(4); // locals
     o.write<uint16_t>(idx("::temp0"));
     o.write<uint16_t>(idx("Form"));
     o.write<uint16_t>(idx("::temp1"));
     o.write<uint16_t>(idx("Bool"));
-    o.write<uint16_t>(3); // instructions
+    o.write<uint16_t>(idx("::temp2"));
+    o.write<uint16_t>(idx("String"));
+    o.write<uint16_t>(idx("aiFormID"));
+    o.write<uint16_t>(idx("Int"));
+    o.write<uint16_t>(opt.assignName ? 4 : 3); // instructions
     auto ident = [&](const std::string& s) { o.write<uint8_t>(1); o.write<uint16_t>(idx(s)); };
     auto string = [&](const std::string& s) { o.write<uint8_t>(2); o.write<uint16_t>(idx(s)); };
     auto integer = [&](int32_t v) { o.write<uint8_t>(3); o.write<int32_t>(v); };
@@ -255,7 +275,10 @@ inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugi
     ident("GetFormFromFile");
     ident("::temp0");
     integer(2);
-    integer(static_cast<int32_t>(formId));
+    if (opt.runtimeFormId)
+        ident("aiFormID");
+    else
+        integer(static_cast<int32_t>(formId));
     string(plugin);
     o.write<uint8_t>(0x19); // callstatic Game.IsPluginInstalled -> ::temp1
     ident("Game");
@@ -263,11 +286,23 @@ inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugi
     ident("::temp1");
     integer(1);
     string(plugin);
+    if (opt.assignName) {
+        o.write<uint8_t>(0x0D); // assign ::temp2 = "Plugin.esp"
+        ident("::temp2");
+        string(plugin);
+    }
     o.write<uint8_t>(0x1A); // return none
     o.write<uint8_t>(0);
 
     w.write<uint16_t>(idx("TestScript"));
-    w.write<uint32_t>(static_cast<uint32_t>(static_cast<int>(o.size()) + sizeAdjust));
+    w.write<uint32_t>(static_cast<uint32_t>(static_cast<int>(o.size()) + opt.sizeAdjust));
     w.writeBytes(o.buffer());
     return w.take();
+}
+
+inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugin, int sizeAdjust = 0)
+{
+    ScriptOptions opt;
+    opt.sizeAdjust = sizeAdjust;
+    return testScript(formId, plugin, opt);
 }
