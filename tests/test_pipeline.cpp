@@ -27,7 +27,7 @@ namespace {
 constexpr uint32_t ESM = RecordFlags::Master;
 
 // Builds a small but complete install:
-//   Fallout4.esm (localized) <- ModA.esp <- ModB.esp, plus ModC.esp (contains a CELL: ineligible).
+//   Fallout4.esm (localized) <- ModA.esp <- ModB.esp, plus ModC.esp (contains a quest, which is never compiled: ineligible).
 std::filesystem::path buildInstall(const std::string& name)
 {
     auto root = tempDir(name);
@@ -85,7 +85,7 @@ std::filesystem::path buildInstall(const std::string& name)
                     record("WEAP", 0x00001000,
                            {zs("EDID", "Pistol10mm"), zs("FULL", "Pistol (Mod C)"), u32("KSIZ", 2),
                             formIds("KWDA", {0x800, 0x801}), weaponData(0x900, 0x11)}),
-                    record("CELL", 0x01000800, {zs("EDID", "ModCCell")}),
+                    record("QUST", 0x01000800, {zs("EDID", "ModCQuest")}),
                 });
 
     writeFile(root / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
@@ -587,11 +587,11 @@ TEST(conflict_resolution_patch_merges_retained_chains)
                                              raw("DNAM", std::vector<uint8_t>(16, 0))}),
                  record("LVLI", 0x00001200,
                         {zs("EDID", "LootPistols"), raw("LLCT", {2}), lvlo(1, 0x1000, 1), lvlo(2, 0x900, 10)}),
-                 record("CELL", 0x01000800, {zs("EDID", "ModECell")})});
+                 record("QUST", 0x01000800, {zs("EDID", "ModEQuest")})});
     writePlugin(data / "ModF.esp", {"Fallout4.esm"},
                 {record("AMMO", 0x00000900, {zs("EDID", "Ammo10mm"), zs("FULL", "10mm Round"),
                                              raw("DNAM", std::vector<uint8_t>(16, 7))}),
-                 record("CELL", 0x01000800, {zs("EDID", "ModFCell")})});
+                 record("QUST", 0x01000800, {zs("EDID", "ModFQuest")})});
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModF.esp\n");
 
     // Alongside compilation: chains with a compiled plugin go to the Dummy outputs,
@@ -774,7 +774,7 @@ TEST(undescribed_formid_with_shifted_master_is_isolated)
 {
     auto root = buildInstall("softref");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("CELL", 0x01000800, {zs("EDID", "ModECell")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("QUST", 0x01000800, {zs("EDID", "ModEQuest")})});
     // ModG keeps ModE and ModC (both retained) as masters 1 and 2, and refers to ModC's cell
     // from a subrecord the definitions do not describe.
     writePlugin(data / "ModG.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
@@ -783,15 +783,14 @@ TEST(undescribed_formid_with_shifted_master_is_isolated)
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModG.esp\n");
     auto cfg = configFor(root);
     cfg.databasePath.clear();
-    cfg.definitions = trialDefinitions({{"CELL", "Candidate"}}); // a type that is not compiled at all
     Pipeline p(cfg);
     p.scan();
     CHECK_EQ(p.session().findPlugin("ModG.esp")->eligibility, Eligibility::Eligible);
     p.analyse();
-    // Blocker report: CELL is the only thing keeping ModC and ModE out.
+    // Blocker report: QUST is the only thing keeping ModC and ModE out.
     const auto& blockers = p.dependencies()->blockers;
     CHECK(!blockers.empty());
-    CHECK_EQ(blockers.front().sig.str(), std::string("CELL"));
+    CHECK_EQ(blockers.front().sig.str(), std::string("QUST"));
     CHECK_EQ(blockers.front().plugins, size_t(2));
     CHECK_EQ(blockers.front().soleBlocker, size_t(2));
     CHECK_EQ(blockers.front().unlocks, size_t(2));
@@ -874,7 +873,7 @@ TEST(conditions_with_unlisted_functions_and_hardcoded_forms)
 {
     auto root = buildInstall("conditions");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("CELL", 0x01000800, {zs("EDID", "ModECell")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("QUST", 0x01000800, {zs("EDID", "ModEQuest")})});
     // ModC is master 2 here but will be master 1 in the output; the condition function is not in
     // the definitions' table, and the condition runs on PlayerRef (hard-coded, not in Fallout4.esm).
     writePlugin(data / "ModH.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
@@ -1023,8 +1022,8 @@ TEST(archive_priority_change_is_reported)
 {
     auto root = buildInstall("archprio");
     auto data = root / "Game" / "Data";
-    // ModE stays in the load order (it has a cell), loads before ModA and ships the same mesh.
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("CELL", 0x01000800, {zs("EDID", "ModECell")})});
+    // ModE stays in the load order (it has a quest), loads before ModA and ships the same mesh.
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("QUST", 0x01000800, {zs("EDID", "ModEQuest")})});
     writeGeneralBa2(data / "ModE - Main.ba2", {{"meshes\\moda\\gun.nif", std::vector<uint8_t>(64, 9)}}, true);
     writeFile(root / "plugins.txt", "*ModE.esp\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
     auto cfg = configFor(root);
@@ -1135,7 +1134,7 @@ TEST(unaligned_undescribed_formid_is_caught)
 {
     auto root = buildInstall("unaligned");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("CELL", 0x01000800, {zs("EDID", "ModECell")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("QUST", 0x01000800, {zs("EDID", "ModEQuest")})});
     // ModC's cell at an odd offset of a subrecord the definitions do not describe.
     std::vector<uint8_t> bytes(10, 0);
     storeLE<uint32_t>(bytes.data() + 3, 0x02000800);
@@ -1170,7 +1169,7 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
     writeFile(inst / "profiles" / "Default" / "modlist.txt", "+ModWeap\n+ModStay\n");
     writeFile(inst / "profiles" / "Default" / "plugins.txt", "*ModStay.esp\n*ModWeap.esp\n");
     writePlugin(inst / "mods" / "ModStay" / "ModStay.esp", {"Fallout4.esm"},
-                {record("CELL", 0x01000800, {zs("EDID", "StayCell")})});
+                {record("QUST", 0x01000800, {zs("EDID", "StayQuest")})});
     writeGeneralBa2(inst / "mods" / "ModStay" / "ModStay - Main.ba2", {{"textures\\gun.dds", std::vector<uint8_t>(32, 1)}},
                     false);
     writePlugin(inst / "mods" / "ModWeap" / "ModWeap.esp", {"Fallout4.esm"},
@@ -1805,8 +1804,8 @@ TEST(world_overrides_compile_with_their_cell)
         CHECK_EQ(s.findPlugin(name)->eligibility, Eligibility::Eligible);
     CHECK_EQ(s.findPlugin("ModN.esp")->eligibility, Eligibility::Eligible); // new references (W3)
     const auto* worldEsm = s.findPlugin("World.esm");
-    CHECK_EQ(worldEsm->eligibility, Eligibility::Ineligible); // it defines the cells
-    CHECK(reasonHas(*worldEsm, "new cells, worldspaces and landscape"));
+    CHECK_EQ(worldEsm->eligibility, Eligibility::Ineligible); // the retained ModZ needs it as a master
+    CHECK(reasonHas(*worldEsm, "Required as a master by ModZ.esp"));
 
     CHECK(p.compile());
     CHECK_EQ(p.validation()->errors, uint64_t(0));
@@ -1908,6 +1907,128 @@ TEST(new_reference_in_precombines_keeps_its_plugin)
     CHECK(!p.compiledOutput()->isCompiled(p.session().findPlugin("ModQ.esp")->index));
     CHECK(p.session().autoRetained.count("modq.esp") == 1);
     CHECK(p.session().autoRetained.at("modq.esp").find("precombine data") != std::string::npos);
+}
+
+namespace {
+std::vector<uint8_t> gridBytes(int32_t x, int32_t y)
+{
+    std::vector<uint8_t> b(12, 0);
+    storeLE<int32_t>(b.data(), x);
+    storeLE<int32_t>(b.data() + 4, y);
+    return b;
+}
+} // namespace
+
+// World stage W4: a plugin's new interior cell and new worldspace (persistent cell, exterior cell,
+// landscape, references) compile with new FormIDs, in their groups; a link between references in
+// different cells is rewritten; an output with new cells is never ESL-flagged.
+TEST(new_cells_and_worldspaces_compile)
+{
+    auto root = buildInstall("newcells");
+    auto data = root / "Game" / "Data";
+    const uint32_t P = RecordFlags::Persistent;
+    std::vector<uint8_t> link(8, 0);
+    storeLE<uint32_t>(link.data() + 4, 0x01000801); // the vault door
+    writePlugin(data / "ModW.esp", {"Fallout4.esm"},
+                {record("CELL", 0x01000800, {zs("EDID", "NewVault")}),
+                 record("REFR", 0x01000801, {zs("EDID", "VaultDoor"), u32("NAME", 0x800)}, P),
+                 record("REFR", 0x01000802, {zs("EDID", "VaultClutter"), u32("NAME", 0x800)}),
+                 record("WRLD", 0x01000810, {zs("EDID", "NewWorld")}),
+                 record("CELL", 0x01000811, {zs("EDID", "NewWorldPersistent")}, P),
+                 record("ACHR", 0x01000812, {zs("EDID", "NewGuard"), u32("NAME", 0x800)}, P),
+                 record("CELL", 0x01000813, {zs("EDID", "NewOutside"), raw("XCLC", gridBytes(-2, 5))}),
+                 record("LAND", 0x01000814, {raw("DATA", {7, 0, 0, 0})}),
+                 record("REFR", 0x01000815, {zs("EDID", "OutsideSign"), u32("NAME", 0x800), raw("XLKR", link)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModW.esp\n");
+    auto cfg = configFor(root);
+    cfg.compile.lightOutputsWhenPossible = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK_EQ(p.session().findPlugin("ModW.esp")->eligibility, Eligibility::Eligible);
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+
+    OutputSet out(result.pluginFiles);
+    auto find = [&](const char* edid) -> const OutputSet::Rec* {
+        for (const auto& r : out.records)
+            if (r.record.editorId() == edid)
+                return &r;
+        return nullptr;
+    };
+    const char* names[] = {"NewVault", "VaultDoor", "VaultClutter", "NewWorld", "NewWorldPersistent",
+                           "NewGuard", "NewOutside", "OutsideSign"};
+    for (const char* n : names) {
+        const auto* r = find(n);
+        CHECK(r != nullptr);
+        if (r)
+            CHECK_EQ(out.identity(*r).first, r->plugin); // new FormIDs, defined by the output
+    }
+    const auto* vault = find("NewVault");
+    const auto* door = find("VaultDoor");
+    const auto* world = find("NewWorld");
+    const auto* persistent = find("NewWorldPersistent");
+    const auto* guard = find("NewGuard");
+    const auto* outside = find("NewOutside");
+    const auto* sign = find("OutsideSign");
+    if (!(vault && door && world && persistent && guard && outside && sign))
+        return;
+    using K = Placement::Kind;
+    CHECK(vault->placement.kind == K::InteriorCell);
+    CHECK(door->placement.kind == K::CellChild && door->placement.persistent);
+    CHECK(out.resolve(*door, door->placement.parent) == out.identity(*vault));
+    CHECK(outside->placement.kind == K::WorldCell && out.resolve(*outside, outside->placement.parent) == out.identity(*world));
+    CHECK(persistent->placement.kind == K::WorldCell);
+    CHECK(out.resolve(*guard, guard->placement.parent) == out.identity(*persistent));
+    CHECK(out.resolve(*sign, sign->placement.parent) == out.identity(*outside));
+    const auto* xlkr = sign->record.find(Signature("XLKR"));
+    CHECK(out.resolve(*sign, loadLE<uint32_t>(xlkr->data.data() + 4)) == out.identity(*door));
+    bool land = false;
+    for (const auto& r : out.records)
+        if (r.record.signature() == Signature("LAND")) {
+            land = true;
+            CHECK(out.resolve(r, r.placement.parent) == out.identity(*outside));
+        }
+    CHECK(land);
+    // Never light with new cells, although few enough records for ESL.
+    for (const auto& f : result.pluginFiles)
+        if (pathToUtf8(f.filename()) == vault->plugin)
+            CHECK(!PluginFile::load(f).header().isLightFlagged());
+    for (const auto& f : result.pluginFiles)
+        CHECK(checkLayout(PluginFile::load(f), true).problems.empty());
+}
+
+// A new cell with precombine data keeps its plugin out (the files are found by plugin name and cell
+// FormID); two new cells at the same grid of one worldspace keep one plugin out.
+TEST(new_cells_with_precombines_or_clashing_grids_stay)
+{
+    auto root = buildInstall("newcellsguard");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModPC.esp", {"Fallout4.esm"},
+                {record("CELL", 0x01000800, {zs("EDID", "Combined"), raw("PCMB", {1, 2})}),
+                 record("REFR", 0x01000801, {zs("EDID", "CombinedRef"), u32("NAME", 0x800)})});
+    writePlugin(data / "World.esm", {"Fallout4.esm"}, {record("WRLD", 0x01000800, {zs("EDID", "SharedWorld")})}, ESM);
+    for (const char* name : {"ModG1.esp", "ModG2.esp"})
+        writePlugin(data / name, {"Fallout4.esm", "World.esm"},
+                    {record("WRLD", 0x01000800, {zs("EDID", "SharedWorld")}),
+                     record("CELL", 0x02000800, {zs("EDID", std::string(name) + "Cell"), raw("XCLC", gridBytes(3, 3))})});
+    writeFile(root / "plugins.txt", "*World.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModPC.esp\n*ModG1.esp\n*ModG2.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"World.esm"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto& kept = p.session().autoRetained;
+    CHECK(kept.count("modpc.esp") == 1);
+    CHECK(kept.count("modpc.esp") && kept.at("modpc.esp").find("precombine or previs data") != std::string::npos);
+    CHECK_EQ(kept.count("modg1.esp") + kept.count("modg2.esp"), size_t(1)); // one of the two stays
+    const auto* c = p.compiledOutput();
+    CHECK(c->isCompiled(p.session().findPlugin("ModG1.esp")->index) !=
+          c->isCompiled(p.session().findPlugin("ModG2.esp")->index));
 }
 
 // While world types are Candidates, a plugin with cell or reference overrides stays as it is.
@@ -2052,7 +2173,7 @@ TEST(definition_check_checks_group_layouts)
     Pipeline p(configFor(root));
     p.scan();
     auto check = p.checkDefinitions({});
-    CHECK_EQ(check.layoutPlugins, size_t(1)); // ModC.esp has a cell
+    CHECK_EQ(check.layoutPlugins, size_t(1)); // ModC.esp has a quest
     CHECK_EQ(check.layoutRebuilt, size_t(1));
     CHECK_EQ(check.layoutProblems, size_t(0));
     bool summary = false;

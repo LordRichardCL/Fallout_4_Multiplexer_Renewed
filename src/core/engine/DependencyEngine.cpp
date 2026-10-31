@@ -195,17 +195,9 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
         if (!newOfOverrideTypes.empty()) {
             p.eligibility = Eligibility::Ineligible;
             std::vector<std::string> why;
-            bool npc = false, world = false;
-            for (Signature t : block.types) {
-                npc |= t == Signature("NPC_");
-                const auto* e = session.defs.catalogueEntry(t);
-                world |= e && e->placement != RecordPlacement::Top;
-            }
-            if (npc)
-                why.push_back("new NPCs: FaceGen data is stored under the plugin's name");
-            if (world)
-                why.push_back("new cells, worldspaces and landscape: precombined meshes and previs data are found "
-                              "by the defining plugin's name");
+            for (Signature t : block.types)
+                if (t == Signature("NPC_"))
+                    why.push_back("new NPCs: FaceGen data is stored under the plugin's name");
             p.reasons.push_back("Adds new records of types compiled only as overrides: " + join(newOfOverrideTypes, ", ") +
                                 ". New records of these types are tied to their plugin" +
                                 (why.empty() ? std::string() : " (" + join(why, "; ") + ")"));

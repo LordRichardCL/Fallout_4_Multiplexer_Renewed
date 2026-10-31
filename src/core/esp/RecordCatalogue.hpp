@@ -40,12 +40,14 @@ struct CatalogueEntry {
     int allocationOrder = -1; // output grouping for allocation, -1 = the shared last group
     std::string notes;
 
-    // The plugin writer can write it: its own top-level group; a placed reference, written with its
-    // cell and worldspace (stages W2, W3); or a cell or worldspace compiled as overrides only (W2).
+    // The plugin writer can write it: its own top-level group, or a cell, worldspace or anything placed
+    // in them, written with their cell and worldspace (world stages W2 to W4). Dialogue topics, which
+    // also own child groups, are not.
     bool writable() const
     {
         return placement == RecordPlacement::Top || placement == RecordPlacement::CellChild ||
-               (overridesOnly && (placement == RecordPlacement::Cell || placement == RecordPlacement::TopWithChildren));
+               placement == RecordPlacement::Cell ||
+               (placement == RecordPlacement::TopWithChildren && sig == Signature("WRLD"));
     }
     // Compiled scope: false = every record; true = only overrides of records defined elsewhere (a
     // plugin that adds new records of the type is not compiled). Used where new records are tied to

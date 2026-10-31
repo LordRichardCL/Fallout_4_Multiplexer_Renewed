@@ -18,6 +18,7 @@
 #include <numeric>
 #include <set>
 #include <sstream>
+#include <tuple>
 
 #include <spdlog/spdlog.h>
 
@@ -526,6 +527,64 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             }
     }
 
+    // New cells (W4). Precombined meshes and previs files are found by the cell's defining plugin and
+    // its FormID (Precombined\<plugin>\<cell>_<mesh>_OC.nif), both of which compiling changes: a new
+    // cell with precombine or previs data, or whose previs file is such a cell (RVIS), keeps its plugin
+    // out. Two new cells at the same grid position of one worldspace would collide in one plugin.
+    {
+        auto subOf = [](const EmittedRecord& e, Signature sig) -> const NormSub* {
+            for (const auto& f : e.fields.fields)
+                for (const auto& sub : f.subs)
+                    if (sub.sig == sig)
+                        return &sub;
+            return nullptr;
+        };
+        auto isNewCompiledCell = [&](FormKey k) {
+            auto it = out.indexByKey.find(k);
+            return it != out.indexByKey.end() && out.records[it->second].isNew &&
+                   out.records[it->second].sig == sig::CELL;
+        };
+        std::map<std::tuple<uint64_t, int32_t, int32_t>, FormKey> grids; // (worldspace, x, y) -> cell
+        for (const auto& e : out.records) {
+            if (e.sig != sig::CELL)
+                continue;
+            if (e.isNew)
+                for (const char* data : {"PCMB", "VISI", "XCRI", "XPRI"})
+                    if (subOf(e, Signature::fromString(data))) {
+                        addIssue(Severity::Error, "Precombined Cell",
+                                 session.formLabel(e.key) + " is a new cell with precombine or previs data (" + data +
+                                     "): those files are found by its plugin's name and its FormID, which compiling "
+                                     "would change, so its plugin stays",
+                                 e.key, session.pluginName(e.key.origin));
+                        break;
+                    }
+            if (const auto* rvis = subOf(e, Signature("RVIS")))
+                for (const auto& [off, k] : rvis->refs)
+                    if (k.valid() && isNewCompiledCell(k))
+                        addIssue(Severity::Error, "Precombined Cell",
+                                 session.formLabel(e.key) + " is in the previs file of " + session.formLabel(k) +
+                                     ", a new cell: that file is found by its plugin's name and FormID, so its plugin "
+                                     "stays",
+                                 k, session.pluginName(k.origin));
+            const auto* xclc = subOf(e, Signature("XCLC"));
+            if (e.placement != Placement::Kind::WorldCell || !e.parent.valid() || !xclc || xclc->bytes.size() < 8 ||
+                (e.fields.flags() & RecordFlags::Persistent))
+                continue;
+            const auto key = std::make_tuple(e.parent.packed(), loadLE<int32_t>(xclc->bytes.data()),
+                                             loadLE<int32_t>(xclc->bytes.data() + 4));
+            auto [it, added] = grids.emplace(key, e.key);
+            if (!added) {
+                const FormKey clash = e.isNew ? e.key : it->second;
+                addIssue(Severity::Error, "World Layout",
+                         session.formLabel(e.key) + " and " + session.formLabel(it->second) +
+                             " are both at grid " + std::to_string(std::get<1>(key)) + "," +
+                             std::to_string(std::get<2>(key)) + " of " + session.formLabel(e.parent) +
+                             ": a new cell there would collide in one plugin, so its plugin stays",
+                         clash, session.pluginName(clash.origin));
+            }
+        }
+    }
+
     // ---- Rewrite (dependency extraction) ------------------------------------------
     progress.stage("Rewrite");
     // References that are already broken in the source (a master index past the master list, or
@@ -905,7 +964,13 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
     // ---- FormIDs --------------------------------------------------------------
     for (auto& op : out.outputs) {
-        op.light = op.patch || (options.lightOutputsWhenPossible &&
+        // Never light with new cells or worldspaces: cells added by ESL-flagged plugins lose changes
+        // across saves.
+        const bool newWorld = std::any_of(op.records.begin(), op.records.end(), [&](uint32_t v) {
+            return out.records[v].isNew &&
+                   (out.records[v].sig == sig::CELL || out.records[v].sig == Signature("WRLD"));
+        });
+        op.light = op.patch || (options.lightOutputsWhenPossible && !newWorld &&
                                 op.newRecords <= (kLightPluginMaxObjectId - kFirstObjectId + 1));
         const uint32_t maxId = op.light ? kLightPluginMaxObjectId : 0x00FFFFFFu;
         std::set<uint32_t> used;

@@ -244,21 +244,10 @@ TEST(update_layouts_and_guards)
         CHECK(!t.isCompilable(Signature("INFO")));
         CHECK(t.strategy(Signature("INFO")) == MergeStrategy::Candidate);
     }
-    {
-        // A cell compiles only as overrides: without the scope it does not compile.
-        RecordDefinitions t = d;
-        std::string noScope = text;
-        auto pos = noScope.find("\nCELL,");
-        auto end = noScope.find('\n', pos + 1);
-        auto scope = noScope.rfind(",overrides", end);
-        noScope.erase(scope, std::string(",overrides").size());
-        auto trial = RecordCatalogue::parse(noScope); // applyCatalogue keeps a pointer to it
-        t.applyCatalogue(trial);
-        CHECK(!t.isCompilable(Signature("CELL")));
-        CHECK(t.strategy(Signature("CELL")) == MergeStrategy::Candidate);
-    }
-    CHECK(!d.overridesOnly(Signature("REFR"))); // new references compile (W3)
-    CHECK(d.overridesOnly(Signature("LAND")));
+    // Dialogue topics own child groups like worldspaces but never compile.
+    CHECK(!d.isCompilable(Signature("DIAL")));
+    for (const char* t : {"REFR", "CELL", "WRLD", "LAND"}) // new records compile (W3, W4)
+        CHECK(!d.overridesOnly(Signature::fromString(t)));
     CHECK(d.field(Signature("CELL"), Signature("XCRI")).skipCountAt == 0);
     // Placed references: persistent location, and topic data whose FormID depends on its type.
     CHECK(d.field(Signature("ACHR"), Signature("XLCN")).kind == FieldKind::FormId);
@@ -275,13 +264,11 @@ TEST(update_layouts_and_guards)
     CHECK_EQ(topic.formIdSlots[0].offset, 4u);
     auto subtype = pdto(1, 0x56544341); // "ACTV": text, never a FormID
     CHECK(subtype.formIdSlots.empty() && subtype.heuristic.empty());
-    // Confirmed world types compile; cells, worldspaces and landscape as overrides only.
+    // Confirmed world types compile.
     for (const char* t : {"CELL", "WRLD", "REFR", "ACHR", "LAND", "PHZD", "PGRE", "PMIS", "PARW"}) {
         CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Winner);
         CHECK(d.isCompilable(Signature::fromString(t)));
     }
-    for (const char* t : {"CELL", "WRLD", "LAND"})
-        CHECK(d.overridesOnly(Signature::fromString(t)));
 }
 
 TEST(struct_array_with_header)
