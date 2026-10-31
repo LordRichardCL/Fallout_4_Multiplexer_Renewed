@@ -66,7 +66,15 @@ WRLD group -> WRLD, world children -> persistent CELL and its children,
 cell children -> persistent (8), temporary (9)          DIAL group -> DIAL, topic children (INFO, in the order added)
 ```
 
-Exterior labels hold Y in the low word and X in the high word. Inside a group, records are ordered ROAD/LAND, then CELL/PGRD/NAVM, then the rest, by FormID; groups follow records, and blocks are ordered by X then Y. A record whose cell, worldspace or topic is not in the plugin, an exterior cell without a grid position, or a cell-child type placed at the top level stops the build. `RecordLocation` reports each record's placement when reading, so a plugin can be rebuilt exactly. `esp/LayoutCheck` rebuilds a plugin and compares records, placements and groups; the definition check runs it on every active plugin with cells, worldspaces or topics (`ValidationEngine::checkGroupLayouts`). Nothing in cells is compiled yet: the placement guard still keeps those types analysis-only.
+Exterior labels hold Y in the low word and X in the high word. Inside a group, records are ordered ROAD/LAND, then CELL/PGRD/NAVM, then the rest, by FormID; groups follow records, and blocks are ordered by X then Y. A record whose cell, worldspace or topic is not in the plugin, an exterior cell without a grid position, or a cell-child type placed at the top level stops the build. `RecordLocation` reports each record's placement when reading, so a plugin can be rebuilt exactly. `esp/LayoutCheck` rebuilds a plugin and compares records, placements and groups; the definition check runs it on every active plugin with cells, worldspaces or topics (`ValidationEngine::checkGroupLayouts`), and world Candidates count as confirmed only when it finds no difference.
+
+### World overrides (stage W2)
+
+- **Placement in the session.** `RecordInstance` keeps each record's placement and parent (as stored in its plugin; also in the plugin-index cache).
+- **Overrides only.** The catalogue marks CELL, WRLD, LAND and the placed reference types `overrides`: `CatalogueEntry::writable()` lets them compile, but a plugin that defines new ones stays out. Dialogue never compiles.
+- **Emitted records keep the chosen version's placement** (`EmittedRecord::placement`, `parent`). After merging, the compiler closes over parents: a cell or worldspace no compiled plugin provides is copied from the last instance in the load order (`container`), which is exactly what the game loads, so the output changes nothing about it. A parent defined by a compiled plugin is an error ("World Layout").
+- **One world output.** Every world record goes to the highest output in use, so a reference shares its plugin with its cell and anything it references comes before. Patches never hold world records.
+- **Writing.** `OutputPlugin::placements` (parallel to `built`) is passed to `PluginWriter`. Materialising checks each placed record's parent is in the same output; `validateWrittenFiles` checks every written record's placement against the plan.
 
 ## Record definitions and the FormID decoder
 

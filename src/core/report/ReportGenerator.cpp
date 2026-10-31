@@ -503,7 +503,8 @@ std::string compilationReport(const ReportContext& ctx)
              {"Output Plugins", formatCount(used)},
              {"Records Written", formatCount(c.records.size())},
              {"New FormIDs", formatCount(c.mappings.size())},
-             {"Merged Records", formatCount(c.mergedRecords)}});
+             {"Merged Records", formatCount(c.mergedRecords)},
+             {"Cells Copied", formatCount(c.containers)}});
     h.note(std::string("Strategy: ") + allocationStrategyName(c.options.strategy) +
            (c.options.mergeCompatible ? " · compatible edits merged" : " · last plugin wins"));
 

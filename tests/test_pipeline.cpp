@@ -5,12 +5,14 @@
 #include "db/Database.hpp"
 #include "engine/Pipeline.hpp"
 #include "engine/ReferenceScanner.hpp"
+#include "esp/LayoutCheck.hpp"
 #include "esp/FieldDecoder.hpp"
 #include "esp/PluginFile.hpp"
 #include "papyrus/Pex.hpp"
 #include "util/Text.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -112,6 +114,7 @@ struct OutputSet {
         std::string plugin;
         Record record;
         std::vector<std::string> masters;
+        Placement placement;
     };
     std::vector<Rec> records;
 
@@ -124,7 +127,7 @@ struct OutputSet {
                 masters.push_back(m.name);
             std::string name = pathToUtf8(f.filename());
             file.forEachRecord([&](const RecordLocation& loc) {
-                records.push_back({name, Record::parse(loc.header, loc.rawData), masters});
+                records.push_back({name, Record::parse(loc.header, loc.rawData), masters, loc.placement()});
                 return true;
             });
         }
@@ -1660,6 +1663,168 @@ TEST(npc_overrides_only)
     CHECK_EQ(text(boss->record.find(sig::FULL)), std::string("Raider Boss"));
     auto cnto = boss->record.find(Signature("CNTO"));
     CHECK(out.resolve(*boss, loadLE<uint32_t>(cnto->data.data())) == std::make_pair(std::string("Fallout4.esm"), 0x1000u));
+}
+
+// World stage W2: overrides of placed references, landscape, cells and worldspaces compile, written
+// with their cell and worldspace. A cell no compiled plugin wins is copied as the game loads it now
+// (here a retained plugin's version). A plugin adding a new reference stays.
+TEST(world_overrides_compile_with_their_cell)
+{
+    auto reasonHas = [](const PluginInfo& pl, const std::string& t) {
+        return std::any_of(pl.reasons.begin(), pl.reasons.end(), [&](const std::string& r) { return r.find(t) != std::string::npos; });
+    };
+    const auto* defs = trialDefinitions({{"CELL", "Winner"}, {"WRLD", "Winner"}, {"REFR", "Winner"},
+                                         {"ACHR", "Winner"}, {"LAND", "Winner"}});
+    for (const char* t : {"CELL", "WRLD", "REFR", "ACHR", "LAND"})
+        CHECK(defs->isCompilable(Signature::fromString(t)));
+
+    auto root = buildInstall("worldoverrides");
+    auto data = root / "Game" / "Data";
+    auto position = [](float x) {
+        std::vector<uint8_t> b(24, 0);
+        storeLE<uint32_t>(b.data(), std::bit_cast<uint32_t>(x));
+        return raw("DATA", b);
+    };
+    auto grid = [](int32_t x, int32_t y) {
+        std::vector<uint8_t> b(12, 0);
+        storeLE<int32_t>(b.data(), x);
+        storeLE<int32_t>(b.data() + 4, y);
+        return raw("XCLC", b);
+    };
+    auto lighting = [](uint8_t v) { return raw("XCLL", std::vector<uint8_t>(92, v)); };
+    const uint32_t P = RecordFlags::Persistent;
+    // World.esm defines the worldspace, its cells and references (like a DLC).
+    writePlugin(data / "World.esm", {"Fallout4.esm"},
+                {record("WRLD", 0x01000800, {zs("EDID", "TestWorld")}),
+                 record("CELL", 0x01000801, {zs("EDID", "WorldPersistent")}, P),
+                 record("ACHR", 0x01000806, {zs("EDID", "Guard"), u32("NAME", 0x800), position(1)}, P),
+                 record("CELL", 0x01000802, {zs("EDID", "Outside"), grid(2, -3), lighting(1)}),
+                 record("REFR", 0x01000805, {zs("EDID", "Rock"), u32("NAME", 0x800), position(1)}),
+                 record("LAND", 0x01000807, {raw("DATA", {1, 0, 0, 0})}),
+                 record("CELL", 0x01000803, {zs("EDID", "Vault"), lighting(1)}),
+                 record("REFR", 0x01000804, {zs("EDID", "Chair"), u32("NAME", 0x800), position(1)})},
+                ESM);
+    // ModX moves the chair in the interior cell.
+    writePlugin(data / "ModX.esp", {"Fallout4.esm", "World.esm"},
+                {record("CELL", 0x01000803, {zs("EDID", "Vault"), lighting(1)}),
+                 record("REFR", 0x01000804, {zs("EDID", "Chair"), u32("NAME", 0x800), position(5)})});
+    // ModY moves the rock and edits the landscape outside.
+    writePlugin(data / "ModY.esp", {"Fallout4.esm", "World.esm"},
+                {record("WRLD", 0x01000800, {zs("EDID", "TestWorld")}),
+                 record("CELL", 0x01000802, {zs("EDID", "Outside"), grid(2, -3), lighting(2)}),
+                 record("REFR", 0x01000805, {zs("EDID", "Rock"), u32("NAME", 0x800), position(6)}),
+                 record("LAND", 0x01000807, {raw("DATA", {2, 0, 0, 0})})});
+    // ModZ (kept by the user) changes the outside cell's lighting after ModY: its version must stay.
+    writePlugin(data / "ModZ.esp", {"Fallout4.esm", "World.esm"},
+                {record("WRLD", 0x01000800, {zs("EDID", "TestWorld")}),
+                 record("CELL", 0x01000802, {zs("EDID", "Outside"), grid(2, -3), lighting(3)})});
+    // ModP moves the guard in the worldspace's persistent cell.
+    writePlugin(data / "ModP.esp", {"Fallout4.esm", "World.esm"},
+                {record("WRLD", 0x01000800, {zs("EDID", "TestWorld")}),
+                 record("CELL", 0x01000801, {zs("EDID", "WorldPersistent")}, P),
+                 record("ACHR", 0x01000806, {zs("EDID", "Guard"), u32("NAME", 0x800), position(7)}, P)});
+    // ModN adds a new reference: new placed references keep their plugin.
+    writePlugin(data / "ModN.esp", {"Fallout4.esm", "World.esm"},
+                {record("CELL", 0x01000803, {zs("EDID", "Vault"), lighting(1)}),
+                 record("REFR", 0x02000800, {zs("EDID", "NewThing"), u32("NAME", 0x800), position(9)})});
+    writeFile(root / "plugins.txt",
+              "*World.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModX.esp\n*ModY.esp\n*ModZ.esp\n*ModP.esp\n*ModN.esp\n");
+    auto cfg = configFor(root);
+    cfg.definitions = defs;
+    cfg.analysis.excludedPlugins = {"ModZ.esp"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    for (const char* name : {"ModX.esp", "ModY.esp", "ModP.esp"})
+        CHECK_EQ(s.findPlugin(name)->eligibility, Eligibility::Eligible);
+    const auto* modN = s.findPlugin("ModN.esp");
+    CHECK_EQ(modN->eligibility, Eligibility::Ineligible);
+    CHECK(reasonHas(*modN, "new cells, worldspaces and placed references"));
+    CHECK_EQ(s.findPlugin("World.esm")->eligibility, Eligibility::Ineligible);
+
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    CHECK(p.compiledOutput()->containers >= 1); // the outside cell (ModZ wins it)
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+
+    OutputSet out(result.pluginFiles);
+    auto find = [&](const char* edid, const char* sig) -> const OutputSet::Rec* {
+        for (const auto& r : out.records)
+            if (r.record.editorId() == edid && r.record.signature() == Signature::fromString(sig))
+                return &r;
+        return nullptr;
+    };
+    auto x = [](const OutputSet::Rec* r) { return loadLE<float>(r->record.find(Signature("DATA"))->data.data()); };
+    const auto* chair = find("Chair", "REFR");
+    const auto* rock = find("Rock", "REFR");
+    const auto* guard = find("Guard", "ACHR");
+    const auto* vault = find("Vault", "CELL");
+    const auto* outside = find("Outside", "CELL");
+    const auto* persistent = find("WorldPersistent", "CELL");
+    const auto* world = find("TestWorld", "WRLD");
+    CHECK(chair && rock && guard && vault && outside && persistent && world);
+    if (!(chair && rock && guard && vault && outside && persistent && world))
+        return;
+    // All world records in one output plugin, still overrides of World.esm's records.
+    for (const auto* r : {chair, rock, guard, vault, outside, persistent, world}) {
+        CHECK_EQ(r->plugin, chair->plugin);
+        CHECK_EQ(out.identity(*r).first, std::string("World.esm"));
+    }
+    CHECK(x(chair) == 5.0f && x(rock) == 6.0f && x(guard) == 7.0f);
+    // In their cells, as the source plugins had them.
+    using K = Placement::Kind;
+    CHECK(chair->placement.kind == K::CellChild && !chair->placement.persistent);
+    CHECK(out.resolve(*chair, chair->placement.parent) == out.identity(*vault));
+    CHECK(rock->placement.kind == K::CellChild && out.resolve(*rock, rock->placement.parent) == out.identity(*outside));
+    CHECK(guard->placement.kind == K::CellChild && guard->placement.persistent);
+    CHECK(out.resolve(*guard, guard->placement.parent) == out.identity(*persistent));
+    CHECK(vault->placement.kind == K::InteriorCell);
+    CHECK(outside->placement.kind == K::WorldCell && out.resolve(*outside, outside->placement.parent) == out.identity(*world));
+    CHECK(persistent->placement.kind == K::WorldCell);
+    // The outside cell is the retained ModZ's version (what the game loads today), not ModY's.
+    CHECK_EQ(int(outside->record.find(Signature("XCLL"))->data[0]), 3);
+    bool land = false;
+    for (const auto& r : out.records)
+        if (r.record.signature() == Signature("LAND")) {
+            land = true;
+            CHECK_EQ(int(r.record.find(Signature("DATA"))->data[0]), 2);
+            CHECK(out.resolve(r, r.placement.parent) == out.identity(*outside));
+        }
+    CHECK(land);
+    // No new reference anywhere: ModN stays as it is.
+    CHECK(find("NewThing", "REFR") == nullptr);
+    // The written plugin passes the group layout check.
+    for (const auto& f : result.pluginFiles) {
+        auto check = checkLayout(PluginFile::load(f), true);
+        CHECK(check.problems.empty());
+    }
+}
+
+// A world record is never placed without its cell: the compiler copies the cell, and a cell defined
+// by a compiled plugin cannot exist in W2 (new cells keep their plugin).
+TEST(world_types_stay_out_while_candidates)
+{
+    auto reasonHas = [](const PluginInfo& pl, const std::string& t) {
+        return std::any_of(pl.reasons.begin(), pl.reasons.end(), [&](const std::string& r) { return r.find(t) != std::string::npos; });
+    };
+    auto root = buildInstall("worldcandidates");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "World.esm", {"Fallout4.esm"},
+                {record("CELL", 0x01000803, {zs("EDID", "Vault")}),
+                 record("REFR", 0x01000804, {zs("EDID", "Chair"), u32("NAME", 0x800)})},
+                ESM);
+    writePlugin(data / "ModX.esp", {"Fallout4.esm", "World.esm"},
+                {record("CELL", 0x01000803, {zs("EDID", "Vault")}),
+                 record("REFR", 0x01000804, {zs("EDID", "Chair2"), u32("NAME", 0x800)})});
+    writeFile(root / "plugins.txt", "*World.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModX.esp\n");
+    Pipeline p(configFor(root)); // shipped catalogue: world types are Candidates
+    p.scan();
+    p.analyse();
+    const auto* modX = p.session().findPlugin("ModX.esp");
+    CHECK_EQ(modX->eligibility, Eligibility::Ineligible);
+    CHECK(reasonHas(*modX, "Contains record types not yet compiled"));
 }
 
 // Every report is also written as plain text with aligned columns.

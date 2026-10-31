@@ -283,19 +283,27 @@ ValidationReport ValidationEngine::validateWrittenFiles(const CompiledOutput& c,
             else
                 v.fail(Severity::Error, "Missing Masters", name + ": master list on disk differs from the plan", name);
 
-            std::set<uint32_t> expected;
-            for (const auto& r : plan->built)
-                expected.insert(r.header.formId);
+            std::map<uint32_t, Placement> expected;
+            for (size_t i = 0; i < plan->built.size(); ++i)
+                expected[plan->built[i].header.formId] = i < plan->placements.size() ? plan->placements[i] : Placement{};
             size_t count = 0;
             file.forEachRecord([&](const RecordLocation& loc) {
                 ++count;
                 try {
                     Record::parse(loc.header, loc.rawData);
-                    if (expected.count(loc.header.formId))
-                        v.pass();
-                    else
+                    auto it = expected.find(loc.header.formId);
+                    if (it == expected.end())
                         v.fail(Severity::Error, "Broken FormIDs",
                                name + ": unexpected record " + formatFormId(loc.header.formId), name);
+                    else if (!(it->second == loc.placement()))
+                        v.fail(Severity::Error, "World Layout",
+                               name + ": " + loc.header.signature.str() + " " + formatFormId(loc.header.formId) +
+                                   " was written as a " + placementKindName(loc.placement().kind) + " of " +
+                                   formatFormId(loc.placement().parent) + ", planned as a " +
+                                   placementKindName(it->second.kind) + " of " + formatFormId(it->second.parent),
+                               name);
+                    else
+                        v.pass();
                 } catch (const std::exception& e) {
                     v.fail(Severity::Error, "Export", name + ": record " + formatFormId(loc.header.formId) +
                                                           " does not parse: " + e.what(),
@@ -502,7 +510,7 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
         if (problems.empty()) {
             out.readyCandidates.push_back(sig);
             const auto* entry = session.defs.catalogueEntry(sig);
-            const bool writable = entry && entry->placement == RecordPlacement::Top;
+            const bool writable = entry && entry->writable();
             v.fail(Severity::Info, "Definitions",
                    label + ": candidate confirmed by your load order (" + std::to_string(n) + " records). " +
                        (writable ? std::string("It can be compiled winner-only") +
@@ -563,6 +571,21 @@ void ValidationEngine::checkGroupLayouts(const Session& session, DefinitionCheck
         }
         ++out.layoutProblems;
         v.fail(Severity::Warning, "Group Layout", plugins[i]->name + ": " + join(r.problems, "; "), plugins[i]->name);
+    }
+    // World types are written in nested groups: they are confirmed only when the writer is too.
+    if (out.layoutProblems) {
+        auto& ready = out.readyCandidates;
+        for (auto it = ready.begin(); it != ready.end();) {
+            const auto* entry = session.defs.catalogueEntry(*it);
+            if (entry && entry->placement != RecordPlacement::Top && entry->writable()) {
+                v.fail(Severity::Warning, "Definitions",
+                       it->str() + " (" + session.defs.recordName(*it) + "): layout confirmed, but the group layout "
+                       "check found differences (see Group Layout); it stays out of compilation");
+                it = ready.erase(it);
+            } else {
+                ++it;
+            }
+        }
     }
     if (out.layoutPlugins)
         v.fail(Severity::Info, "Group Layout",

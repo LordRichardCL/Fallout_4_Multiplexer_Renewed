@@ -25,6 +25,9 @@ struct CachedRecord {
     uint64_t offset = 0;
     uint64_t hash = 0;
     std::string editorId;
+    uint8_t placement = 0; // Placement::Kind
+    bool persistent = false;
+    uint32_t parentRaw = 0;
 };
 
 struct CachedPluginIndex {

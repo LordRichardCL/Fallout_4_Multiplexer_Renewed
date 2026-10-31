@@ -252,8 +252,8 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
             continue;
         PluginWriter w;
         w.setHeader(op.header);
-        for (const auto& rec : op.built)
-            w.addRecord(rec);
+        for (size_t i = 0; i < op.built.size(); ++i)
+            w.addRecord(op.built[i], i < op.placements.size() ? op.placements[i] : Placement{});
         auto path = r.directory / utf8ToPath(op.name);
         auto image = w.build(options.compressLargeRecords);
         r.pluginFiles.push_back(path);

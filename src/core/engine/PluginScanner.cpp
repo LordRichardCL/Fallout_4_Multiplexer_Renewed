@@ -257,6 +257,9 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
                             r.offset = c.offset;
                             r.hash = c.hash;
                             r.loadPos = p.loadOrder;
+                            r.placement = c.placement;
+                            r.persistent = c.persistent;
+                            r.parentRaw = c.parentRaw;
                             r.key = session.resolve(p, c.rawFormId);
                             if (!c.editorId.empty())
                                 r.editorId = session.strings.intern(c.editorId);
@@ -293,6 +296,10 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
                     r.offset = loc.offset;
                     r.loadPos = p.loadOrder;
                     r.key = session.resolve(p, loc.header.formId);
+                    const auto placement = loc.placement();
+                    r.placement = static_cast<uint8_t>(placement.kind);
+                    r.persistent = placement.persistent;
+                    r.parentRaw = placement.parent;
                     uint32_t flagsForHash = loc.header.flags & ~RecordFlags::Compressed;
                     r.hash = fnv1a64(loc.rawData.data(), loc.rawData.size(), 0xcbf29ce484222325ULL ^ flagsForHash);
                     auto edid = quickEditorId(loc);
@@ -304,7 +311,8 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
                         ++p.deletedCount;
                     out.push_back(r);
                     if (pc.store)
-                        pc.index.records.push_back({r.signature, r.flags, r.dataSize, r.rawFormId, r.offset, r.hash, edid});
+                        pc.index.records.push_back({r.signature, r.flags, r.dataSize, r.rawFormId, r.offset, r.hash, edid,
+                                                    r.placement, r.persistent, r.parentRaw});
                     return true;
                 });
                 p.scanned = true;

@@ -83,20 +83,27 @@ inline void writePlugin(const std::filesystem::path& path, const std::vector<std
     for (const auto& m : masters)
         h.masters.push_back({m, 0});
     w.setHeader(h);
-    // As in a real plugin: cells are interior cells, and placed references, landscape and navmeshes
-    // go into the first cell listed (temporary, or persistent when flagged).
-    uint32_t firstCell = 0;
+    // As in a real plugin: a cell with a grid position (XCLC) or the persistent flag that follows a
+    // worldspace is that worldspace's cell, any other cell is an interior cell; placed references,
+    // landscape and navmeshes go into the cell listed before them (temporary, or persistent when
+    // flagged).
+    uint32_t firstCell = 0, cell = 0, world = 0;
     for (const auto& r : records)
         if (r.signature() == sig::CELL && !firstCell)
             firstCell = r.header.formId;
     for (auto& r : records) {
         Placement p;
         const auto* entry = RecordCatalogue::get().find(r.signature());
-        if (r.signature() == sig::CELL) {
-            p.kind = Placement::Kind::InteriorCell;
+        if (r.signature() == Signature("WRLD")) {
+            world = r.header.formId;
+        } else if (r.signature() == sig::CELL) {
+            cell = r.header.formId;
+            const bool exterior = world && (r.find(Signature("XCLC")) || (r.header.flags & RecordFlags::Persistent));
+            p.kind = exterior ? Placement::Kind::WorldCell : Placement::Kind::InteriorCell;
+            p.parent = exterior ? world : 0;
         } else if (entry && entry->placement == RecordPlacement::CellChild) {
             p.kind = Placement::Kind::CellChild;
-            p.parent = firstCell;
+            p.parent = cell ? cell : firstCell;
             p.persistent = (r.header.flags & RecordFlags::Persistent) != 0;
         }
         w.addRecord(std::move(r), p);

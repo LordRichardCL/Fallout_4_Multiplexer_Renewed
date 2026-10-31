@@ -191,8 +191,8 @@ TEST(stage5_layouts)
 TEST(update_layouts_and_guards)
 {
     const auto& d = RecordDefinitions::get();
-    // Requested types are Candidates; those stored inside cells, worldspaces or topics can never compile.
-    for (const char* t : {"REFR", "ACHR", "PGRE", "PARW", "PMIS", "PHZD", "LAND", "INFO", "WRLD", "DIAL"}) {
+    // Requested types are Candidates, not compiled.
+    for (const char* t : {"REFR", "ACHR", "PGRE", "PARW", "PMIS", "PHZD", "LAND", "INFO", "WRLD", "DIAL", "CELL"}) {
         CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Candidate);
         CHECK(d.supportSummary(Signature::fromString(t)).find("not compiled") != std::string::npos);
     }
@@ -216,16 +216,39 @@ TEST(update_layouts_and_guards)
     for (const char* sub : {"00TX", "90TX", ":0TX", "@0TX", "A0TX", "O0TX"})
         CHECK(d.field(Signature("WTHR"), Signature::fromString(sub)).kind == FieldKind::ZString);
 
-    // Turning a cell child into Winner in the catalogue still does not compile it.
+    // World types compile only as overrides, written with their cell (stage W2): a cell child set to
+    // Winner compiles with the "overrides" scope and not without it; dialogue never compiles.
     std::string text = readText("resources/record_catalogue.csv");
-    auto pos = text.find("\nREFR,");
-    auto cand = text.find("Candidate", pos);
-    text.replace(cand, std::string("Candidate").size(), "Winner");
-    auto trial = RecordCatalogue::parse(text);
-    RecordDefinitions t = d;
-    t.applyCatalogue(trial);
-    CHECK(!t.isCompilable(Signature("REFR")));
-    CHECK(t.strategy(Signature("REFR")) == MergeStrategy::Candidate);
+    auto promote = [](std::string t, const char* sig, bool dropScope) {
+        auto pos = t.find(std::string("\n") + sig + ",");
+        auto cand = t.find("Candidate", pos);
+        t.replace(cand, std::string("Candidate").size(), "Winner");
+        if (dropScope) {
+            auto end = t.find('\n', pos + 1);
+            auto scope = t.rfind(",overrides", end);
+            if (scope != std::string::npos && scope > pos)
+                t.erase(scope, std::string(",overrides").size());
+        }
+        return t;
+    };
+    {
+        RecordDefinitions t = d;
+        auto trial = RecordCatalogue::parse(promote(promote(text, "REFR", false), "INFO", false));
+        t.applyCatalogue(trial);
+        CHECK(t.isCompilable(Signature("REFR")));
+        CHECK(t.overridesOnly(Signature("REFR")));
+        CHECK(!t.isCompilable(Signature("INFO")));
+        CHECK(t.strategy(Signature("INFO")) == MergeStrategy::Candidate);
+    }
+    {
+        RecordDefinitions t = d;
+        auto trial = RecordCatalogue::parse(promote(text, "REFR", true));
+        t.applyCatalogue(trial);
+        CHECK(!t.isCompilable(Signature("REFR")));
+        CHECK(t.strategy(Signature("REFR")) == MergeStrategy::Candidate);
+    }
+    CHECK(d.field(Signature("CELL"), Signature("XCRI")).skipCountAt == 0);
+    CHECK(d.strategy(Signature("CELL")) == MergeStrategy::Candidate);
 }
 
 TEST(struct_array_with_header)

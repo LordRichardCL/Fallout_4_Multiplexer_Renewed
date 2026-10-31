@@ -1405,6 +1405,44 @@ void buildOldGen(RecordDefinitions& d)
         .field("OFST", noRefs())
         .field("CLSZ", noRefs())
         .modelRegions(); // cloud model
+    // Cell, from xEdit's CELL definition. XCRI: mesh count, reference count, the mesh IDs, then
+    // (reference, mesh ID) pairs. Precombined meshes are found by the cell's defining plugin
+    // (Precombined\<plugin>\<cell>_<mesh>_OC.nif), so an override never changes where they are.
+    FieldDef combinedRefs = structArray(8, {0}, MergeMode::Scalar);
+    combinedRefs.arrayStart = 8;
+    combinedRefs.skipCountAt = 0;
+    combinedRefs.skipStride = 4;
+    b.record("CELL", "Cell", true)
+        .field("DATA", noRefs())   // flags
+        .field("VISI", noRefs())   // previs timestamp
+        .field("RVIS", formId())   // in previs file of (cell)
+        .field("PCMB", noRefs())   // precombined timestamp
+        .field("XCLC", noRefs())   // grid
+        .field("XCLL", noRefs())   // lighting
+        .field("CNAM", noRefs())   // precombined object level XY
+        .field("ZNAM", noRefs())   // precombined object level Z
+        .field("TVDT", noRefs())   // terrain visibility
+        .field("MHDT", noRefs())   // max height data
+        .field("LTMP", formId())   // lighting template
+        .field("XCLW", noRefs())   // water height
+        .field("XCLR", formIdArray()) // regions
+        .field("XLCN", formId())   // location
+        .field("XWCN", noRefs())   // water current count
+        .field("XWCU", noRefs())   // water current velocities
+        .field("XCWT", formId())   // water
+        .field("XOWN", structAt({0})) // owner
+        .field("XRNK", noRefs())   // faction rank
+        .field("XILL", formId())   // lock list
+        .field("XILW", structAt({0}, 16)) // exterior LOD: worldspace, offsets
+        .field("XWEM", zstring())  // water environment map
+        .field("XCCM", formId())   // sky/weather from region
+        .field("XCAS", formId())   // acoustic space
+        .field("XEZN", formId())   // encounter zone
+        .field("XCMO", formId())   // music type
+        .field("XCIM", formId())   // image space
+        .field("XGDR", formId())   // god rays
+        .field("XPRI", formIdArray(MergeMode::Scalar)) // previs reference index
+        .field("XCRI", combinedRefs); // combined reference index
     b.record("LAND", "Landscape", true)
         .field("DATA", noRefs())
         .field("VNML", noRefs())   // normals
@@ -1553,7 +1591,8 @@ void RecordDefinitions::computeFingerprint()
     std::string text = profileName_;
     auto addField = [&](Signature sub, const FieldDef& f) {
         text += "|" + sub.str() + ":" + std::to_string(int(f.kind)) + "/" + std::to_string(int(f.merge)) + "/" +
-                std::to_string(f.stride) + "+" + std::to_string(f.arrayStart) + "/" + std::to_string(f.requiredSize) + "/" + std::to_string(f.partial) +
+                std::to_string(f.stride) + "+" + std::to_string(f.arrayStart) + "~" + std::to_string(f.skipCountAt) +
+                "*" + std::to_string(f.skipStride) + "/" + std::to_string(f.requiredSize) + "/" + std::to_string(f.partial) +
                 "/" + f.countSig.str() + std::to_string(f.countWidth) + "/" + f.companion.str();
         for (auto o : f.offsets)
             text += "," + std::to_string(o);
@@ -1649,9 +1688,9 @@ void RecordDefinitions::applyCatalogue(const RecordCatalogue& catalogue)
     for (Signature s : sigs) {
         auto& rd = records_[s];
         auto e = catalogue.find(s);
-        // Only records in their own top-level group can be written: the plugin writer has no nested
-        // groups (cells, worldspaces, dialogue topics), so those types never compile.
-        rd.compilable = rd.layout && e && e->placement == RecordPlacement::Top &&
+        // Only types the plugin writer can place compile: top-level types, and cells, worldspaces and
+        // placed references as overrides only (written with their cell). Dialogue never compiles.
+        rd.compilable = rd.layout && e && e->writable() &&
                         (e->strategy == MergeStrategy::Specialised || e->strategy == MergeStrategy::Winner);
         if (rd.compilable)
             compilable_.push_back(s);
@@ -1673,7 +1712,7 @@ MergeStrategy RecordDefinitions::strategy(Signature s) const
     if (!e || !hasLayout(s))
         return MergeStrategy::Preserve;
     // A described type that cannot be written is analysed and checked, never compiled.
-    if (e->placement != RecordPlacement::Top && e->strategy != MergeStrategy::Preserve)
+    if (!e->writable() && e->strategy != MergeStrategy::Preserve)
         return MergeStrategy::Candidate;
     return e->strategy;
 }
@@ -1695,7 +1734,7 @@ std::string RecordDefinitions::supportSummary(Signature s) const
         return e->overridesOnly ? "Compiled: overrides only (new records keep their plugin), winning version taken whole"
                                 : "Compiled: winning version taken whole (fields not merged)";
     case MergeStrategy::Candidate:
-        if (e->placement != RecordPlacement::Top)
+        if (!e->writable())
             return "Described (analysed and checked); not compiled: stored inside cells, worldspaces or dialogue "
                    "topics, which the app does not write";
         return std::string("Candidate: described, waiting for the definition check on a real load order (not compiled "

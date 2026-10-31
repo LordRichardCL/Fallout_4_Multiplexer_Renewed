@@ -208,6 +208,18 @@ int typeRank(const RecordDefinitions& defs, Signature s)
     return e && e->allocationOrder >= 0 ? e->allocationOrder : defs.catalogue().allocationGroups() - 1;
 }
 
+// Where a record's chosen version sits: cells, worldspaces and placed references keep it.
+void placeFromImpl(const Session& session, EmittedRecord& e, const RecordInstance& r)
+{
+    const auto* entry = session.defs.catalogueEntry(r.signature);
+    e.world = entry && entry->placement != RecordPlacement::Top;
+    e.placement = static_cast<Placement::Kind>(r.placement);
+    e.persistent = r.persistent;
+    e.parent = e.placement == Placement::Kind::Top || r.parentRaw == 0 || e.placement == Placement::Kind::InteriorCell
+                   ? FormKey{}
+                   : session.resolve(session.plugins[r.plugin], r.parentRaw);
+}
+
 } // namespace
 
 CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions& opts, ProgressSink& progress)
@@ -231,6 +243,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     auto addIssue = [&](Severity s, std::string cat, std::string msg, FormKey k = {}, std::string plugin = {}) {
         out.issues.push_back({s, std::move(cat), std::move(msg), k, std::move(plugin)});
     };
+    auto placeFrom = [&](EmittedRecord& e, const RecordInstance& r) { placeFromImpl(session, e, r); };
     if (out.compiledPlugins.empty() && !options.buildPatch) {
         addIssue(Severity::Warning, "Compilation", "No plugins are eligible for compilation");
         return out;
@@ -262,7 +275,9 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             // Only retained plugins: last-plugin-wins already applies unless the patch
             // merges the chain. Only types whose fields merge are patched (a winner-only type would just
             // repeat the winner), unless the user chose another plugin's version.
+            const auto* entry = session.defs.catalogueEntry(inst[0].signature);
             if (options.buildPatch && inst.size() > 1 && session.defs.isCompilable(inst[0].signature) &&
+                entry && entry->placement == RecordPlacement::Top && // the patch holds no cells
                 (session.defs.mergesFields(inst[0].signature) || forced >= 0) &&
                 (options.mergeCompatible || forced >= 0) && !options.skipPatchRecords.count(key.packed()))
                 candidates.push_back({gi, false, true, forced, true});
@@ -384,6 +399,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                         e.issues.insert(e.issues.end(), m.issues[i].begin(), m.issues[i].end());
                 e.fields = m.fields;
                 e.size = estimateSize(e.fields);
+                placeFrom(e, inst[c.forced >= 0 ? static_cast<size_t>(c.forced) : inst.size() - 1]);
                 emitted[ci] = std::move(e);
             } catch (const std::exception& ex) {
                 mergeIssues[ci].push_back({Severity::Error, "Unreadable Record",
@@ -426,6 +442,61 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         }
     }
     emitted.clear();
+
+    // ---- Containers ---------------------------------------------------------------
+    // A compiled placed reference is written inside its cell, and an exterior cell inside its
+    // worldspace. Where no compiled plugin provides that cell or worldspace, it is copied as the game
+    // loads it now (the last plugin's version, whoever that is), so the output changes nothing about
+    // it. Cells and worldspaces are only ever overrides here: the plugin that defines them stays.
+    {
+        Normalizer norm(session);
+        std::vector<std::pair<FormKey, FormKey>> todo; // (needed, needed by)
+        for (const auto& e : out.records)
+            if (e.parent.valid())
+                todo.emplace_back(e.parent, e.key);
+        while (!todo.empty()) {
+            auto [k, by] = todo.back();
+            todo.pop_back();
+            if (out.indexByKey.count(k))
+                continue;
+            const auto* g = session.findGroup(k);
+            if (!g || out.compiledFlag_[k.origin]) {
+                addIssue(Severity::Error, "World Layout",
+                         session.formLabel(by) + " cannot be placed: its " + (g ? "cell or worldspace " : "parent ") +
+                             session.formLabel(k) + (g ? " is defined by a compiled plugin" : " is not in the load order"),
+                         by, session.pluginName(out.records[out.indexByKey.at(by)].winner));
+                continue;
+            }
+            auto inst = session.instances(*g);
+            EmittedRecord e;
+            e.key = k;
+            e.sig = inst.back().signature;
+            for (size_t i = inst.size(); i-- > 0;)
+                if (inst[i].editorId) {
+                    e.editorId = session.strings.get(inst[i].editorId);
+                    break;
+                }
+            e.container = true;
+            e.winner = inst.back().plugin;
+            for (const auto& r : inst)
+                e.chain.push_back(r.plugin);
+            e.contributors.push_back(inst.back().plugin);
+            try {
+                e.fields = splitFields(norm.normalize(inst.back()), session.defs);
+            } catch (const std::exception& ex) {
+                addIssue(Severity::Error, "Unreadable Record", session.formLabel(k) + ": " + ex.what(), by,
+                         session.pluginName(e.winner));
+                continue;
+            }
+            e.size = estimateSize(e.fields);
+            placeFrom(e, inst.back());
+            if (e.parent.valid())
+                todo.emplace_back(e.parent, k);
+            out.indexByKey[k] = static_cast<uint32_t>(out.records.size());
+            out.records.push_back(std::move(e));
+            out.containers++;
+        }
+    }
 
     // ---- Rewrite (dependency extraction) ------------------------------------------
     progress.stage("Rewrite");
@@ -678,6 +749,25 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             }
         }
 
+    // Cells, worldspaces and placed references go into one output, the last one in use: a reference
+    // must be in the same plugin as its cell, and everything they reference then comes before.
+    {
+        int worldOutput = 0;
+        bool anyWorld = false;
+        for (uint32_t v = 0; v < out.records.size(); ++v) {
+            if (out.records[v].patch)
+                continue;
+            if (out.records[v].world)
+                anyWorld = true;
+            else
+                worldOutput = std::max(worldOutput, pref[v]);
+        }
+        if (anyWorld)
+            for (uint32_t v = 0; v < out.records.size(); ++v)
+                if (out.records[v].world && !out.records[v].patch)
+                    pref[v] = worldOutput;
+    }
+
     // Constraint: a record may only reference new records in the same or an earlier output.
     for (const auto& comp : sccs) {
         int o = 0;
@@ -813,6 +903,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
         op.built.clear();
         op.built.reserve(op.records.size());
+        op.placements.clear();
+        op.placements.reserve(op.records.size());
         for (auto v : op.records) {
             auto& e = out.records[v];
             bool ok = true;
@@ -848,7 +940,21 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     }
                 rec.subrecords.push_back(std::move(sr));
             }
+            Placement placement;
+            placement.kind = e.placement;
+            placement.persistent = e.persistent;
+            if (e.parent.valid()) {
+                bool parentOk = true;
+                placement.parent = out.translate(session, e.parent, op.index, &parentOk);
+                const auto pit = out.indexByKey.find(e.parent);
+                if (!parentOk || pit == out.indexByKey.end() || out.records[pit->second].output != op.index)
+                    addIssue(Severity::Error, "World Layout",
+                             session.formLabel(e.key) + " is not in the same output as its cell or worldspace " +
+                                 session.formLabel(e.parent),
+                             e.key, op.name);
+            }
             op.built.push_back(std::move(rec));
+            op.placements.push_back(placement);
         }
     }
 

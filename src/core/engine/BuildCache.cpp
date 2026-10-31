@@ -14,8 +14,9 @@ namespace fo4mx {
 
 namespace {
 
-constexpr uint32_t kFormatVersion = 4; // 2: merges against own masters; 3: Editor IDs of all compressed records;
-                                       // 4: record-level classification of types that are not merged
+constexpr uint32_t kFormatVersion = 5; // 2: merges against own masters; 3: Editor IDs of all compressed records;
+                                       // 4: record-level classification of types that are not merged;
+                                       // 5: record placement (cells, worldspaces, topics)
 
 const char* kCacheSchema = R"SQL(
 CREATE TABLE IF NOT EXISTS Info (key TEXT PRIMARY KEY, value TEXT);
@@ -351,6 +352,9 @@ std::optional<CachedPluginIndex> BuildCache::loadPluginIndex(const std::string& 
             c.offset = r.read<uint64_t>();
             c.hash = r.read<uint64_t>();
             c.editorId = r.readWString();
+            c.placement = r.read<uint8_t>();
+            c.persistent = r.read<uint8_t>() != 0;
+            c.parentRaw = r.read<uint32_t>();
         }
         plugins.hits++;
         return out;
@@ -374,6 +378,9 @@ void BuildCache::storePluginIndex(const std::string& path, uint64_t size, int64_
         w.write(c.offset);
         w.write(c.hash);
         w.writeWString(c.editorId.size() > 0xFFFF ? c.editorId.substr(0, 0xFFFF) : c.editorId);
+        w.write<uint8_t>(c.placement);
+        w.write<uint8_t>(c.persistent ? 1 : 0);
+        w.write(c.parentRaw);
     }
     auto blob = pack(w.buffer());
     std::lock_guard lock(mutex_);

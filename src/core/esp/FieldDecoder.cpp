@@ -122,16 +122,20 @@ private:
                     heuristic(i, from, static_cast<uint32_t>(size));
             }
             break;
-        case FieldKind::StructArray:
-            if (def.stride == 0 || size < def.arrayStart || (size - def.arrayStart) % def.stride != 0) {
+        case FieldKind::StructArray: {
+            size_t start = def.arrayStart;
+            if (def.skipCountAt != 0xFFFF && def.skipCountAt + 4u <= size)
+                start += static_cast<size_t>(loadLE<uint32_t>(sr.data.data() + def.skipCountAt)) * def.skipStride;
+            if (def.stride == 0 || size < start || (size - start) % def.stride != 0) {
                 issue(Severity::Warning, sr.signature, "array size is not a multiple of the element size");
                 heuristic(i, 0, static_cast<uint32_t>(size));
                 break;
             }
-            for (size_t e = def.arrayStart; e < size; e += def.stride)
+            for (size_t e = start; e < size; e += def.stride)
                 for (uint16_t o : def.offsets)
                     slot(i, e + o);
             break;
+        }
         case FieldKind::Vmad:
             decodeVmad(i, sr);
             break;

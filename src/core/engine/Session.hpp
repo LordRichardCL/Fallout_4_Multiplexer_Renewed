@@ -102,6 +102,11 @@ struct RecordInstance {
     uint64_t hash = 0;
     uint32_t editorId = 0; // Session::strings id
     int32_t loadPos = 0;   // load order position of `plugin`
+    // Where it sits in the plugin's groups (Placement::Kind) and its parent cell, worldspace or
+    // topic as the plugin stores the FormID (Session::resolve gives its FormKey).
+    uint8_t placement = 0;
+    bool persistent = false;
+    uint32_t parentRaw = 0;
 };
 
 // All instances of one FormKey: records[begin, end), in load order.

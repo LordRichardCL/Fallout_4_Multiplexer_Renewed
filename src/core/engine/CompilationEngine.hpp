@@ -3,6 +3,7 @@
 #include "engine/FieldModel.hpp"
 #include "engine/Session.hpp"
 #include "esp/FieldDecoder.hpp"
+#include "esp/GroupLayout.hpp"
 #include "esp/PluginHeader.hpp"
 #include "util/Progress.hpp"
 
@@ -78,6 +79,13 @@ struct EmittedRecord {
     uint32_t objectId = 0;
     uint32_t rawFormId = 0;
     bool formIdChanged = false; // differs from the previous compilation's map
+    // Cells, worldspaces and placed references: where the chosen version sits, and its parent cell
+    // or worldspace. `container`: copied (the game's current version) only to hold compiled records.
+    Placement::Kind placement = Placement::Kind::Top;
+    bool persistent = false;
+    FormKey parent;
+    bool container = false;
+    bool world = false; // a cell, worldspace or cell child: all go to one output
 };
 
 struct OutputPlugin {
@@ -94,6 +102,7 @@ struct OutputPlugin {
     uint64_t bytes = 0;
     PluginHeader header;
     std::vector<Record> built;
+    std::vector<Placement> placements; // parallel to `built`
 };
 
 struct FormMapping {
@@ -135,6 +144,7 @@ struct CompiledOutput {
     size_t patchedRecords = 0; // records in the conflict resolution patch
     size_t mergesReused = 0;   // override chains restored from the build cache
     size_t mergesComputed = 0; // override chains merged in this compilation
+    size_t containers = 0;     // cells and worldspaces copied to hold compiled references
     bool empty() const { return records.empty(); }
     bool isCompiled(PluginIndex p) const;
     bool hasArchiveLoader(PluginIndex p) const;

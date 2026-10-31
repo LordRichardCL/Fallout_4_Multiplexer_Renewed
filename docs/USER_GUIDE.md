@@ -195,6 +195,18 @@ Command line: `fo4mx check-definitions --mo2 "C:\Modding\MO2"` prints the same r
 
 `fo4mx record-types` lists every Fallout 4 record type the app knows: name, category, where it lives in a plugin, its strategy (*Specialised*: compiled with fields merged; *Winner*: compiled, the winning version taken whole; *Candidate*: described and checked, not compiled yet; *Preserve*: stays in its plugin) and support level. The list comes from `resources/record_catalogue.csv`, built from xEdit's Fallout 4 record list.
 
+## Cells, worldspaces and placed references
+
+Most mods that change the world do it by **editing existing objects**: moving a vanilla rock, disabling a car, changing a cell's lighting, tweaking landscape. The compiler can include those edits (stage W2):
+
+- **What is compiled:** overrides of existing placed references (REFR, ACHR and the placed projectile types), landscape (LAND), cells (CELL) and worldspaces (WRLD).
+- **How it is written:** each edited reference is written inside its cell, and each exterior cell inside its worldspace, with the same nested groups the Creation Kit and xEdit use. All of them go into one output plugin, the last one in use.
+- **Cells nobody compiled:** when a compiled plugin edits a reference in a cell whose current version comes from a plugin that stays in the load order, the output gets an exact copy of that cell as the game loads it now. The output loads last, so the copy changes nothing. The Compilation Report counts these as **Cells Copied**.
+- **Precombined meshes and previs stay exactly as they are.** The game finds them by the plugin that *defines* the cell (`Precombined\<plugin>\<cell>_<mesh>_OC.nif`), and that plugin always stays.
+- **What keeps a plugin out:** adding *new* references, cells or worldspaces (a later stage), navmeshes (NAVM), and dialogue. The plugin's reason says which.
+
+These types are **Candidates**: nothing is compiled from them until a definition check on your load order confirms both their layouts and the **Group Layout** check (see *Checking the record definitions*). A Group Layout difference keeps them all out.
+
 ## Rebuilding after switching over
 
 You do not need to switch back to the original load order to rebuild. Scans recognise the app's own files: Dummy plugins and patches are never read as sources, an archive loader is looked through to the original plugin underneath it, and plugins the last build compiled count as active sources in their original position even though they are disabled now. **Changes** and **Rebuild** therefore work straight from the switched-over load order.

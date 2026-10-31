@@ -127,7 +127,8 @@ Rules:
 
 **Infrastructure**
 - **Compile scope** (catalogue column *Scope*): `overrides` compiles only overrides of a type. A plugin that adds new records of the type keeps its plugin out, with the reason.
-- **Nested groups (W1):** the plugin writer now writes cells, worldspaces and dialogue topics with their nested groups, and the definition check rebuilds the load order's own plugins to confirm it (see ARCHITECTURE, *Writing plugins: nested groups*). Compiling those types is the next stages' work.
+- **Nested groups (W1):** the plugin writer now writes cells, worldspaces and dialogue topics with their nested groups, and the definition check rebuilds the load order's own plugins to confirm it (see ARCHITECTURE, *Writing plugins: nested groups*).
+- **World overrides (W2):** CELL (layout from xEdit, including the counted XCRI list), WRLD, LAND and the placed reference types are overrides-only Candidates. Once promoted they compile with their cells and worldspaces; new cells and references (W3, W4), NAVM and dialogue stay out.
 - **Placement guard:** only types in their own top-level group can compile; until the world stages land, the guard still applies. Anything stored inside cells, worldspaces or dialogue topics stays analysis-only, whatever the catalogue says. DIAL and WRLD are now `top with children`.
 - **Arrays with a header** (`FieldDef::arrayStart`), for WRLD's large-reference list.
 

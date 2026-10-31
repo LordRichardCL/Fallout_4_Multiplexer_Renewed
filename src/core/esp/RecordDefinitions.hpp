@@ -47,6 +47,10 @@ struct FieldDef {
     std::vector<uint16_t> offsets; // Struct / StructArray FormID offsets
     uint16_t stride = 0;           // StructArray element size
     uint16_t arrayStart = 0;       // StructArray: header bytes before the first element (no FormIDs)
+    // StructArray: a uint32 count at `skipCountAt` gives `skipCount * skipStride` more bytes before the
+    // first element (CELL XCRI: a counted list of mesh IDs precedes the references).
+    uint16_t skipCountAt = 0xFFFF;
+    uint16_t skipStride = 0;
     uint16_t requiredSize = 0;     // FormId / Struct: expected size (0 = any)
     bool partial = false;          // bytes outside `offsets` may hold undescribed FormIDs
     std::vector<std::pair<uint16_t, uint16_t>> plain; // partial structs: [begin, end) known to hold no FormIDs
