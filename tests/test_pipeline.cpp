@@ -1057,6 +1057,27 @@ TEST(archive_priority_change_is_reported)
     CHECK(warned);
     auto result = p.exportOutputs();
     CHECK(std::filesystem::exists(result.directory / "Multiplexer_ArchivePriority.txt"));
+
+    // That build's INI change is applied (ModA's archive is now in the INI list). A new build still
+    // compares with the load order as it was: ModA's archive is ModA's, and ModA stays out.
+    Exporter::applyArchiveIni(p.session(), *p.compiledOutput(), result.directory);
+    {
+        std::ifstream in(root / "ini" / "Fallout4Custom.ini");
+        std::string ini((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK(ini.find("ModA - Main.ba2") != std::string::npos);
+    }
+    cfg.keepArchivePriority = true;
+    Pipeline again(cfg);
+    again.scan();
+    bool owned = false;
+    for (const auto& ar : again.session().assets.archives)
+        if (ar.name == "ModA - Main.ba2")
+            owned = ar.owner == again.session().findPlugin("ModA.esp")->index;
+    CHECK(owned);
+    again.analyse();
+    CHECK(again.compile());
+    CHECK(!again.compiledOutput()->isCompiled(again.session().findPlugin("ModA.esp")->index));
+    CHECK(again.session().autoRetained.count("moda.esp") == 1);
 }
 
 TEST(weapon_sounds_at_unaligned_offsets_are_rewritten)

@@ -87,6 +87,14 @@ std::vector<std::string> readLines(const fs::path& path)
 
 } // namespace
 
+std::vector<std::string> Exporter::registeredArchives(const fs::path& outputDirectory)
+{
+    std::vector<std::string> out;
+    for (const auto& a : readLines(outputDirectory / kRegisteredFile))
+        out.push_back(toLower(a));
+    return out;
+}
+
 std::vector<std::string> Exporter::archiveList(const Session& session, const CompiledOutput& c,
                                                const fs::path& outputDirectory)
 {

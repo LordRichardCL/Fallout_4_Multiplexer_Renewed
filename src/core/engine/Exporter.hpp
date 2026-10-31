@@ -49,6 +49,9 @@ public:
     // The SResourceArchiveList2 value the build needs: the current value, without archives an
     // earlier build in `outputDirectory` registered but this one no longer needs, plus the
     // archives of compiled plugins.
+    // Archives an earlier build added to the INI list (Multiplexer_RegisteredArchives.txt in the
+    // output folder), lowercase.
+    static std::vector<std::string> registeredArchives(const std::filesystem::path& outputDirectory);
     static std::vector<std::string> archiveList(const Session& session, const CompiledOutput& compiled,
                                                 const std::filesystem::path& outputDirectory);
 

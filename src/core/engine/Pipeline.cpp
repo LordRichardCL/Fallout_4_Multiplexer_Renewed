@@ -122,10 +122,14 @@ void Pipeline::scan(ProgressSink& progress)
                  session_->vfs.roots().size());
 
     PluginScanner::scan(*session_, config_.scan, progress);
-    // The Auto-Merger's copies in the output folder are never read as originals.
-    session_->relinkedCopies = AutoMerger::readManifest(config_.exportOptions.outputDirectory.empty()
-                                                            ? Exporter::defaultOutputDirectory(*session_)
-                                                            : config_.exportOptions.outputDirectory);
+    // The Auto-Merger's copies in the output folder are never read as originals, and archives an
+    // earlier build added to the INI list count as their plugin's.
+    const auto outputDir = config_.exportOptions.outputDirectory.empty() ? Exporter::defaultOutputDirectory(*session_)
+                                                                         : config_.exportOptions.outputDirectory;
+    session_->relinkedCopies = AutoMerger::readManifest(outputDir);
+    session_->registeredArchives.clear();
+    for (const auto& a : Exporter::registeredArchives(outputDir))
+        session_->registeredArchives.insert(a);
     AssetScanner::scan(*session_, config_.assets, progress);
     DependencyEngine::evaluateEligibility(*session_, config_.analysis);
 

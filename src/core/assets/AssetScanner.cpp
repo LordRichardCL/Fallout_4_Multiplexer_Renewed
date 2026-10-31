@@ -100,8 +100,11 @@ void AssetScanner::scan(Session& session, const AssetScanOptions& options, Progr
         else if (owner == kInvalidPlugin)
             spdlog::debug("INI archive {} not found", name);
     };
+    // Archives an earlier build added to the INI list load as their plugin's archives (below), as
+    // they did before: the baseline is the load order without this app's changes.
     for (const auto& a : session.install.iniArchives())
-        queue(a, kInvalidPlugin);
+        if (!session.registeredArchives.count(toLower(a)))
+            queue(a, kInvalidPlugin);
     for (auto pi : session.loadOrder)
         for (const auto& a : pluginArchiveNames(session.plugins[pi], language))
             queue(a, pi);

@@ -202,7 +202,10 @@ public:
     std::map<PluginIndex, ReferenceDecision> referenceDecisions;
     // Copies the Auto-Merger wrote into the output folder (path -> content hash, from its manifest).
     // They are never read as originals.
-    std::unordered_map<std::string, uint64_t> relinkedCopies; // per plugin with references (eligibility)
+    std::unordered_map<std::string, uint64_t> relinkedCopies;
+    // Archives an earlier build added to the INI list (lowercase). The scan loads them as their plugin's
+    // archives, where the game loaded them before that build: the load order as it was.
+    std::unordered_set<std::string> registeredArchives; // per plugin with references (eligibility)
     std::vector<RecordEdge> recordEdges; // references of winning compilable records
     std::unordered_set<std::string> userRetained; // lowercase plugin names the user excluded
     // Plugins kept out of compilation because validation found records it cannot write safely
