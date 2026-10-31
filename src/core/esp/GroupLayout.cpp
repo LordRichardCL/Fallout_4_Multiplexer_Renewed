@@ -12,6 +12,7 @@ const char* placementKindName(Placement::Kind k)
     case Placement::Kind::WorldCell: return "worldspace cell";
     case Placement::Kind::CellChild: return "cell child";
     case Placement::Kind::TopicChild: return "topic child";
+    case Placement::Kind::QuestChild: return "quest child";
     }
     return "";
 }

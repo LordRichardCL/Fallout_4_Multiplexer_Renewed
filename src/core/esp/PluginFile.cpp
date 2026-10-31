@@ -102,12 +102,14 @@ void PluginFile::forEachRecord(const std::function<bool(const RecordLocation&)>&
                 loc.cell = f.label;
             else if (f.type == GroupType::TopicChildren)
                 loc.topic = f.label;
+            else if (f.type == GroupType::QuestChildren)
+                loc.quest = f.label;
             else if (f.type == GroupType::InteriorBlock || f.type == GroupType::ExteriorBlock) {
                 loc.blockType = f.type;
                 loc.blockLabel = f.label;
             } else if (f.type == GroupType::InteriorSubBlock || f.type == GroupType::ExteriorSubBlock)
                 loc.subBlockLabel = f.label;
-            else if (f.type > GroupType::CellTemporary)
+            else if (f.type > GroupType::QuestChildren)
                 loc.unusualGroup = true;
         }
         if (!visitor(loc))
@@ -155,6 +157,9 @@ Placement RecordLocation::placement() const
     } else if (topic) {
         p.kind = Placement::Kind::TopicChild;
         p.parent = topic;
+    } else if (quest) {
+        p.kind = Placement::Kind::QuestChild;
+        p.parent = quest;
     }
     return p;
 }

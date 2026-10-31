@@ -41,7 +41,7 @@ CSTY,Combat Style,Actors,top,Candidate,61,,Layout from xEdit wbDefinitionsFO4.pa
 DEBR,Debris,Visual Effects,top,Candidate,68,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 DFOB,Default Object,Game Data,top,Specialised,87,,
 DIAL,Dialog Topic,Quests and Dialogue,top with children,Candidate,,,"Has a child group per topic holding its INFO records. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
-DLBR,Dialog Branch,Quests and Dialogue,top,Candidate,95,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+DLBR,Dialog Branch,Quests and Dialogue,quest child,Candidate,95,,Stored in its quest's child group (Fallout 4). Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (dialogue stays in its plugin).,
 DLVW,Dialog View,Quests and Dialogue,top,Preserve,97,,
 DMGT,Damage Type,Combat,top,Specialised,8,,
 DOBJ,Default Object Manager,Game Data,top,Winner,86,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
@@ -129,7 +129,7 @@ REVB,Reverb Parameters,Audio,top,Winner,112,,Layout from xEdit wbDefinitionsFO4.
 RFCT,Visual Effect,Visual Effects,top,Specialised,53,,
 RFGP,Reference Group,World,top,Candidate,114,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 SCCO,Scene Collection,Quests and Dialogue,top,Candidate,124,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
-SCEN,Scene,Quests and Dialogue,top,Candidate,100,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+SCEN,Scene,Quests and Dialogue,quest child,Candidate,100,,Stored in its quest's child group (Fallout 4). Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (dialogue stays in its plugin).,
 SCOL,Static Collection,Base Objects,top,Specialised,30,,
 SCSN,Audio Category Snapshot,Audio,top,Candidate,126,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 SMBN,Story Manager Branch Node,Quests and Dialogue,top,Preserve,92,,

@@ -157,6 +157,12 @@ private:
         case FieldKind::VendorLocation:
             decodeVendorLocation(i, sr);
             break;
+        case FieldKind::TopicData:
+            if (size == 8 && loadLE<uint32_t>(sr.data.data()) == 0)
+                slot(i, 4); // a topic
+            else if (size != 8 || loadLE<uint32_t>(sr.data.data()) != 1)
+                heuristic(i, 0, static_cast<uint32_t>(size)); // not a subtype either: scanned
+            break;
         }
 
         // Context tracking for PERK entry points.

@@ -32,6 +32,7 @@ enum class FieldKind : uint8_t {
     PerkData,       // PERK DATA (meaning depends on the preceding PRKE)
     PerkEntryData,  // PERK EPFD (meaning depends on the preceding EPFT)
     VendorLocation, // FACT PLVD
+    TopicData,      // PDTO: type 0 = topic (FormID at +4), type 1 = 4-character subtype
 };
 
 // How two plugins' edits of a field combine during merging.

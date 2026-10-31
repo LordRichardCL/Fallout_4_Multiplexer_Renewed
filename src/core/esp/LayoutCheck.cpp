@@ -32,6 +32,7 @@ std::string groupName(int32_t type, uint32_t label)
     case GroupType::TopicChildren: return "topic children of " + formatFormId(label);
     case GroupType::CellPersistent: return "persistent children of " + formatFormId(label);
     case GroupType::CellTemporary: return "temporary children of " + formatFormId(label);
+    case GroupType::QuestChildren: return "quest children of " + formatFormId(label);
     }
     return "group type " + std::to_string(type) + " " + formatFormId(label);
 }
@@ -44,6 +45,38 @@ std::vector<uint8_t> canonical(const Record& r)
 }
 
 using GroupKey = std::pair<int32_t, uint32_t>;
+// Groups that hold at least one record, by (type, label); empty ones are counted.
+bool collectGroups(std::span<const uint8_t> b, size_t begin, size_t end, std::multiset<GroupKey>& out, size_t& empty)
+{
+    bool any = false;
+    for (size_t pos = begin; pos + RecordHeader::kSize <= end;) {
+        const uint32_t size = loadLE<uint32_t>(b.data() + pos + 4);
+        if (Signature(loadLE<uint32_t>(b.data() + pos)) == sig::GRUP) {
+            if (size < GroupHeader::kSize || pos + size > end)
+                break;
+            if (collectGroups(b, pos + GroupHeader::kSize, pos + size, out, empty)) {
+                out.insert({loadLE<int32_t>(b.data() + pos + 12), loadLE<uint32_t>(b.data() + pos + 8)});
+                any = true;
+            } else {
+                ++empty;
+            }
+            pos += size;
+        } else {
+            any = true;
+            pos += RecordHeader::kSize + size;
+        }
+    }
+    return any;
+}
+
+std::multiset<GroupKey> nonEmptyGroups(const PluginFile& f, size_t& empty)
+{
+    std::multiset<GroupKey> out;
+    const auto b = f.bytes();
+    collectGroups(b, RecordHeader::kSize + f.header().record.dataSize, b.size(), out, empty);
+    return out;
+}
+
 // Groups and records in file order, for the order comparison.
 std::pair<std::vector<GroupKey>, std::vector<uint32_t>> sequence(const PluginFile& f)
 {
@@ -68,18 +101,17 @@ LayoutCheck checkLayout(const PluginFile& file, bool rebuild)
             out.problems.push_back("(further differences not listed)");
     };
 
-    std::multiset<GroupKey> groups;
     file.forEachGroup([&](const GroupHeader& g, uint32_t depth) {
         ++out.groups;
-        groups.insert({g.groupType, g.label});
         if (depth == 0 && (Signature(g.label) == sig::CELL || Signature(g.label) == Signature("WRLD") ||
-                           Signature(g.label) == Signature("DIAL")))
+                           Signature(g.label) == Signature("DIAL") || Signature(g.label) == Signature("QUST")))
             out.nested = true;
-        if (g.groupType > GroupType::CellTemporary)
+        if (g.groupType > GroupType::QuestChildren)
             problem("contains a " + groupName(g.groupType, g.label) + ", which this app does not write");
     });
     if (!out.nested)
         return out;
+    const auto groups = nonEmptyGroups(file, out.emptyGroups);
 
     // Placement.
     struct Placed {
@@ -104,9 +136,11 @@ LayoutCheck checkLayout(const PluginFile& file, bool rebuild)
                             std::to_string(static_cast<int32_t>(loc.subBlockLabel)) + "; the writer puts it in block " +
                             std::to_string(interiorBlockOf(loc.header.formId)) + " / sub-block " +
                             std::to_string(interiorSubBlockOf(loc.header.formId)));
-            } else if (loc.header.flags & RecordFlags::Persistent) {
+            } else if ((loc.header.flags & RecordFlags::Persistent) || !cellGrid(cell)) {
+                // The persistent cell (or one without a grid position) sits directly in the worldspace.
                 if (loc.groupType != GroupType::WorldChildren)
-                    problem(label + " is a persistent worldspace cell inside " + groupName(loc.groupType, loc.groupLabel));
+                    problem(label + " is a worldspace cell without a grid position inside " +
+                            groupName(loc.groupType, loc.groupLabel));
             } else if (auto grid = cellGrid(cell)) {
                 const auto sub = subBlockOf(*grid), block = blockOf(sub);
                 if (loc.blockType != GroupType::ExteriorBlock || loc.blockLabel != gridLabel(block) ||
@@ -115,8 +149,6 @@ LayoutCheck checkLayout(const PluginFile& file, bool rebuild)
                             groupName(loc.blockType, loc.blockLabel) + "; the writer puts it in " +
                             groupName(GroupType::ExteriorBlock, gridLabel(block)) + " / " +
                             groupName(GroupType::ExteriorSubBlock, gridLabel(sub)));
-            } else {
-                problem(label + " is a worldspace cell with neither a grid position nor the persistent flag");
             }
             if (rebuild)
                 records.emplace_back(std::move(cell), placement);
@@ -126,7 +158,7 @@ LayoutCheck checkLayout(const PluginFile& file, bool rebuild)
                 if (loc.groupType != GroupType::CellPersistent && loc.groupType != GroupType::CellTemporary)
                     problem(label + " is directly in the " + groupName(loc.groupType, loc.groupLabel) +
                             ", not in a persistent or temporary group");
-            } else if (placement.kind == Placement::Kind::TopicChild) {
+            } else if (placement.kind == Placement::Kind::TopicChild || placement.kind == Placement::Kind::QuestChild) {
                 ++out.topicChildren;
             } else if (loc.groupType != GroupType::Top) {
                 problem(label + " is in the " + groupName(loc.groupType, loc.groupLabel) +
@@ -136,12 +168,13 @@ LayoutCheck checkLayout(const PluginFile& file, bool rebuild)
                 records.emplace_back(file.recordAt(loc.offset), placement);
         }
         if (rebuild) {
-            if (!original.emplace(loc.header.formId, Placed{loc.header.signature, placement, canonical(records.back().first)}).second)
-                problem(label + " is in the plugin twice");
+            if (!original.emplace(loc.header.formId, Placed{loc.header.signature, placement, canonical(records.back().first)}).second &&
+                out.defects.size() < kMaxProblems)
+                out.defects.push_back(label + " is in the plugin twice");
         }
         return true;
     });
-    if (!rebuild || !out.problems.empty())
+    if (!rebuild || !out.problems.empty() || !out.defects.empty())
         return out;
 
     // Rebuild.
@@ -179,8 +212,8 @@ LayoutCheck checkLayout(const PluginFile& file, bool rebuild)
     if (seen != original.size())
         problem(std::to_string(original.size()) + " records written, " + std::to_string(seen) + " read back");
 
-    std::multiset<GroupKey> rebuiltGroups;
-    again.forEachGroup([&](const GroupHeader& g, uint32_t) { rebuiltGroups.insert({g.groupType, g.label}); });
+    size_t rebuiltEmpty = 0;
+    const auto rebuiltGroups = nonEmptyGroups(again, rebuiltEmpty);
     std::vector<GroupKey> missing, extra;
     std::set_difference(groups.begin(), groups.end(), rebuiltGroups.begin(), rebuiltGroups.end(), std::back_inserter(missing));
     std::set_difference(rebuiltGroups.begin(), rebuiltGroups.end(), groups.begin(), groups.end(), std::back_inserter(extra));
@@ -188,7 +221,7 @@ LayoutCheck checkLayout(const PluginFile& file, bool rebuild)
         problem("the original has a " + groupName(t, l) + " that the rebuild does not");
     for (const auto& [t, l] : extra)
         problem("the rebuild has a " + groupName(t, l) + " that the original does not");
-    out.sameOrder = out.problems.empty() && sequence(file) == sequence(again);
+    out.sameOrder = out.problems.empty() && sequence(file).second == sequence(again).second; // record order
     return out;
 }
 

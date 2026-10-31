@@ -1491,7 +1491,8 @@ void buildOldGen(RecordDefinitions& d)
             .field("XPRD", noRefs())   // patrol idle time
             .field("XPPA", noRefs())
             .field("INAM", formId())   // patrol idle / image space
-            .field("PDTO", unknown())  // topic reference or 4-character subtype: scanned
+            .field("PDTO", special(FieldKind::TopicData)) // topic, or a 4-character subtype
+            .field("XLCN", formId())   // persistent location
             .field("XLCM", noRefs())
             .field("XCNT", noRefs())
             .field("XRDS", noRefs())
@@ -1746,7 +1747,8 @@ std::string RecordDefinitions::supportSummary(Signature s) const
     case RecordPlacement::TopWithChildren: return "Preserved: owns child groups (stays in its plugin)";
     case RecordPlacement::Cell:
     case RecordPlacement::CellChild: return "Preserved: placed in cells (stays in its plugin)";
-    case RecordPlacement::TopicChild: return "Preserved: dialogue (stays in its plugin)";
+    case RecordPlacement::TopicChild:
+    case RecordPlacement::QuestChild: return "Preserved: dialogue (stays in its plugin)";
     case RecordPlacement::Top: break;
     }
     if (e->strategy != MergeStrategy::Preserve)

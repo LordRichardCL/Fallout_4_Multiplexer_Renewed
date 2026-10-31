@@ -27,17 +27,18 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
     auto label = [](const Entry& e) { return e.record.signature().str() + " " + formatFormId(e.record.header.formId); };
 
     // Parents present in this plugin.
-    std::map<uint32_t, const Entry*> cells, worlds, topics;
+    const Signature QUST("QUST");
+    std::map<uint32_t, const Entry*> cells, worlds, topics, quests;
     for (const auto& e : records_) {
         const auto s = e.record.signature();
-        auto& index = s == sig::CELL ? cells : s == WRLD ? worlds : topics;
-        if ((s == sig::CELL || s == WRLD || s == DIAL) && !index.emplace(e.record.header.formId, &e).second)
+        auto& index = s == sig::CELL ? cells : s == WRLD ? worlds : s == DIAL ? topics : quests;
+        if ((s == sig::CELL || s == WRLD || s == DIAL || s == QUST) && !index.emplace(e.record.header.formId, &e).second)
             throw FormatError(label(e) + " is in the plugin twice");
     }
 
     std::map<Signature, std::vector<const Entry*>> top;
     std::vector<const Entry*> interiorCells;
-    std::map<uint32_t, std::vector<const Entry*>> worldCells, topicChildren;
+    std::map<uint32_t, std::vector<const Entry*>> worldCells, topicChildren, questChildren;
     std::map<uint32_t, std::pair<std::vector<const Entry*>, std::vector<const Entry*>>> cellChildren; // persistent, temporary
     for (const auto& e : records_) {
         const auto s = e.record.signature();
@@ -59,8 +60,6 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
         case Kind::WorldCell:
             if (!worlds.count(p.parent))
                 throw FormatError(label(e) + ": its worldspace " + formatFormId(p.parent) + " is not in the plugin");
-            if (!(e.record.header.flags & RecordFlags::Persistent) && !cellGrid(e.record))
-                throw FormatError(label(e) + ": an exterior cell needs its grid position (XCLC)");
             worldCells[p.parent].push_back(&e);
             break;
         case Kind::CellChild:
@@ -72,6 +71,11 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
             if (!topics.count(p.parent))
                 throw FormatError(label(e) + ": its topic " + formatFormId(p.parent) + " is not in the plugin");
             topicChildren[p.parent].push_back(&e);
+            break;
+        case Kind::QuestChild:
+            if (!quests.count(p.parent))
+                throw FormatError(label(e) + ": its quest " + formatFormId(p.parent) + " is not in the plugin");
+            questChildren[p.parent].push_back(&e);
             break;
         }
     }
@@ -126,6 +130,17 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
         close(children);
     };
 
+    auto writeTopic = [&](const Entry* e) { // a topic and its responses
+        writeRecord(e);
+        auto it = topicChildren.find(e->record.header.formId);
+        if (it == topicChildren.end())
+            return;
+        size_t tg = open(e->record.header.formId, GroupType::TopicChildren);
+        for (const auto* info : it->second) // order matters to the game: as added
+            writeRecord(info);
+        close(tg);
+    };
+
     std::vector<Signature> order;
     for (auto s : topLevelOrder())
         if (top.count(s))
@@ -155,9 +170,22 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
             auto& list = top[s];
             byFormId(list);
             for (const auto* e : list) {
+                if (s == DIAL) {
+                    writeTopic(e);
+                    continue;
+                }
                 writeRecord(e);
                 const uint32_t id = e->record.header.formId;
-                if (s == WRLD) {
+                if (s == QUST) {
+                    auto it = questChildren.find(id);
+                    if (it == questChildren.end())
+                        continue;
+                    byFormId(it->second);
+                    size_t qg = open(id, GroupType::QuestChildren);
+                    for (const auto* child : it->second)
+                        writeTopic(child); // DIAL with its responses; DLBR and SCEN alone
+                    close(qg);
+                } else if (s == WRLD) {
                     auto it = worldCells.find(id);
                     if (it == worldCells.end())
                         continue;
@@ -165,7 +193,9 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
                     std::vector<const Entry*> persistent;
                     std::map<std::pair<int32_t, int32_t>, std::map<std::pair<int32_t, int32_t>, std::vector<const Entry*>>> blocks;
                     for (const auto* c : it->second) {
-                        if (c->record.header.flags & RecordFlags::Persistent) {
+                        // The persistent cell (and a cell without a grid position) sits directly in the
+                        // worldspace's group.
+                        if ((c->record.header.flags & RecordFlags::Persistent) || !cellGrid(c->record)) {
                             persistent.push_back(c);
                             continue;
                         }
@@ -187,14 +217,6 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
                         close(bg);
                     }
                     close(wg);
-                } else if (s == DIAL) {
-                    auto it = topicChildren.find(id);
-                    if (it == topicChildren.end())
-                        continue;
-                    size_t tg = open(id, GroupType::TopicChildren);
-                    for (const auto* info : it->second) // order matters to the game: as added
-                        writeRecord(info);
-                    close(tg);
                 }
             }
         }

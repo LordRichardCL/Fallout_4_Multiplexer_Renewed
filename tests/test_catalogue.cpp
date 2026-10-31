@@ -123,9 +123,11 @@ TEST(catalogue_group_and_allocation_order)
     CHECK_EQ(order.size(), size_t(132));
     CHECK(order.front() == Signature("GMST"));
     CHECK(order.back() == Signature("OVIS"));
-    for (Signature s : order) { // CELL has a top-level group too (interior cell blocks)
+    // CELL has a top-level group too (interior cell blocks); SCEN and DLBR live in their quest's group
+    // but may also have a top-level group.
+    for (Signature s : order) {
         auto p = RecordCatalogue::get().find(s)->placement;
-        CHECK(p == RecordPlacement::Top || p == RecordPlacement::TopWithChildren ||
+        CHECK(p == RecordPlacement::Top || p == RecordPlacement::TopWithChildren || p == RecordPlacement::QuestChild ||
               (p == RecordPlacement::Cell && s == Signature("CELL")));
     }
     CHECK(std::find(order.begin(), order.end(), Signature("REFR")) == order.end());
@@ -248,6 +250,21 @@ TEST(update_layouts_and_guards)
         CHECK(t.strategy(Signature("REFR")) == MergeStrategy::Candidate);
     }
     CHECK(d.field(Signature("CELL"), Signature("XCRI")).skipCountAt == 0);
+    // Placed references: persistent location, and topic data whose FormID depends on its type.
+    CHECK(d.field(Signature("ACHR"), Signature("XLCN")).kind == FieldKind::FormId);
+    auto pdto = [&](uint32_t type, uint32_t data) {
+        Subrecord sr;
+        sr.signature = Signature("PDTO");
+        sr.data.resize(8);
+        storeLE<uint32_t>(sr.data.data(), type);
+        storeLE<uint32_t>(sr.data.data() + 4, data);
+        return decodeLayout(d, Signature("REFR"), {sr});
+    };
+    auto topic = pdto(0, 0x01000800);
+    CHECK_EQ(topic.formIdSlots.size(), size_t(1));
+    CHECK_EQ(topic.formIdSlots[0].offset, 4u);
+    auto subtype = pdto(1, 0x56544341); // "ACTV": text, never a FormID
+    CHECK(subtype.formIdSlots.empty() && subtype.heuristic.empty());
     CHECK(d.strategy(Signature("CELL")) == MergeStrategy::Candidate);
 }
 

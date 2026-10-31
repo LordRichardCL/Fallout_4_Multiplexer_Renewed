@@ -17,6 +17,7 @@ enum class RecordPlacement : uint8_t {
     Cell,       // CELL: interior block groups, or inside its worldspace
     CellChild,  // placed references, landscape, navmeshes: in a cell's child groups
     TopicChild, // INFO: in its dialogue topic's child group
+    QuestChild, // DLBR, SCEN: in their quest's child group (Fallout 4)
 };
 const char* placementName(RecordPlacement p);
 

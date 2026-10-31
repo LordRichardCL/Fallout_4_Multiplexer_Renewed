@@ -19,6 +19,7 @@ inline constexpr int32_t CellChildren = 6;     // label: CELL FormID
 inline constexpr int32_t TopicChildren = 7;    // label: DIAL FormID
 inline constexpr int32_t CellPersistent = 8;   // label: CELL FormID
 inline constexpr int32_t CellTemporary = 9;    // label: CELL FormID
+inline constexpr int32_t QuestChildren = 10;   // label: QUST FormID (Fallout 4: the quest's DIAL, DLBR, SCEN)
 } // namespace GroupType
 
 // Where a record sits in the group tree.
@@ -29,9 +30,10 @@ struct Placement {
         WorldCell,    // CELL inside a worldspace: its persistent cell, or in a block/sub-block by grid
         CellChild,    // placed reference, landscape, navmesh... in a cell's persistent or temporary group
         TopicChild,   // INFO in its topic's group
+        QuestChild,   // DIAL, DLBR or SCEN in its quest's group
     };
     Kind kind = Kind::Top;
-    uint32_t parent = 0;     // WorldCell: WRLD; CellChild: CELL; TopicChild: DIAL (FormIDs as in the file)
+    uint32_t parent = 0;     // WorldCell: WRLD; CellChild: CELL; TopicChild: DIAL; QuestChild: QUST (as in the file)
     bool persistent = false; // CellChild: persistent (group 8) or temporary (group 9)
 
     bool operator==(const Placement&) const = default;

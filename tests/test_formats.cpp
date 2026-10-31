@@ -240,6 +240,14 @@ TEST(nested_groups_round_trip)
         {record("DIAL", 0x01000830, {zs("EDID", "Topic")}), {}},
         {record("INFO", 0x01000832, {zs("EDID", "Second")}), {K::TopicChild, 0x01000830, false}},
         {record("INFO", 0x01000831, {zs("EDID", "First")}), {K::TopicChild, 0x01000830, false}},
+        // Fallout 4 quest children: the quest's own topics (with their responses), branches and scenes.
+        {record("QUST", 0x01000840, {zs("EDID", "Quest")}), {}},
+        {record("DIAL", 0x01000841, {zs("EDID", "QuestTopic")}), {K::QuestChild, 0x01000840, false}},
+        {record("INFO", 0x01000842, {zs("EDID", "QuestLine")}), {K::TopicChild, 0x01000841, false}},
+        {record("SCEN", 0x01000843, {zs("EDID", "Scene")}), {K::QuestChild, 0x01000840, false}},
+        {record("DLBR", 0x01000844, {zs("EDID", "Branch")}), {K::QuestChild, 0x01000840, false}},
+        // A worldspace cell with neither a grid position nor the persistent flag stays in the worldspace.
+        {record("CELL", 0x01000824, {zs("EDID", "W2odd")}), {K::WorldCell, 0x01000820, false}},
     };
     PluginWriter w;
     w.setHeader(fixtureHeader());
@@ -256,7 +264,7 @@ TEST(nested_groups_round_trip)
         CHECK(!loc.unusualGroup);
         auto rec = f.recordAt(loc.offset);
         read[loc.header.formId] = {recordBytes(rec), loc.placement()};
-        if (loc.header.signature == Signature("INFO"))
+        if (loc.header.signature == Signature("INFO") && loc.topic == 0x01000830)
             infoOrder.push_back(loc.header.formId);
         again.addRecord(rec, loc.placement());
         return true;
@@ -292,10 +300,9 @@ TEST(nested_groups_refuse_misplaced_records)
     CHECK(fails({{record("REFR", 0x01000801, {}), {}}}, "cannot be written as a top-level group"));
     CHECK(fails({{record("CELL", 0x01000801, {}), {}}}, "cannot be placed as a top"));
     CHECK(fails({{record("KYWD", 0x01000801, {}), {K::InteriorCell, 0, false}}}, "cannot be placed as a interior cell"));
-    CHECK(fails({{record("WRLD", 0x01000800, {}), {}}, {record("CELL", 0x01000801, {}), {K::WorldCell, 0x01000800, false}}},
-                "needs its grid position"));
     CHECK(fails({{record("CELL", 0x01000801, {}), {K::WorldCell, 0x01000800, false}}}, "its worldspace 01000800"));
     CHECK(fails({{record("INFO", 0x01000801, {}), {K::TopicChild, 0x01000800, false}}}, "its topic 01000800"));
+    CHECK(fails({{record("SCEN", 0x01000801, {}), {K::QuestChild, 0x01000800, false}}}, "its quest 01000800"));
     CHECK(fails({{record("CELL", 0x01000801, {}), {K::InteriorCell, 0, false}},
                  {record("CELL", 0x01000801, {}), {K::InteriorCell, 0, false}}},
                 "in the plugin twice"));
@@ -349,6 +356,39 @@ TEST(layout_check_against_plugins)
     CHECK(wrong.problems[0].find("CELL 01000812 at -40,3") != std::string::npos);
     CHECK(wrong.problems[0].find("the writer puts it in") != std::string::npos);
     CHECK(!wrong.rebuilt); // a placement difference stops before the rebuild
+
+    // An empty group (the Creation Kit leaves some) is not a difference; a FormID twice is a fault of
+    // the plugin, reported apart.
+    {
+        BinaryWriter w;
+        fixtureHeader().toRecord().write(w, false);
+        w.writeBytes(group(Signature("WRLD").value, GroupType::Top,
+                           G{recordBytes(world),
+                             group(0x01000810, GroupType::WorldChildren,
+                                   G{group(gridLabel({0, 0}), GroupType::ExteriorBlock,
+                                           G{group(gridLabel({0, 0}), GroupType::ExteriorSubBlock,
+                                                   G{recordBytes(a), group(0x01000811, GroupType::CellChildren, G{})})})})}));
+        auto empty = checkLayout(PluginFile::fromBytes(w.take()), true);
+        CHECK(empty.problems.empty() && empty.defects.empty() && empty.rebuilt);
+        CHECK_EQ(empty.emptyGroups, size_t(1));
+    }
+    {
+        BinaryWriter w;
+        fixtureHeader().toRecord().write(w, false);
+        auto aCell = G{recordBytes(a), group(0x01000811, GroupType::CellChildren,
+                                             G{group(0x01000811, GroupType::CellTemporary,
+                                                     G{recordBytes(refA), recordBytes(refA)})})};
+        w.writeBytes(group(Signature("WRLD").value, GroupType::Top,
+                           G{recordBytes(world),
+                             group(0x01000810, GroupType::WorldChildren,
+                                   G{group(gridLabel({0, 0}), GroupType::ExteriorBlock,
+                                           G{group(gridLabel({0, 0}), GroupType::ExteriorSubBlock, aCell)})})}));
+        auto twice = checkLayout(PluginFile::fromBytes(w.take()), true);
+        CHECK(twice.problems.empty());
+        CHECK_EQ(twice.defects.size(), size_t(1));
+        CHECK(twice.defects[0].find("REFR 01000813 is in the plugin twice") != std::string::npos);
+        CHECK(!twice.rebuilt);
+    }
 
     // Placement only (large plugins): no rebuild, same verdict.
     auto quick = checkLayout(PluginFile::fromBytes(image(false, right)), false);

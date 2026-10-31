@@ -64,7 +64,10 @@ CELL group -> interior block (last decimal digit of the object ID) -> sub-block 
 WRLD group -> WRLD, world children -> persistent CELL and its children,
                                       exterior block (floor(sub-block / 4)) -> sub-block (floor(grid / 8)) -> CELL, cell children
 cell children -> persistent (8), temporary (9)          DIAL group -> DIAL, topic children (INFO, in the order added)
+QUST group -> QUST, quest children (10; Fallout 4: the quest's DIAL with its topic children, DLBR, SCEN)
 ```
+
+A worldspace's persistent cell, and any worldspace cell without a grid position, sits directly in the worldspace's children group. Empty groups are not written.
 
 Exterior labels hold Y in the low word and X in the high word. Inside a group, records are ordered ROAD/LAND, then CELL/PGRD/NAVM, then the rest, by FormID; groups follow records, and blocks are ordered by X then Y. A record whose cell, worldspace or topic is not in the plugin, an exterior cell without a grid position, or a cell-child type placed at the top level stops the build. `RecordLocation` reports each record's placement when reading, so a plugin can be rebuilt exactly. `esp/LayoutCheck` rebuilds a plugin and compares records, placements and groups; the definition check runs it on every active plugin with cells, worldspaces or topics (`ValidationEngine::checkGroupLayouts`), and world Candidates count as confirmed only when it finds no difference.
 

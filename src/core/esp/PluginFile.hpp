@@ -26,10 +26,11 @@ struct RecordLocation {
     uint32_t world = 0;       // enclosing worldspace (label of a World Children group), 0 if none
     uint32_t cell = 0;        // enclosing cell (label of a Cell Children group), 0 if none
     uint32_t topic = 0;       // enclosing dialogue topic (Topic Children group), 0 if none
+    uint32_t quest = 0;       // enclosing quest (Quest Children group), 0 if none
     int32_t blockType = -1;   // enclosing cell block group (interior 2 or exterior 4), -1 if none
     uint32_t blockLabel = 0;
     uint32_t subBlockLabel = 0; // enclosing cell sub-block group (3 or 5)
-    bool unusualGroup = false; // inside a group type this app does not write (anything above 9)
+    bool unusualGroup = false; // inside a group type this app does not write (anything above 10)
 
     // Where the record sits, as the writer takes it.
     Placement placement() const;

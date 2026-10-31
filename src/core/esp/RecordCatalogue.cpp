@@ -21,6 +21,7 @@ const char* placementName(RecordPlacement p)
     case RecordPlacement::Cell: return "cell";
     case RecordPlacement::CellChild: return "cell child";
     case RecordPlacement::TopicChild: return "topic child";
+    case RecordPlacement::QuestChild: return "quest child";
     }
     return "";
 }
@@ -124,6 +125,8 @@ RecordCatalogue RecordCatalogue::parse(std::string_view csv)
             e.placement = RecordPlacement::CellChild;
         else if (f[3] == "topic child")
             e.placement = RecordPlacement::TopicChild;
+        else if (f[3] == "quest child")
+            e.placement = RecordPlacement::QuestChild;
         else
             fail("unknown placement '" + f[3] + "'");
         if (f[4] == "Specialised")

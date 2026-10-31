@@ -16,6 +16,7 @@ namespace fo4mx {
 //                 then exterior block -> sub-block -> CELL and its children
 //   cell children group -> persistent group (8), temporary group (9)
 //   DIAL group -> DIAL, then its topic children group (INFO, in the order added)
+//   QUST group -> QUST, then its quest children group (Fallout 4: its DIAL with their responses, DLBR, SCEN)
 // Records in a group are ordered ROAD/LAND, CELL/PGRD/NAVM, then the rest, each by FormID.
 // A record whose parent (cell, worldspace, topic) is not in the plugin cannot be placed: build()
 // throws, nothing is written.

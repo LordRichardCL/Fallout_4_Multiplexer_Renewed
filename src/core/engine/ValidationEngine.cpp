@@ -537,7 +537,8 @@ void ValidationEngine::checkGroupLayouts(const Session& session, DefinitionCheck
     std::vector<const PluginInfo*> plugins;
     for (const auto& p : session.plugins)
         if (p.active && p.scanned && p.error.empty() &&
-            (p.typeCounts.count(sig::CELL) || p.typeCounts.count(Signature("WRLD")) || p.typeCounts.count(Signature("DIAL"))))
+            (p.typeCounts.count(sig::CELL) || p.typeCounts.count(Signature("WRLD")) || p.typeCounts.count(Signature("DIAL")) ||
+             p.typeCounts.count(Signature("QUST"))))
             plugins.push_back(&p);
     progress.stage("Check group layouts");
     std::vector<LayoutCheck> results(plugins.size());
@@ -565,6 +566,15 @@ void ValidationEngine::checkGroupLayouts(const Session& session, DefinitionCheck
         ++out.layoutPlugins;
         out.layoutRebuilt += r.rebuilt && r.problems.empty();
         out.layoutSameOrder += r.sameOrder;
+        out.layoutEmptyGroups += r.emptyGroups;
+        if (r.problems.empty() && !r.defects.empty()) {
+            // A fault of the plugin, not of the writer: reported, not counted against the writer.
+            ++out.layoutDefects;
+            v.fail(Severity::Warning, "Group Layout",
+                   plugins[i]->name + ": not rebuilt, the plugin itself is faulty: " + join(r.defects, "; "),
+                   plugins[i]->name);
+            continue;
+        }
         if (r.problems.empty()) {
             v.pass();
             continue;
@@ -589,12 +599,15 @@ void ValidationEngine::checkGroupLayouts(const Session& session, DefinitionCheck
     }
     if (out.layoutPlugins)
         v.fail(Severity::Info, "Group Layout",
-               std::to_string(out.layoutPlugins) + " plugins with cells, worldspaces or dialogue topics checked: " +
-                   std::to_string(out.layoutRebuilt) + " rebuilt by the nested group writer and read back with every "
-                   "record and group in place (" + std::to_string(out.layoutSameOrder) + " in the same order), " +
-                   std::to_string(out.layoutPlugins - out.layoutRebuilt - out.layoutProblems) +
+               std::to_string(out.layoutPlugins) + " plugins with cells, worldspaces, quests or dialogue topics "
+                   "checked: " + std::to_string(out.layoutRebuilt) + " rebuilt by the nested group writer and read "
+                   "back with every record and group in place (" + std::to_string(out.layoutSameOrder) +
+                   " with records in the same order), " +
+                   std::to_string(out.layoutPlugins - out.layoutRebuilt - out.layoutProblems - out.layoutDefects) +
                    " checked by placement only (over 64 MB), " + std::to_string(out.layoutProblems) +
-                   " with differences. Send this result to the developer");
+                   " with differences, " + std::to_string(out.layoutDefects) +
+                   " not rebuilt because the plugin itself is faulty. " + std::to_string(out.layoutEmptyGroups) +
+                   " empty groups were left out (no effect in game). Send this result to the developer");
 }
 
 std::vector<ArchivePriorityChange> ValidationEngine::checkArchivePriority(const Session& session,
