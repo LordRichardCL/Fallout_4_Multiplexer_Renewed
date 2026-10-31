@@ -1042,6 +1042,7 @@ TEST(archive_priority_change_is_reported)
         CHECK(q.archivePriorityChanges().empty());
     }
     cfg.keepArchivePriority = false; // compiled anyway: the change is reported
+    cfg.databasePath = root / "archprio.sqlite"; // the build is remembered
     Pipeline p(cfg);
     p.scan();
     p.analyse();
@@ -1067,6 +1068,9 @@ TEST(archive_priority_change_is_reported)
         CHECK(ini.find("ModA - Main.ba2") != std::string::npos);
     }
     cfg.keepArchivePriority = true;
+    // Even without the list in the output folder (a mod manager may remove it), the last build in the
+    // database says ModA was compiled, so its archive in the INI list was put there by that build.
+    std::filesystem::remove(result.directory / "Multiplexer_RegisteredArchives.txt");
     Pipeline again(cfg);
     again.scan();
     bool owned = false;
@@ -1078,6 +1082,10 @@ TEST(archive_priority_change_is_reported)
     CHECK(again.compile());
     CHECK(!again.compiledOutput()->isCompiled(again.session().findPlugin("ModA.esp")->index));
     CHECK(again.session().autoRetained.count("moda.esp") == 1);
+    bool baseline = false;
+    for (const auto& is : again.validation()->issues)
+        baseline |= is.category == "Archive Priority" && is.message.find("1 archives in the INI list were added") == 0;
+    CHECK(baseline);
 }
 
 TEST(weapon_sounds_at_unaligned_offsets_are_rewritten)

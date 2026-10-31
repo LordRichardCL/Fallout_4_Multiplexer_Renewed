@@ -102,9 +102,17 @@ void AssetScanner::scan(Session& session, const AssetScanOptions& options, Progr
     };
     // Archives an earlier build added to the INI list load as their plugin's archives (below), as
     // they did before: the baseline is the load order without this app's changes.
-    for (const auto& a : session.install.iniArchives())
-        if (!session.registeredArchives.count(toLower(a)))
-            queue(a, kInvalidPlugin);
+    size_t restored = 0;
+    for (const auto& a : session.install.iniArchives()) {
+        if (session.registeredArchives.count(toLower(a))) {
+            ++restored;
+            continue;
+        }
+        queue(a, kInvalidPlugin);
+    }
+    session.restoredArchives = restored;
+    spdlog::info("{} archives an earlier build added to the INI list load as their plugin's ({} listed as added)",
+                 restored, session.registeredArchives.size());
     for (auto pi : session.loadOrder)
         for (const auto& a : pluginArchiveNames(session.plugins[pi], language))
             queue(a, pi);
@@ -115,13 +123,14 @@ void AssetScanner::scan(Session& session, const AssetScanOptions& options, Progr
     for (const auto* f : vfs.rootFiles()) {
         if (!iendsWith(f->relativePath, ".ba2"))
             continue;
-        auto sep = f->relativePath.find(" - ");
-        if (sep == std::string::npos)
-            continue;
-        std::string base = f->relativePath.substr(0, sep);
-        for (const char* ext : {".esp", ".esm", ".esl"})
-            if (auto p = session.findPlugin(base + ext))
-                p->archives.push_back(f->relativePath);
+        // "<plugin> - <suffix>.ba2"; the plugin name itself may contain " - " (FOLIP - New LODs).
+        for (size_t sep = f->relativePath.find(" - "); sep != std::string::npos;
+             sep = f->relativePath.find(" - ", sep + 1)) {
+            std::string base = f->relativePath.substr(0, sep);
+            for (const char* ext : {".esp", ".esm", ".esl"})
+                if (auto p = session.findPlugin(base + ext))
+                    p->archives.push_back(f->relativePath);
+        }
     }
 
     idx.archives.resize(archiveFiles.size());

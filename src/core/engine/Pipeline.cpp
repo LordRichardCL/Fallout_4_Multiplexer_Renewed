@@ -130,6 +130,18 @@ void Pipeline::scan(ProgressSink& progress)
     session_->registeredArchives.clear();
     for (const auto& a : Exporter::registeredArchives(outputDir))
         session_->registeredArchives.insert(a);
+    // Also from the last build in the database (the file lives in a folder a mod manager manages):
+    // archives of plugins it compiled that are now in the INI list were put there by it.
+    for (const auto& a : session_->install.iniArchives()) {
+        const std::string lower = toLower(a);
+        if (!iendsWith(lower, ".ba2"))
+            continue;
+        for (const auto& name : session_->reactivate) {
+            const std::string base = name.size() > 4 ? name.substr(0, name.size() - 4) : name;
+            if (lower.size() > base.size() + 3 && lower.compare(0, base.size() + 3, base + " - ") == 0)
+                session_->registeredArchives.insert(lower);
+        }
+    }
     AssetScanner::scan(*session_, config_.assets, progress);
     DependencyEngine::evaluateEligibility(*session_, config_.analysis);
 
@@ -381,6 +393,13 @@ bool Pipeline::compile(ProgressSink& progress)
             validation_->pass();
     }
 
+    // Make the baseline visible: archives an earlier build put in the INI list count as their plugin's.
+    if (!session_->registeredArchives.empty() || session_->restoredArchives)
+        validation_->fail(Severity::Info, "Archive Priority",
+                          std::to_string(session_->restoredArchives) + " archives in the INI list were added by an "
+                          "earlier build (" + std::to_string(session_->registeredArchives.size()) +
+                          " listed in Multiplexer_RegisteredArchives.txt); they are compared as their plugin's own "
+                          "archives, where the game loaded them before");
     archiveChanges_ = ValidationEngine::checkArchivePriority(*session_, *compiled_);
     if (!loadersOff.empty() && !compiled_->archivesToRegister.empty())
         validation_->fail(Severity::Info, "Archive Loaders",
