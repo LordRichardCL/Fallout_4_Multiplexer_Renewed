@@ -84,6 +84,9 @@ public:
     // Archives listed in SResourceArchiveList2 load before every plugin's own archives. Once compiled
     // plugins are disabled, their archives move into that list, so an archive of a plugin that stays
     // can start winning files it used to lose. Loose files are unaffected (they beat all archives).
+    // Compiled plugins whose archives (loaded from the INI list after switching over) would no longer
+    // serve files they serve today, with the number of such files.
+    static std::map<PluginIndex, size_t> archiveLosers(const Session& session, const CompiledOutput& compiled);
     static std::vector<ArchivePriorityChange> checkArchivePriority(const Session& session,
                                                                    const CompiledOutput& compiled);
 

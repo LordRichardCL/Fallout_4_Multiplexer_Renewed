@@ -1029,6 +1029,19 @@ TEST(archive_priority_change_is_reported)
     writeFile(root / "plugins.txt", "*ModE.esp\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
     auto cfg = configFor(root);
     cfg.databasePath.clear();
+    {
+        // By default ModA stays: compiled, its archive would lose the mesh to ModE's.
+        Pipeline q(cfg);
+        q.scan();
+        q.analyse();
+        CHECK(q.compile());
+        const auto* modA = q.session().findPlugin("ModA.esp");
+        CHECK(!q.compiledOutput()->isCompiled(modA->index));
+        CHECK(q.session().autoRetained.count("moda.esp") == 1);
+        CHECK(q.session().autoRetained.at("moda.esp").find("Archive priority: 1 files") == 0);
+        CHECK(q.archivePriorityChanges().empty());
+    }
+    cfg.keepArchivePriority = false; // compiled anyway: the change is reported
     Pipeline p(cfg);
     p.scan();
     p.analyse();
@@ -1165,6 +1178,7 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
         auto outside = cfg;
         outside.databasePath = root / "db3.sqlite";
         outside.exportOptions.outputDirectory = root / "Elsewhere";
+        outside.keepArchivePriority = false; // compile it, to see why no loader is used
         Pipeline q(outside);
         q.scan();
         q.analyse();

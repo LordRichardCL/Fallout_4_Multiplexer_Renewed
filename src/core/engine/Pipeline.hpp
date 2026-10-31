@@ -39,6 +39,9 @@ struct PipelineConfig {
     // Mod Organizer 2 with the output folder inside the mods folder: replace compiled plugins that
     // have archives with archive loaders so their archives keep their priority (no INI change).
     bool archiveLoaders = true;
+    // Keep a plugin out of compilation when its archives, loaded from the INI list after switching
+    // over, would no longer serve files they serve today (other archives would win them).
+    bool keepArchivePriority = true;
     // Record definitions to use instead of the runtime profile's (tests, trial catalogues). Not owned.
     const RecordDefinitions* definitions = nullptr;
 };

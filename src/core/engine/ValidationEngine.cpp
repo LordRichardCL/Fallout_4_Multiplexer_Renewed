@@ -612,12 +612,14 @@ void ValidationEngine::checkGroupLayouts(const Session& session, DefinitionCheck
                    " repeated top-level groups written once. Send this result to the developer");
 }
 
-std::vector<ArchivePriorityChange> ValidationEngine::checkArchivePriority(const Session& session,
-                                                                         const CompiledOutput& compiled)
+namespace {
+// Load sequence after switching over: INI archives as today, then compiled plugins' archives
+// (appended to the INI list in load order), then the archives of plugins that stay. Calls `changed`
+// for each file whose winning archive changes.
+template <class F>
+void forEachArchiveChange(const Session& session, const CompiledOutput& compiled, F changed)
 {
     const auto& idx = session.assets;
-    // Load sequence after switching over: INI archives as today, then compiled plugins' archives
-    // (appended to the INI list in load order), then the archives of plugins that stay.
     std::vector<uint64_t> rank(idx.archives.size());
     for (size_t a = 0; a < idx.archives.size(); ++a) {
         const auto& ar = idx.archives[a];
@@ -625,7 +627,6 @@ std::vector<ArchivePriorityChange> ValidationEngine::checkArchivePriority(const 
         uint64_t tier = ar.owner == kInvalidPlugin ? 0 : movesToIni ? 1 : 2;
         rank[a] = (tier << 32) | a;
     }
-    std::vector<ArchivePriorityChange> out;
     for (const auto& e : idx.entries) {
         if (e.sources.size() < 2)
             continue;
@@ -636,11 +637,32 @@ std::vector<ArchivePriorityChange> ValidationEngine::checkArchivePriority(const 
         for (const auto& s : e.sources)
             if (s.archive != kLooseFile && (!after || rank[s.archive] > rank[after->archive]))
                 after = &s;
-        if (!after || after->archive == before.archive)
-            continue;
-        out.push_back({idx.path(e), idx.archives[before.archive].name, idx.modName(before),
-                       idx.archives[after->archive].name, idx.modName(*after)});
+        if (after && after->archive != before.archive)
+            changed(e, before, *after);
     }
+}
+} // namespace
+
+std::map<PluginIndex, size_t> ValidationEngine::archiveLosers(const Session& session, const CompiledOutput& compiled)
+{
+    std::map<PluginIndex, size_t> out;
+    forEachArchiveChange(session, compiled, [&](const AssetEntry&, const AssetSource& before, const AssetSource&) {
+        const auto owner = session.assets.archives[before.archive].owner;
+        if (owner != kInvalidPlugin && compiled.isCompiled(owner))
+            ++out[owner];
+    });
+    return out;
+}
+
+std::vector<ArchivePriorityChange> ValidationEngine::checkArchivePriority(const Session& session,
+                                                                         const CompiledOutput& compiled)
+{
+    const auto& idx = session.assets;
+    std::vector<ArchivePriorityChange> out;
+    forEachArchiveChange(session, compiled, [&](const AssetEntry& e, const AssetSource& before, const AssetSource& after) {
+        out.push_back({idx.path(e), idx.archives[before.archive].name, idx.modName(before),
+                       idx.archives[after.archive].name, idx.modName(after)});
+    });
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.path < b.path; });
     return out;
 }

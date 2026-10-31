@@ -164,7 +164,7 @@ Then:
 
 ### Archive priority
 
-With archive loaders (MO2) nothing changes: every archive keeps its position. Without them, archives listed in the INI load before every plugin's own archives. Once compiled plugins' archives move into that list, an archive of a plugin that stays can start winning a file it used to lose. The **Validation** page lists these under **Archive Priority** (up to 50, with the full list in `Multiplexer_ArchivePriority.txt`). To keep the compiled mod's version of a file, exclude that mod from compilation, or provide the file loose (loose files beat every archive).
+With archive loaders (MO2) nothing changes: every archive keeps its position. Without them, archives listed in the INI load before every plugin's own archives. Once compiled plugins' archives move into that list, an archive of a plugin that stays could start winning a file it used to lose. The app does not let that happen: a plugin whose archives would lose any file they serve today stays in the load order (**Kept Out Automatically**, "Archive priority: N files…"), and the compilation runs again without it. This matters most for mods that ship large archives, such as LOD packs. With Mod Organizer 2 and the output inside the mods folder, archive loaders keep every archive in place, so nothing is kept out for this reason. Any remaining change is listed under **Archive Priority** (up to 50, with the full list in `Multiplexer_ArchivePriority.txt`).
 
 ### When some records cannot be compiled safely
 

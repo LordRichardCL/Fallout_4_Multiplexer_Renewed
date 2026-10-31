@@ -274,6 +274,19 @@ bool Pipeline::compile(ProgressSink& progress)
             for (const auto& [pi, why] : AutoMerger::plan(*session_, *compiled_, outputDir, *autoMerge_))
                 if (session_->autoRetained.emplace(session_->plugins[pi].key, why).second)
                     ++isolated;
+        // A compiled plugin whose archives would lose files to other archives (INI list) changes what
+        // the game shows: it stays in the load order instead.
+        if (config_.keepArchivePriority)
+            for (const auto& [pi, files] : ValidationEngine::archiveLosers(*session_, *compiled_))
+                if (session_->autoRetained
+                        .emplace(session_->plugins[pi].key,
+                                 "Archive priority: " + std::to_string(files) +
+                                     " files its archives provide today would be served by other archives once "
+                                     "they load from the INI list (before every plugin's own archives). On Mod "
+                                     "Organizer 2, with the output inside the mods folder, archive loaders keep "
+                                     "their place")
+                        .second)
+                    ++isolated;
         if (isolated && round < 8)
             continue;
         if (!validation_->critical() || !config_.autoIsolate || round >= 8)
@@ -312,7 +325,8 @@ bool Pipeline::compile(ProgressSink& progress)
         const auto* p = session_->findPlugin(key);
         validation_->fail(Severity::Warning, "Kept Out Automatically",
                           (p ? p->name : key) +
-                              (reason.rfind("Advanced Users Auto-Merger", 0) == 0
+                              (reason.rfind("Advanced Users Auto-Merger", 0) == 0 ||
+                                       reason.rfind("Archive priority", 0) == 0
                                    ? " stays in the load order: " + reason
                                    : " stays in the load order because one of its records could not be written "
                                      "safely: " + reason),
