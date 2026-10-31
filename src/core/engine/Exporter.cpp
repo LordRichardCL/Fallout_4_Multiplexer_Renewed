@@ -204,13 +204,17 @@ std::vector<fs::path> Exporter::applyArchiveIni(const Session& session, const Co
             custom = entry.path();
 
     std::string text;
+    auto backup = custom;
+    backup += ".multiplexer-backup-" + timestamp();
     if (fs::exists(custom)) {
         std::ifstream in(custom, std::ios::binary);
         text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-        auto backup = custom;
-        backup += ".multiplexer-backup-" + timestamp();
         fs::copy_file(custom, backup, fs::copy_options::overwrite_existing);
         spdlog::info("Backed up {} to {}", pathToUtf8(custom), pathToUtf8(backup));
+    } else {
+        // An empty backup records that there was no Fallout4Custom.ini: the oldest backup is always
+        // the state before this app's first change (the scan's archive baseline).
+        writeText(backup, "");
     }
     std::string updated = setIniValue(text, "Archive", "SResourceArchiveList2", join(archiveList(session, c, outputDirectory), ", "));
     if (updated != text) {

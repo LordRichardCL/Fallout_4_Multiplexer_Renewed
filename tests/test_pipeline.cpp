@@ -1086,6 +1086,21 @@ TEST(archive_priority_change_is_reported)
     for (const auto& is : again.validation()->issues)
         baseline |= is.category == "Archive Priority" && is.message.find("1 archives in the INI list were added") == 0;
     CHECK(baseline);
+
+    // Every generated file deleted and a fresh database: the oldest backup of Fallout4Custom.ini (made
+    // before the first change) still shows that ModA's archive was added since.
+    auto fresh = cfg;
+    fresh.databasePath = root / "fresh.sqlite";
+    Pipeline clean(fresh);
+    clean.scan();
+    bool restored = false;
+    for (const auto& ar : clean.session().assets.archives)
+        if (ar.name == "ModA - Main.ba2")
+            restored = ar.owner == clean.session().findPlugin("ModA.esp")->index;
+    CHECK(restored);
+    clean.analyse();
+    CHECK(clean.compile());
+    CHECK(!clean.compiledOutput()->isCompiled(clean.session().findPlugin("ModA.esp")->index));
 }
 
 TEST(weapon_sounds_at_unaligned_offsets_are_rewritten)
@@ -1712,9 +1727,9 @@ TEST(npc_overrides_only)
     CHECK(out.resolve(*boss, loadLE<uint32_t>(cnto->data.data())) == std::make_pair(std::string("Fallout4.esm"), 0x1000u));
 }
 
-// World stage W2: overrides of placed references, landscape, cells and worldspaces compile, written
-// with their cell and worldspace. A cell no compiled plugin wins is copied as the game loads it now
-// (here a retained plugin's version). A plugin adding a new reference stays.
+// World stages W2 and W3: overrides of placed references, landscape, cells and worldspaces, and new
+// references in existing cells, compile, written with their cell and worldspace. A cell no compiled
+// plugin wins is copied as the game loads it now (here a retained plugin's version).
 TEST(world_overrides_compile_with_their_cell)
 {
     auto reasonHas = [](const PluginInfo& pl, const std::string& t) {
@@ -1770,10 +1785,13 @@ TEST(world_overrides_compile_with_their_cell)
                 {record("WRLD", 0x01000800, {zs("EDID", "TestWorld")}),
                  record("CELL", 0x01000801, {zs("EDID", "WorldPersistent")}, P),
                  record("ACHR", 0x01000806, {zs("EDID", "Guard"), u32("NAME", 0x800), position(7)}, P)});
-    // ModN adds a new reference: new placed references keep their plugin.
+    // ModN adds a new reference in the vault, and a lamp linked to it (XLKR: keyword, reference).
+    std::vector<uint8_t> link(8, 0);
+    storeLE<uint32_t>(link.data() + 4, 0x02000800);
     writePlugin(data / "ModN.esp", {"Fallout4.esm", "World.esm"},
                 {record("CELL", 0x01000803, {zs("EDID", "Vault"), lighting(1)}),
-                 record("REFR", 0x02000800, {zs("EDID", "NewThing"), u32("NAME", 0x800), position(9)})});
+                 record("REFR", 0x02000800, {zs("EDID", "NewThing"), u32("NAME", 0x800), position(9)}),
+                 record("REFR", 0x02000801, {zs("EDID", "NewLamp"), u32("NAME", 0x800), raw("XLKR", link), position(8)})});
     writeFile(root / "plugins.txt",
               "*World.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModX.esp\n*ModY.esp\n*ModZ.esp\n*ModP.esp\n*ModN.esp\n");
     auto cfg = configFor(root);
@@ -1785,10 +1803,10 @@ TEST(world_overrides_compile_with_their_cell)
     const auto& s = p.session();
     for (const char* name : {"ModX.esp", "ModY.esp", "ModP.esp"})
         CHECK_EQ(s.findPlugin(name)->eligibility, Eligibility::Eligible);
-    const auto* modN = s.findPlugin("ModN.esp");
-    CHECK_EQ(modN->eligibility, Eligibility::Ineligible);
-    CHECK(reasonHas(*modN, "new cells, worldspaces and placed references"));
-    CHECK_EQ(s.findPlugin("World.esm")->eligibility, Eligibility::Ineligible);
+    CHECK_EQ(s.findPlugin("ModN.esp")->eligibility, Eligibility::Eligible); // new references (W3)
+    const auto* worldEsm = s.findPlugin("World.esm");
+    CHECK_EQ(worldEsm->eligibility, Eligibility::Ineligible); // it defines the cells
+    CHECK(reasonHas(*worldEsm, "new cells, worldspaces and landscape"));
 
     CHECK(p.compile());
     CHECK_EQ(p.validation()->errors, uint64_t(0));
@@ -1840,13 +1858,56 @@ TEST(world_overrides_compile_with_their_cell)
             CHECK(out.resolve(r, r.placement.parent) == out.identity(*outside));
         }
     CHECK(land);
-    // No new reference anywhere: ModN stays as it is.
-    CHECK(find("NewThing", "REFR") == nullptr);
+    // ModN's new references: new FormIDs in the output, in the vault (a copy of World.esm's cell), the
+    // lamp's link pointing at the new FormID.
+    const auto* thing = find("NewThing", "REFR");
+    const auto* lamp = find("NewLamp", "REFR");
+    CHECK(thing && lamp);
+    if (thing && lamp) {
+        CHECK_EQ(out.identity(*thing).first, thing->plugin); // defined by the output
+        CHECK(thing->placement.kind == K::CellChild);
+        CHECK(out.resolve(*thing, thing->placement.parent) == out.identity(*vault));
+        CHECK_EQ(lamp->plugin, thing->plugin);
+        const auto* xlkr = lamp->record.find(Signature("XLKR"));
+        CHECK(out.resolve(*lamp, loadLE<uint32_t>(xlkr->data.data() + 4)) == out.identity(*thing));
+    }
     // The written plugin passes the group layout check.
     for (const auto& f : result.pluginFiles) {
         auto check = checkLayout(PluginFile::load(f), true);
         CHECK(check.problems.empty());
     }
+}
+
+// A new reference listed in its cell's precombine data keeps its plugin out: the precombined meshes
+// were made for its FormID.
+TEST(new_reference_in_precombines_keeps_its_plugin)
+{
+    auto root = buildInstall("precombined");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "World.esm", {"Fallout4.esm"},
+                {record("CELL", 0x01000803, {zs("EDID", "Vault")}),
+                 record("REFR", 0x01000804, {zs("EDID", "Chair"), u32("NAME", 0x800)})},
+                ESM);
+    // XCRI: 1 mesh, 1 reference: mesh ID, then (reference, mesh ID).
+    std::vector<uint8_t> xcri(8 + 4 + 8, 0);
+    storeLE<uint32_t>(xcri.data(), 1);
+    storeLE<uint32_t>(xcri.data() + 4, 1);
+    storeLE<uint32_t>(xcri.data() + 8, 0xABCDEF01);
+    storeLE<uint32_t>(xcri.data() + 12, 0x02000800);
+    storeLE<uint32_t>(xcri.data() + 16, 0xABCDEF01);
+    writePlugin(data / "ModQ.esp", {"Fallout4.esm", "World.esm"},
+                {record("CELL", 0x01000803, {zs("EDID", "Vault"), raw("XCRI", xcri)}),
+                 record("REFR", 0x02000800, {zs("EDID", "Combined"), u32("NAME", 0x800)})});
+    writeFile(root / "plugins.txt", "*World.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModQ.esp\n");
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    CHECK_EQ(p.session().findPlugin("ModQ.esp")->eligibility, Eligibility::Eligible);
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    CHECK(!p.compiledOutput()->isCompiled(p.session().findPlugin("ModQ.esp")->index));
+    CHECK(p.session().autoRetained.count("modq.esp") == 1);
+    CHECK(p.session().autoRetained.at("modq.esp").find("precombine data") != std::string::npos);
 }
 
 // While world types are Candidates, a plugin with cell or reference overrides stays as it is.

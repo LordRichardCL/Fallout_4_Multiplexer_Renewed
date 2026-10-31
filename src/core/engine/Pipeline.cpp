@@ -3,6 +3,7 @@
 #include "db/DatabaseWriter.hpp"
 #include "engine/CleaningEngine.hpp"
 #include "report/ReportGenerator.hpp"
+#include "util/IniFile.hpp"
 #include "util/Text.hpp"
 
 #include <fstream>
@@ -130,6 +131,36 @@ void Pipeline::scan(ProgressSink& progress)
     session_->registeredArchives.clear();
     for (const auto& a : Exporter::registeredArchives(outputDir))
         session_->registeredArchives.insert(a);
+    // Also from the oldest backup of Fallout4Custom.ini (written before this app first changed it):
+    // archives of active plugins in today's list that were not in that list were added since. This
+    // holds when the output folder and the database were deleted between builds.
+    if (!session_->install.iniDirectory.empty()) {
+        std::error_code ec;
+        std::filesystem::path oldest;
+        for (const auto& entry : std::filesystem::directory_iterator(session_->install.iniDirectory, ec)) {
+            const std::string name = toLower(pathToUtf8(entry.path().filename()));
+            if (name.rfind("fallout4custom.ini.multiplexer-backup-", 0) == 0 &&
+                (oldest.empty() || name < toLower(pathToUtf8(oldest.filename()))))
+                oldest = entry.path();
+        }
+        if (!oldest.empty()) {
+            IniFile before;
+            before.load(oldest);
+            std::unordered_set<std::string> original;
+            for (const auto& a : split(before.get("Archive", "SResourceArchiveList2", ""), ','))
+                original.insert(toLower(a));
+            for (const auto& a : split(session_->install.ini.get("Archive", "SResourceArchiveList2", ""), ',')) {
+                const std::string lower = toLower(a);
+                if (lower.empty() || original.count(lower) || !iendsWith(lower, ".ba2"))
+                    continue;
+                for (size_t sep = lower.find(" - "); sep != std::string::npos; sep = lower.find(" - ", sep + 1))
+                    for (const char* ext : {".esp", ".esm", ".esl"})
+                        if (const auto* p = session_->findPlugin(lower.substr(0, sep) + ext);
+                            p && p->active && !p->baseGame)
+                            session_->registeredArchives.insert(lower);
+            }
+        }
+    }
     // Also from the last build in the database (the file lives in a folder a mod manager manages):
     // archives of plugins it compiled that are now in the INI list were put there by it.
     for (const auto& a : session_->install.iniArchives()) {

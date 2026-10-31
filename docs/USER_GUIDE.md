@@ -166,6 +166,8 @@ Then:
 
 With archive loaders (MO2) nothing changes: every archive keeps its position. Without them, archives listed in the INI load before every plugin's own archives. Once compiled plugins' archives move into that list, an archive of a plugin that stays could start winning a file it used to lose. The app does not let that happen: a plugin whose archives would lose any file they serve today stays in the load order (**Kept Out Automatically**, "Archive priority: N files…"), and the compilation runs again without it. This matters most for mods that ship large archives, such as LOD packs. With Mod Organizer 2 and the output inside the mods folder, archive loaders keep every archive in place, so nothing is kept out for this reason. Any remaining change is listed under **Archive Priority** (up to 50, with the full list in `Multiplexer_ArchivePriority.txt`).
 
+The comparison is always with your load order **as it was before this app changed the INI**: archives an earlier **Apply to Game** added count as their plugin's own. The app knows them from `Multiplexer_RegisteredArchives.txt` in the output folder, from the last build in its database, and from the oldest `Fallout4Custom.ini.multiplexer-backup-*` next to your INI (the INI before the first change). If you delete generated files between builds, keep those backups, or restore the oldest one first.
+
 ### When some records cannot be compiled safely
 
 If validation finds records that cannot be written safely, for example a FormID in data the app does not fully understand, the app does **not** block the whole export. It keeps those records' plugins in the load order (or leaves those records out of the patch) and compiles again. The **Validation** page lists every plugin it kept out under **Kept Out Automatically**, with the reason. The **Plugins** page shows them as *Retained*. Only errors that cannot be traced to a plugin or record still block export.
@@ -197,13 +199,15 @@ Command line: `fo4mx check-definitions --mo2 "C:\Modding\MO2"` prints the same r
 
 ## Cells, worldspaces and placed references
 
-Most mods that change the world do it by **editing existing objects**: moving a vanilla rock, disabling a car, changing a cell's lighting, tweaking landscape. The compiler can include those edits (stage W2):
+Most mods that change the world do it by **editing existing objects** (moving a vanilla rock, disabling a car, changing a cell's lighting, tweaking landscape) or by **placing new objects in existing cells** (a new workbench in Sanctuary, clutter in a vanilla interior). The compiler includes both (stages W2 and W3):
 
-- **What is compiled:** overrides of existing placed references (REFR, ACHR and the placed projectile types), landscape (LAND), cells (CELL) and worldspaces (WRLD).
+- **What is compiled:** overrides of existing placed references (REFR, ACHR and the placed projectile types), landscape (LAND), cells (CELL) and worldspaces (WRLD); and **new placed references in existing cells**. New references get new FormIDs in the output, and every link to them from compiled records (linked references, enable parents and so on) is rewritten. A plugin that stays and refers to them keeps their plugin in the load order too (it is a master).
+- **New references in precombines or previs:** a new reference listed in its cell's precombine (XCRI) or previs (XPRI) data keeps its plugin out: those meshes and files were generated for its FormID.
 - **How it is written:** each edited reference is written inside its cell, and each exterior cell inside its worldspace, with the same nested groups the Creation Kit and xEdit use. They go into the last output plugin in use, kept together in clusters (an interior cell with everything in it, or a worldspace with all its cells); when a cluster's masters would not fit, the next output takes it.
 - **Cells nobody compiled:** when a compiled plugin edits a reference in a cell whose current version comes from a plugin that stays in the load order, the output gets an exact copy of that cell as the game loads it now. The output loads last, so the copy changes nothing. The Compilation Report counts these as **Cells Copied**.
 - **Precombined meshes and previs stay exactly as they are.** The game finds them by the plugin that *defines* the cell (`Precombined\<plugin>\<cell>_<mesh>_OC.nif`), and that plugin always stays.
-- **What keeps a plugin out:** adding *new* references, cells or worldspaces (a later stage), navmeshes (NAVM), and dialogue. The plugin's reason says which.
+- **What keeps a plugin out:** adding *new* cells, worldspaces or landscape (a later stage), navmeshes (NAVM), and dialogue. The plugin's reason says which.
+- **Saves:** new references get new FormIDs, so a game saved with the original plugins loses them. Start a new game.
 
 CELL, WRLD, REFR, ACHR, LAND and the placed hazards, projectiles, missiles and arrows were confirmed by a real load order (1,366 plugins rebuilt by the Group Layout check) and are compiled. PBAR, PBEA, PCON and PFLA did not occur in it and stay Candidates. A Group Layout difference in a later definition check is reported, and keeps any world type that is still a Candidate out.
 

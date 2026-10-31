@@ -234,21 +234,31 @@ TEST(update_layouts_and_guards)
         return t;
     };
     {
+        // A placed reference type set to Winner compiles (overrides and new references, W2/W3); dialogue
+        // never does.
         RecordDefinitions t = d;
-        auto trial = RecordCatalogue::parse(promote(promote(text, "REFR", false), "INFO", false));
+        auto trial = RecordCatalogue::parse(promote(promote(text, "PBAR", false), "INFO", false));
         t.applyCatalogue(trial);
-        CHECK(t.isCompilable(Signature("REFR")));
-        CHECK(t.overridesOnly(Signature("REFR")));
+        CHECK(t.isCompilable(Signature("PBAR")));
+        CHECK(!t.overridesOnly(Signature("PBAR")));
         CHECK(!t.isCompilable(Signature("INFO")));
         CHECK(t.strategy(Signature("INFO")) == MergeStrategy::Candidate);
     }
     {
+        // A cell compiles only as overrides: without the scope it does not compile.
         RecordDefinitions t = d;
-        auto trial = RecordCatalogue::parse(promote(text, "REFR", true));
+        std::string noScope = text;
+        auto pos = noScope.find("\nCELL,");
+        auto end = noScope.find('\n', pos + 1);
+        auto scope = noScope.rfind(",overrides", end);
+        noScope.erase(scope, std::string(",overrides").size());
+        auto trial = RecordCatalogue::parse(noScope); // applyCatalogue keeps a pointer to it
         t.applyCatalogue(trial);
-        CHECK(!t.isCompilable(Signature("REFR")));
-        CHECK(t.strategy(Signature("REFR")) == MergeStrategy::Candidate);
+        CHECK(!t.isCompilable(Signature("CELL")));
+        CHECK(t.strategy(Signature("CELL")) == MergeStrategy::Candidate);
     }
+    CHECK(!d.overridesOnly(Signature("REFR"))); // new references compile (W3)
+    CHECK(d.overridesOnly(Signature("LAND")));
     CHECK(d.field(Signature("CELL"), Signature("XCRI")).skipCountAt == 0);
     // Placed references: persistent location, and topic data whose FormID depends on its type.
     CHECK(d.field(Signature("ACHR"), Signature("XLCN")).kind == FieldKind::FormId);
@@ -265,12 +275,13 @@ TEST(update_layouts_and_guards)
     CHECK_EQ(topic.formIdSlots[0].offset, 4u);
     auto subtype = pdto(1, 0x56544341); // "ACTV": text, never a FormID
     CHECK(subtype.formIdSlots.empty() && subtype.heuristic.empty());
-    // Confirmed world types compile as overrides only.
+    // Confirmed world types compile; cells, worldspaces and landscape as overrides only.
     for (const char* t : {"CELL", "WRLD", "REFR", "ACHR", "LAND", "PHZD", "PGRE", "PMIS", "PARW"}) {
         CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Winner);
         CHECK(d.isCompilable(Signature::fromString(t)));
-        CHECK(d.overridesOnly(Signature::fromString(t)));
     }
+    for (const char* t : {"CELL", "WRLD", "LAND"})
+        CHECK(d.overridesOnly(Signature::fromString(t)));
 }
 
 TEST(struct_array_with_header)

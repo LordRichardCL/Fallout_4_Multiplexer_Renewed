@@ -498,6 +498,34 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         }
     }
 
+    // ---- Precombines and previs --------------------------------------------------
+    // A new reference listed in a cell's precombine (XCRI) or previs (XPRI) data was combined into
+    // meshes made for its FormID; whether those files depend on it cannot be checked, so its plugin
+    // stays in the load order.
+    for (const auto& e : out.records) {
+        if (e.sig != sig::CELL)
+            continue;
+        for (const auto& f : e.fields.fields)
+            for (const auto& sub : f.subs) {
+                if (sub.sig != Signature("XCRI") && sub.sig != Signature("XPRI"))
+                    continue;
+                for (const auto& [off, k] : sub.refs) {
+                    if (!k.valid() || !out.compiledFlag_[k.origin])
+                        continue;
+                    auto it = out.indexByKey.find(k);
+                    if (it == out.indexByKey.end() || !out.records[it->second].isNew)
+                        continue;
+                    addIssue(Severity::Error, "Precombined Reference",
+                             session.formLabel(k) + " is a new reference in the " +
+                                 (sub.sig == Signature("XCRI") ? "precombine" : "previs") + " data of " +
+                                 session.formLabel(e.key) +
+                                 ": the precombined meshes and previs files were made for its FormID, which "
+                                 "compiling would change, so its plugin stays",
+                             k, session.pluginName(k.origin));
+                }
+            }
+    }
+
     // ---- Rewrite (dependency extraction) ------------------------------------------
     progress.stage("Rewrite");
     // References that are already broken in the source (a master index past the master list, or
@@ -749,6 +777,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             }
         }
 
+    std::vector<std::vector<uint32_t>> worldClusters; // records that must share an output
     // Cells, worldspaces and placed references go into the last output in use (so everything they
     // reference comes before), in clusters that are never split: an interior cell with everything in
     // it, or a worldspace with all its cells. When a cluster's masters would not fit in that output,
@@ -792,6 +821,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             for (uint32_t v = 0; v < out.records.size(); ++v)
                 if (!out.records[v].world && !out.records[v].patch && pref[v] == worldOutput)
                     retainedMastersOf(out.records[v], current);
+            for (const auto& [root, members] : clusters)
+                worldClusters.push_back(members);
             int o = worldOutput;
             for (const auto& [root, members] : clusters) {
                 std::set<PluginIndex> need;
@@ -826,6 +857,30 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         }
         for (auto v : comp)
             out.records[v].output = out.records[v].patch ? patchOutput[v] : o;
+    }
+    // A placed reference that links to a new reference in a later output moves there, and its whole
+    // cluster (its cell, its worldspace, everything in them) with it; repeat until nothing moves.
+    for (bool moved = !worldClusters.empty(); moved;) {
+        moved = false;
+        for (const auto& members : worldClusters) {
+            int o = 0;
+            for (auto v : members)
+                o = std::max(o, out.records[v].output);
+            for (auto v : members)
+                if (out.records[v].output != o) {
+                    out.records[v].output = o;
+                    moved = true;
+                }
+        }
+        for (auto& e : out.records) {
+            if (e.patch)
+                continue;
+            for (auto d : e.deps)
+                if (out.records[d].output > e.output) {
+                    e.output = out.records[d].output;
+                    moved = true;
+                }
+        }
     }
 
     for (uint32_t v = 0; v < out.records.size(); ++v) {
