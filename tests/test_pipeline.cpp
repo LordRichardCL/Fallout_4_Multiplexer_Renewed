@@ -1785,6 +1785,11 @@ TEST(definition_check_checks_group_layouts)
     for (const auto& is : check.report.issues)
         summary |= is.category == "Group Layout" && is.message.find("1 rebuilt by the nested group writer") != std::string::npos;
     CHECK(summary);
+    // The exported Validation Report includes the definition check.
+    p.writeReports(root / "Reports");
+    std::ifstream in(root / "Reports" / "ValidationReport.txt");
+    std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(txt.find("Group Layout") != std::string::npos);
 }
 
 // ---- Filename references --------------------------------------------------------------------------

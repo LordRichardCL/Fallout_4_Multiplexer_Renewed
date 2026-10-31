@@ -80,6 +80,9 @@ public:
     const DependencyReport* dependencies() const { return dependencies_ ? &*dependencies_ : nullptr; }
     const CompiledOutput* compiledOutput() const { return compiled_ ? &*compiled_ : nullptr; }
     const ValidationReport* validation() const { return validation_ ? &*validation_ : nullptr; }
+    // For the Validation Report: the compile validation plus the latest definition check (its
+    // findings are never errors). Null when neither has run.
+    const ValidationReport* reportValidation() const;
     const std::optional<ExportResult>& exportResult() const { return exported_; }
     // Advanced Users Auto-Merger results (null when it is off or before Analyse).
     const AutoMergeReport* autoMerge() const { return autoMerge_ ? &*autoMerge_ : nullptr; }
@@ -101,6 +104,8 @@ private:
     std::optional<DependencyReport> dependencies_;
     std::optional<CompiledOutput> compiled_;
     std::optional<ValidationReport> validation_;
+    std::optional<ValidationReport> definitionCheck_;      // latest definition check's findings
+    mutable std::optional<ValidationReport> reportValidation_;
     std::vector<ArchivePriorityChange> archiveChanges_;
     std::optional<ExportResult> exported_;
     std::optional<AutoMergeReport> autoMerge_;

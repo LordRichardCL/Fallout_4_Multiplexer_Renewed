@@ -156,7 +156,17 @@ DefinitionCheck Pipeline::checkDefinitions(const std::vector<Signature>& types, 
     openDatabase();
     if (db_)
         db::DatabaseWriter(*db_).writeValidation("definitions", check.report, false);
+    definitionCheck_ = check.report;
     return check;
+}
+
+const ValidationReport* Pipeline::reportValidation() const
+{
+    if (!definitionCheck_)
+        return validation();
+    reportValidation_ = validation_ ? *validation_ : ValidationReport{};
+    reportValidation_->merge(*definitionCheck_);
+    return &*reportValidation_;
 }
 
 void Pipeline::analyse(ProgressSink& progress)
@@ -482,7 +492,7 @@ std::vector<std::filesystem::path> Pipeline::writeReports(const std::filesystem:
     ctx.conflicts = conflicts();
     ctx.dependencies = dependencies();
     ctx.compiled = compiledOutput();
-    ctx.validation = validation();
+    ctx.validation = reportValidation();
     ctx.autoMerge = autoMerge();
     auto files = ReportGenerator::writeAll(ctx, directory);
     spdlog::info("Wrote {} report files to {}", files.size(), pathToUtf8(directory));

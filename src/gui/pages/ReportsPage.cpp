@@ -33,7 +33,7 @@ fo4mx::ReportContext contextFor(AppController* app)
         ctx.conflicts = p->conflicts();
         ctx.dependencies = p->dependencies();
         ctx.compiled = p->compiledOutput();
-        ctx.validation = p->validation();
+        ctx.validation = p->reportValidation();
         ctx.autoMerge = p->autoMerge();
     }
     ctx.maxRows = 2000;
