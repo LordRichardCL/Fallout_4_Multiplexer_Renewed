@@ -157,6 +157,9 @@ std::string text(const Subrecord* s)
 
 } // namespace
 
+// A copy of the shipped definitions with some catalogue strategies changed (defined further down).
+const RecordDefinitions* trialDefinitions(const std::vector<std::pair<std::string, std::string>>& strategies);
+
 TEST(pipeline_end_to_end)
 {
     auto root = buildInstall("pipeline");
@@ -780,6 +783,7 @@ TEST(undescribed_formid_with_shifted_master_is_isolated)
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModG.esp\n");
     auto cfg = configFor(root);
     cfg.databasePath.clear();
+    cfg.definitions = trialDefinitions({{"CELL", "Candidate"}}); // a type that is not compiled at all
     Pipeline p(cfg);
     p.scan();
     CHECK_EQ(p.session().findPlugin("ModG.esp")->eligibility, Eligibility::Eligible);
@@ -1802,8 +1806,7 @@ TEST(world_overrides_compile_with_their_cell)
     }
 }
 
-// A world record is never placed without its cell: the compiler copies the cell, and a cell defined
-// by a compiled plugin cannot exist in W2 (new cells keep their plugin).
+// While world types are Candidates, a plugin with cell or reference overrides stays as it is.
 TEST(world_types_stay_out_while_candidates)
 {
     auto reasonHas = [](const PluginInfo& pl, const std::string& t) {
@@ -1819,7 +1822,9 @@ TEST(world_types_stay_out_while_candidates)
                 {record("CELL", 0x01000803, {zs("EDID", "Vault")}),
                  record("REFR", 0x01000804, {zs("EDID", "Chair2"), u32("NAME", 0x800)})});
     writeFile(root / "plugins.txt", "*World.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModX.esp\n");
-    Pipeline p(configFor(root)); // shipped catalogue: world types are Candidates
+    auto cfg = configFor(root);
+    cfg.definitions = trialDefinitions({{"CELL", "Candidate"}, {"REFR", "Candidate"}});
+    Pipeline p(cfg); // world types as Candidates: not compiled
     p.scan();
     p.analyse();
     const auto* modX = p.session().findPlugin("ModX.esp");

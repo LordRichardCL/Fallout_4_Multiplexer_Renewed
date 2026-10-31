@@ -302,7 +302,20 @@ TEST(nested_groups_refuse_misplaced_records)
     CHECK(fails({{record("KYWD", 0x01000801, {}), {K::InteriorCell, 0, false}}}, "cannot be placed as a interior cell"));
     CHECK(fails({{record("CELL", 0x01000801, {}), {K::WorldCell, 0x01000800, false}}}, "its worldspace 01000800"));
     CHECK(fails({{record("INFO", 0x01000801, {}), {K::TopicChild, 0x01000800, false}}}, "its topic 01000800"));
-    CHECK(fails({{record("SCEN", 0x01000801, {}), {K::QuestChild, 0x01000800, false}}}, "its quest 01000800"));
+    // Topics added to another plugin's quest: the quest's group is written without the quest.
+    {
+        PluginWriter w;
+        w.setHeader(fixtureHeader());
+        w.addRecord(record("DIAL", 0x01000801, {zs("EDID", "AddedTopic")}), {K::QuestChild, 0x00001234, false});
+        auto f = PluginFile::fromBytes(w.build());
+        size_t topics = 0;
+        f.forEachRecord([&](const RecordLocation& loc) {
+            CHECK(loc.placement() == (Placement{K::QuestChild, 0x00001234, false}));
+            ++topics;
+            return true;
+        });
+        CHECK_EQ(topics, size_t(1));
+    }
     CHECK(fails({{record("CELL", 0x01000801, {}), {K::InteriorCell, 0, false}},
                  {record("CELL", 0x01000801, {}), {K::InteriorCell, 0, false}}},
                 "in the plugin twice"));

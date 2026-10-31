@@ -28,7 +28,7 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
 
     // Parents present in this plugin.
     const Signature QUST("QUST");
-    std::map<uint32_t, const Entry*> cells, worlds, topics, quests;
+    std::map<uint32_t, const Entry*> cells, worlds, topics, quests; // quests: only for the duplicate check
     for (const auto& e : records_) {
         const auto s = e.record.signature();
         auto& index = s == sig::CELL ? cells : s == WRLD ? worlds : s == DIAL ? topics : quests;
@@ -73,14 +73,16 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
             topicChildren[p.parent].push_back(&e);
             break;
         case Kind::QuestChild:
-            if (!quests.count(p.parent))
-                throw FormatError(label(e) + ": its quest " + formatFormId(p.parent) + " is not in the plugin");
+            // A plugin may add topics to another plugin's quest without overriding the quest itself:
+            // the quest's group is then written on its own.
             questChildren[p.parent].push_back(&e);
             break;
         }
     }
     if (!interiorCells.empty())
         top[sig::CELL]; // the CELL group holds interior cells only
+    if (!questChildren.empty())
+        top[QUST];
 
     auto byFormId = [](std::vector<const Entry*>& list) {
         std::stable_sort(list.begin(), list.end(), [](const Entry* a, const Entry* b) {
@@ -166,6 +168,26 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
                 }
                 close(bg);
             }
+        } else if (s == QUST) {
+            // Quests in FormID order, each followed by its quest children group (also when the quest
+            // itself is not in the plugin).
+            std::map<uint32_t, const Entry*> byId;
+            for (const auto* e : top[s])
+                byId[e->record.header.formId] = e;
+            for (const auto& [id, _] : questChildren)
+                byId.emplace(id, nullptr);
+            for (const auto& [id, quest] : byId) {
+                if (quest)
+                    writeRecord(quest);
+                auto it = questChildren.find(id);
+                if (it == questChildren.end())
+                    continue;
+                byFormId(it->second);
+                size_t qg = open(id, GroupType::QuestChildren);
+                for (const auto* child : it->second)
+                    writeTopic(child); // DIAL with its responses; DLBR and SCEN alone
+                close(qg);
+            }
         } else {
             auto& list = top[s];
             byFormId(list);
@@ -176,16 +198,7 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
                 }
                 writeRecord(e);
                 const uint32_t id = e->record.header.formId;
-                if (s == QUST) {
-                    auto it = questChildren.find(id);
-                    if (it == questChildren.end())
-                        continue;
-                    byFormId(it->second);
-                    size_t qg = open(id, GroupType::QuestChildren);
-                    for (const auto* child : it->second)
-                        writeTopic(child); // DIAL with its responses; DLBR and SCEN alone
-                    close(qg);
-                } else if (s == WRLD) {
+                if (s == WRLD) {
                     auto it = worldCells.find(id);
                     if (it == worldCells.end())
                         continue;

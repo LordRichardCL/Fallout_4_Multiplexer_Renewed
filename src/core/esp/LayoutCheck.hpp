@@ -21,8 +21,10 @@ struct LayoutCheck {
     size_t cells = 0, children = 0, topicChildren = 0;
     bool sameOrder = false;       // rebuild: records in the same order as the original
     size_t emptyGroups = 0;       // groups holding no record: left out by the writer, no effect in game
+    size_t repeatedTopGroups = 0; // top-level groups the plugin repeats: written once
     std::vector<std::string> problems; // differences between the plugin and what the writer makes of it
-    std::vector<std::string> defects;  // faults of the plugin itself (duplicate FormIDs): no rebuild
+    std::vector<std::string> defects;  // faults of the plugin itself (duplicate FormIDs, an exterior cell
+                                       // without its grid): no rebuild
 };
 
 LayoutCheck checkLayout(const PluginFile& file, bool rebuild);

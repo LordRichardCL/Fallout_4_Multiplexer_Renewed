@@ -62,7 +62,7 @@ struct DefinitionCheck {
     ValidationReport report; // findings, never errors: the check does not block export
     // Nested group writer checked against the load order's own cells, worldspaces and topics.
     size_t layoutPlugins = 0, layoutRebuilt = 0, layoutSameOrder = 0, layoutProblems = 0, layoutDefects = 0;
-    size_t layoutEmptyGroups = 0;
+    size_t layoutEmptyGroups = 0, layoutRepeatedTop = 0;
 };
 
 // A file whose winning archive changes once compiled plugins' archives load from the INI list.

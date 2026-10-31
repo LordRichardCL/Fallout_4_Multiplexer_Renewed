@@ -9,7 +9,7 @@
 # Scope (optional, last column): 'overrides' = only overrides of the type are compiled; new records keep their plugin.
 Signature,Name,Category,Placement,Strategy,Group Order,Allocation Order,Notes,Scope
 AACT,Action,Animation,top,Winner,3,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
-ACHR,Placed NPC,Placed References,cell child,Candidate,,,"Tied to precombines and previs. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
+ACHR,Placed NPC,Placed References,cell child,Winner,,,"Tied to precombines and previs. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Confirmed by a real load order (definition and group layout checks).",overrides
 ACTI,Activator,Base Objects,top,Specialised,20,,
 ADDN,Addon Node,Base Objects,top,Winner,74,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 AECH,Audio Effect Chain,Audio,top,Winner,123,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
@@ -28,7 +28,7 @@ BNDS,Bendable Spline,Base Objects,top,Candidate,47,,Layout from xEdit wbDefiniti
 BOOK,Book,Items,top,Specialised,23,10,
 BPTD,Body Part Data,Actors,top,Winner,73,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 CAMS,Camera Shot,Visual Effects,top,Candidate,76,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
-CELL,Cell,World,cell,Candidate,56,,"Interior cells in block groups; exterior cells inside their worldspace. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
+CELL,Cell,World,cell,Winner,56,,"Interior cells in block groups; exterior cells inside their worldspace. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Confirmed by a real load order (definition and group layout checks).",overrides
 CLAS,Class,Actors,top,Candidate,9,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 CLFM,Color,Visual Effects,top,Specialised,111,,
 CLMT,Climate,World,top,Candidate,51,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
@@ -77,7 +77,7 @@ IPDS,Impact Data Set,Combat,top,Specialised,81,,
 KEYM,Key,Items,top,Specialised,41,12,
 KSSM,Sound Keyword Mapping,Audio,top,Specialised,122,,
 KYWD,Keyword,Game Data,top,Specialised,1,0,
-LAND,Landscape,World,cell child,Candidate,,,"Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
+LAND,Landscape,World,cell child,Winner,,,"Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Confirmed by a real load order (definition and group layout checks).",overrides
 LAYR,Layer,World,top,Winner,116,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 LCRT,Location Reference Type,World,top,Specialised,2,,
 LCTN,Location,World,top,Candidate,84,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
@@ -108,21 +108,21 @@ OMOD,Object Modification,Item Components,top,Specialised,118,5,
 OTFT,Outfit,Lists,top,Specialised,102,,
 OVIS,Object Visibility Manager,Game Data,top,Winner,131,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 PACK,Package,Quests and Dialogue,top,Preserve,60,,
-PARW,Placed Arrow,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
+PARW,Placed Arrow,Placed References,cell child,Winner,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Confirmed by a real load order (definition and group layout checks).",overrides
 PBAR,Placed Barrier,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
 PBEA,Placed Beam,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
 PCON,Placed Cone/Voice,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
 PERK,Perk,Magic,top,Specialised,72,14,
 PFLA,Placed Flame,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
-PGRE,Placed Projectile,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
-PHZD,Placed Hazard,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
+PGRE,Placed Projectile,Placed References,cell child,Winner,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Confirmed by a real load order (definition and group layout checks).",overrides
+PHZD,Placed Hazard,Placed References,cell child,Winner,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Confirmed by a real load order (definition and group layout checks).",overrides
 PKIN,Pack-In,Base Objects,top,Candidate,113,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 PLYR,Player Reference,Placed References,top,Preserve,39,,Placeholder for the player reference.
-PMIS,Placed Missile,Placed References,cell child,Candidate,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
+PMIS,Placed Missile,Placed References,cell child,Winner,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Confirmed by a real load order (definition and group layout checks).",overrides
 PROJ,Projectile,Combat,top,Specialised,45,,
 QUST,Quest,Quests and Dialogue,top,Preserve,58,,Alias indexes and scripts tie quests to their plugin.
 RACE,Race,Actors,top,Candidate,13,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
-REFR,Placed Object,Placed References,cell child,Candidate,,,"Tied to precombines and previs. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
+REFR,Placed Object,Placed References,cell child,Winner,,,"Tied to precombines and previs. Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Confirmed by a real load order (definition and group layout checks).",overrides
 REGN,Region,World,top,Candidate,54,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 RELA,Relationship,Actors,top,Candidate,99,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 REVB,Reverb Parameters,Audio,top,Winner,112,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
@@ -152,6 +152,6 @@ TXST,Texture Set,Visual Effects,top,Specialised,6,,
 VTYP,Voice Type,Actors,top,Candidate,78,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 WATR,Water,World,top,Candidate,65,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
 WEAP,Weapon,Items,top,Specialised,36,6,
-WRLD,Worldspace,World,top with children,Candidate,57,,"Has child groups (persistent cell, blocks, cells). Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Candidate until the definition and group layout checks confirm it.",overrides
+WRLD,Worldspace,World,top with children,Winner,57,,"Has child groups (persistent cell, blocks, cells). Layout from xEdit wbDefinitionsFO4.pas. Overrides only, written with their cell and worldspace (stage W2); new records keep their plugin. Confirmed by a real load order (definition and group layout checks).",overrides
 WTHR,Weather,World,top,Candidate,50,,Layout from xEdit wbDefinitionsFO4.pas and the shared weather definitions; compiled once the definition check confirms it.
 ZOOM,Zoom,Item Components,top,Specialised,120,,

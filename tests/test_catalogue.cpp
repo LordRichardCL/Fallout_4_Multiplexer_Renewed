@@ -63,7 +63,7 @@ TEST(catalogue_strategy_matches_the_layouts)
         winner += e.strategy == MergeStrategy::Winner;
     }
     CHECK_EQ(specialised, size_t(61));
-    CHECK_EQ(winner, size_t(23)); // stages 4 and 5, confirmed by a real load order
+    CHECK_EQ(winner, size_t(32)); // stages 4 and 5, and the world overrides (W2), confirmed by a real load order
     CHECK_EQ(specialised + winner, defs.compilableTypes().size());
     CHECK_EQ(defs.recordName(Signature("MISC")), std::string("Misc. Item"));
     CHECK_EQ(defs.recordName(Signature("XYZW")), std::string("XYZW"));
@@ -193,8 +193,8 @@ TEST(stage5_layouts)
 TEST(update_layouts_and_guards)
 {
     const auto& d = RecordDefinitions::get();
-    // Requested types are Candidates, not compiled.
-    for (const char* t : {"REFR", "ACHR", "PGRE", "PARW", "PMIS", "PHZD", "LAND", "INFO", "WRLD", "DIAL", "CELL"}) {
+    // Requested types are Candidates, not compiled (the confirmed world types are checked below).
+    for (const char* t : {"PBAR", "PBEA", "PCON", "PFLA", "INFO", "DIAL"}) {
         CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Candidate);
         CHECK(d.supportSummary(Signature::fromString(t)).find("not compiled") != std::string::npos);
     }
@@ -265,7 +265,12 @@ TEST(update_layouts_and_guards)
     CHECK_EQ(topic.formIdSlots[0].offset, 4u);
     auto subtype = pdto(1, 0x56544341); // "ACTV": text, never a FormID
     CHECK(subtype.formIdSlots.empty() && subtype.heuristic.empty());
-    CHECK(d.strategy(Signature("CELL")) == MergeStrategy::Candidate);
+    // Confirmed world types compile as overrides only.
+    for (const char* t : {"CELL", "WRLD", "REFR", "ACHR", "LAND", "PHZD", "PGRE", "PMIS", "PARW"}) {
+        CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Winner);
+        CHECK(d.isCompilable(Signature::fromString(t)));
+        CHECK(d.overridesOnly(Signature::fromString(t)));
+    }
 }
 
 TEST(struct_array_with_header)

@@ -567,6 +567,7 @@ void ValidationEngine::checkGroupLayouts(const Session& session, DefinitionCheck
         out.layoutRebuilt += r.rebuilt && r.problems.empty();
         out.layoutSameOrder += r.sameOrder;
         out.layoutEmptyGroups += r.emptyGroups;
+        out.layoutRepeatedTop += r.repeatedTopGroups;
         if (r.problems.empty() && !r.defects.empty()) {
             // A fault of the plugin, not of the writer: reported, not counted against the writer.
             ++out.layoutDefects;
@@ -607,7 +608,8 @@ void ValidationEngine::checkGroupLayouts(const Session& session, DefinitionCheck
                    " checked by placement only (over 64 MB), " + std::to_string(out.layoutProblems) +
                    " with differences, " + std::to_string(out.layoutDefects) +
                    " not rebuilt because the plugin itself is faulty. " + std::to_string(out.layoutEmptyGroups) +
-                   " empty groups were left out (no effect in game). Send this result to the developer");
+                   " empty groups were left out (no effect in game), " + std::to_string(out.layoutRepeatedTop) +
+                   " repeated top-level groups written once. Send this result to the developer");
 }
 
 std::vector<ArchivePriorityChange> ValidationEngine::checkArchivePriority(const Session& session,

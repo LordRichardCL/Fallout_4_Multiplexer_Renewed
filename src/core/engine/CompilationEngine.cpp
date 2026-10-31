@@ -749,8 +749,11 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             }
         }
 
-    // Cells, worldspaces and placed references go into one output, the last one in use: a reference
-    // must be in the same plugin as its cell, and everything they reference then comes before.
+    // Cells, worldspaces and placed references go into the last output in use (so everything they
+    // reference comes before), in clusters that are never split: an interior cell with everything in
+    // it, or a worldspace with all its cells. When a cluster's masters would not fit in that output,
+    // the next one takes it. A cluster that needs more masters than any plugin may have keeps its
+    // compiled plugins out (validation isolates them).
     {
         int worldOutput = 0;
         bool anyWorld = false;
@@ -762,10 +765,54 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             else
                 worldOutput = std::max(worldOutput, pref[v]);
         }
-        if (anyWorld)
+        if (anyWorld) {
+            auto retainedMastersOf = [&](const EmittedRecord& e, std::set<PluginIndex>& m) {
+                if (!e.isNew && e.key.valid())
+                    m.insert(e.key.origin);
+                for (const auto& [k, via] : collectRefs(e.fields, options.rewriteHeuristicReferences))
+                    if (k.valid() && !out.compiledFlag_[k.origin])
+                        m.insert(k.origin);
+            };
+            // Room for other outputs as masters.
+            const size_t limit = 254 > static_cast<size_t>(N) ? 254 - static_cast<size_t>(N) : 1;
+            std::map<FormKey, std::vector<uint32_t>> clusters; // root (interior cell or worldspace) -> records
+            for (uint32_t v = 0; v < out.records.size(); ++v) {
+                if (!out.records[v].world || out.records[v].patch)
+                    continue;
+                FormKey root = out.records[v].key;
+                for (int guard = 0; guard < 8; ++guard) {
+                    auto it = out.indexByKey.find(root);
+                    if (it == out.indexByKey.end() || !out.records[it->second].parent.valid())
+                        break;
+                    root = out.records[it->second].parent;
+                }
+                clusters[root].push_back(v);
+            }
+            std::set<PluginIndex> current;
             for (uint32_t v = 0; v < out.records.size(); ++v)
-                if (out.records[v].world && !out.records[v].patch)
-                    pref[v] = worldOutput;
+                if (!out.records[v].world && !out.records[v].patch && pref[v] == worldOutput)
+                    retainedMastersOf(out.records[v], current);
+            int o = worldOutput;
+            for (const auto& [root, members] : clusters) {
+                std::set<PluginIndex> need;
+                for (auto v : members)
+                    retainedMastersOf(out.records[v], need);
+                std::set<PluginIndex> merged = current;
+                merged.insert(need.begin(), need.end());
+                if (merged.size() > limit && o + 1 < N) {
+                    ++o;
+                    merged = need;
+                }
+                if (merged.size() > limit)
+                    addIssue(Severity::Error, "World Layout",
+                             session.formLabel(root) + " and everything compiled in it need " +
+                                 std::to_string(need.size()) + " masters, more than an output plugin can have",
+                             root);
+                current = std::move(merged);
+                for (auto v : members)
+                    pref[v] = o;
+            }
+        }
     }
 
     // Constraint: a record may only reference new records in the same or an earlier output.

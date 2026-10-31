@@ -69,11 +69,23 @@ bool collectGroups(std::span<const uint8_t> b, size_t begin, size_t end, std::mu
     return any;
 }
 
-std::multiset<GroupKey> nonEmptyGroups(const PluginFile& f, size_t& empty)
+// A plugin that repeats a top-level group (the same signature twice) has it once in the rebuild,
+// as xEdit would save it: top-level groups are compared once each, the repeats counted.
+std::multiset<GroupKey> nonEmptyGroups(const PluginFile& f, size_t& empty, size_t* repeatedTop = nullptr)
 {
     std::multiset<GroupKey> out;
     const auto b = f.bytes();
     collectGroups(b, RecordHeader::kSize + f.header().record.dataSize, b.size(), out, empty);
+    std::set<uint32_t> seen;
+    for (auto it = out.begin(); it != out.end();) {
+        if (it->first == GroupType::Top && !seen.insert(it->second).second) {
+            if (repeatedTop)
+                ++*repeatedTop;
+            it = out.erase(it);
+        } else {
+            ++it;
+        }
+    }
     return out;
 }
 
@@ -111,7 +123,7 @@ LayoutCheck checkLayout(const PluginFile& file, bool rebuild)
     });
     if (!out.nested)
         return out;
-    const auto groups = nonEmptyGroups(file, out.emptyGroups);
+    const auto groups = nonEmptyGroups(file, out.emptyGroups, &out.repeatedTopGroups);
 
     // Placement.
     struct Placed {
@@ -138,9 +150,19 @@ LayoutCheck checkLayout(const PluginFile& file, bool rebuild)
                             std::to_string(interiorSubBlockOf(loc.header.formId)));
             } else if ((loc.header.flags & RecordFlags::Persistent) || !cellGrid(cell)) {
                 // The persistent cell (or one without a grid position) sits directly in the worldspace.
-                if (loc.groupType != GroupType::WorldChildren)
-                    problem(label + " is a worldspace cell without a grid position inside " +
-                            groupName(loc.groupType, loc.groupLabel));
+                // An exterior cell in a block that has lost its grid position is a fault of the plugin:
+                // nothing says where it belongs.
+                if (loc.groupType != GroupType::WorldChildren) {
+                    if (loc.blockType == GroupType::ExteriorBlock && !(loc.header.flags & RecordFlags::Persistent)) {
+                        if (out.defects.size() < kMaxProblems)
+                            out.defects.push_back(label + " is an exterior cell (in " +
+                                                  groupName(GroupType::ExteriorSubBlock, loc.subBlockLabel) +
+                                                  ") without its grid position (XCLC)");
+                    } else {
+                        problem(label + " is a worldspace cell without a grid position inside " +
+                                groupName(loc.groupType, loc.groupLabel));
+                    }
+                }
             } else if (auto grid = cellGrid(cell)) {
                 const auto sub = subBlockOf(*grid), block = blockOf(sub);
                 if (loc.blockType != GroupType::ExteriorBlock || loc.blockLabel != gridLabel(block) ||
