@@ -6,7 +6,10 @@
 #include "assets/AssetScanner.hpp"
 #include "ba2/Ba2Archive.hpp"
 #include "esp/FieldDecoder.hpp"
+#include "esp/GroupLayout.hpp"
+#include "esp/LayoutCheck.hpp"
 #include "esp/PluginFile.hpp"
+#include "esp/PluginWriter.hpp"
 #include "esp/StringTables.hpp"
 #include "util/Compression.hpp"
 #include "util/IniFile.hpp"
@@ -89,6 +92,273 @@ TEST(plugin_write_and_scan)
     CHECK_EQ(order.front(), std::string("KYWD")); // KYWD group precedes WEAP
     auto h = readPluginHeader(dir / "Test.esp");
     CHECK_EQ(h.masters[0].name, std::string("Fallout4.esm"));
+}
+
+// Grid math as xEdit does it: sub-block = floor(cell / 8), block = floor(sub-block / 4); labels hold
+// Y in the low word and X in the high word; interior blocks are the last two decimal digits.
+TEST(group_layout_math)
+{
+    CHECK(subBlockOf({-1, 9}) == (GridCell{-1, 1}));
+    CHECK(blockOf(subBlockOf({-1, 9})) == (GridCell{-1, 0}));
+    CHECK(subBlockOf({-9, -8}) == (GridCell{-2, -1}));
+    CHECK(blockOf(subBlockOf({-9, -8})) == (GridCell{-1, -1}));
+    CHECK(subBlockOf({7, 8}) == (GridCell{0, 1}));
+    CHECK(blockOf({4, 3}) == (GridCell{1, 0}));
+    CHECK_EQ(gridLabel({-1, 2}), 0xFFFF0002u);
+    CHECK(gridFromLabel(gridLabel({-30, 17})) == (GridCell{-30, 17}));
+    CHECK_EQ(interiorBlockOf(0x01003039), 5); // object ID 12345
+    CHECK_EQ(interiorSubBlockOf(0x01003039), 4);
+    CHECK(recordSortPriority(Signature("LAND")) < recordSortPriority(Signature("NAVM")));
+    CHECK(recordSortPriority(Signature("NAVM")) < recordSortPriority(Signature("REFR")));
+}
+
+namespace {
+
+std::vector<uint8_t> recordBytes(const Record& r)
+{
+    BinaryWriter w;
+    r.write(w, false);
+    return w.take();
+}
+
+// A group built by hand (independent of PluginWriter).
+std::vector<uint8_t> group(uint32_t label, int32_t type, const std::vector<std::vector<uint8_t>>& contents)
+{
+    BinaryWriter body;
+    for (const auto& c : contents)
+        body.writeBytes(c);
+    GroupHeader g;
+    g.label = label;
+    g.groupType = type;
+    g.groupSize = static_cast<uint32_t>(GroupHeader::kSize + body.size());
+    BinaryWriter w;
+    g.write(w);
+    w.writeBytes(body.buffer());
+    return w.take();
+}
+
+Record cellAt(uint32_t formId, const char* edid, int32_t x, int32_t y)
+{
+    std::vector<uint8_t> xclc(12, 0);
+    storeLE<int32_t>(xclc.data(), x);
+    storeLE<int32_t>(xclc.data() + 4, y);
+    return record("CELL", formId, {zs("EDID", edid), raw("XCLC", xclc)});
+}
+
+PluginHeader fixtureHeader()
+{
+    PluginHeader h;
+    h.record.signature = sig::TES4;
+    h.record.formVersion = 131;
+    h.masters.push_back({"Fallout4.esm", 0});
+    return h;
+}
+
+} // namespace
+
+// The writer's nested groups match a file laid out by hand the way xEdit writes it.
+TEST(nested_groups_match_hand_built_layout)
+{
+    using K = Placement::Kind;
+    const auto interior = record("CELL", 0x01003039, {zs("EDID", "Vault")});
+    const auto persistentRef = record("REFR", 0x01000801, {zs("EDID", "Door")}, RecordFlags::Persistent);
+    const auto tempRef = record("REFR", 0x01000802, {zs("EDID", "Chair")});
+    const auto navmesh = record("NAVM", 0x01000803, {raw("NVNM", std::vector<uint8_t>(8, 0))});
+    const auto world = record("WRLD", 0x01000810, {zs("EDID", "World")});
+    const auto worldCell = record("CELL", 0x01000811, {zs("EDID", "WorldPersistent")}, RecordFlags::Persistent);
+    const auto worldRef = record("REFR", 0x01000812, {zs("EDID", "Marker")}, RecordFlags::Persistent);
+    const auto exterior = cellAt(0x01000813, "Outside", -1, 9);
+    const auto rock = record("REFR", 0x01000814, {zs("EDID", "Rock")});
+    const auto land = record("LAND", 0x01000815, {raw("DATA", {1, 2, 3, 4})});
+
+    PluginWriter w;
+    w.setHeader(fixtureHeader());
+    // Added in no particular order.
+    w.addRecord(land, {K::CellChild, 0x01000813, false});
+    w.addRecord(rock, {K::CellChild, 0x01000813, false});
+    w.addRecord(exterior, {K::WorldCell, 0x01000810, false});
+    w.addRecord(tempRef, {K::CellChild, 0x01003039, false});
+    w.addRecord(world);
+    w.addRecord(navmesh, {K::CellChild, 0x01003039, false});
+    w.addRecord(worldRef, {K::CellChild, 0x01000811, true});
+    w.addRecord(persistentRef, {K::CellChild, 0x01003039, true});
+    w.addRecord(worldCell, {K::WorldCell, 0x01000810, false});
+    w.addRecord(interior, {K::InteriorCell, 0, false});
+    const auto image = w.build();
+
+    using G = std::vector<std::vector<uint8_t>>;
+    const auto cellGroup = group(sig::CELL.value, GroupType::Top, G{group(5, GroupType::InteriorBlock, G{group(
+        4, GroupType::InteriorSubBlock,
+        G{recordBytes(interior),
+          group(0x01003039, GroupType::CellChildren,
+                G{group(0x01003039, GroupType::CellPersistent, G{recordBytes(persistentRef)}),
+                  group(0x01003039, GroupType::CellTemporary, G{recordBytes(navmesh), recordBytes(tempRef)})})})})});
+    const auto worldGroup = group(Signature("WRLD").value, GroupType::Top,
+        G{recordBytes(world),
+          group(0x01000810, GroupType::WorldChildren,
+                G{recordBytes(worldCell),
+                  group(0x01000811, GroupType::CellChildren,
+                        G{group(0x01000811, GroupType::CellPersistent, G{recordBytes(worldRef)})}),
+                  group(gridLabel({-1, 0}), GroupType::ExteriorBlock,
+                        G{group(gridLabel({-1, 1}), GroupType::ExteriorSubBlock,
+                                G{recordBytes(exterior),
+                                  group(0x01000813, GroupType::CellChildren,
+                                        G{group(0x01000813, GroupType::CellTemporary,
+                                                G{recordBytes(land), recordBytes(rock)})})})})})});
+    std::vector<uint8_t> expected;
+    expected.insert(expected.end(), cellGroup.begin(), cellGroup.end()); // CELL precedes WRLD
+    expected.insert(expected.end(), worldGroup.begin(), worldGroup.end());
+
+    auto f = PluginFile::fromBytes(image);
+    const size_t headerSize = RecordHeader::kSize + f.header().record.dataSize;
+    CHECK(std::vector<uint8_t>(image.begin() + static_cast<std::ptrdiff_t>(headerSize), image.end()) == expected);
+    CHECK_EQ(f.header().numRecords, 10 + 14); // records + groups
+}
+
+// Written and read back: every record keeps its bytes and its place, and writing what was read
+// gives the same file.
+TEST(nested_groups_round_trip)
+{
+    using K = Placement::Kind;
+    std::vector<std::pair<Record, Placement>> in = {
+        {record("KYWD", 0x01000800, {zs("EDID", "Kw")}), {}},
+        {record("CELL", 0x01000801, {zs("EDID", "InteriorA")}), {K::InteriorCell, 0, false}},
+        {record("CELL", 0x01000902, {zs("EDID", "InteriorB")}), {K::InteriorCell, 0, false}},
+        {record("REFR", 0x01000803, {zs("EDID", "A1")}), {K::CellChild, 0x01000801, false}},
+        {record("ACHR", 0x01000804, {zs("EDID", "A2")}, RecordFlags::Persistent), {K::CellChild, 0x01000801, true}},
+        {record("REFR", 0x01000805, {zs("EDID", "B1")}), {K::CellChild, 0x01000902, false}},
+        {record("WRLD", 0x01000810, {zs("EDID", "W1")}), {}},
+        {record("WRLD", 0x01000820, {zs("EDID", "W2")}), {}},
+        {cellAt(0x01000811, "W1a", 0, 0), {K::WorldCell, 0x01000810, false}},
+        {cellAt(0x01000812, "W1b", 1, 1), {K::WorldCell, 0x01000810, false}},     // same sub-block
+        {cellAt(0x01000813, "W1c", -33, -40), {K::WorldCell, 0x01000810, false}}, // another block
+        {cellAt(0x01000821, "W2a", 50, -3), {K::WorldCell, 0x01000820, false}},
+        {record("CELL", 0x01000822, {zs("EDID", "W2p")}, RecordFlags::Persistent), {K::WorldCell, 0x01000820, false}},
+        {record("LAND", 0x01000814, {raw("DATA", {1})}), {K::CellChild, 0x01000811, false}},
+        {record("REFR", 0x01000815, {zs("EDID", "W1aRef")}), {K::CellChild, 0x01000811, false}},
+        {record("REFR", 0x01000823, {zs("EDID", "W2pRef")}, RecordFlags::Persistent), {K::CellChild, 0x01000822, true}},
+        {record("DIAL", 0x01000830, {zs("EDID", "Topic")}), {}},
+        {record("INFO", 0x01000832, {zs("EDID", "Second")}), {K::TopicChild, 0x01000830, false}},
+        {record("INFO", 0x01000831, {zs("EDID", "First")}), {K::TopicChild, 0x01000830, false}},
+    };
+    PluginWriter w;
+    w.setHeader(fixtureHeader());
+    for (const auto& [r, p] : in)
+        w.addRecord(r, p);
+    const auto image = w.build();
+
+    auto f = PluginFile::fromBytes(image);
+    std::map<uint32_t, std::pair<std::vector<uint8_t>, Placement>> read;
+    std::vector<uint32_t> infoOrder;
+    PluginWriter again;
+    again.setHeader(f.header());
+    f.forEachRecord([&](const RecordLocation& loc) {
+        CHECK(!loc.unusualGroup);
+        auto rec = f.recordAt(loc.offset);
+        read[loc.header.formId] = {recordBytes(rec), loc.placement()};
+        if (loc.header.signature == Signature("INFO"))
+            infoOrder.push_back(loc.header.formId);
+        again.addRecord(rec, loc.placement());
+        return true;
+    });
+    CHECK_EQ(read.size(), in.size());
+    for (const auto& [r, p] : in) {
+        auto it = read.find(r.header.formId);
+        CHECK(it != read.end());
+        CHECK(it->second.first == recordBytes(r));
+        CHECK(it->second.second == p);
+    }
+    CHECK(infoOrder == (std::vector<uint32_t>{0x01000832, 0x01000831})); // topic responses keep their order
+    CHECK(again.build() == image);
+}
+
+// A record that cannot be placed stops the build: nothing is written.
+TEST(nested_groups_refuse_misplaced_records)
+{
+    using K = Placement::Kind;
+    auto fails = [](std::vector<std::pair<Record, Placement>> records, const std::string& expect) {
+        PluginWriter w;
+        w.setHeader(fixtureHeader());
+        for (auto& [r, p] : records)
+            w.addRecord(r, p);
+        try {
+            w.build();
+        } catch (const FormatError& e) {
+            return std::string(e.what()).find(expect) != std::string::npos;
+        }
+        return false;
+    };
+    CHECK(fails({{record("REFR", 0x01000801, {}), {K::CellChild, 0x01000800, false}}}, "its cell 01000800 is not in the plugin"));
+    CHECK(fails({{record("REFR", 0x01000801, {}), {}}}, "cannot be written as a top-level group"));
+    CHECK(fails({{record("CELL", 0x01000801, {}), {}}}, "cannot be placed as a top"));
+    CHECK(fails({{record("KYWD", 0x01000801, {}), {K::InteriorCell, 0, false}}}, "cannot be placed as a interior cell"));
+    CHECK(fails({{record("WRLD", 0x01000800, {}), {}}, {record("CELL", 0x01000801, {}), {K::WorldCell, 0x01000800, false}}},
+                "needs its grid position"));
+    CHECK(fails({{record("CELL", 0x01000801, {}), {K::WorldCell, 0x01000800, false}}}, "its worldspace 01000800"));
+    CHECK(fails({{record("INFO", 0x01000801, {}), {K::TopicChild, 0x01000800, false}}}, "its topic 01000800"));
+    CHECK(fails({{record("CELL", 0x01000801, {}), {K::InteriorCell, 0, false}},
+                 {record("CELL", 0x01000801, {}), {K::InteriorCell, 0, false}}},
+                "in the plugin twice"));
+}
+
+// The layout check: a plugin laid out like the writer passes in the same order; one laid out in
+// another valid order passes with the order noted; a cell in the wrong block is a difference.
+TEST(layout_check_against_plugins)
+{
+    using G = std::vector<std::vector<uint8_t>>;
+    const auto world = record("WRLD", 0x01000810, {zs("EDID", "World")});
+    const auto a = cellAt(0x01000811, "A", 0, 0);
+    const auto b = cellAt(0x01000812, "B", -40, 3);
+    const auto refA = record("REFR", 0x01000813, {zs("EDID", "RefA")});
+    const auto persistentA = record("REFR", 0x01000814, {zs("EDID", "DoorA")}, RecordFlags::Persistent);
+    auto image = [&](bool writerOrder, uint32_t bSubBlock) {
+        auto cellGroupOf = [&](const Record& c, const G& children) {
+            return G{recordBytes(c), group(c.header.formId, GroupType::CellChildren, children)};
+        };
+        const G aChildren = writerOrder
+            ? G{group(0x01000811, GroupType::CellPersistent, G{recordBytes(persistentA)}),
+                group(0x01000811, GroupType::CellTemporary, G{recordBytes(refA)})}
+            : G{group(0x01000811, GroupType::CellTemporary, G{recordBytes(refA)}),
+                group(0x01000811, GroupType::CellPersistent, G{recordBytes(persistentA)})};
+        auto aCell = cellGroupOf(a, aChildren);
+        auto blockA = group(gridLabel({0, 0}), GroupType::ExteriorBlock,
+                            G{group(gridLabel({0, 0}), GroupType::ExteriorSubBlock, G{aCell[0], aCell[1]})});
+        auto blockB = group(gridLabel(blockOf(subBlockOf({-40, 3}))), GroupType::ExteriorBlock,
+                            G{group(bSubBlock, GroupType::ExteriorSubBlock, G{recordBytes(b)})});
+        auto children = group(0x01000810, GroupType::WorldChildren, writerOrder ? G{blockB, blockA} : G{blockA, blockB});
+        BinaryWriter w;
+        fixtureHeader().toRecord().write(w, false);
+        w.writeBytes(group(Signature("WRLD").value, GroupType::Top, G{recordBytes(world), children}));
+        return w.take();
+    };
+    const uint32_t right = gridLabel(subBlockOf({-40, 3}));
+
+    auto same = checkLayout(PluginFile::fromBytes(image(true, right)), true);
+    CHECK(same.nested && same.rebuilt);
+    CHECK(same.problems.empty());
+    CHECK(same.sameOrder);
+    CHECK_EQ(same.cells, size_t(2));
+    CHECK_EQ(same.children, size_t(2));
+
+    auto other = checkLayout(PluginFile::fromBytes(image(false, right)), true);
+    CHECK(other.problems.empty());
+    CHECK(!other.sameOrder);
+
+    auto wrong = checkLayout(PluginFile::fromBytes(image(true, gridLabel({-4, 0}))), true);
+    CHECK_EQ(wrong.problems.size(), size_t(1));
+    CHECK(wrong.problems[0].find("CELL 01000812 at -40,3") != std::string::npos);
+    CHECK(wrong.problems[0].find("the writer puts it in") != std::string::npos);
+    CHECK(!wrong.rebuilt); // a placement difference stops before the rebuild
+
+    // Placement only (large plugins): no rebuild, same verdict.
+    auto quick = checkLayout(PluginFile::fromBytes(image(false, right)), false);
+    CHECK(quick.problems.empty() && !quick.rebuilt);
+
+    // A plugin without cells, worldspaces or topics is not looked at.
+    PluginWriter flat;
+    flat.setHeader(fixtureHeader());
+    flat.addRecord(record("KYWD", 0x01000800, {zs("EDID", "Kw")}));
+    CHECK(!checkLayout(PluginFile::fromBytes(flat.build()), true).nested);
 }
 
 TEST(string_tables)

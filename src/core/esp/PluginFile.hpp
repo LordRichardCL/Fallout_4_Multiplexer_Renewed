@@ -1,5 +1,6 @@
 #pragma once
 
+#include "esp/GroupLayout.hpp"
 #include "esp/PluginHeader.hpp"
 #include "esp/Record.hpp"
 
@@ -20,6 +21,18 @@ struct RecordLocation {
     Signature topGroup;       // label of the enclosing top-level group
     uint32_t depth = 0;       // group nesting depth (1 = directly in a top group)
     std::span<const uint8_t> rawData; // payload (only valid while the PluginFile is alive)
+    int32_t groupType = -1;   // type of the enclosing group (GroupType), -1 outside any group
+    uint32_t groupLabel = 0;
+    uint32_t world = 0;       // enclosing worldspace (label of a World Children group), 0 if none
+    uint32_t cell = 0;        // enclosing cell (label of a Cell Children group), 0 if none
+    uint32_t topic = 0;       // enclosing dialogue topic (Topic Children group), 0 if none
+    int32_t blockType = -1;   // enclosing cell block group (interior 2 or exterior 4), -1 if none
+    uint32_t blockLabel = 0;
+    uint32_t subBlockLabel = 0; // enclosing cell sub-block group (3 or 5)
+    bool unusualGroup = false; // inside a group type this app does not write (anything above 9)
+
+    // Where the record sits, as the writer takes it.
+    Placement placement() const;
 };
 
 // A plugin loaded fully into memory for scanning.
@@ -35,6 +48,9 @@ public:
     void forEachRecord(const std::function<bool(const RecordLocation&)>& visitor) const;
 
     Record recordAt(uint64_t offset) const;
+
+    // Visits every group header depth-first in file order (depth 0 = top-level group).
+    void forEachGroup(const std::function<void(const GroupHeader&, uint32_t depth)>& visitor) const;
 
 private:
     void parseHeader();

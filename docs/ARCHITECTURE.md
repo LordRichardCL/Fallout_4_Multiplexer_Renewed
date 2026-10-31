@@ -55,6 +55,19 @@ The scanner indexes every record of every active plugin as a compact `RecordInst
 
 A type compiles only when the catalogue says *Specialised* or *Winner* **and** `RecordDefinitions` has a layout for it (`RecordDef::layout`: every subrecord that can hold a FormID is described). Setting *Preserve* turns a type off without touching code. Any other strategy without a layout does nothing and is reported (`strategyWithoutLayout`, checked by a test). The definition check covers every type with a layout and gives each *Candidate* a verdict: confirmed only with no size problems, no FormID-like values outside the described fields, and at least 99% of its FormIDs resolving. Promotion from *Candidate* to *Winner* is a catalogue change made after such a result. Signatures missing from the catalogue are reported as unknown record types: such a plugin is not compiled and its reason says it may be for another game or damaged. Asset path subrecords (`AssetRole`: mesh, texture, material, sound, icon) are part of the field definitions.
 
+## Writing plugins: nested groups
+
+`esp/PluginWriter` writes the TES4 header and one top-level group per signature, in the catalogue's group order. Each record is added with a `Placement` (`esp/GroupLayout`): top-level, interior cell, worldspace cell, cell child (persistent or temporary) or topic child. The writer builds the nested groups as xEdit writes them:
+
+```text
+CELL group -> interior block (last decimal digit of the object ID) -> sub-block (second-to-last) -> CELL, cell children
+WRLD group -> WRLD, world children -> persistent CELL and its children,
+                                      exterior block (floor(sub-block / 4)) -> sub-block (floor(grid / 8)) -> CELL, cell children
+cell children -> persistent (8), temporary (9)          DIAL group -> DIAL, topic children (INFO, in the order added)
+```
+
+Exterior labels hold Y in the low word and X in the high word. Inside a group, records are ordered ROAD/LAND, then CELL/PGRD/NAVM, then the rest, by FormID; groups follow records, and blocks are ordered by X then Y. A record whose cell, worldspace or topic is not in the plugin, an exterior cell without a grid position, or a cell-child type placed at the top level stops the build. `RecordLocation` reports each record's placement when reading, so a plugin can be rebuilt exactly. `esp/LayoutCheck` rebuilds a plugin and compares records, placements and groups; the definition check runs it on every active plugin with cells, worldspaces or topics (`ValidationEngine::checkGroupLayouts`). Nothing in cells is compiled yet: the placement guard still keeps those types analysis-only.
+
 ## Record definitions and the FormID decoder
 
 Rewriting references requires knowing exactly which bytes are FormIDs. `esp/RecordDefinitions.cpp` describes the supported record types for the 1.10.163 runtime profile (Phase One plus tier 1 base objects, effects, sounds and UI data; see the README for the list):

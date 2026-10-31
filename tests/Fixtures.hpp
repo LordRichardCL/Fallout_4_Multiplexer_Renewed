@@ -3,6 +3,7 @@
 // Helpers that build synthetic plugins, string tables and installs.
 
 #include "esp/PluginWriter.hpp"
+#include "esp/RecordCatalogue.hpp"
 #include "esp/Record.hpp"
 #include "util/Binary.hpp"
 #include "util/Text.hpp"
@@ -82,8 +83,24 @@ inline void writePlugin(const std::filesystem::path& path, const std::vector<std
     for (const auto& m : masters)
         h.masters.push_back({m, 0});
     w.setHeader(h);
-    for (auto& r : records)
-        w.addRecord(std::move(r));
+    // As in a real plugin: cells are interior cells, and placed references, landscape and navmeshes
+    // go into the first cell listed (temporary, or persistent when flagged).
+    uint32_t firstCell = 0;
+    for (const auto& r : records)
+        if (r.signature() == sig::CELL && !firstCell)
+            firstCell = r.header.formId;
+    for (auto& r : records) {
+        Placement p;
+        const auto* entry = RecordCatalogue::get().find(r.signature());
+        if (r.signature() == sig::CELL) {
+            p.kind = Placement::Kind::InteriorCell;
+        } else if (entry && entry->placement == RecordPlacement::CellChild) {
+            p.kind = Placement::Kind::CellChild;
+            p.parent = firstCell;
+            p.persistent = (r.header.flags & RecordFlags::Persistent) != 0;
+        }
+        w.addRecord(std::move(r), p);
+    }
     w.write(path, compressLarge);
 }
 

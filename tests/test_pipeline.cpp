@@ -1307,7 +1307,8 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
     auto data = root / "Game" / "Data";
     // A large (compressed) record of a type the compiler does not describe.
     writePlugin(data / "ModL.esp", {"Fallout4.esm"},
-                {record("LAND", 0x01000800, {raw("DATA", std::vector<uint8_t>(20000, 1))}),
+                {record("CELL", 0x01000802, {zs("EDID", "ModLCell")}),
+                 record("LAND", 0x01000800, {raw("DATA", std::vector<uint8_t>(20000, 1))}),
                  record("GMST", 0x01000801, {zs("EDID", "fModSetting"), raw("DATA", std::vector<uint8_t>(20000, 2))})},
                 0, true);
     // A record type that does not exist in Fallout 4 (an Oblivion creature).
@@ -1404,14 +1405,16 @@ TEST(cleaning_report_findings)
     auto root = buildInstall("cleaning");
     auto data = root / "Game" / "Data";
     writePlugin(data / "ModW.esm", {"Fallout4.esm"},
-                {record("REFR", 0x01000800, {raw("NAME", {0, 0, 0, 0})}),
+                {record("CELL", 0x01000805, {zs("EDID", "ModWCell")}),
+                 record("REFR", 0x01000800, {raw("NAME", {0, 0, 0, 0})}),
                  record("NAVM", 0x01000801, {raw("NVNM", std::vector<uint8_t>(8, 0))}),
                  record("KYWD", 0x01000802, {zs("EDID", "ModW_Keyword")}),
                  record("LVLI", 0x01000803, {zs("EDID", "ListA"), raw("LLCT", {1}), lvlo(1, 0x01000804, 1)}),
                  record("LVLI", 0x01000804, {zs("EDID", "ListB"), raw("LLCT", {1}), lvlo(1, 0x01000803, 1)})},
                 ESM);
     writePlugin(data / "ModD.esp", {"Fallout4.esm", "ModW.esm"},
-                {record("REFR", 0x01000800, {}, RecordFlags::Deleted),
+                {record("CELL", 0x01000805, {zs("EDID", "ModWCell")}), // a reference's cell is always copied with it
+                 record("REFR", 0x01000800, {}, RecordFlags::Deleted),
                  record("NAVM", 0x01000801, {}, RecordFlags::Deleted),
                  record("KYWD", 0x01000802, {}, RecordFlags::Deleted),
                  // A new record in ModW's FormID range that ModW does not have.
@@ -1765,6 +1768,23 @@ TEST(auto_merger_relinks_scripts_and_configs)
     p.exportOutputs();
     CHECK(!std::filesystem::exists(result.directory / "scripts" / "modsuser.pex"));
     CHECK(!std::filesystem::exists(result.directory / "Multiplexer_Relinked.tsv"));
+}
+
+// The definition check also checks the nested group writer against the load order's plugins with
+// cells, worldspaces or dialogue topics.
+TEST(definition_check_checks_group_layouts)
+{
+    auto root = buildInstall("layoutcheck");
+    Pipeline p(configFor(root));
+    p.scan();
+    auto check = p.checkDefinitions({});
+    CHECK_EQ(check.layoutPlugins, size_t(1)); // ModC.esp has a cell
+    CHECK_EQ(check.layoutRebuilt, size_t(1));
+    CHECK_EQ(check.layoutProblems, size_t(0));
+    bool summary = false;
+    for (const auto& is : check.report.issues)
+        summary |= is.category == "Group Layout" && is.message.find("1 rebuilt by the nested group writer") != std::string::npos;
+    CHECK(summary);
 }
 
 // ---- Filename references --------------------------------------------------------------------------

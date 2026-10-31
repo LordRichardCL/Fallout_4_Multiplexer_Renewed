@@ -3,9 +3,11 @@
 #include "engine/Diagnosis.hpp"
 #include "engine/Normalizer.hpp"
 #include "engine/ParallelFor.hpp"
+#include "esp/LayoutCheck.hpp"
 #include "esp/PluginFile.hpp"
 #include "util/Text.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <map>
 #include <mutex>
@@ -513,9 +515,63 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                    label + ": candidate not confirmed: " + join(problems, "; ") + ". It stays out of compilation");
         }
     }
+    checkGroupLayouts(session, out, progress, threads);
     spdlog::info("Definition check: {} record types, {} subrecord layouts, {} warnings", out.recordsByType.size(),
                  out.stats.size(), v.warnings);
     return out;
+}
+
+void ValidationEngine::checkGroupLayouts(const Session& session, DefinitionCheck& out, ProgressSink& progress,
+                                         unsigned threads)
+{
+    // The nested group writer against every plugin with cells, worldspaces or dialogue topics.
+    constexpr uint64_t kRebuildLimit = 64ull * 1024 * 1024;
+    std::vector<const PluginInfo*> plugins;
+    for (const auto& p : session.plugins)
+        if (p.active && p.scanned && p.error.empty() &&
+            (p.typeCounts.count(sig::CELL) || p.typeCounts.count(Signature("WRLD")) || p.typeCounts.count(Signature("DIAL"))))
+            plugins.push_back(&p);
+    progress.stage("Check group layouts");
+    std::vector<LayoutCheck> results(plugins.size());
+    std::atomic<size_t> done{0};
+    parallelFor(
+        plugins.size(),
+        [&](size_t i) {
+            try {
+                auto file = PluginFile::load(plugins[i]->path);
+                results[i] = checkLayout(file, file.bytes().size() <= kRebuildLimit);
+            } catch (const std::exception& e) {
+                results[i].nested = true;
+                results[i].problems.push_back(std::string("could not be read: ") + e.what());
+            }
+            size_t n = ++done;
+            progress.progress(n, plugins.size(), plugins[i]->name);
+        },
+        progress, std::min(threads ? threads : 4u, 4u)); // whole plugins in memory: a few at a time
+
+    auto& v = out.report;
+    for (size_t i = 0; i < plugins.size(); ++i) {
+        const auto& r = results[i];
+        if (!r.nested)
+            continue;
+        ++out.layoutPlugins;
+        out.layoutRebuilt += r.rebuilt && r.problems.empty();
+        out.layoutSameOrder += r.sameOrder;
+        if (r.problems.empty()) {
+            v.pass();
+            continue;
+        }
+        ++out.layoutProblems;
+        v.fail(Severity::Warning, "Group Layout", plugins[i]->name + ": " + join(r.problems, "; "), plugins[i]->name);
+    }
+    if (out.layoutPlugins)
+        v.fail(Severity::Info, "Group Layout",
+               std::to_string(out.layoutPlugins) + " plugins with cells, worldspaces or dialogue topics checked: " +
+                   std::to_string(out.layoutRebuilt) + " rebuilt by the nested group writer and read back with every "
+                   "record and group in place (" + std::to_string(out.layoutSameOrder) + " in the same order), " +
+                   std::to_string(out.layoutPlugins - out.layoutRebuilt - out.layoutProblems) +
+                   " checked by placement only (over 64 MB), " + std::to_string(out.layoutProblems) +
+                   " with differences. Send this result to the developer");
 }
 
 std::vector<ArchivePriorityChange> ValidationEngine::checkArchivePriority(const Session& session,

@@ -57,6 +57,8 @@ void PluginFile::forEachRecord(const std::function<bool(const RecordLocation&)>&
     struct Frame {
         uint64_t end;
         Signature top;
+        int32_t type;
+        uint32_t label;
     };
     std::vector<Frame> stack;
     BinaryReader r(bytes_);
@@ -79,7 +81,7 @@ void PluginFile::forEachRecord(const std::function<bool(const RecordLocation&)>&
             if (g.groupSize < GroupHeader::kSize || offset + g.groupSize > bytes_.size())
                 throw FormatError("invalid group size at offset " + std::to_string(offset));
             Signature top = stack.empty() ? Signature(g.label) : stack.back().top;
-            stack.push_back({offset + g.groupSize, top});
+            stack.push_back({offset + g.groupSize, top, g.groupType, g.label});
             continue;
         }
 
@@ -89,9 +91,72 @@ void PluginFile::forEachRecord(const std::function<bool(const RecordLocation&)>&
         loc.topGroup = stack.empty() ? loc.header.signature : stack.back().top;
         loc.depth = static_cast<uint32_t>(stack.size());
         loc.rawData = r.readBytes(loc.header.dataSize);
+        if (!stack.empty()) {
+            loc.groupType = stack.back().type;
+            loc.groupLabel = stack.back().label;
+        }
+        for (const auto& f : stack) {
+            if (f.type == GroupType::WorldChildren)
+                loc.world = f.label;
+            else if (f.type == GroupType::CellChildren)
+                loc.cell = f.label;
+            else if (f.type == GroupType::TopicChildren)
+                loc.topic = f.label;
+            else if (f.type == GroupType::InteriorBlock || f.type == GroupType::ExteriorBlock) {
+                loc.blockType = f.type;
+                loc.blockLabel = f.label;
+            } else if (f.type == GroupType::InteriorSubBlock || f.type == GroupType::ExteriorSubBlock)
+                loc.subBlockLabel = f.label;
+            else if (f.type > GroupType::CellTemporary)
+                loc.unusualGroup = true;
+        }
         if (!visitor(loc))
             return;
     }
+}
+
+void PluginFile::forEachGroup(const std::function<void(const GroupHeader&, uint32_t depth)>& visitor) const
+{
+    std::vector<uint64_t> ends;
+    BinaryReader r(bytes_);
+    r.seek(static_cast<size_t>(firstGroupOffset_));
+    while (!r.atEnd()) {
+        while (!ends.empty() && r.position() >= ends.back())
+            ends.pop_back();
+        if (r.atEnd())
+            break;
+        const uint64_t offset = r.position();
+        if (r.remaining() < RecordHeader::kSize)
+            throw FormatError("truncated data at offset " + std::to_string(offset));
+        if (Signature(r.peek<uint32_t>()) == sig::GRUP) {
+            r.skip(4);
+            auto g = GroupHeader::read(r);
+            if (g.groupSize < GroupHeader::kSize || offset + g.groupSize > bytes_.size())
+                throw FormatError("invalid group size at offset " + std::to_string(offset));
+            visitor(g, static_cast<uint32_t>(ends.size()));
+            ends.push_back(offset + g.groupSize);
+            continue;
+        }
+        auto h = RecordHeader::read(r);
+        r.skip(h.dataSize);
+    }
+}
+
+Placement RecordLocation::placement() const
+{
+    Placement p;
+    if (header.signature == sig::CELL && cell == 0) {
+        p.kind = world ? Placement::Kind::WorldCell : Placement::Kind::InteriorCell;
+        p.parent = world;
+    } else if (cell) {
+        p.kind = Placement::Kind::CellChild;
+        p.parent = cell;
+        p.persistent = groupType == GroupType::CellPersistent;
+    } else if (topic) {
+        p.kind = Placement::Kind::TopicChild;
+        p.parent = topic;
+    }
+    return p;
 }
 
 Record PluginFile::recordAt(uint64_t offset) const

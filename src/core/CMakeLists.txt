@@ -10,6 +10,8 @@ add_library(fo4mx_core STATIC
     util/Platform.cpp
     util/Text.cpp
     esp/FieldDecoder.cpp
+    esp/GroupLayout.cpp
+    esp/LayoutCheck.cpp
     esp/PluginFile.cpp
     esp/PluginHeader.cpp
     esp/PluginWriter.cpp
