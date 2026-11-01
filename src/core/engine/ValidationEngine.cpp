@@ -325,7 +325,7 @@ ValidationReport ValidationEngine::validateWrittenFiles(const CompiledOutput& c,
 }
 
 DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::vector<Signature>& types,
-                                                   ProgressSink& progress, unsigned threads)
+                                                   ProgressSink& progress, unsigned threads, bool groupLayouts)
 {
     progress.stage("Check definitions");
     DefinitionCheck out;
@@ -523,7 +523,8 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                    label + ": candidate not confirmed: " + join(problems, "; ") + ". It stays out of compilation");
         }
     }
-    checkGroupLayouts(session, out, progress, threads);
+    if (groupLayouts)
+        checkGroupLayouts(session, out, progress, threads);
     spdlog::info("Definition check: {} record types, {} subrecord layouts, {} warnings", out.recordsByType.size(),
                  out.stats.size(), v.warnings);
     return out;

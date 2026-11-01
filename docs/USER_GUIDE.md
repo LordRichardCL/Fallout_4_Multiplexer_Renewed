@@ -174,6 +174,8 @@ If validation finds records that cannot be written safely, for example a FormID 
 
 ## Checking the record definitions
 
+Every **Analyse** also checks the **Candidate** record types (described but not compiled yet) against your load order, and the Validation Report (Definitions category) says for each whether your files confirm it. Send that report to the developer: confirmed types are switched on in the next version. The full check below also covers the compiled types and the group layout.
+
 The app needs the exact layout of every record type it compiles. This check confirms those layouts against **your** game files. Run it once after installing a new version of the app, and send the result to the developer if it shows warnings.
 
 1. Start the app. On the **Setup** screen, check the folders and press **Save and Continue**.

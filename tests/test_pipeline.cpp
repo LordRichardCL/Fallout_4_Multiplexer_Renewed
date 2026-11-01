@@ -2124,6 +2124,21 @@ TEST(quest_compiles_with_aliases_in_order)
     }
 }
 
+// Every analysis checks the Candidate types against the load order, so the Validation Report says
+// whether they are confirmed without a separate definition check.
+TEST(analysis_checks_candidate_types)
+{
+    auto root = buildInstall("candidatecheck"); // ModC.esp has a quest
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    p.writeReports(root / "Reports");
+    std::ifstream in(root / "Reports" / "ValidationReport.txt");
+    std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(txt.find("QUST (Quest): candidate confirmed by your load order (1 records)") != std::string::npos);
+}
+
 // While world types are Candidates, a plugin with cell or reference overrides stays as it is.
 TEST(world_types_stay_out_while_candidates)
 {

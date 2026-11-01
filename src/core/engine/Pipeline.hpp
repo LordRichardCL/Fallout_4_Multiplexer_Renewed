@@ -108,6 +108,7 @@ private:
     std::optional<CompiledOutput> compiled_;
     std::optional<ValidationReport> validation_;
     mutable std::optional<ValidationReport> definitionCheck_; // latest definition check's findings
+    std::optional<ValidationReport> candidateCheck_;          // this analysis's check of the Candidate types
     mutable std::optional<ValidationReport> reportValidation_;
     std::vector<ArchivePriorityChange> archiveChanges_;
     std::optional<ExportResult> exported_;

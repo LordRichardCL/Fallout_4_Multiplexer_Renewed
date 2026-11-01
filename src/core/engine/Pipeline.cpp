@@ -214,10 +214,17 @@ const ValidationReport* Pipeline::reportValidation() const
     if (!definitionCheck_ && db_)
         if (auto stored = db::DatabaseWriter(*db_).loadValidation("definitions"))
             definitionCheck_ = std::move(*stored);
-    if (!definitionCheck_)
+    // This analysis's candidate check is current; a full definition check (with the group layout
+    // check) is used when there is no candidate check.
+    const ValidationReport* extra = candidateCheck_ ? &*candidateCheck_ : definitionCheck_ ? &*definitionCheck_ : nullptr;
+    if (!extra)
         return validation();
     reportValidation_ = validation_ ? *validation_ : ValidationReport{};
-    reportValidation_->merge(*definitionCheck_);
+    reportValidation_->merge(*extra);
+    if (candidateCheck_ && definitionCheck_)
+        for (const auto& is : definitionCheck_->issues) // the group layout result is only in the full check
+            if (is.category == "Group Layout")
+                reportValidation_->issues.push_back(is);
     return &*reportValidation_;
 }
 
@@ -236,6 +243,20 @@ void Pipeline::analyse(ProgressSink& progress)
     }
     dependencies_ = DependencyEngine::analyse(*session_, config_.analysis, progress);
     CleaningEngine::analyse(*session_, *conflicts_, *dependencies_);
+    // The Candidate types (described, not compiled yet) are checked against this load order every
+    // time, so the Validation Report always says whether they are confirmed.
+    {
+        std::vector<Signature> candidates;
+        for (const auto& e : session_->defs.catalogue().entries())
+            if (session_->defs.strategy(e.sig) == MergeStrategy::Candidate)
+                candidates.push_back(e.sig);
+        candidateCheck_.reset();
+        if (!candidates.empty()) {
+            progress.stage("Checking candidate record types");
+            candidateCheck_ =
+                ValidationEngine::checkDefinitions(*session_, candidates, progress, config_.scan.threads, false).report;
+        }
+    }
     compiled_.reset();
     validation_.reset();
     if (db_)

@@ -93,8 +93,10 @@ public:
     // Decodes every record of the compilable types (or `types`) in the load order, base game
     // included, and reports layouts that look wrong: FormIDs at described offsets that do not
     // resolve, unexpected sizes, and undescribed data that looks like FormIDs.
+    // `groupLayouts`: also rebuild the load order's plugins with cells, worldspaces, quests or topics.
     static DefinitionCheck checkDefinitions(Session& session, const std::vector<Signature>& types = {},
-                                            ProgressSink& progress = nullProgress(), unsigned threads = 0);
+                                            ProgressSink& progress = nullProgress(), unsigned threads = 0,
+                                            bool groupLayouts = true);
     // Part of the definition check: the nested group writer against every active plugin with cells,
     // worldspaces or dialogue topics (LayoutCheck); findings in `out.report`, category "Group Layout".
     static void checkGroupLayouts(const Session& session, DefinitionCheck& out, ProgressSink& progress = nullProgress(),
