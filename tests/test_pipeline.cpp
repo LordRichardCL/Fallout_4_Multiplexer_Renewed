@@ -2022,7 +2022,8 @@ TEST(navmeshes_compile_with_a_combined_info_map)
                 ESM);
     writePlugin(data / "ModP.esp", {"Fallout4.esm", "NavBase.esm"},
                 {record("NAVI", 0x01000FF1,
-                        {u32("NVER", 12), info(0x01000F00, 0, 0x01000F01), info(0x02000801, 0, 0x02000800)}),
+                        {u32("NVER", 12), info(0x01000F00, 0, 0x01000F01), info(0x02000801, 0, 0x02000800),
+                         info(0x01000F77, 0, 0x01000F01)}), // a navmesh that exists nowhere: left out
                  record("CELL", 0x02000800, {zs("EDID", "PCell")}),
                  record("NAVM", 0x02000801, {geometry(0x02000800)})});
     writePlugin(data / "ModQ.esp", {"Fallout4.esm", "NavBase.esm"},

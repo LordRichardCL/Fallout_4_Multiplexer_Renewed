@@ -239,6 +239,7 @@ static EmittedRecord combineNavmeshInfos(Session& session, const CompiledOutput&
     std::map<FormKey, size_t> infoAt;
     std::vector<FormKey> deleted;
     std::set<FormKey> deletedSeen;
+    size_t missing = 0;
     EmittedRecord e;
     for (const auto& r : inst) {
         e.chain.push_back(r.plugin);
@@ -253,6 +254,12 @@ static EmittedRecord combineNavmeshInfos(Session& session, const CompiledOutput&
                 if (sub.heuristic || ref == sub.refs.end())
                     throw FormatError("a navmesh info in " + session.pluginName(r.plugin) +
                                       " could not be decoded, so the navmesh infos cannot be combined");
+                // An entry for a navmesh that exists nowhere describes nothing the game can find; it is
+                // left out rather than written for "none".
+                if (!session.exists(ref->second)) {
+                    ++missing;
+                    continue;
+                }
                 if (auto it = infoAt.find(ref->second); it != infoAt.end()) {
                     infos[it->second] = std::move(sub);
                 } else {
@@ -272,6 +279,9 @@ static EmittedRecord combineNavmeshInfos(Session& session, const CompiledOutput&
     }
     if (!base)
         throw FormatError("no compiled plugin has a navmesh info map");
+    if (missing)
+        e.issues.push_back({Severity::Info, Signature("NVMI"),
+                            std::to_string(missing) + " navmesh infos for navmeshes that exist in no plugin are left out"});
 
     // EDID and NVER, the navmesh infos, then the rest (NVPP), then the deleted navmeshes.
     std::vector<NormSub> subs, rest;

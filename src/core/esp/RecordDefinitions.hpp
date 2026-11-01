@@ -38,6 +38,9 @@ enum class FieldKind : uint8_t {
     PrecutMap,      // NAVM MNAM: references with the triangles cut for them
     NavmeshInfo,    // NAVI NVMI: one navmesh's connections, island data and pathing cell
     PrecomputedPathing, // NAVI NVPP: precomputed paths and road markers
+    PackageValue,   // PACK CNAM: the combat style before the data inputs, a data input value after
+    PackageLocation, // PACK PLDT: location type, then a FormID for references, cells, objects, keywords
+    PackageTarget,  // PACK PTDA: target type, then a FormID for references, objects, keywords
 };
 
 // How two plugins' edits of a field combine during merging.

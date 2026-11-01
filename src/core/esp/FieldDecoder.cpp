@@ -174,6 +174,37 @@ private:
         case FieldKind::PrecomputedPathing:
             decodeNavmesh(i, sr, def.kind);
             break;
+        case FieldKind::PackageValue: {
+            // Before the first data input (ANAM) CNAM is the combat style; after it, a value.
+            bool input = false;
+            for (uint32_t k = 0; k < i; ++k)
+                input |= subs_[k].signature == Signature("ANAM");
+            if (!input) {
+                if (size == 4)
+                    slot(i, 0);
+                else
+                    heuristic(i, 0, static_cast<uint32_t>(size));
+            }
+            break;
+        }
+        case FieldKind::PackageLocation:
+        case FieldKind::PackageTarget: {
+            // xEdit wbPLDT / wbTargetData: type, value, then radius or count (and a collection index).
+            if (size < 8) {
+                heuristic(i, 0, static_cast<uint32_t>(size));
+                break;
+            }
+            const int32_t type = loadLE<int32_t>(sr.data.data());
+            const bool location = def.kind == FieldKind::PackageLocation;
+            const bool form = location ? (type == 0 || type == 1 || type == 4 || type == 6)
+                                       : (type == 0 || type == 1 || type == 3 || type == 7);
+            const bool known = location ? (type >= 0 && type <= 14 && type != 12 && type != 13) : (type >= 0 && type <= 8);
+            if (form)
+                slot(i, 4);
+            else if (!known)
+                heuristic(i, 4, 8);
+            break;
+        }
         case FieldKind::TopicData:
             if (size == 8 && loadLE<uint32_t>(sr.data.data()) == 0)
                 slot(i, 4); // a topic
@@ -330,6 +361,25 @@ private:
             throw FormatError("data after the quest's aliases");
     }
 
+    // Fallout 4 PACK (xEdit wbVMADFragmentedPACK): extra bind data version, flags (OnBegin, OnEnd,
+    // OnChange), the fragment script, then one fragment per flag set (a byte, script and function
+    // names). It must end exactly at the end of the subrecord.
+    void packageFragments(BinaryReader& r, uint32_t i, int16_t version, int16_t objFormat)
+    {
+        r.skip(1); // extra bind data version
+        const uint8_t flags = r.read<uint8_t>();
+        vmadScript(r, i, version, objFormat);
+        for (int f = 0; f < 3; ++f) {
+            if (!(flags & (1 << f)))
+                continue;
+            r.skip(1);
+            r.readWString(); // script name
+            r.readWString(); // fragment (function) name
+        }
+        if (!r.atEnd())
+            throw FormatError("data after the package's fragments");
+    }
+
     void decodeVmad(uint32_t i, const Subrecord& sr)
     {
         size_t slotsBefore = out_.formIdSlots.size();
@@ -343,6 +393,8 @@ private:
             if (!r.atEnd()) {
                 if (record_ == Signature("QUST"))
                     questFragments(r, i, version, objFormat);
+                else if (record_ == Signature("PACK"))
+                    packageFragments(r, i, version, objFormat);
                 else
                     vmadFragments(r, i, sr, version, objFormat);
             }

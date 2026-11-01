@@ -1220,6 +1220,46 @@ void buildOldGen(RecordDefinitions& d)
         .field("XNAM", noRefs())   // coordinates
         .field("VNAM", unknown())  // undecoded in xEdit: scanned
         .add(region("Scene", {"SNAM"}, {"SNAM", "XNAM"}));
+    // Package, from xEdit's PACK. Data inputs, the procedure tree and the begin/end/change events
+    // repeat the same subrecords, so everything from PKDT on is one region, kept in order exactly.
+    // CNAM is the combat style before the first data input and a value after it; PLDT and PTDA hold
+    // a FormID only for some types; the script data has package fragments, decoded in full.
+    std::initializer_list<const char*> packageBody = {
+        "PKDT", "PSDT", "CITC", "CTDA", "CIS1", "CIS2", "IDLF", "IDLC", "IDLT", "IDLA", "IDLB",
+        "CNAM", "QNAM", "PKCU",                                                        // header
+        "ANAM", "BNAM", "PDTO", "PLDT", "PTDA", "TPIC", "UNAM", "PNAM", "XNAM",        // data inputs
+        "PRCB", "FNAM", "PKC2", "PFO2", "PFOR",                                        // procedure tree
+        "POBA", "POEA", "POCA", "INAM"};                                               // events
+    b.record("PACK", "Package", true)
+        .field("PKDT", noRefs())   // flags, type, interrupt override, speed
+        .field("PSDT", noRefs())   // schedule
+        .field("IDLF", noRefs())
+        .field("IDLC", noRefs())
+        .field("IDLT", noRefs())
+        .field("IDLA", formIdArray(MergeMode::Multiset)) // idle animations
+        .field("IDLB", unknown())  // undecoded in xEdit: scanned
+        .field("CNAM", special(FieldKind::PackageValue))
+        .field("QNAM", formId())   // owner quest
+        .field("PKCU", structAt({4}, 12)) // data input count, package template, version counter
+        .field("ANAM", zstring())  // data input type, branch type
+        .field("BNAM", unknown())  // data input value (undecoded in xEdit) or name: scanned
+        .field("PDTO", special(FieldKind::TopicData))
+        .field("PLDT", special(FieldKind::PackageLocation))
+        .field("PTDA", special(FieldKind::PackageTarget))
+        .field("TPIC", formId())   // dialogue topic
+        .field("UNAM", noRefs())   // data input index
+        .field("PNAM", noRefs())   // data input flags, procedure type
+        .field("XNAM", noRefs())   // marker
+        .field("PRCB", noRefs())   // branch count, flags
+        .field("FNAM", noRefs())   // procedure flags
+        .field("PKC2", noRefs())   // data input index
+        .field("PFO2", noRefs())   // flags override
+        .field("PFOR", unknown())  // undecoded in xEdit: scanned
+        .field("POBA", noRefs())
+        .field("POEA", noRefs())
+        .field("POCA", noRefs())
+        .field("INAM", formId())   // idle
+        .add(region("Package", packageBody, packageBody));
     b.record("LCTN", "Location", true)
         .field("ACPR", structArray(12, {0, 4})) // persistent references: ref, world/cell, grid
         .field("LCPR", structArray(12, {0, 4}))

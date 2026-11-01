@@ -84,13 +84,13 @@ TEST(catalogue_strategy_matches_the_layouts)
 
     // Marking a type without a layout Specialised does not make it compilable; it is reported.
     std::string promoted = readText("resources/record_catalogue.csv");
-    pos = promoted.find("\nPACK,");
+    pos = promoted.find("\nLVSP,");
     auto pres = promoted.find("Preserve", pos);
     promoted.replace(pres, std::string("Preserve").size(), "Specialised");
     auto promotedCat = RecordCatalogue::parse(promoted);
     RecordDefinitions d2 = defs;
     d2.applyCatalogue(promotedCat);
-    CHECK(!d2.isCompilable(Signature("PACK")));
+    CHECK(!d2.isCompilable(Signature("LVSP")));
     CHECK_EQ(d2.strategyWithoutLayout().size(), size_t(1));
 }
 
@@ -300,6 +300,44 @@ TEST(update_layouts_and_guards)
         auto lp = decode("NAVI", "NVPP", p.v);
         CHECK(lp.issues.empty());
         CHECK((offsets(lp) == std::vector<uint32_t>{8, 12, 20}));
+        // Packages: CNAM is the combat style before the first data input, a value after it; PLDT and
+        // PTDA hold a FormID only for some types; package fragments end exactly.
+        CHECK(d.strategy(Signature("PACK")) == MergeStrategy::Candidate);
+        auto sub = [](const char* sig, std::vector<uint8_t> data) {
+            Subrecord sr;
+            sr.signature = Signature::fromString(sig);
+            sr.data = std::move(data);
+            return sr;
+        };
+        auto u32 = [](uint32_t a, uint32_t b = 0, uint32_t c = 0, size_t n = 4) {
+            Bytes x;
+            x.u32(a);
+            if (n > 4) x.u32(b);
+            if (n > 8) x.u32(c);
+            return x.v;
+        };
+        auto pack = decodeLayout(d, Signature("PACK"),
+                                 {sub("CNAM", u32(0x01000800)), sub("ANAM", {'I', 'n', 't', 0}), sub("CNAM", u32(5)),
+                                  sub("PLDT", u32(0, 0x01000801, 0, 12)), sub("PLDT", u32(2, 7, 0, 12)),
+                                  sub("PTDA", u32(7, 0x01000802, 1, 12)), sub("PTDA", u32(2, 9, 1, 12))});
+        std::vector<std::pair<uint32_t, uint32_t>> packSlots;
+        for (const auto& sl : pack.formIdSlots)
+            packSlots.emplace_back(sl.sub, sl.offset);
+        CHECK((packSlots == std::vector<std::pair<uint32_t, uint32_t>>{{0, 0}, {3, 4}, {5, 4}}));
+        CHECK(pack.heuristic.empty() && pack.issues.empty());
+        // VMAD: version 6, format 2, no scripts; fragments: bind version, flags OnBegin|OnChange, a script
+        // with no properties, two fragments.
+        Bytes v;
+        v.u16(6).u16(2).u16(0);
+        v.u8(3).u8(5).u16(1).u8('S').u8(0).u16(0);
+        for (int f = 0; f < 2; ++f)
+            v.u8(0).u16(1).u8('S').u16(1).u8('F');
+        auto vm = decodeLayout(d, Signature("PACK"), {sub("VMAD", v.v)});
+        CHECK(vm.heuristic.empty() && vm.issues.empty());
+        auto vbad = v.v;
+        vbad.push_back(0);
+        CHECK(!decodeLayout(d, Signature("PACK"), {sub("VMAD", vbad)}).issues.empty());
+
         // Precut map: reference, 2 triangles; reference, 0 triangles.
         Bytes m;
         m.u32(0x01000903).u16(2).u16(1).u16(2).u32(0x01000904).u16(0);
