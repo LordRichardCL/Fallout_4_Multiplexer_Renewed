@@ -514,3 +514,10 @@ Placement for types not in the writer's group order, and categories, are to be c
 | `WRLD` | Worldspace | named, analysed generically, keeps its plugin out | top-level group with child groups (cells, blocks) |
 | `WTHR` | Weather | named, analysed generically, keeps its plugin out | top-level group |
 | `ZOOM` | Zoom | **described, compiled, merged** | top-level group |
+
+## Stage 7a promotion
+
+The definition check on a real load order (build 39) confirmed 27 of the stage 7a Candidates; they are promoted to Winner:
+RELA, MUSC, SPGD, RACE, IDLE, CPTH, IDLM, SMEN, REGN, SCSN, ECZN, SCCO, RFGP, FSTP, VTYP, DEBR, WATR, CLAS, BNDS, CAMS, FSTS, TACT, CLMT, MUST, MATT, CSTY, and NPC_ (overrides only: new NPCs keep their plugin, FaceGen is stored under the plugin's name).
+
+Held back: LCTN (confirmed overall, but `RCSR` resolves only 86.4% of its FormIDs, so its layout is not trusted), WTHR (`IMSP` sizes), PKIN (98.9% resolve), SCEN, INFO and DIAL (dialogue never compiles).

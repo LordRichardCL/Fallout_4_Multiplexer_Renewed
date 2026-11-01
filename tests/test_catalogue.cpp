@@ -63,7 +63,7 @@ TEST(catalogue_strategy_matches_the_layouts)
         winner += e.strategy == MergeStrategy::Winner;
     }
     CHECK_EQ(specialised, size_t(61));
-    CHECK_EQ(winner, size_t(32)); // stages 4 and 5, and the world overrides (W2), confirmed by a real load order
+    CHECK_EQ(winner, size_t(59)); // stages 4 and 5, the world types and the stage 7a types, confirmed by a real load order
     CHECK_EQ(specialised + winner, defs.compilableTypes().size());
     CHECK_EQ(defs.recordName(Signature("MISC")), std::string("Misc. Item"));
     CHECK_EQ(defs.recordName(Signature("XYZW")), std::string("XYZW"));
@@ -83,13 +83,13 @@ TEST(catalogue_strategy_matches_the_layouts)
 
     // Marking a type without a layout Specialised does not make it compilable; it is reported.
     std::string promoted = readText("resources/record_catalogue.csv");
-    pos = promoted.find("\nNPC_,");
+    pos = promoted.find("\nQUST,");
     auto pres = promoted.find("Preserve", pos);
     promoted.replace(pres, std::string("Preserve").size(), "Specialised");
     auto promotedCat = RecordCatalogue::parse(promoted);
     RecordDefinitions d2 = defs;
     d2.applyCatalogue(promotedCat);
-    CHECK(!d2.isCompilable(Signature("NPC_")));
+    CHECK(!d2.isCompilable(Signature("QUST")));
     CHECK_EQ(d2.strategyWithoutLayout().size(), size_t(1));
 }
 
@@ -198,8 +198,9 @@ TEST(update_layouts_and_guards)
         CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Candidate);
         CHECK(d.supportSummary(Signature::fromString(t)).find("not compiled") != std::string::npos);
     }
-    CHECK(d.strategy(Signature("NPC_")) == MergeStrategy::Candidate);
+    CHECK(d.strategy(Signature("NPC_")) == MergeStrategy::Winner); // confirmed: compiled as overrides only
     CHECK(d.overridesOnly(Signature("NPC_")));
+    CHECK(d.strategy(Signature("LCTN")) == MergeStrategy::Candidate); // RCSR layout not confirmed
     CHECK(d.strategy(Signature("WTHR")) == MergeStrategy::Candidate);
     CHECK(d.strategy(Signature("QUST")) == MergeStrategy::Preserve);
 
