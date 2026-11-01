@@ -586,3 +586,12 @@ To watch: the output holding the navmesh info map needs every plugin its entries
 Build 57 compiled navmeshes on a real load order: 1,511 plugins compiled (+68), 285,636 new FormIDs, 0 errors; the output holding the navmesh info map has 177 masters. The navmesh info map no longer carries entries for navmeshes that exist in no plugin (8 in one plugin were written as "none"); they are left out.
 
 - **PACK** has a layout from xEdit and is a **Candidate**. Data inputs, the procedure tree and the begin/end/change events repeat the same subrecords, so everything from PKDT on is one region, kept in order. CNAM is the combat style before the first data input (ANAM) and a value after it. PLDT holds a FormID for references, cells, object IDs and keywords (types 0, 1, 4, 6); PTDA for references, object IDs and keywords (types 0, 1, 3, 7); unknown types are scanned. The script data has package fragments (one per OnBegin, OnEnd, OnChange flag), decoded in full. BNAM, IDLB and PFOR are undecoded in xEdit and scanned.
+
+## Packages (P2): promotion, and the next candidates
+
+The analysis's candidate check on a real load order (build 58) confirmed PACK (13,096 records, 99.9% of 62,704 FormIDs resolve): promoted to Winner. Packages compile.
+
+Layout corrections for the remaining candidates:
+- **WTHR IMSP** holds 4 image spaces (sunrise, day, sunset, night), or 8 from form version 111 (xEdit): read as a FormID array of either size. The 4 records of 16 bytes no longer fail.
+- **INFO TRDA**: the emotion keyword is FFFFFFFF for "none" (xEdit allows it), which was counted as a FormID that resolves to nothing (37% of them). It is no longer read as a FormID.
+- A candidate whose FormIDs resolve below 99% is reported with the subrecords that fail, their resolve rate and offsets (PKIN: 98.9% overall).

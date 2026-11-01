@@ -1373,7 +1373,7 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
     writePlugin(data / "ModL.esp", {"Fallout4.esm"},
                 {record("CELL", 0x01000802, {zs("EDID", "ModLCell")}),
                  record("LAND", 0x01000800, {raw("DATA", std::vector<uint8_t>(20000, 1))}),
-                 record("PACK", 0x01000801, {zs("EDID", "ModPackage"), raw("PKDT", std::vector<uint8_t>(20000, 2))})},
+                 record("PKIN", 0x01000801, {zs("EDID", "ModPackIn"), raw("VNAM", std::vector<uint8_t>(20000, 2))})},
                 0, true);
     // A record type that does not exist in Fallout 4 (an Oblivion creature).
     writePlugin(data / "ModU.esp", {"Fallout4.esm"}, {record("CREA", 0x01000800, {zs("EDID", "OldCreature")})});
@@ -1386,8 +1386,8 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
 
     bool compressedEdid = false;
     for (const auto& r : s.records)
-        if (r.plugin == s.findPlugin("ModL.esp")->index && r.signature == Signature("PACK"))
-            compressedEdid = r.editorId && s.strings.get(r.editorId) == "ModPackage";
+        if (r.plugin == s.findPlugin("ModL.esp")->index && r.signature == Signature("PKIN"))
+            compressedEdid = r.editorId && s.strings.get(r.editorId) == "ModPackIn";
     CHECK(compressedEdid);
 
     const auto* modU = s.findPlugin("ModU.esp");
@@ -1402,8 +1402,8 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
     for (const auto& b : p.dependencies()->blockers) {
         if (b.sig == Signature("CREA"))
             crea = !b.known && b.category == "Unknown" && b.support.find("Unknown record type") == 0;
-        if (b.sig == Signature("PACK"))
-            pack = b.known && b.name == "Package" && b.category == "Quests and Dialogue";
+        if (b.sig == Signature("PKIN"))
+            pack = b.known && b.name == "Pack-In" && b.category == "Base Objects";
     }
     CHECK(crea);
     CHECK(pack);
@@ -1414,8 +1414,8 @@ TEST(types_that_are_not_merged_are_classified_record_by_record)
 {
     auto root = buildInstall("notmerged");
     auto data = root / "Game" / "Data";
-    auto gmst = [](uint32_t id, const char* edid, uint8_t v) { // packages: not compiled
-        return record("PACK", id, {zs("EDID", edid), raw("PKDT", {v, 0, 0, 0})});
+    auto gmst = [](uint32_t id, const char* edid, uint8_t v) { // pack-ins: not compiled
+        return record("PKIN", id, {zs("EDID", edid), raw("VNAM", {v, 0, 0, 0})});
     };
     writePlugin(data / "ModG.esm", {"Fallout4.esm"},
                 {gmst(0x01000800, "fA", 1), gmst(0x01000801, "fB", 1), gmst(0x01000802, "fC", 1)}, ESM);

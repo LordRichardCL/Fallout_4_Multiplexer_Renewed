@@ -564,8 +564,17 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
             continue;
         auto problems = candidateProblems[sig];
         auto [res, total] = perType[sig];
-        if (total && res * 100 < total * 99)
-            problems.push_back("only " + pct(res, total) + " of its FormIDs resolve (99% needed)");
+        if (total && res * 100 < total * 99) {
+            // Which subrecords fail, so the layout (or the data) can be looked at.
+            std::vector<std::string> subs;
+            for (const auto& st : out.stats)
+                if (st.record == sig && st.formIds && st.resolved * 100 < st.formIds * 99)
+                    subs.push_back(st.sub.str() + " " + pct(st.resolved, st.formIds) + " of " +
+                                   std::to_string(st.formIds) + ", failing " + topOffsets(st.unresolvedOffsets) +
+                                   (st.example.empty() ? std::string() : " (e.g. " + st.example + ")"));
+            problems.push_back("only " + pct(res, total) + " of its FormIDs resolve (99% needed)" +
+                               (subs.empty() ? std::string() : ": " + join(subs, "; ")));
+        }
         const std::string label = sig.str() + " (" + session.defs.recordName(sig) + ")";
         if (problems.empty()) {
             out.readyCandidates.push_back(sig);

@@ -287,7 +287,7 @@ Navmeshes (NAVM) compile with their cells (confirmed by a real load order: 28,51
 
 ## AI packages
 
-AI packages (PACK) are checked by every analysis and compile once a real load order confirms their layout. Until then plugins with packages stay in the load order.
+AI packages (PACK) compile (confirmed by a real load order: 13,096 packages, 99.9% of their FormIDs resolve), including their data inputs, procedure tree and script fragments. New packages get new FormIDs: start a new game.
 
 ## Filename references
 

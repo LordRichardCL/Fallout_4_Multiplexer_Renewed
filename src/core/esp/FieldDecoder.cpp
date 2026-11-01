@@ -205,6 +205,18 @@ private:
                 heuristic(i, 4, 8);
             break;
         }
+        case FieldKind::ResponseData:
+            // xEdit: emotion keyword or FFFFFFFF (none), response number, sound, unknown, interrupt
+            // percentage, camera target and location aliases.
+            if (size != 20) {
+                issue(Severity::Warning, sr.signature, "unexpected size " + std::to_string(size) + " (expected 20)");
+                heuristic(i, 0, static_cast<uint32_t>(size));
+                break;
+            }
+            if (loadLE<uint32_t>(sr.data.data()) != 0xFFFFFFFFu)
+                slot(i, 0);
+            slot(i, 5);
+            break;
         case FieldKind::TopicData:
             if (size == 8 && loadLE<uint32_t>(sr.data.data()) == 0)
                 slot(i, 4); // a topic

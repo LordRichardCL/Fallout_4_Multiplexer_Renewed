@@ -996,7 +996,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("NAM1", noRefs())   // disabled cloud layers
         .field("SNAM", weatherSound)
         .field("TNAM", formIdList()) // sky statics
-        .field("IMSP", structAt({0, 4, 8, 12, 16, 20, 24, 28}, 32)) // image spaces per time of day
+        .field("IMSP", formIdArray(MergeMode::Scalar)) // image spaces per time of day: 4, or 8 from form version 111
         .field("WGDR", structAt({0, 4, 8, 12, 16, 20, 24, 28}, 32)) // god rays per time of day
         .field("DALC", noRefs())   // directional ambient colours
         .field("GNAM", formId())   // sun glare lens flare
@@ -1495,7 +1495,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("DNAM", formId())   // shared INFO
         .field("GNAM", formId())   // INFO group
         .field("IOVR", zstring())  // override file name
-        .field("TRDA", structAt({0, 5}, 20)) // response data: emotion keyword, sound
+        .field("TRDA", special(FieldKind::ResponseData)) // response data: emotion keyword (FFFFFFFF = none), sound
         .field("NAM1", FieldDef{FieldKind::ILString}) // response text (dialogue strings)
         .field("NAM2", zstring())
         .field("NAM3", zstring())

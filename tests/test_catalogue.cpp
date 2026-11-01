@@ -64,7 +64,7 @@ TEST(catalogue_strategy_matches_the_layouts)
         winner += e.strategy == MergeStrategy::Winner;
     }
     CHECK_EQ(specialised, size_t(61));
-    CHECK_EQ(winner, size_t(66)); // stages 4 and 5, world, stage 7a, quest types, LCTN, GMST and navmeshes, confirmed by a real load order
+    CHECK_EQ(winner, size_t(67)); // stages 4 and 5, world, stage 7a, quest types, LCTN, GMST, navmeshes and packages, confirmed by a real load order
     CHECK_EQ(specialised + winner, defs.compilableTypes().size());
     CHECK_EQ(defs.recordName(Signature("MISC")), std::string("Misc. Item"));
     CHECK_EQ(defs.recordName(Signature("XYZW")), std::string("XYZW"));
@@ -302,7 +302,7 @@ TEST(update_layouts_and_guards)
         CHECK((offsets(lp) == std::vector<uint32_t>{8, 12, 20}));
         // Packages: CNAM is the combat style before the first data input, a value after it; PLDT and
         // PTDA hold a FormID only for some types; package fragments end exactly.
-        CHECK(d.strategy(Signature("PACK")) == MergeStrategy::Candidate);
+        CHECK(d.strategy(Signature("PACK")) == MergeStrategy::Winner); // confirmed
         auto sub = [](const char* sig, std::vector<uint8_t> data) {
             Subrecord sr;
             sr.signature = Signature::fromString(sig);
@@ -337,6 +337,16 @@ TEST(update_layouts_and_guards)
         auto vbad = v.v;
         vbad.push_back(0);
         CHECK(!decodeLayout(d, Signature("PACK"), {sub("VMAD", vbad)}).issues.empty());
+
+        // INFO TRDA: FFFFFFFF is "no emotion", not a FormID; WTHR IMSP holds 4 or 8 image spaces.
+        Bytes t;
+        t.u32(0xFFFFFFFF).u8(1).u32(0x01000803).zero(11);
+        auto trda = decodeLayout(d, Signature("INFO"), {sub("TRDA", t.v)});
+        CHECK(trda.issues.empty() && trda.formIdSlots.size() == 1 && trda.formIdSlots[0].offset == 5);
+        storeLE<uint32_t>(t.v.data(), 0x01000804);
+        CHECK_EQ(decodeLayout(d, Signature("INFO"), {sub("TRDA", t.v)}).formIdSlots.size(), size_t(2));
+        CHECK_EQ(decodeLayout(d, Signature("WTHR"), {sub("IMSP", std::vector<uint8_t>(16, 0))}).formIdSlots.size(), size_t(4));
+        CHECK(decodeLayout(d, Signature("WTHR"), {sub("IMSP", std::vector<uint8_t>(32, 0))}).issues.empty());
 
         // Precut map: reference, 2 triangles; reference, 0 triangles.
         Bytes m;
