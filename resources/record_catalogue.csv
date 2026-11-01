@@ -103,7 +103,7 @@ NAVI,Navmesh Info Map,World,top,Preserve,55,,
 NAVM,Navmesh,World,cell child,Preserve,,,Deleting navmeshes can crash the game (xEdit docs 7.5.4).
 NOCM,Navmesh Obstacle Manager,World,top,Preserve,128,,
 NOTE,Note,Items,top,Specialised,44,11,
-NPC_,Non-Player Character,Actors,top,Winner,38,,Layout from xEdit wbDefinitionsFO4.pas. Overrides only: new NPCs keep their plugin (FaceGen data is stored under its name). Confirmed by a real load order (definition check).,overrides
+NPC_,Non-Player Character,Actors,top,Winner,38,,"Layout from xEdit wbDefinitionsFO4.pas. Overrides and new NPCs (stage N1, new FormIDs); a plugin that ships FaceGen for its NPCs (stored under its name) keeps them through its FaceGen folder. Confirmed by a real load order (definition check).",
 OMOD,Object Modification,Item Components,top,Specialised,118,5,
 OTFT,Outfit,Lists,top,Specialised,102,,
 OVIS,Object Visibility Manager,Game Data,top,Winner,131,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).

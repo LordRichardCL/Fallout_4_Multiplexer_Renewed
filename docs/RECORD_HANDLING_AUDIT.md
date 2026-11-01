@@ -538,3 +538,7 @@ Held back: LCTN (confirmed overall, but `RCSR` resolves only 86.4% of its FormID
 ## Quest stage (Q3): promotion
 
 The analysis's candidate check on a real load order confirmed QUST (11,474 records, 529,239 FormIDs, 99.9% resolve, script data decoded in full), SMQN (1,284 records, 99.8%) and SMBN (423 records, 100%). They are promoted to Winner. Quests with dialogue stay with their plugin (DIAL, INFO, SCEN and DLBR are not compiled).
+
+## NPC stage (N1)
+
+NPC_ is no longer overrides only: new NPCs compile with new FormIDs. FaceGen is found by the defining plugin's name and the NPC's FormID, so a plugin that ships FaceGen keeps its NPCs through its FaceGen folder (a Compatibility Required filename reference, loose files and archives alike); new NPCs without FaceGen look the same compiled. Relocating FaceGen to the output (N2) comes after confirming how the engine finds the face textures.

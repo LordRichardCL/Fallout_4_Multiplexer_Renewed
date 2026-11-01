@@ -265,6 +265,10 @@ Every finding on the **Validation** page and under **Dependencies → Missing Re
 
 **Missing References (summary)** rows group all references from one plugin to another (for example *ImprovedAREnclaveNWBBEPatch.esp -> BlackBirdElitePA.esp: 173 references*). Other categories (missing assets, archive priority, kept out automatically, missing masters and so on) carry a general explanation. Likely causes are included in **Copy**, **Save…** and the HTML and JSON reports.
 
+## NPCs
+
+NPC records compile: overrides of existing NPCs, and **new NPCs** with new FormIDs (start a new game). The game finds an NPC's face (FaceGen) as `facegeom\<plugin>\<FormID>.nif`, so a plugin that ships FaceGen for its NPCs stays in the load order (its FaceGen folder is a *Compatibility Required* filename reference); moving FaceGen to the output is a later stage. New NPCs without FaceGen (creatures, robots, NPCs that take their face from a template) look the same compiled.
+
 ## Quests
 
 Quests (QUST) and the story manager nodes that start them (SMQN, SMBN) are compiled (confirmed by a real load order: 11,474 quests, 99.9% of their FormIDs resolve):

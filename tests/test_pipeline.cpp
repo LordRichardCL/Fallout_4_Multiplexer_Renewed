@@ -1673,15 +1673,13 @@ TEST(body_part_data_candidate_is_confirmed_by_the_definition_check)
     CHECK_EQ(resolved, uint64_t(11));
 }
 
-// NPC_ compiles only as overrides: a plugin that adds a new NPC stays out (FaceGen data is stored
-// under the defining plugin's name), a plugin that only overrides one compiles.
-TEST(npc_overrides_only)
+// NPCs (stage N1): overrides and new NPCs compile. A new NPC without FaceGen looks the same compiled
+// (there was no face file to find before either); a plugin that ships FaceGen for its NPCs (found by
+// its name and the NPC's FormID) keeps them through its FaceGen folder.
+TEST(npcs_compile_unless_they_have_facegen)
 {
-    const auto* defs = trialDefinitions({{"NPC_", "Winner"}});
-    CHECK(defs->isCompilable(Signature("NPC_")));
-    CHECK(defs->overridesOnly(Signature("NPC_")));
-
-    auto root = buildInstall("npcoverrides");
+    CHECK(!RecordDefinitions::get().overridesOnly(Signature("NPC_")));
+    auto root = buildInstall("npcs");
     auto data = root / "Game" / "Data";
     auto item = [](uint32_t form, uint32_t count) {
         std::vector<uint8_t> b(8);
@@ -1694,36 +1692,32 @@ TEST(npc_overrides_only)
                 ESM);
     writePlugin(data / "ModNO.esp", {"Fallout4.esm", "ModN.esm"},
                 {record("NPC_", 0x01000800, {zs("EDID", "Raider"), zs("FULL", "Raider Boss"), u32("COCT", 1), item(0x1000, 2)})});
-    writePlugin(data / "ModNN.esp", {"Fallout4.esm"}, {record("NPC_", 0x01000800, {zs("EDID", "NewGuy")})});
-    writeFile(root / "plugins.txt", "*ModN.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModNO.esp\n*ModNN.esp\n");
-    auto cfg = configFor(root);
-    cfg.definitions = defs;
-    Pipeline p(cfg);
+    writePlugin(data / "ModNF.esp", {"Fallout4.esm"}, {record("NPC_", 0x01000800, {zs("EDID", "FacedGuy")})});
+    writeFile(data / "Meshes" / "Actors" / "Character" / "FaceGenData" / "FaceGeom" / "ModNF.esp" / "00000800.nif", "nif");
+    writeFile(root / "plugins.txt", "*ModN.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModNO.esp\n*ModNF.esp\n");
+    Pipeline p(configFor(root));
     p.scan();
     p.analyse();
     auto& s = p.session();
+    CHECK_EQ(s.findPlugin("ModN.esm")->eligibility, Eligibility::Eligible);
     CHECK_EQ(s.findPlugin("ModNO.esp")->eligibility, Eligibility::Eligible);
-    for (const char* name : {"ModNN.esp", "ModN.esm"}) {
-        const auto* pl = s.findPlugin(name);
-        CHECK_EQ(pl->eligibility, Eligibility::Ineligible);
-        bool reason = false;
-        for (const auto& r : pl->reasons)
-            reason |= r.find("Adds new records of types compiled only as overrides: NPC_ (1)") == 0;
-        CHECK(reason);
-    }
+    const auto* faced = s.findPlugin("ModNF.esp");
+    CHECK_EQ(faced->eligibility, Eligibility::Ineligible);
+    CHECK(std::any_of(faced->reasons.begin(), faced->reasons.end(),
+                      [](const std::string& r) { return r.find("FaceGen meshes") != std::string::npos; }));
 
     CHECK(p.compile());
     CHECK_EQ(p.validation()->errors, uint64_t(0));
     OutputSet out(p.exportOutputs().pluginFiles);
-    const OutputSet::Rec* boss = nullptr;
-    for (const auto& r : out.records)
-        if (r.record.header.signature == Signature("NPC_"))
-            boss = &r;
+    const OutputSet::Rec* boss = out.byEditorId("Raider");
     CHECK(boss != nullptr);
-    CHECK(out.identity(*boss) == std::make_pair(std::string("ModN.esm"), 0x800u)); // still an override
-    CHECK_EQ(text(boss->record.find(sig::FULL)), std::string("Raider Boss"));
+    if (!boss)
+        return;
+    CHECK_EQ(out.identity(*boss).first, boss->plugin); // a new NPC: new FormID in the output
+    CHECK_EQ(text(boss->record.find(sig::FULL)), std::string("Raider Boss")); // ModNO's version wins
     auto cnto = boss->record.find(Signature("CNTO"));
     CHECK(out.resolve(*boss, loadLE<uint32_t>(cnto->data.data())) == std::make_pair(std::string("Fallout4.esm"), 0x1000u));
+    CHECK(out.byEditorId("FacedGuy") == nullptr);
 }
 
 // World stages W2 and W3: overrides of placed references, landscape, cells and worldspaces, and new

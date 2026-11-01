@@ -198,8 +198,8 @@ TEST(update_layouts_and_guards)
         CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Candidate);
         CHECK(d.supportSummary(Signature::fromString(t)).find("not compiled") != std::string::npos);
     }
-    CHECK(d.strategy(Signature("NPC_")) == MergeStrategy::Winner); // confirmed: compiled as overrides only
-    CHECK(d.overridesOnly(Signature("NPC_")));
+    CHECK(d.strategy(Signature("NPC_")) == MergeStrategy::Winner); // confirmed
+    CHECK(!d.overridesOnly(Signature("NPC_")));                    // new NPCs too (N1)
     CHECK(d.strategy(Signature("LCTN")) == MergeStrategy::Candidate); // RCSR layout not confirmed
     CHECK(d.strategy(Signature("WTHR")) == MergeStrategy::Candidate);
     CHECK(d.strategy(Signature("QUST")) == MergeStrategy::Winner); // quest stage, confirmed
