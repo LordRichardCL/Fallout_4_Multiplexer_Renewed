@@ -1151,6 +1151,29 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             op.built.push_back(std::move(rec));
             op.placements.push_back(placement);
         }
+        // SEQ: as zEdit and xEdit build it.
+        op.seqFormIds.clear();
+        auto startsWithGame = [](const Record& r) {
+            const auto* dnam = r.find(Signature("DNAM"));
+            return dnam && dnam->data.size() >= 2 && (loadLE<uint16_t>(dnam->data.data()) & 0x0001);
+        };
+        for (size_t k = 0; k < op.records.size(); ++k) {
+            const auto& e = out.records[op.records[k]];
+            if (e.sig != Signature("QUST") || !startsWithGame(op.built[k]))
+                continue;
+            if (!e.isNew) {
+                // An override: the defining plugin's SEQ already lists the quest if it starts with the game there.
+                const auto* g = session.findGroup(e.key);
+                if (!g)
+                    continue;
+                try {
+                    if (startsWithGame(session.loadRecord(session.instances(*g)[0])))
+                        continue;
+                } catch (const std::exception&) {
+                }
+            }
+            op.seqFormIds.push_back(op.built[k].header.formId);
+        }
     }
 
     // ---- Mappings and archives ------------------------------------------------

@@ -263,6 +263,14 @@ Every finding on the **Validation** page and under **Dependencies → Missing Re
 
 **Missing References (summary)** rows group all references from one plugin to another (for example *ImprovedAREnclaveNWBBEPatch.esp -> BlackBirdElitePA.esp: 173 references*). Other categories (missing assets, archive priority, kept out automatically, missing masters and so on) carry a general explanation. Likely causes are included in **Copy**, **Save…** and the HTML and JSON reports.
 
+## Quests
+
+Quests (QUST) and the story manager nodes that start them (SMQN, SMBN) are described and checked by the definition check; they compile once a real load order confirms them. Then:
+- **Quests without dialogue compile** (setup, tracking and script quests, MCM quests). Stages, objectives and aliases are kept exactly in order, and every FormID in them, including the quest's scripts, fragments and alias scripts, is rewritten.
+- **Start-game-enabled quests** are listed in `seq\<output>.seq` for each output, so the game starts them as before.
+- **Quests with dialogue stay with their plugin**: dialogue (DIAL, INFO, SCEN, DLBR) is not compiled, since voice files are found by the plugin's name and the line's FormID.
+- **Saves:** quests get new FormIDs; start a new game.
+
 ## Filename references
 
 Some files find a plugin by its **file name** rather than by its records: a script calling `Game.GetFormFromFile(0x812, "MyMod.esp")`, an MCM menu that requires `MyMod.esp`, a RobCo Patcher line `MyMod.esp|812`, FaceGen meshes in a folder called `MyMod.esp`. If that plugin were compiled away, those files would point at a plugin that is no longer loaded.

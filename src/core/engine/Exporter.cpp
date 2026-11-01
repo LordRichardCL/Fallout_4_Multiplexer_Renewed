@@ -278,6 +278,24 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
         r.writtenOutputs.push_back(op.name);
         spdlog::info("Wrote {} ({} records, {} masters)", op.name, op.built.size(), op.masterNames.size());
     }
+    // SEQ files of the outputs (start-game-enabled quests); an output that no longer needs one loses it.
+    for (const auto& op : c.outputs) {
+        auto stem = op.name.substr(0, op.name.rfind('.'));
+        auto seq = r.directory / "seq" / utf8ToPath(stem + ".seq");
+        std::error_code ec;
+        if (op.seqFormIds.empty() || (op.records.empty() && !options.writeEmptyOutputs)) {
+            if (fs::exists(seq, ec))
+                fs::remove(seq, ec);
+            continue;
+        }
+        BinaryWriter w;
+        for (uint32_t id : op.seqFormIds)
+            w.write<uint32_t>(id);
+        fs::create_directories(seq.parent_path(), ec);
+        writeBinary(seq, w.buffer());
+        r.seqFiles.push_back(seq);
+        spdlog::info("Wrote {} ({} start-game-enabled quests)", pathToUtf8(seq.filename()), op.seqFormIds.size());
+    }
     // Outputs from the previous build that this build no longer produces.
     for (const auto& name : previousOutputs) {
         bool current = std::any_of(r.pluginFiles.begin(), r.pluginFiles.end(),
@@ -286,6 +304,7 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
         std::error_code ec;
         if (!current && fs::exists(path, ec)) {
             fs::remove(path, ec);
+            fs::remove(r.directory / "seq" / utf8ToPath(name.substr(0, name.rfind('.')) + ".seq"), ec);
             r.removedOutputs.push_back(name);
             spdlog::info("Removed {} (no longer produced)", name);
         }

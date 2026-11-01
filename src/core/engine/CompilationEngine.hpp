@@ -103,6 +103,9 @@ struct OutputPlugin {
     PluginHeader header;
     std::vector<Record> built;
     std::vector<Placement> placements; // parallel to `built`
+    // Start-game-enabled quests the game must find in seq\<plugin>.seq: new ones, and overrides that
+    // make a quest start with the game when its defining plugin does not (FormIDs as written here).
+    std::vector<uint32_t> seqFormIds;
 };
 
 struct FormMapping {

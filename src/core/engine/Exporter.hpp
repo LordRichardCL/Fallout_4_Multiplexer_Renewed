@@ -26,6 +26,7 @@ struct ExportResult {
     std::filesystem::path pluginsTxt;
     std::filesystem::path summary;
     std::vector<std::filesystem::path> archiveLoaders; // empty ESL plugins keeping compiled plugins' archives loading
+    std::vector<std::filesystem::path> seqFiles;       // seq\<output>.seq for start-game-enabled quests
 };
 
 // Stage Export: writes the output plugins and everything needed to switch

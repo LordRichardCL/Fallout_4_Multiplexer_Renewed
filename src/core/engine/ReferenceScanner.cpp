@@ -123,9 +123,9 @@ Rule rule(Fact f)
         return {K::Directory, C::Unknown, "folder",
                 "a folder named after the plugin: something may find these files by the plugin's name"};
     case Fact::EngineFileName:
-        return {K::FilePath, C::CompatibilityRequired, "engine file",
-                "the game finds this file by the plugin's name (SEQ file of start-game-enabled quests); writing one "
-                "for the output is not implemented"};
+        return {K::FilePath, C::Safe, "SEQ file",
+                "the SEQ file of the plugin's start-game-enabled quests: when its quests are compiled, each output "
+                "gets its own SEQ file and this one is no longer read"};
     case Fact::ToolFileName:
         return {K::FilePath, C::Safe, "file name",
                 "RobCo Patcher reads every INI in its folders: the file name is not used to find the plugin"};

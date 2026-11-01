@@ -2041,7 +2041,19 @@ TEST(quest_compiles_with_aliases_in_order)
     auto root = buildInstall("quest");
     auto data = root / "Game" / "Data";
     std::vector<uint8_t> dnam(12, 0);
+    dnam[0] = 0x01; // start game enabled
+    std::vector<uint8_t> quiet(12, 0);
     std::vector<uint8_t> indx = {10, 0, 0, 0};
+    // Quests.esm (kept) defines a quest that starts with the game and one that does not.
+    writePlugin(data / "Quests.esm", {"Fallout4.esm"},
+                {record("QUST", 0x01000800, {zs("EDID", "AlreadyStarts"), raw("DNAM", dnam)}),
+                 record("QUST", 0x01000801, {zs("EDID", "MadeToStart"), raw("DNAM", quiet)})},
+                ESM);
+    // ModR overrides both, making the second start with the game; it ships its own SEQ file.
+    writePlugin(data / "ModR.esp", {"Fallout4.esm", "Quests.esm"},
+                {record("QUST", 0x01000800, {zs("EDID", "AlreadyStarts"), raw("DNAM", dnam), zs("FULL", "x")}),
+                 record("QUST", 0x01000801, {zs("EDID", "MadeToStart"), raw("DNAM", dnam)})});
+    writeBytes(data / "Seq" / "ModR.seq", {0x01, 0x08, 0x00, 0x01});
     writePlugin(data / "ModQ.esp", {"Fallout4.esm"},
                 {record("KYWD", 0x01000801, {zs("EDID", "QuestKeywordA")}),
                  record("KYWD", 0x01000802, {zs("EDID", "QuestKeywordB")}),
@@ -2053,16 +2065,19 @@ TEST(quest_compiles_with_aliases_in_order)
                          raw("ALED", {}),
                          u32("ALST", 1), zs("ALID", "Second"), u32("KSIZ", 1), formIds("KWDA", {0x01000802}),
                          raw("ALED", {})})});
-    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModQ.esp\n");
+    writeFile(root / "plugins.txt", "*Quests.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModQ.esp\n*ModR.esp\n");
     auto cfg = configFor(root);
     cfg.definitions = defs;
+    cfg.analysis.excludedPlugins = {"Quests.esm"};
     Pipeline p(cfg);
     p.scan();
     p.analyse();
     CHECK_EQ(p.session().findPlugin("ModQ.esp")->eligibility, Eligibility::Eligible);
+    CHECK_EQ(p.session().findPlugin("ModR.esp")->eligibility, Eligibility::Eligible); // its SEQ file is safe
     CHECK(p.compile());
     CHECK_EQ(p.validation()->errors, uint64_t(0));
-    OutputSet out(p.exportOutputs().pluginFiles);
+    auto result = p.exportOutputs();
+    OutputSet out(result.pluginFiles);
     const auto* quest = out.byEditorId("TestQuest");
     const auto* a = out.byEditorId("QuestKeywordA");
     const auto* b = out.byEditorId("QuestKeywordB");
@@ -2088,6 +2103,24 @@ TEST(quest_compiles_with_aliases_in_order)
         CHECK(out.resolve(*quest, loadLE<uint32_t>(vmad.data() + layout.formIdSlots[1].offset)) == out.identity(*quest));
         CHECK(out.resolve(*quest, loadLE<uint32_t>(vmad.data() + layout.formIdSlots[2].offset)) ==
               std::make_pair(std::string("Fallout4.esm"), 0x800u));
+    }
+
+    // SEQ files: the output holding the quests lists the new one and the override that makes a quest
+    // start with the game, not the override of one that already does (Quests.esm's SEQ covers it).
+    const auto* made = out.byEditorId("MadeToStart");
+    CHECK(made != nullptr);
+    std::map<std::string, std::vector<uint32_t>> seqs;
+    for (const auto& f : result.seqFiles) {
+        std::ifstream in(f, std::ios::binary);
+        std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        for (size_t k = 0; k + 4 <= bytes.size(); k += 4)
+            seqs[pathToUtf8(f.stem()) + ".esp"].push_back(loadLE<uint32_t>(reinterpret_cast<const uint8_t*>(bytes.data() + k)));
+    }
+    CHECK(seqs.count(quest->plugin) == 1);
+    if (made && seqs.count(quest->plugin)) {
+        CHECK_EQ(made->plugin, quest->plugin);
+        CHECK(seqs[quest->plugin] == (std::vector<uint32_t>{made->record.header.formId, quest->record.header.formId}) ||
+              seqs[quest->plugin] == (std::vector<uint32_t>{quest->record.header.formId, made->record.header.formId}));
     }
 }
 
