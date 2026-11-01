@@ -442,6 +442,26 @@ TEST(ba2_general_archive)
     }
 }
 
+// A quest's script data is decoded in full: script properties, the fragment list and every alias
+// with its object and scripts. Nothing is left to scanning.
+TEST(decoder_quest_fragments_and_aliases)
+{
+    Subrecord vmad;
+    vmad.signature = Signature("VMAD");
+    vmad.data = questVmad(0x01000801, 0x01000800, 0x00000802);
+    auto layout = decodeLayout(RecordDefinitions::get(), Signature("QUST"), {vmad});
+    CHECK(layout.heuristic.empty());
+    CHECK(layout.issues.empty());
+    std::vector<uint32_t> values;
+    for (const auto& slot : layout.formIdSlots)
+        values.push_back(loadLE<uint32_t>(vmad.data.data() + slot.offset));
+    CHECK(values == (std::vector<uint32_t>{0x01000801, 0x01000800, 0x00000802}));
+    // One byte too many: not trusted, scanned and reported.
+    vmad.data.push_back(0);
+    auto bad = decodeLayout(RecordDefinitions::get(), Signature("QUST"), {vmad});
+    CHECK(!bad.issues.empty());
+}
+
 TEST(decoder_vmad_condition_lists)
 {
     const auto& defs = RecordDefinitions::get();

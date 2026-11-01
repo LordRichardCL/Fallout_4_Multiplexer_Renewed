@@ -1096,6 +1096,97 @@ void buildOldGen(RecordDefinitions& d)
         .field("XNAM", noRefs())
         .field("ENAM", noRefs())   // event type
         .conditionRegion();
+    // Story manager quest and branch nodes (xEdit SMQN, SMBN). SMQN lists its quests: NNAM quest,
+    // RNAM hours until reset, kept in order.
+    b.record("SMBN", "Story Manager Branch Node", true)
+        .field("PNAM", formId())   // parent node
+        .field("SNAM", formId())   // previous node
+        .field("DNAM", noRefs())
+        .field("XNAM", noRefs())
+        .conditionRegion();
+    b.record("SMQN", "Story Manager Quest Node", true)
+        .field("PNAM", formId())   // parent node
+        .field("SNAM", formId())   // previous node
+        .field("DNAM", noRefs())
+        .field("XNAM", noRefs())   // max concurrent quests
+        .field("MNAM", noRefs())   // number of quests to run
+        .field("HNAM", noRefs())   // hours until reset
+        .field("QNAM", noRefs())   // quest count
+        .field("NNAM", formId())   // quest
+        .field("RNAM", noRefs())   // hours until reset
+        .conditionRegion()
+        .add(region("Quests", {"QNAM", "NNAM"}, {"QNAM", "NNAM", "RNAM"}));
+
+    // Quest, from xEdit's QUST. Stages, objectives and aliases repeat the same subrecords (each alias
+    // has its own keyword and inventory lists), so everything from DNAM on is one region, kept in
+    // order exactly; its FormIDs are still found and rewritten by the fields below. The script data
+    // (VMAD) has quest fragments and alias scripts, decoded in full.
+    std::initializer_list<const char*> questBody = {
+        "DNAM", "ENAM", "LNAM", "XNAM", "QTGL", "FLTR", "CTDA", "CIS1", "CIS2", "NEXT",
+        "INDX", "QSDT", "NAM2", "CNAM", "NAM0",                                   // stages, log entries
+        "QOBJ", "FNAM", "NNAM", "QSTA",                                           // objectives
+        "ANAM", "ALST", "ALLS", "ALCS", "ALID", "ALFI", "ALFR", "ALUA", "ALFA", "ALRT", "ALEQ", "ALEA",
+        "ALCO", "ALCA", "ALCL", "ALNA", "ALNT", "ALFE", "ALFD", "ALCC", "KSIZ", "KWDA", "COCT", "CNTO",
+        "SPOR", "OCOR", "GWOR", "ECOR", "ALLA", "ALDN", "ALFV", "ALDI", "ALSP", "ALFC", "ALPC", "VTCK",
+        "ALED", "ALFL", "KNAM", "ALMI",                                           // aliases
+        "GNAM", "SNAM"};
+    b.record("QUST", "Quest", true)
+        .field("DNAM", noRefs())   // flags, priority, delay, type
+        .field("ENAM", noRefs())   // event
+        .field("LNAM", formId())   // location
+        .field("XNAM", formId())   // completion XP global
+        .field("QTGL", formIdList()) // text display globals
+        .field("NEXT", noRefs())   // marker between dialogue and story manager conditions
+        .field("INDX", noRefs())   // stage index, flags
+        .field("QSDT", noRefs())   // log entry flags
+        .field("NAM2", zstring())  // note
+        .field("CNAM", lstring())  // log entry
+        .field("NAM0", formId())   // next quest
+        .field("QOBJ", noRefs())   // objective index
+        .field("FNAM", noRefs())   // objective or alias flags
+        .field("NNAM", lstring())  // objective display text
+        .field("QSTA", structAt({8})) // target: alias, flags, keyword
+        .field("ANAM", noRefs())   // next alias ID
+        .field("ALST", noRefs())   // reference alias ID
+        .field("ALLS", noRefs())   // location alias ID
+        .field("ALCS", noRefs())   // ref collection alias ID
+        .field("ALID", zstring())  // alias name
+        .field("ALFI", noRefs())
+        .field("ALFR", formId())   // specific reference
+        .field("ALUA", formId())   // unique actor
+        .field("ALFA", noRefs())
+        .field("ALRT", formId())   // location ref type
+        .field("ALEQ", formId())   // external alias quest
+        .field("ALEA", noRefs())
+        .field("ALCO", formId())   // create reference to object
+        .field("ALCA", noRefs())
+        .field("ALCL", noRefs())
+        .field("ALNA", noRefs())
+        .field("ALNT", noRefs())
+        .field("ALFE", noRefs())
+        .field("ALFD", noRefs())
+        .field("ALCC", noRefs())
+        .field("COCT", noRefs())
+        .field("CNTO", structAt({0}, 8)) // item, count
+        .field("SPOR", formId())   // override package lists
+        .field("OCOR", formId())
+        .field("GWOR", formId())
+        .field("ECOR", formId())
+        .field("ALLA", structArray(8, {0}, MergeMode::Scalar)) // linked aliases: keyword, alias
+        .field("ALDN", formId())   // display name
+        .field("ALFV", formId())   // forced voice
+        .field("ALDI", formId())   // death item
+        .field("ALSP", formId())   // spell
+        .field("ALFC", formId())   // faction
+        .field("ALPC", formId())   // package
+        .field("VTCK", formId())   // voice types
+        .field("ALED", noRefs())   // alias end
+        .field("ALFL", formId())   // specific location
+        .field("KNAM", formId())   // keyword
+        .field("ALMI", noRefs())
+        .field("GNAM", formId())   // quest group
+        .field("SNAM", zstring())  // SWF file
+        .add(region("Quest", questBody, questBody));
     b.record("CAMS", "Camera Shot", true)
         .field("DATA", noRefs())
         .field("MNAM", formId())   // image space modifier

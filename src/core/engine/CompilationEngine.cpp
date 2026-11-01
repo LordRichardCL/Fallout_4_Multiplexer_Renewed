@@ -942,6 +942,14 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         }
     }
 
+    // Records whose FormID differs from the previous compilation's (saves made with it may break):
+    // listed one by one when few, otherwise summed up per change.
+    struct StabilityChange {
+        uint32_t record;
+        std::string change;
+        std::string message;
+    };
+    std::vector<StabilityChange> stability;
     for (uint32_t v = 0; v < out.records.size(); ++v) {
         auto& e = out.records[v];
         auto& op = out.outputs[static_cast<size_t>(e.output)];
@@ -955,10 +963,10 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             op.overrides++;
         if (previousOutput[v] >= 0 && previousOutput[v] != e.output) {
             e.formIdChanged = true;
-            addIssue(Severity::Warning, "FormID Stability",
-                     session.formLabel(e.key) + " moved from " + out.outputName(previousOutput[v]) + " to " +
-                         out.outputName(e.output) + " because of new dependencies; saves referencing it may break",
-                     e.key);
+            stability.push_back({v, out.outputName(previousOutput[v]) + " to " + out.outputName(e.output),
+                                 session.formLabel(e.key) + " moved from " + out.outputName(previousOutput[v]) +
+                                     " to " + out.outputName(e.output) +
+                                     " because of new dependencies; saves referencing it may break"});
         }
     }
 
@@ -1001,12 +1009,32 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             }
             if (previousFor(e)) {
                 e.formIdChanged = true;
-                addIssue(Severity::Warning, "FormID Stability",
-                         session.formLabel(e.key) + " received a new FormID in " + op.name, e.key);
+                stability.push_back({v, "a new FormID in " + op.name,
+                                     session.formLabel(e.key) + " received a new FormID in " + op.name});
             }
             e.objectId = next;
             used.insert(next++);
         }
+    }
+
+    constexpr size_t kStabilityListed = 100;
+    if (stability.size() <= kStabilityListed) {
+        for (const auto& c : stability)
+            addIssue(Severity::Warning, "FormID Stability", c.message, out.records[c.record].key);
+    } else {
+        std::map<std::string, std::pair<size_t, std::string>> byChange; // change -> (count, example)
+        for (const auto& c : stability) {
+            auto& entry = byChange[c.change];
+            if (entry.first++ == 0)
+                entry.second = session.formLabel(out.records[c.record].key);
+        }
+        for (const auto& [change, entry] : byChange)
+            addIssue(Severity::Warning, "FormID Stability",
+                     std::to_string(entry.first) + " records " +
+                         (change.rfind("a new FormID", 0) == 0 ? "received " + change : "moved from " + change) +
+                         " since the previous compilation (e.g. " + entry.second +
+                         "); saves made with the previous outputs may lose them. Start a new game, or keep the "
+                         "previous outputs");
     }
 
     // ---- Master lists ---------------------------------------------------------

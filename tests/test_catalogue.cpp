@@ -83,13 +83,13 @@ TEST(catalogue_strategy_matches_the_layouts)
 
     // Marking a type without a layout Specialised does not make it compilable; it is reported.
     std::string promoted = readText("resources/record_catalogue.csv");
-    pos = promoted.find("\nQUST,");
+    pos = promoted.find("\nNAVM,");
     auto pres = promoted.find("Preserve", pos);
     promoted.replace(pres, std::string("Preserve").size(), "Specialised");
     auto promotedCat = RecordCatalogue::parse(promoted);
     RecordDefinitions d2 = defs;
     d2.applyCatalogue(promotedCat);
-    CHECK(!d2.isCompilable(Signature("QUST")));
+    CHECK(!d2.isCompilable(Signature("NAVM")));
     CHECK_EQ(d2.strategyWithoutLayout().size(), size_t(1));
 }
 
@@ -202,7 +202,7 @@ TEST(update_layouts_and_guards)
     CHECK(d.overridesOnly(Signature("NPC_")));
     CHECK(d.strategy(Signature("LCTN")) == MergeStrategy::Candidate); // RCSR layout not confirmed
     CHECK(d.strategy(Signature("WTHR")) == MergeStrategy::Candidate);
-    CHECK(d.strategy(Signature("QUST")) == MergeStrategy::Preserve);
+    CHECK(d.strategy(Signature("QUST")) == MergeStrategy::Candidate); // quest stage: checked, not compiled yet
 
     // Same subrecord, different meaning per record.
     CHECK(d.field(Signature("RACE"), Signature("ZNAM")).kind == FieldKind::ZString);

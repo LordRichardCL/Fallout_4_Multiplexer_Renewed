@@ -111,6 +111,55 @@ inline void writePlugin(const std::filesystem::path& path, const std::vector<std
     w.write(path, compressLarge);
 }
 
+// A Fallout 4 quest VMAD (version 6, object format 2): one script with an object property, the
+// fragment script with one stage fragment, and one alias (object: `quest`, alias 0) whose script
+// has an object property naming `aliasTarget`.
+inline std::vector<uint8_t> questVmad(uint32_t questScriptTarget, uint32_t quest, uint32_t aliasTarget)
+{
+    using namespace fo4mx;
+    BinaryWriter w;
+    auto object = [&](int16_t alias, uint32_t formId) {
+        w.write<uint16_t>(0);
+        w.write<int16_t>(alias);
+        w.write<uint32_t>(formId);
+    };
+    auto objectProperty = [&](const char* name, uint32_t formId) {
+        w.writeWString(name);
+        w.write<uint8_t>(1); // object
+        w.write<uint8_t>(1); // status
+        object(-1, formId);
+    };
+    w.write<int16_t>(6);
+    w.write<int16_t>(2);
+    w.write<uint16_t>(1);
+    w.writeWString("QuestScript");
+    w.write<uint8_t>(0);
+    w.write<uint16_t>(1);
+    objectProperty("Target", questScriptTarget);
+    // Fragments.
+    w.write<uint8_t>(3);
+    w.write<uint16_t>(1);
+    w.writeWString("Fragments:Quests:QF_TestQuest");
+    w.write<uint8_t>(0);
+    w.write<uint16_t>(0);
+    w.write<uint32_t>(10);
+    w.write<uint32_t>(0);
+    w.write<uint8_t>(1);
+    w.writeWString("Fragments:Quests:QF_TestQuest");
+    w.writeWString("Fragment_Stage_0010_Item_00");
+    // Aliases.
+    w.write<uint16_t>(1);
+    object(0, quest);
+    w.write<int16_t>(6);
+    w.write<int16_t>(2);
+    w.write<uint16_t>(1);
+    w.writeWString("AliasScript");
+    w.write<uint8_t>(0);
+    w.write<uint16_t>(1);
+    objectProperty("Item", aliasTarget);
+    return w.take();
+}
+
 // .STRINGS (null-terminated) or .DLSTRINGS (length-prefixed) table.
 inline std::vector<uint8_t> stringTable(const std::map<uint32_t, std::string>& strings, bool lengthPrefixed)
 {

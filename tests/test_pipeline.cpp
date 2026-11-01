@@ -2031,6 +2031,66 @@ TEST(new_cells_with_precombines_or_clashing_grids_stay)
           c->isCompiled(p.session().findPlugin("ModG2.esp")->index));
 }
 
+// The quest stage: a new quest compiles (QUST promoted in a trial catalogue) with its stages,
+// objectives and aliases in their original order (each alias keeps its own keyword list), and every
+// FormID in it rewritten, its script data included.
+TEST(quest_compiles_with_aliases_in_order)
+{
+    const auto* defs = trialDefinitions({{"QUST", "Winner"}});
+    CHECK(defs->isCompilable(Signature("QUST")));
+    auto root = buildInstall("quest");
+    auto data = root / "Game" / "Data";
+    std::vector<uint8_t> dnam(12, 0);
+    std::vector<uint8_t> indx = {10, 0, 0, 0};
+    writePlugin(data / "ModQ.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000801, {zs("EDID", "QuestKeywordA")}),
+                 record("KYWD", 0x01000802, {zs("EDID", "QuestKeywordB")}),
+                 record("QUST", 0x01000800,
+                        {zs("EDID", "TestQuest"), raw("VMAD", questVmad(0x01000801, 0x01000800, 0x00000800)),
+                         zs("FULL", "Test Quest"), raw("DNAM", dnam), raw("INDX", indx), raw("QSDT", {0}),
+                         zs("CNAM", "Started"), raw("ANAM", {2, 0, 0, 0}),
+                         u32("ALST", 0), zs("ALID", "First"), u32("KSIZ", 1), formIds("KWDA", {0x01000801}),
+                         raw("ALED", {}),
+                         u32("ALST", 1), zs("ALID", "Second"), u32("KSIZ", 1), formIds("KWDA", {0x01000802}),
+                         raw("ALED", {})})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModQ.esp\n");
+    auto cfg = configFor(root);
+    cfg.definitions = defs;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK_EQ(p.session().findPlugin("ModQ.esp")->eligibility, Eligibility::Eligible);
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    OutputSet out(p.exportOutputs().pluginFiles);
+    const auto* quest = out.byEditorId("TestQuest");
+    const auto* a = out.byEditorId("QuestKeywordA");
+    const auto* b = out.byEditorId("QuestKeywordB");
+    CHECK(quest && a && b);
+    if (!(quest && a && b))
+        return;
+    std::vector<std::string> order;
+    for (const auto& sr : quest->record.subrecords)
+        order.push_back(sr.signature.str());
+    CHECK(order == (std::vector<std::string>{"EDID", "VMAD", "FULL", "DNAM", "INDX", "QSDT", "CNAM", "ANAM", "ALST",
+                                             "ALID", "KSIZ", "KWDA", "ALED", "ALST", "ALID", "KSIZ", "KWDA", "ALED"}));
+    std::vector<std::pair<std::string, uint32_t>> keywords;
+    for (const auto& sr : quest->record.subrecords)
+        if (sr.signature == Signature("KWDA"))
+            keywords.push_back(out.resolve(*quest, loadLE<uint32_t>(sr.data.data())));
+    CHECK(keywords.size() == 2 && keywords[0] == out.identity(*a) && keywords[1] == out.identity(*b));
+    // Script data: the quest script's property, and the alias's object (the quest itself).
+    const auto& vmad = quest->record.find(Signature("VMAD"))->data;
+    auto layout = decodeLayout(RecordDefinitions::get(), Signature("QUST"), {quest->record.subrecords[1]});
+    CHECK_EQ(layout.formIdSlots.size(), size_t(3));
+    if (layout.formIdSlots.size() == 3) {
+        CHECK(out.resolve(*quest, loadLE<uint32_t>(vmad.data() + layout.formIdSlots[0].offset)) == out.identity(*a));
+        CHECK(out.resolve(*quest, loadLE<uint32_t>(vmad.data() + layout.formIdSlots[1].offset)) == out.identity(*quest));
+        CHECK(out.resolve(*quest, loadLE<uint32_t>(vmad.data() + layout.formIdSlots[2].offset)) ==
+              std::make_pair(std::string("Fallout4.esm"), 0x800u));
+    }
+}
+
 // While world types are Candidates, a plugin with cell or reference overrides stays as it is.
 TEST(world_types_stay_out_while_candidates)
 {

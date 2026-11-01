@@ -521,3 +521,10 @@ The definition check on a real load order (build 39) confirmed 27 of the stage 7
 RELA, MUSC, SPGD, RACE, IDLE, CPTH, IDLM, SMEN, REGN, SCSN, ECZN, SCCO, RFGP, FSTP, VTYP, DEBR, WATR, CLAS, BNDS, CAMS, FSTS, TACT, CLMT, MUST, MATT, CSTY, and NPC_ (overrides only: new NPCs keep their plugin, FaceGen is stored under the plugin's name).
 
 Held back: LCTN (confirmed overall, but `RCSR` resolves only 86.4% of its FormIDs, so its layout is not trusted), WTHR (`IMSP` sizes), PKIN (98.9% resolve), SCEN, INFO and DIAL (dialogue never compiles).
+
+## Quest stage (Q1): layouts
+
+- **QUST** has a layout from xEdit. Stages, objectives and aliases repeat the same subrecords (each alias has its own keyword and inventory lists), and the field model merges a record's packed arrays by subrecord type, so everything from DNAM on is one region, kept in order; its FormIDs are found and rewritten by the field definitions.
+- **Quest script data** (VMAD) is decoded in full: quest fragments (count, fragment script with its properties, stage fragments) and the alias section (each alias's object, its own version and format, and its scripts). Anything that does not end exactly at the end of the subrecord is scanned and reported.
+- **SMQN** and **SMBN** (story manager quest and branch nodes) have layouts.
+- All three are **Candidates**: checked by the definition check, not compiled until a real load order confirms them. Quests with dialogue stay with their plugin either way (dialogue is not compiled).

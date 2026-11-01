@@ -279,6 +279,40 @@ private:
             heuristic(i, static_cast<uint32_t>(r.position()), static_cast<uint32_t>(sr.data.size()));
     }
 
+    // Fallout 4 QUST (xEdit wbVMADFragmentedQUST): extra bind data version, fragment count, the
+    // fragment script (flags and properties only when it has a name), the fragments (stage, stage
+    // index, a byte, script and function names), then the aliases: each an object (the quest and
+    // the alias ID), its own version and object format, and its scripts. It must end exactly at the
+    // end of the subrecord.
+    void questFragments(BinaryReader& r, uint32_t i, int16_t version, int16_t objFormat)
+    {
+        r.skip(1); // extra bind data version
+        const uint16_t fragments = r.read<uint16_t>();
+        if (!r.readWString().empty()) {
+            if (version >= 4)
+                r.skip(1); // status
+            const uint16_t props = r.read<uint16_t>();
+            for (uint16_t p = 0; p < props; ++p)
+                vmadProperty(r, i, version, objFormat, 0);
+        }
+        for (uint16_t f = 0; f < fragments; ++f) {
+            r.skip(4 + 4 + 1); // stage, stage index, unknown
+            r.readWString();   // script name
+            r.readWString();   // fragment (function) name
+        }
+        const uint16_t aliases = r.read<uint16_t>();
+        for (uint16_t a = 0; a < aliases; ++a) {
+            vmadObject(r, i, objFormat);
+            const int16_t aliasVersion = r.read<int16_t>();
+            const int16_t aliasFormat = r.read<int16_t>();
+            const uint16_t scripts = r.read<uint16_t>();
+            for (uint16_t s = 0; s < scripts; ++s)
+                vmadScript(r, i, aliasVersion, aliasFormat);
+        }
+        if (!r.atEnd())
+            throw FormatError("data after the quest's aliases");
+    }
+
     void decodeVmad(uint32_t i, const Subrecord& sr)
     {
         size_t slotsBefore = out_.formIdSlots.size();
@@ -289,8 +323,12 @@ private:
             uint16_t scripts = r.read<uint16_t>();
             for (uint16_t s = 0; s < scripts; ++s)
                 vmadScript(r, i, version, objFormat);
-            if (!r.atEnd())
-                vmadFragments(r, i, sr, version, objFormat);
+            if (!r.atEnd()) {
+                if (record_ == Signature("QUST"))
+                    questFragments(r, i, version, objFormat);
+                else
+                    vmadFragments(r, i, sr, version, objFormat);
+            }
         } catch (const FormatError& e) {
             out_.formIdSlots.resize(slotsBefore);
             issue(Severity::Warning, sr.signature, std::string("script data not fully decoded: ") + e.what());
