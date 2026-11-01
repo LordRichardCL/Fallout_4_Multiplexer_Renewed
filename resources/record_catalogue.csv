@@ -120,7 +120,7 @@ PKIN,Pack-In,Base Objects,top,Candidate,113,,Layout from xEdit wbDefinitionsFO4.
 PLYR,Player Reference,Placed References,top,Preserve,39,,Placeholder for the player reference.
 PMIS,Placed Missile,Placed References,cell child,Winner,,,"From xEdit wbDefinitionsFO4 (ReferenceRecord); missing from the supplied record list. Layout from xEdit wbDefinitionsFO4.pas. Written with their cell and worldspace: overrides (stage W2) and new references in existing cells (stage W3, new FormIDs); new references listed in precombine or previs data keep their plugin. Confirmed by a real load order (definition and group layout checks).",
 PROJ,Projectile,Combat,top,Specialised,45,,
-QUST,Quest,Quests and Dialogue,top,Candidate,58,,"Layout from xEdit wbDefinitionsFO4.pas: stages, objectives and aliases kept in order as one region; script data with quest fragments and alias scripts decoded in full. Quests with dialogue stay with their plugin (dialogue is not compiled). Candidate until the definition check confirms it.",
+QUST,Quest,Quests and Dialogue,top,Winner,58,,"Layout from xEdit wbDefinitionsFO4.pas: stages, objectives and aliases kept in order as one region; script data with quest fragments and alias scripts decoded in full. Quests with dialogue stay with their plugin (dialogue is not compiled). Confirmed by a real load order (definition check: 11,474 quests, 99.9% of FormIDs resolve).",
 RACE,Race,Actors,top,Winner,13,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 REFR,Placed Object,Placed References,cell child,Winner,,,"Tied to precombines and previs. Layout from xEdit wbDefinitionsFO4.pas. Written with their cell and worldspace: overrides (stage W2) and new references in existing cells (stage W3, new FormIDs); new references listed in precombine or previs data keep their plugin. Confirmed by a real load order (definition and group layout checks).",
 REGN,Region,World,top,Winner,54,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
@@ -132,9 +132,9 @@ SCCO,Scene Collection,Quests and Dialogue,top,Winner,124,,Layout from xEdit wbDe
 SCEN,Scene,Quests and Dialogue,quest child,Candidate,100,,Stored in its quest's child group (Fallout 4). Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (dialogue stays in its plugin).,
 SCOL,Static Collection,Base Objects,top,Specialised,30,,
 SCSN,Audio Category Snapshot,Audio,top,Winner,126,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
-SMBN,Story Manager Branch Node,Quests and Dialogue,top,Candidate,92,,Layout from xEdit wbDefinitionsFO4.pas. Candidate until the definition check confirms it.,
+SMBN,Story Manager Branch Node,Quests and Dialogue,top,Winner,92,,Layout from xEdit wbDefinitionsFO4.pas. Confirmed by a real load order (definition check).,
 SMEN,Story Manager Event Node,Quests and Dialogue,top,Winner,94,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
-SMQN,Story Manager Quest Node,Quests and Dialogue,top,Candidate,93,,Layout from xEdit wbDefinitionsFO4.pas. Candidate until the definition check confirms it.,
+SMQN,Story Manager Quest Node,Quests and Dialogue,top,Winner,93,,Layout from xEdit wbDefinitionsFO4.pas. Confirmed by a real load order (definition check).,
 SNCT,Sound Category,Audio,top,Winner,108,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 SNDR,Sound Descriptor,Audio,top,Specialised,106,,
 SOPM,Sound Output Model,Audio,top,Winner,109,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).

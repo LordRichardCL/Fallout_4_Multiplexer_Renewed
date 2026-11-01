@@ -27,7 +27,7 @@ namespace {
 constexpr uint32_t ESM = RecordFlags::Master;
 
 // Builds a small but complete install:
-//   Fallout4.esm (localized) <- ModA.esp <- ModB.esp, plus ModC.esp (contains a quest, which is never compiled: ineligible).
+//   Fallout4.esm (localized) <- ModA.esp <- ModB.esp, plus ModC.esp (contains a dialogue topic, which is never compiled: ineligible).
 std::filesystem::path buildInstall(const std::string& name)
 {
     auto root = tempDir(name);
@@ -85,7 +85,7 @@ std::filesystem::path buildInstall(const std::string& name)
                     record("WEAP", 0x00001000,
                            {zs("EDID", "Pistol10mm"), zs("FULL", "Pistol (Mod C)"), u32("KSIZ", 2),
                             formIds("KWDA", {0x800, 0x801}), weaponData(0x900, 0x11)}),
-                    record("QUST", 0x01000800, {zs("EDID", "ModCQuest")}),
+                    record("DIAL", 0x01000800, {zs("EDID", "ModCTopic")}),
                 });
 
     writeFile(root / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
@@ -587,11 +587,11 @@ TEST(conflict_resolution_patch_merges_retained_chains)
                                              raw("DNAM", std::vector<uint8_t>(16, 0))}),
                  record("LVLI", 0x00001200,
                         {zs("EDID", "LootPistols"), raw("LLCT", {2}), lvlo(1, 0x1000, 1), lvlo(2, 0x900, 10)}),
-                 record("QUST", 0x01000800, {zs("EDID", "ModEQuest")})});
+                 record("DIAL", 0x01000800, {zs("EDID", "ModETopic")})});
     writePlugin(data / "ModF.esp", {"Fallout4.esm"},
                 {record("AMMO", 0x00000900, {zs("EDID", "Ammo10mm"), zs("FULL", "10mm Round"),
                                              raw("DNAM", std::vector<uint8_t>(16, 7))}),
-                 record("QUST", 0x01000800, {zs("EDID", "ModFQuest")})});
+                 record("DIAL", 0x01000800, {zs("EDID", "ModFTopic")})});
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModF.esp\n");
 
     // Alongside compilation: chains with a compiled plugin go to the Dummy outputs,
@@ -774,7 +774,7 @@ TEST(undescribed_formid_with_shifted_master_is_isolated)
 {
     auto root = buildInstall("softref");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("QUST", 0x01000800, {zs("EDID", "ModEQuest")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("DIAL", 0x01000800, {zs("EDID", "ModETopic")})});
     // ModG keeps ModE and ModC (both retained) as masters 1 and 2, and refers to ModC's cell
     // from a subrecord the definitions do not describe.
     writePlugin(data / "ModG.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
@@ -787,10 +787,10 @@ TEST(undescribed_formid_with_shifted_master_is_isolated)
     p.scan();
     CHECK_EQ(p.session().findPlugin("ModG.esp")->eligibility, Eligibility::Eligible);
     p.analyse();
-    // Blocker report: QUST is the only thing keeping ModC and ModE out.
+    // Blocker report: DIAL is the only thing keeping ModC and ModE out.
     const auto& blockers = p.dependencies()->blockers;
     CHECK(!blockers.empty());
-    CHECK_EQ(blockers.front().sig.str(), std::string("QUST"));
+    CHECK_EQ(blockers.front().sig.str(), std::string("DIAL"));
     CHECK_EQ(blockers.front().plugins, size_t(2));
     CHECK_EQ(blockers.front().soleBlocker, size_t(2));
     CHECK_EQ(blockers.front().unlocks, size_t(2));
@@ -873,7 +873,7 @@ TEST(conditions_with_unlisted_functions_and_hardcoded_forms)
 {
     auto root = buildInstall("conditions");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("QUST", 0x01000800, {zs("EDID", "ModEQuest")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("DIAL", 0x01000800, {zs("EDID", "ModETopic")})});
     // ModC is master 2 here but will be master 1 in the output; the condition function is not in
     // the definitions' table, and the condition runs on PlayerRef (hard-coded, not in Fallout4.esm).
     writePlugin(data / "ModH.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
@@ -1022,8 +1022,8 @@ TEST(archive_priority_change_is_reported)
 {
     auto root = buildInstall("archprio");
     auto data = root / "Game" / "Data";
-    // ModE stays in the load order (it has a quest), loads before ModA and ships the same mesh.
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("QUST", 0x01000800, {zs("EDID", "ModEQuest")})});
+    // ModE stays in the load order (it has a dialogue topic), loads before ModA and ships the same mesh.
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("DIAL", 0x01000800, {zs("EDID", "ModETopic")})});
     writeGeneralBa2(data / "ModE - Main.ba2", {{"meshes\\moda\\gun.nif", std::vector<uint8_t>(64, 9)}}, true);
     writeFile(root / "plugins.txt", "*ModE.esp\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
     auto cfg = configFor(root);
@@ -1134,7 +1134,7 @@ TEST(unaligned_undescribed_formid_is_caught)
 {
     auto root = buildInstall("unaligned");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("QUST", 0x01000800, {zs("EDID", "ModEQuest")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("DIAL", 0x01000800, {zs("EDID", "ModETopic")})});
     // ModC's cell at an odd offset of a subrecord the definitions do not describe.
     std::vector<uint8_t> bytes(10, 0);
     storeLE<uint32_t>(bytes.data() + 3, 0x02000800);
@@ -1169,7 +1169,7 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
     writeFile(inst / "profiles" / "Default" / "modlist.txt", "+ModWeap\n+ModStay\n");
     writeFile(inst / "profiles" / "Default" / "plugins.txt", "*ModStay.esp\n*ModWeap.esp\n");
     writePlugin(inst / "mods" / "ModStay" / "ModStay.esp", {"Fallout4.esm"},
-                {record("QUST", 0x01000800, {zs("EDID", "StayQuest")})});
+                {record("DIAL", 0x01000800, {zs("EDID", "StayTopic")})});
     writeGeneralBa2(inst / "mods" / "ModStay" / "ModStay - Main.ba2", {{"textures\\gun.dds", std::vector<uint8_t>(32, 1)}},
                     false);
     writePlugin(inst / "mods" / "ModWeap" / "ModWeap.esp", {"Fallout4.esm"},
@@ -2128,7 +2128,7 @@ TEST(quest_compiles_with_aliases_in_order)
 // whether they are confirmed without a separate definition check.
 TEST(analysis_checks_candidate_types)
 {
-    auto root = buildInstall("candidatecheck"); // ModC.esp has a quest
+    auto root = buildInstall("candidatecheck"); // ModC.esp has a dialogue topic
     Pipeline p(configFor(root));
     p.scan();
     p.analyse();
@@ -2136,7 +2136,7 @@ TEST(analysis_checks_candidate_types)
     p.writeReports(root / "Reports");
     std::ifstream in(root / "Reports" / "ValidationReport.txt");
     std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    CHECK(txt.find("QUST (Quest): candidate confirmed by your load order (1 records)") != std::string::npos);
+    CHECK(txt.find("DIAL (Dialog Topic): candidate confirmed by your load order (1 records)") != std::string::npos);
 }
 
 // While world types are Candidates, a plugin with cell or reference overrides stays as it is.
@@ -2281,7 +2281,7 @@ TEST(definition_check_checks_group_layouts)
     Pipeline p(configFor(root));
     p.scan();
     auto check = p.checkDefinitions({});
-    CHECK_EQ(check.layoutPlugins, size_t(1)); // ModC.esp has a quest
+    CHECK_EQ(check.layoutPlugins, size_t(1)); // ModC.esp has a dialogue topic
     CHECK_EQ(check.layoutRebuilt, size_t(1));
     CHECK_EQ(check.layoutProblems, size_t(0));
     bool summary = false;

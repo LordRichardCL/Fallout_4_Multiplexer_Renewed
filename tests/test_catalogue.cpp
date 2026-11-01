@@ -63,7 +63,7 @@ TEST(catalogue_strategy_matches_the_layouts)
         winner += e.strategy == MergeStrategy::Winner;
     }
     CHECK_EQ(specialised, size_t(61));
-    CHECK_EQ(winner, size_t(59)); // stages 4 and 5, the world types and the stage 7a types, confirmed by a real load order
+    CHECK_EQ(winner, size_t(62)); // stages 4 and 5, world, stage 7a and quest types, confirmed by a real load order
     CHECK_EQ(specialised + winner, defs.compilableTypes().size());
     CHECK_EQ(defs.recordName(Signature("MISC")), std::string("Misc. Item"));
     CHECK_EQ(defs.recordName(Signature("XYZW")), std::string("XYZW"));
@@ -202,7 +202,7 @@ TEST(update_layouts_and_guards)
     CHECK(d.overridesOnly(Signature("NPC_")));
     CHECK(d.strategy(Signature("LCTN")) == MergeStrategy::Candidate); // RCSR layout not confirmed
     CHECK(d.strategy(Signature("WTHR")) == MergeStrategy::Candidate);
-    CHECK(d.strategy(Signature("QUST")) == MergeStrategy::Candidate); // quest stage: checked, not compiled yet
+    CHECK(d.strategy(Signature("QUST")) == MergeStrategy::Winner); // quest stage, confirmed
 
     // Same subrecord, different meaning per record.
     CHECK(d.field(Signature("RACE"), Signature("ZNAM")).kind == FieldKind::ZString);

@@ -534,3 +534,7 @@ Held back: LCTN (confirmed overall, but `RCSR` resolves only 86.4% of its FormID
 - Each output gets `seq\<output>.seq` listing its start-game-enabled quests, as zEdit and xEdit build it: new quests, and overrides that make a quest start with the game when its defining plugin does not (that plugin's own SEQ covers the others). FormIDs as written in the output. An output that no longer needs one loses it at export.
 - A plugin's own `seq\<plugin>.seq` is a Safe filename reference: once its quests are compiled it is no longer read.
 - QUST, SMQN and SMBN stay Candidates until a definition check on a real load order confirms their layouts; with them promoted, quests without dialogue compile.
+
+## Quest stage (Q3): promotion
+
+The analysis's candidate check on a real load order confirmed QUST (11,474 records, 529,239 FormIDs, 99.9% resolve, script data decoded in full), SMQN (1,284 records, 99.8%) and SMBN (423 records, 100%). They are promoted to Winner. Quests with dialogue stay with their plugin (DIAL, INFO, SCEN and DLBR are not compiled).
