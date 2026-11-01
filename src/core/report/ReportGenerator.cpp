@@ -364,7 +364,9 @@ std::string assetReport(const ReportContext& ctx)
     for (const auto& ar : a.archives)
         h.row({std::to_string(ar.loadSequence), ar.name, ar.modName,
                ar.owner == kInvalidPlugin ? "INI" : s.pluginName(ar.owner),
-               ar.archive ? formatCount(ar.archive->entries().size()) : "unreadable"});
+               !ar.archive               ? std::string("unreadable")
+               : ar.archive->hasNames() ? formatCount(ar.archive->entries().size())
+                                        : formatCount(ar.archive->entries().size()) + " (no name table: matched by hash)"});
     h.tableEnd(a.archives.size(), a.archives.size());
 
     h.h2("Asset conflicts");

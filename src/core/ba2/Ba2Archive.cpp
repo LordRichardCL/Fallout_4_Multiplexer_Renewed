@@ -4,6 +4,8 @@
 #include "util/Compression.hpp"
 #include "util/Text.hpp"
 
+#include <array>
+#include <cstdio>
 #include <fstream>
 
 namespace fo4mx {
@@ -89,7 +91,10 @@ std::unique_ptr<Ba2Archive> Ba2Archive::open(const std::filesystem::path& path)
         readExact(in, table.data(), table.size(), "file table");
         BinaryReader r(table);
         for (auto& e : ar->entries_) {
-            r.skip(16); // name hash, extension, dir hash, flags
+            e.nameHash = r.read<uint32_t>();
+            e.extension = r.read<uint32_t>();
+            e.dirHash = r.read<uint32_t>();
+            r.skip(4); // flags
             e.offset = r.read<uint64_t>();
             e.packedSize = r.read<uint32_t>();
             e.unpackedSize = r.read<uint32_t>();
@@ -100,7 +105,9 @@ std::unique_ptr<Ba2Archive> Ba2Archive::open(const std::filesystem::path& path)
             uint8_t fixed[24];
             readExact(in, fixed, sizeof(fixed), "texture table");
             BinaryReader r(fixed, sizeof(fixed));
-            r.skip(12); // name hash, extension, dir hash
+            e.nameHash = r.read<uint32_t>();
+            e.extension = r.read<uint32_t>();
+            e.dirHash = r.read<uint32_t>();
             r.skip(1);
             uint8_t chunkCount = r.read<uint8_t>();
             uint16_t chunkHeaderSize = r.read<uint16_t>();
@@ -134,8 +141,10 @@ std::unique_ptr<Ba2Archive> Ba2Archive::open(const std::filesystem::path& path)
     in.clear();
     in.seekg(0, std::ios::end);
     auto fileSize = static_cast<uint64_t>(in.tellg());
-    if (nameTable == 0 || nameTable >= fileSize)
-        throw FormatError(pathToUtf8(path.filename()) + ": missing name table");
+    if (nameTable == 0 || nameTable >= fileSize) {
+        ar->hasNames_ = false; // written without names (Archive2 -nostrings): matched by hash
+        return ar;
+    }
     std::vector<uint8_t> names(static_cast<size_t>(fileSize - nameTable));
     in.seekg(static_cast<std::streamoff>(nameTable));
     readExact(in, names.data(), names.size(), "name table");
@@ -143,6 +152,61 @@ std::unique_ptr<Ba2Archive> Ba2Archive::open(const std::filesystem::path& path)
     for (auto& e : ar->entries_)
         e.path = normalizeAssetPath(nr.readWString());
     return ar;
+}
+
+uint32_t bsCrc32(std::string_view text)
+{
+    static const auto table = [] {
+        std::array<uint32_t, 256> t{};
+        for (uint32_t i = 0; i < 256; ++i) {
+            uint32_t c = i;
+            for (int k = 0; k < 8; ++k)
+                c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+            t[i] = c;
+        }
+        return t;
+    }();
+    uint32_t crc = 0;
+    for (char ch : text) {
+        auto c = static_cast<unsigned char>(ch == '/' ? '\\' : ch);
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<unsigned char>(c - 'A' + 'a');
+        crc = (crc >> 8) ^ table[(crc ^ c) & 0xFF];
+    }
+    return crc;
+}
+
+Ba2Hash ba2Hash(std::string_view path)
+{
+    Ba2Hash h;
+    const size_t slash = path.find_last_of("\\/");
+    const std::string_view dir = slash == std::string_view::npos ? std::string_view() : path.substr(0, slash);
+    std::string_view file = slash == std::string_view::npos ? path : path.substr(slash + 1);
+    std::string_view ext;
+    if (const size_t dot = file.find_last_of('.'); dot != std::string_view::npos) {
+        ext = file.substr(dot + 1);
+        file = file.substr(0, dot);
+    }
+    h.dirHash = bsCrc32(dir);
+    h.nameHash = bsCrc32(file);
+    for (size_t i = 0; i < 4 && i < ext.size(); ++i) {
+        auto c = static_cast<unsigned char>(ext[i]);
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<unsigned char>(c - 'A' + 'a');
+        h.extension |= static_cast<uint32_t>(c) << (8 * i);
+    }
+    return h;
+}
+
+std::string unnamedBa2Path(const Ba2Entry& e)
+{
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%08x\\%08x.", e.dirHash, e.nameHash);
+    std::string out = buf;
+    for (int i = 0; i < 4; ++i)
+        if (const char c = static_cast<char>((e.extension >> (8 * i)) & 0xFF))
+            out += c;
+    return out;
 }
 
 std::vector<uint8_t> Ba2Archive::extract(size_t index) const
@@ -214,7 +278,8 @@ std::vector<uint8_t> makeDdsHeader(uint32_t width, uint32_t height, uint32_t mip
 }
 
 void writeGeneralBa2(const std::filesystem::path& path,
-                     const std::vector<std::pair<std::string, std::vector<uint8_t>>>& files, bool compress)
+                     const std::vector<std::pair<std::string, std::vector<uint8_t>>>& files, bool compress,
+                     bool names)
 {
     std::vector<std::vector<uint8_t>> payloads;
     for (const auto& [_, data] : files)
@@ -230,10 +295,10 @@ void writeGeneralBa2(const std::filesystem::path& path,
 
     uint64_t dataOffset = 24 + files.size() * 36ull;
     for (size_t i = 0; i < files.size(); ++i) {
-        uint64_t h = fnv1a64(files[i].first.data(), files[i].first.size());
-        w.write<uint32_t>(static_cast<uint32_t>(h));
-        w.write<uint32_t>(0);
-        w.write<uint32_t>(static_cast<uint32_t>(h >> 32));
+        const auto h = ba2Hash(files[i].first);
+        w.write<uint32_t>(h.nameHash);
+        w.write<uint32_t>(h.extension);
+        w.write<uint32_t>(h.dirHash);
         w.write<uint32_t>(0x00100100);
         w.write<uint64_t>(dataOffset);
         w.write<uint32_t>(compress ? static_cast<uint32_t>(payloads[i].size()) : 0u);
@@ -243,9 +308,11 @@ void writeGeneralBa2(const std::filesystem::path& path,
     }
     for (const auto& p : payloads)
         w.writeBytes(p);
-    w.patch<uint64_t>(nameTablePos, w.size());
-    for (const auto& [name, _] : files)
-        w.writeWString(name);
+    if (names) {
+        w.patch<uint64_t>(nameTablePos, w.size());
+        for (const auto& [name, _] : files)
+            w.writeWString(name);
+    }
 
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out.write(reinterpret_cast<const char*>(w.buffer().data()), static_cast<std::streamsize>(w.size()));

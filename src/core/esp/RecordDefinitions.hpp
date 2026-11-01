@@ -42,6 +42,7 @@ enum class FieldKind : uint8_t {
     PackageLocation, // PACK PLDT: location type, then a FormID for references, cells, objects, keywords
     PackageTarget,  // PACK PTDA: target type, then a FormID for references, objects, keywords
     ResponseData,   // INFO TRDA: emotion keyword (FFFFFFFF = none, as xEdit), response number, sound
+    SceneHeadtracking, // SCEN HTID: a sound in a radio action (type 6), alias IDs in a dialogue action
 };
 
 // How two plugins' edits of a field combine during merging.

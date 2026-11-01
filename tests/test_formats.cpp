@@ -1,3 +1,4 @@
+#include <cstdio>
 #include "Fixtures.hpp"
 #include "papyrus/Pex.hpp"
 #include "Test.hpp"
@@ -440,6 +441,25 @@ TEST(ba2_general_archive)
         CHECK(ar->extract(1) == files[1].second);
         CHECK_EQ(ar->extractHead(0, 10).size(), size_t(10));
     }
+    // The game's hash (xEdit TwbHash.FO4): CRC32 table, start 0, no final xor, lower case.
+    const auto h = ba2Hash("Textures\\Foo\\Bar.DDS");
+    CHECK_EQ(h.dirHash, 0xc5fb816du);
+    CHECK_EQ(h.nameHash, 0x89be55b8u);
+    CHECK_EQ(h.extension, uint32_t('d') | uint32_t('d') << 8 | uint32_t('s') << 16);
+    // An archive without a name table (Archive2 -nostrings) is read; its files keep their hashes.
+    auto bare = dir / "nostrings.ba2";
+    writeGeneralBa2(bare, files, false, false);
+    auto ar = Ba2Archive::open(bare);
+    CHECK(!ar->hasNames());
+    CHECK_EQ(ar->entries().size(), size_t(2));
+    CHECK(ar->entries()[0].path.empty());
+    CHECK(ar->entries()[0].dirHash == ba2Hash("meshes\\weapons\\gun.nif").dirHash);
+    CHECK(ar->extract(1) == files[1].second);
+    CHECK_EQ(unnamedBa2Path(ar->entries()[1]), [&] {
+        char b[40];
+        std::snprintf(b, sizeof(b), "%08x\\%08x.pex", ba2Hash("scripts\\a.pex").dirHash, ba2Hash("scripts\\a.pex").nameHash);
+        return std::string(b);
+    }());
 }
 
 // A quest's script data is decoded in full: script properties, the fragment list and every alias

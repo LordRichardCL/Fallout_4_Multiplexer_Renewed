@@ -156,8 +156,8 @@ void AssetScanner::scan(Session& session, const AssetScanOptions& options, Progr
     // 2. Archive contents in load order (later archives win).
     for (uint32_t a = 0; a < idx.archives.size(); ++a) {
         const auto& info = idx.archives[a];
-        if (!info.archive)
-            continue;
+        if (!info.archive || !info.archive->hasNames())
+            continue; // without a name table: matched by hash below
         uint32_t mod = idx.strings.intern(info.modName);
         const auto& entries = info.archive->entries();
         for (uint32_t e = 0; e < entries.size(); ++e) {
@@ -192,6 +192,51 @@ void AssetScanner::scan(Session& session, const AssetScanOptions& options, Progr
             s.priority = looseBase + root;
             s.size = f.sizes[slot];
             entry.sources.push_back(s);
+        }
+    }
+    // Archives written without a name table (Archive2 -nostrings): the game finds each file by its
+    // hashes, so each one is the path of any other archive or loose file with the same hashes; a
+    // file that no other source names keeps the name xEdit shows ("<dir hash>\<name hash>.<ext>").
+    {
+        std::unordered_map<uint64_t, std::vector<uint32_t>> byHash; // dir and name hash -> entries
+        bool any = false;
+        for (const auto& info : idx.archives)
+            any |= info.archive && !info.archive->hasNames();
+        if (any)
+            for (uint32_t i = 0; i < idx.entries.size(); ++i) {
+                const auto h = ba2Hash(idx.path(idx.entries[i]));
+                byHash[(static_cast<uint64_t>(h.dirHash) << 32) | h.nameHash].push_back(i);
+            }
+        size_t matched = 0, unmatched = 0;
+        for (uint32_t a = 0; a < idx.archives.size(); ++a) {
+            const auto& info = idx.archives[a];
+            if (!info.archive || info.archive->hasNames())
+                continue;
+            uint32_t mod = idx.strings.intern(info.modName);
+            const auto& entries = info.archive->entries();
+            for (uint32_t e = 0; e < entries.size(); ++e) {
+                const auto& en = entries[e];
+                std::string path;
+                if (auto it = byHash.find((static_cast<uint64_t>(en.dirHash) << 32) | en.nameHash); it != byHash.end())
+                    for (uint32_t i : it->second)
+                        if (ba2Hash(idx.path(idx.entries[i])).extension == en.extension) {
+                            path = idx.path(idx.entries[i]);
+                            break;
+                        }
+                (path.empty() ? unmatched : matched)++;
+                if (path.empty())
+                    path = unnamedBa2Path(en);
+                AssetSource src;
+                src.archive = a;
+                src.entry = e;
+                src.mod = mod;
+                src.priority = a;
+                src.size = en.size();
+                idx.getOrAdd(path).sources.push_back(src);
+            }
+            spdlog::info("Archive {} has no name table: {} files matched by hash, {} named by hash only", info.name,
+                         matched, unmatched);
+            matched = unmatched = 0;
         }
     }
     for (auto& e : idx.entries)

@@ -1373,7 +1373,7 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
     writePlugin(data / "ModL.esp", {"Fallout4.esm"},
                 {record("CELL", 0x01000802, {zs("EDID", "ModLCell")}),
                  record("LAND", 0x01000800, {raw("DATA", std::vector<uint8_t>(20000, 1))}),
-                 record("PKIN", 0x01000801, {zs("EDID", "ModPackIn"), raw("VNAM", std::vector<uint8_t>(20000, 2))})},
+                 record("LVSP", 0x01000801, {zs("EDID", "ModLeveledSpell"), raw("LVLD", std::vector<uint8_t>(20000, 2))})},
                 0, true);
     // A record type that does not exist in Fallout 4 (an Oblivion creature).
     writePlugin(data / "ModU.esp", {"Fallout4.esm"}, {record("CREA", 0x01000800, {zs("EDID", "OldCreature")})});
@@ -1386,8 +1386,8 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
 
     bool compressedEdid = false;
     for (const auto& r : s.records)
-        if (r.plugin == s.findPlugin("ModL.esp")->index && r.signature == Signature("PKIN"))
-            compressedEdid = r.editorId && s.strings.get(r.editorId) == "ModPackIn";
+        if (r.plugin == s.findPlugin("ModL.esp")->index && r.signature == Signature("LVSP"))
+            compressedEdid = r.editorId && s.strings.get(r.editorId) == "ModLeveledSpell";
     CHECK(compressedEdid);
 
     const auto* modU = s.findPlugin("ModU.esp");
@@ -1402,8 +1402,8 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
     for (const auto& b : p.dependencies()->blockers) {
         if (b.sig == Signature("CREA"))
             crea = !b.known && b.category == "Unknown" && b.support.find("Unknown record type") == 0;
-        if (b.sig == Signature("PKIN"))
-            pack = b.known && b.name == "Pack-In" && b.category == "Base Objects";
+        if (b.sig == Signature("LVSP"))
+            pack = b.known && b.name == "Leveled Spell" && b.category == "Lists";
     }
     CHECK(crea);
     CHECK(pack);
@@ -1414,8 +1414,8 @@ TEST(types_that_are_not_merged_are_classified_record_by_record)
 {
     auto root = buildInstall("notmerged");
     auto data = root / "Game" / "Data";
-    auto gmst = [](uint32_t id, const char* edid, uint8_t v) { // pack-ins: not compiled
-        return record("PKIN", id, {zs("EDID", edid), raw("VNAM", {v, 0, 0, 0})});
+    auto gmst = [](uint32_t id, const char* edid, uint8_t v) { // leveled spells: not compiled
+        return record("LVSP", id, {zs("EDID", edid), raw("LVLD", {v, 0, 0, 0})});
     };
     writePlugin(data / "ModG.esm", {"Fallout4.esm"},
                 {gmst(0x01000800, "fA", 1), gmst(0x01000801, "fB", 1), gmst(0x01000802, "fC", 1)}, ESM);
@@ -1992,6 +1992,33 @@ TEST(new_cells_and_worldspaces_compile)
             CHECK(!PluginFile::load(f).header().isLightFlagged());
     for (const auto& f : result.pluginFiles)
         CHECK(checkLayout(PluginFile::load(f), true).problems.empty());
+}
+
+// An archive written without a name table (Archive2 -nostrings) is read: its files are matched by
+// the game's hashes to the paths other archives and loose files give them.
+TEST(archives_without_names_are_matched_by_hash)
+{
+    auto root = buildInstall("nostrings");
+    auto data = root / "Game" / "Data";
+    writeGeneralBa2(data / "ModB - Main.ba2", {{"textures\\gun.dds", std::vector<uint8_t>(16, 1)}}, false);
+    writeGeneralBa2(data / "ModC - Textures.ba2",
+                    {{"textures\\gun.dds", std::vector<uint8_t>(16, 2)}, {"textures\\only.dds", std::vector<uint8_t>(8, 3)}},
+                    false, false);
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    const auto& idx = p.session().assets;
+    const auto* gun = idx.find("textures\\gun.dds");
+    CHECK(gun != nullptr);
+    if (gun) {
+        CHECK_EQ(gun->sources.size(), size_t(2));
+        CHECK(idx.archives[gun->winner().archive].name == "ModC - Textures.ba2"); // loaded later, wins
+    }
+    const auto h = ba2Hash("textures\\only.dds");
+    char name[40];
+    std::snprintf(name, sizeof(name), "%08x\\%08x.dds", h.dirHash, h.nameHash);
+    CHECK(idx.find(name) != nullptr); // named by nothing else: the name xEdit shows
 }
 
 // Navmesh stage (M2): navmeshes compile with their cells, and the navmesh info map the game combines

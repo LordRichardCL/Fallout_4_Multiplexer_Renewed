@@ -1448,7 +1448,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("CRIS", noRefs())
         .field("DEMO", noRefs())
         .field("DEVA", noRefs())
-        .field("HTID", unknown())
+        .field("HTID", special(FieldKind::SceneHeadtracking))
         .field("DTID", noRefs())   // NPC headtracking actor IDs
         .field("VENC", formId())
         .field("PLVD", formId())

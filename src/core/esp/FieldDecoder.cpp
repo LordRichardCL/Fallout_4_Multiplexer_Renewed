@@ -217,6 +217,22 @@ private:
                 slot(i, 0);
             slot(i, 5);
             break;
+        case FieldKind::SceneHeadtracking: {
+            // The action's type is in the ANAM that starts it (xEdit wbSceneActionTypeDecider): in a
+            // radio action (6) HTID is the sound to play, in a dialogue action a list of alias IDs, in
+            // a start-scene action an empty marker.
+            int type = -1;
+            for (uint32_t k = i; k-- > 0;)
+                if (subs_[k].signature == Signature("ANAM") && subs_[k].data.size() >= 2) {
+                    type = loadLE<uint16_t>(subs_[k].data.data());
+                    break;
+                }
+            if (type == 6 && size == 4)
+                slot(i, 0);
+            else if (type < 0 || type > 6)
+                heuristic(i, 0, static_cast<uint32_t>(size));
+            break;
+        }
         case FieldKind::TopicData:
             if (size == 8 && loadLE<uint32_t>(sr.data.data()) == 0)
                 slot(i, 4); // a topic
@@ -373,23 +389,33 @@ private:
             throw FormatError("data after the quest's aliases");
     }
 
-    // Fallout 4 PACK (xEdit wbVMADFragmentedPACK): extra bind data version, flags (OnBegin, OnEnd,
-    // OnChange), the fragment script, then one fragment per flag set (a byte, script and function
-    // names). It must end exactly at the end of the subrecord.
-    void packageFragments(BinaryReader& r, uint32_t i, int16_t version, int16_t objFormat)
+    // Fallout 4 PACK, INFO and SCEN (xEdit wbVMADFragmentedPACK / INFO / SCEN): extra bind data
+    // version, flags (OnBegin, OnEnd and, for packages, OnChange), the fragment script, then one
+    // fragment per flag set (a byte, script and function names). Scenes then list their phase
+    // fragments (a uint16 count; each a flag, the phase index, a byte, script and function names).
+    // It must end exactly at the end of the subrecord.
+    void eventFragments(BinaryReader& r, uint32_t i, int16_t version, int16_t objFormat, int events, bool phases)
     {
         r.skip(1); // extra bind data version
         const uint8_t flags = r.read<uint8_t>();
         vmadScript(r, i, version, objFormat);
-        for (int f = 0; f < 3; ++f) {
+        for (int f = 0; f < events; ++f) {
             if (!(flags & (1 << f)))
                 continue;
             r.skip(1);
             r.readWString(); // script name
             r.readWString(); // fragment (function) name
         }
+        if (phases) {
+            const uint16_t count = r.read<uint16_t>();
+            for (uint16_t k = 0; k < count; ++k) {
+                r.skip(1 + 4 + 1); // phase flag, phase index, unknown
+                r.readWString();
+                r.readWString();
+            }
+        }
         if (!r.atEnd())
-            throw FormatError("data after the package's fragments");
+            throw FormatError("data after the script fragments");
     }
 
     void decodeVmad(uint32_t i, const Subrecord& sr)
@@ -406,7 +432,11 @@ private:
                 if (record_ == Signature("QUST"))
                     questFragments(r, i, version, objFormat);
                 else if (record_ == Signature("PACK"))
-                    packageFragments(r, i, version, objFormat);
+                    eventFragments(r, i, version, objFormat, 3, false);
+                else if (record_ == Signature("INFO"))
+                    eventFragments(r, i, version, objFormat, 2, false);
+                else if (record_ == Signature("SCEN"))
+                    eventFragments(r, i, version, objFormat, 2, true);
                 else
                     vmadFragments(r, i, sr, version, objFormat);
             }

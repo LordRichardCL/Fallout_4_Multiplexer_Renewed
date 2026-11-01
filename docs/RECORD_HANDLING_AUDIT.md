@@ -595,3 +595,17 @@ Layout corrections for the remaining candidates:
 - **WTHR IMSP** holds 4 image spaces (sunrise, day, sunset, night), or 8 from form version 111 (xEdit): read as a FormID array of either size. The 4 records of 16 bytes no longer fail.
 - **INFO TRDA**: the emotion keyword is FFFFFFFF for "none" (xEdit allows it), which was counted as a FormID that resolves to nothing (37% of them). It is no longer read as a FormID.
 - A candidate whose FormIDs resolve below 99% is reported with the subrecords that fail, their resolve rate and offsets (PKIN: 98.9% overall).
+
+## Weather, pack-ins, and dialogue script data (D1)
+
+The candidate check on a real load order (build 59):
+- **WTHR** confirmed (272 records, 100% of 12,745 FormIDs resolve, IMSP of 4 or 8 image spaces): promoted to Winner.
+- **PKIN** at 98.9%: every failure is CNAM (the pack-in's cell), 18 of 1,692, cells missing from their source plugins (read as none in game, written as none). The layout is a single FormID: promoted to Winner.
+- **INFO** TRDA now resolves (the no-emotion value). What is left for INFO and SCEN is their script data:
+  - INFO and SCEN VMAD fragments are decoded in full (xEdit wbVMADFragmentedINFO / SCEN): flags, the fragment script, one fragment per OnBegin/OnEnd flag and, for scenes, the phase fragments (a uint16 count; each a flag, phase index, a byte, script and function names). They must end exactly.
+  - SCEN HTID is the sound in a radio action (action type 6, from the ANAM that starts the action) and alias IDs in a dialogue action.
+- Dialogue (DIAL, INFO, SCEN, DLBR) still does not compile: voice files are found by the plugin's name and the response's FormID.
+
+## Archives without a name table
+
+Archive2 can write a BA2 without its name table (`-nostrings`); the game finds files by their hashes, so it loads. These archives were reported unreadable. They are now read: each file is matched by the game's hashes (xEdit TwbHash.FO4: CRC32 of the folder and of the file name without extension, lower case with backslashes, and the extension) to the path another archive or loose file gives it; a file no other source names keeps the name xEdit shows (`<dir hash>\<name hash>.<ext>`). Conflicts and archive priority then cover them like any other archive.

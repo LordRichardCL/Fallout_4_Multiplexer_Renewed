@@ -64,7 +64,7 @@ TEST(catalogue_strategy_matches_the_layouts)
         winner += e.strategy == MergeStrategy::Winner;
     }
     CHECK_EQ(specialised, size_t(61));
-    CHECK_EQ(winner, size_t(67)); // stages 4 and 5, world, stage 7a, quest types, LCTN, GMST, navmeshes and packages, confirmed by a real load order
+    CHECK_EQ(winner, size_t(69)); // stages 4 and 5, world, stage 7a, quest types, LCTN, GMST, navmeshes, packages, WTHR and PKIN, confirmed by a real load order
     CHECK_EQ(specialised + winner, defs.compilableTypes().size());
     CHECK_EQ(defs.recordName(Signature("MISC")), std::string("Misc. Item"));
     CHECK_EQ(defs.recordName(Signature("XYZW")), std::string("XYZW"));
@@ -216,7 +216,7 @@ TEST(update_layouts_and_guards)
     CHECK_EQ(gmst("sSomeText").localized.size(), size_t(1));
     CHECK(gmst("fSomeValue").localized.empty());
     CHECK(gmst("fSomeValue").heuristic.empty() && gmst("fSomeValue").formIdSlots.empty());
-    CHECK(d.strategy(Signature("WTHR")) == MergeStrategy::Candidate);
+    CHECK(d.strategy(Signature("WTHR")) == MergeStrategy::Winner); // confirmed
     CHECK(d.strategy(Signature("QUST")) == MergeStrategy::Winner); // quest stage, confirmed
 
     // Navmeshes (xEdit layouts): every FormID found, and the data must end exactly.
@@ -347,6 +347,20 @@ TEST(update_layouts_and_guards)
         CHECK_EQ(decodeLayout(d, Signature("INFO"), {sub("TRDA", t.v)}).formIdSlots.size(), size_t(2));
         CHECK_EQ(decodeLayout(d, Signature("WTHR"), {sub("IMSP", std::vector<uint8_t>(16, 0))}).formIdSlots.size(), size_t(4));
         CHECK(decodeLayout(d, Signature("WTHR"), {sub("IMSP", std::vector<uint8_t>(32, 0))}).issues.empty());
+
+        // INFO and SCEN script fragments; SCEN HTID is a sound only in a radio action.
+        Bytes iv;
+        iv.u16(6).u16(2).u16(0).u8(3).u8(2).u16(1).u8('S').u8(0).u16(0).u8(0).u16(1).u8('S').u16(1).u8('F');
+        CHECK(decodeLayout(d, Signature("INFO"), {sub("VMAD", iv.v)}).heuristic.empty());
+        Bytes sv;
+        sv.u16(6).u16(2).u16(0).u8(3).u8(1).u16(1).u8('S').u8(0).u16(0).u8(0).u16(1).u8('S').u16(1).u8('F');
+        sv.u16(1).u8(1).u32(2).u8(0).u16(1).u8('S').u16(1).u8('P');
+        auto scen = decodeLayout(d, Signature("SCEN"), {sub("VMAD", sv.v)});
+        CHECK(scen.heuristic.empty() && scen.issues.empty());
+        auto radio = decodeLayout(d, Signature("SCEN"), {sub("ANAM", {6, 0}), sub("HTID", u32(0x01000805))});
+        CHECK(radio.formIdSlots.size() == 1 && radio.formIdSlots[0].sub == 1);
+        auto talk = decodeLayout(d, Signature("SCEN"), {sub("ANAM", {0, 0}), sub("HTID", u32(3))});
+        CHECK(talk.formIdSlots.empty() && talk.heuristic.empty());
 
         // Precut map: reference, 2 triangles; reference, 0 triangles.
         Bytes m;
