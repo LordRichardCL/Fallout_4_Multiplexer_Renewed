@@ -51,6 +51,9 @@ struct DefinitionStat {
     uint64_t resolved = 0;  // ... that name an existing record
     uint64_t softRefs = 0;  // values in undescribed bytes that look like FormIDs
     std::string example;    // a record showing the problem
+    uint64_t decodeFailures = 0; // records whose subrecord could not be decoded (scanned instead)
+    std::map<std::string, uint64_t> failureReasons; // why, numbers replaced (the version kept)
+    std::string failureExample;
     std::map<uint32_t, uint64_t> softOffsets;       // byte offset -> values there that look like FormIDs
     std::map<uint32_t, uint64_t> unresolvedOffsets; // byte offset -> described FormIDs there that name nothing
 };

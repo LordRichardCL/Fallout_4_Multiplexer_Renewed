@@ -1373,7 +1373,7 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
     writePlugin(data / "ModL.esp", {"Fallout4.esm"},
                 {record("CELL", 0x01000802, {zs("EDID", "ModLCell")}),
                  record("LAND", 0x01000800, {raw("DATA", std::vector<uint8_t>(20000, 1))}),
-                 record("GMST", 0x01000801, {zs("EDID", "fModSetting"), raw("DATA", std::vector<uint8_t>(20000, 2))})},
+                 record("PACK", 0x01000801, {zs("EDID", "ModPackage"), raw("PKDT", std::vector<uint8_t>(20000, 2))})},
                 0, true);
     // A record type that does not exist in Fallout 4 (an Oblivion creature).
     writePlugin(data / "ModU.esp", {"Fallout4.esm"}, {record("CREA", 0x01000800, {zs("EDID", "OldCreature")})});
@@ -1386,8 +1386,8 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
 
     bool compressedEdid = false;
     for (const auto& r : s.records)
-        if (r.plugin == s.findPlugin("ModL.esp")->index && r.signature == Signature("GMST"))
-            compressedEdid = r.editorId && s.strings.get(r.editorId) == "fModSetting";
+        if (r.plugin == s.findPlugin("ModL.esp")->index && r.signature == Signature("PACK"))
+            compressedEdid = r.editorId && s.strings.get(r.editorId) == "ModPackage";
     CHECK(compressedEdid);
 
     const auto* modU = s.findPlugin("ModU.esp");
@@ -1398,15 +1398,15 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
     CHECK(unknownReason);
 
     p.analyse();
-    bool crea = false, gmst = false;
+    bool crea = false, pack = false;
     for (const auto& b : p.dependencies()->blockers) {
         if (b.sig == Signature("CREA"))
             crea = !b.known && b.category == "Unknown" && b.support.find("Unknown record type") == 0;
-        if (b.sig == Signature("GMST"))
-            gmst = b.known && b.name == "Game Setting" && b.category == "Game Data";
+        if (b.sig == Signature("PACK"))
+            pack = b.known && b.name == "Package" && b.category == "Quests and Dialogue";
     }
     CHECK(crea);
-    CHECK(gmst);
+    CHECK(pack);
 }
 
 // Record types without a layout are classified record by record and never shown as merged.
@@ -1414,8 +1414,8 @@ TEST(types_that_are_not_merged_are_classified_record_by_record)
 {
     auto root = buildInstall("notmerged");
     auto data = root / "Game" / "Data";
-    auto gmst = [](uint32_t id, const char* edid, uint8_t v) {
-        return record("GMST", id, {zs("EDID", edid), raw("DATA", {v, 0, 0, 0})});
+    auto gmst = [](uint32_t id, const char* edid, uint8_t v) { // packages: not compiled
+        return record("PACK", id, {zs("EDID", edid), raw("PKDT", {v, 0, 0, 0})});
     };
     writePlugin(data / "ModG.esm", {"Fallout4.esm"},
                 {gmst(0x01000800, "fA", 1), gmst(0x01000801, "fB", 1), gmst(0x01000802, "fC", 1)}, ESM);
@@ -2123,6 +2123,11 @@ TEST(quest_compiles_with_aliases_in_order)
 TEST(analysis_checks_candidate_types)
 {
     auto root = buildInstall("candidatecheck"); // ModC.esp has a dialogue topic
+    // A navmesh whose geometry ends early: the check says it was not decoded, and why.
+    writePlugin(root / "Game" / "Data" / "ModN.esp", {"Fallout4.esm"},
+                {record("CELL", 0x01000800, {zs("EDID", "ModNCell")}),
+                 record("NAVM", 0x01000801, {raw("NVNM", {15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 1, 0xFF, 0xFF, 0, 0})})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModN.esp\n");
     Pipeline p(configFor(root));
     p.scan();
     p.analyse();
@@ -2131,6 +2136,9 @@ TEST(analysis_checks_candidate_types)
     std::ifstream in(root / "Reports" / "ValidationReport.txt");
     std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     CHECK(txt.find("DIAL (Dialog Topic): candidate confirmed by your load order (1 records)") != std::string::npos);
+    CHECK(txt.find("NAVM NVNM: not decoded in 1 of 1 records, scanned instead: version 15: implausible vertex count N") !=
+          std::string::npos);
+    CHECK(txt.find("NAVM (Navmesh): candidate not confirmed: NVNM could not be decoded in 1 records") != std::string::npos);
 }
 
 // While world types are Candidates, a plugin with cell or reference overrides stays as it is.

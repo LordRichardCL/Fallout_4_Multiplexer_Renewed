@@ -64,7 +64,7 @@ TEST(catalogue_strategy_matches_the_layouts)
         winner += e.strategy == MergeStrategy::Winner;
     }
     CHECK_EQ(specialised, size_t(61));
-    CHECK_EQ(winner, size_t(63)); // stages 4 and 5, world, stage 7a, quest types and LCTN, confirmed by a real load order
+    CHECK_EQ(winner, size_t(64)); // stages 4 and 5, world, stage 7a, quest types, LCTN and GMST, confirmed by a real load order
     CHECK_EQ(specialised + winner, defs.compilableTypes().size());
     CHECK_EQ(defs.recordName(Signature("MISC")), std::string("Misc. Item"));
     CHECK_EQ(defs.recordName(Signature("XYZW")), std::string("XYZW"));
@@ -203,7 +203,7 @@ TEST(update_layouts_and_guards)
     CHECK(!d.overridesOnly(Signature("NPC_")));                    // new NPCs too (N1)
     CHECK(d.strategy(Signature("LCTN")) == MergeStrategy::Winner); // RCSR matches xEdit; only stale data failed
     // GMST: the value is a localised string for 's' settings, a number otherwise.
-    CHECK(d.strategy(Signature("GMST")) == MergeStrategy::Candidate);
+    CHECK(d.strategy(Signature("GMST")) == MergeStrategy::Winner); // confirmed
     auto gmst = [&](const char* edid) {
         Subrecord e;
         e.signature = Signature("EDID");
@@ -259,6 +259,14 @@ TEST(update_layouts_and_guards)
         auto ext = b.v;
         storeLE<uint32_t>(ext.data() + 8, 0x0000003C);
         CHECK((offsets(decode("NAVM", "NVNM", ext)) == std::vector<uint32_t>{8, 65, 82}));
+        // Version 11: no cover data and no waypoints.
+        Bytes o;
+        o.u32(11).u32(0).u32(0).u32(0x01000805);
+        o.u32(0).u32(0).u32(0).u32(0);
+        o.u32(1).zero(8 + 24).u32(0);
+        auto lo = decode("NAVM", "NVNM", o.v);
+        CHECK(lo.issues.empty());
+        CHECK((offsets(lo) == std::vector<uint32_t>{12}));
         // A byte too many: reported and scanned, no slots kept.
         auto bad = b.v;
         bad.push_back(0);

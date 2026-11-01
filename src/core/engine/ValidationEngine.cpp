@@ -8,6 +8,7 @@
 #include "util/Text.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <map>
 #include <mutex>
@@ -324,6 +325,34 @@ ValidationReport ValidationEngine::validateWrittenFiles(const CompiledOutput& c,
     return v;
 }
 
+namespace {
+// A decoding failure without its numbers, so failures group by cause; a navmesh version is kept.
+std::string failureReason(const std::string& message)
+{
+    std::string m = message;
+    if (auto p = m.find("not decoded: "); p != std::string::npos)
+        m = m.substr(p + 13);
+    else if (auto q = m.find("could not decode: "); q != std::string::npos)
+        m = m.substr(q + 18);
+    std::string out;
+    for (size_t i = 0; i < m.size();) {
+        if (std::isdigit(static_cast<unsigned char>(m[i]))) {
+            const bool keep = out.ends_with("version ");
+            while (i < m.size() && std::isdigit(static_cast<unsigned char>(m[i])))
+                if (keep)
+                    out += m[i++];
+                else
+                    ++i;
+            if (!keep)
+                out += 'N';
+        } else {
+            out += m[i++];
+        }
+    }
+    return out;
+}
+} // namespace
+
 DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::vector<Signature>& types,
                                                    ProgressSink& progress, unsigned threads, bool groupLayouts)
 {
@@ -397,6 +426,12 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                         st.sizeIssues++;
                         if (st.example.empty())
                             st.example = where + ": " + is.message;
+                    } else if (is.message.find("not decoded") != std::string::npos ||
+                               is.message.find("could not decode") != std::string::npos) {
+                        st.decodeFailures++;
+                        st.failureReasons[failureReason(is.message)]++;
+                        if (st.failureExample.empty())
+                            st.failureExample = where + ": " + is.message;
                     }
                 }
             }
@@ -410,6 +445,11 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                 t.described |= v.described;
                 t.occurrences += v.occurrences;
                 t.sizeIssues += v.sizeIssues;
+                t.decodeFailures += v.decodeFailures;
+                for (const auto& [r, n] : v.failureReasons)
+                    t.failureReasons[r] += n;
+                if (t.failureExample.empty())
+                    t.failureExample = v.failureExample;
                 t.formIds += v.formIds;
                 t.resolved += v.resolved;
                 t.softRefs += v.softRefs;
@@ -451,6 +491,9 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
             auto& problems = candidateProblems[st.record];
             if (st.sizeIssues)
                 problems.push_back(st.sub.str() + " has an unexpected size in " + std::to_string(st.sizeIssues) + " records");
+            if (st.decodeFailures)
+                problems.push_back(st.sub.str() + " could not be decoded in " + std::to_string(st.decodeFailures) +
+                                   " records");
             if (st.softRefs)
                 problems.push_back(st.sub.str() + (st.described ? "" : " (not described)") + " holds " +
                                    std::to_string(st.softRefs) + " values that look like FormIDs");
@@ -473,6 +516,23 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                    label + ": unexpected size in " + std::to_string(st.sizeIssues) + " of " +
                        std::to_string(st.occurrences) + " records; these are scanned instead of decoded (e.g. " +
                        st.example + ")");
+            flagged = true;
+        }
+        // A described field that could not be decoded, with why, so the layout can be corrected.
+        if (st.decodeFailures) {
+            std::vector<std::pair<uint64_t, std::string>> reasons;
+            for (const auto& [r, n] : st.failureReasons)
+                reasons.emplace_back(n, r);
+            std::sort(reasons.rbegin(), reasons.rend());
+            std::string list;
+            for (size_t i = 0; i < reasons.size() && i < 8; ++i)
+                list += (i ? "; " : "") + reasons[i].second + " (" + std::to_string(reasons[i].first) + ")";
+            if (reasons.size() > 8)
+                list += "; ...";
+            v.fail(Severity::Warning, "Definitions",
+                   label + ": not decoded in " + std::to_string(st.decodeFailures) + " of " +
+                       std::to_string(st.occurrences) + " records, scanned instead: " + list + " (e.g. " +
+                       st.failureExample + ")");
             flagged = true;
         }
         // Undescribed data that keeps looking like FormIDs is a field the definitions should cover.

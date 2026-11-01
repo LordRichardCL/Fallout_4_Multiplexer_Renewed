@@ -560,9 +560,21 @@ private:
         r.skip(4);
     }
 
+    // Older navmeshes (as xEdit notes): cover data from version 13, waypoints from version 12.
     void navmeshGeometry(BinaryReader& r, uint32_t i)
     {
-        r.skip(4); // version
+        const uint32_t version = r.read<uint32_t>();
+        try {
+            navmeshBody(r, i, version);
+        } catch (const FormatError& e) {
+            throw FormatError("version " + std::to_string(version) + ": " + e.what());
+        }
+        if (!r.atEnd())
+            throw FormatError("version " + std::to_string(version) + ": " + std::to_string(r.remaining()) +
+                              " trailing bytes");
+    }
+    void navmeshBody(BinaryReader& r, uint32_t i, uint32_t version)
+    {
         pathingCell(r, i);
         r.skip(static_cast<size_t>(counted(r, 12, "vertex")) * 12);
         r.skip(static_cast<size_t>(counted(r, 21, "triangle")) * 21);
@@ -576,9 +588,12 @@ private:
             slot(i, r.position());
             r.skip(4);
         }
-        r.skip(static_cast<size_t>(counted(r, 8, "cover")) * 8);
-        r.skip(static_cast<size_t>(counted(r, 4, "cover triangle")) * 4);
-        r.skip(static_cast<size_t>(counted(r, 18, "waypoint")) * 18);
+        if (version > 12) {
+            r.skip(static_cast<size_t>(counted(r, 8, "cover")) * 8);
+            r.skip(static_cast<size_t>(counted(r, 4, "cover triangle")) * 4);
+        }
+        if (version > 11)
+            r.skip(static_cast<size_t>(counted(r, 18, "waypoint")) * 18);
         const uint32_t divisor = r.read<uint32_t>();
         r.skip(8 + 24); // grid size, bounds
         const uint32_t cells = divisor <= 12 ? divisor * divisor : 0;

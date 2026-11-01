@@ -279,7 +279,7 @@ Quests (QUST) and the story manager nodes that start them (SMQN, SMBN) are compi
 
 ## Locations and game settings
 
-Locations (LCTN) compile. Game settings (GMST) are checked by the analysis and compile once a real load order confirms their layout; a setting changed by two plugins keeps the last one's value, as in game.
+Locations (LCTN) and game settings (GMST) compile (both confirmed by a real load order); a setting changed by two plugins keeps the last one's value, as in game.
 
 ## Navmeshes
 

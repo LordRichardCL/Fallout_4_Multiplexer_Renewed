@@ -61,7 +61,7 @@ FSTS,Footstep Set,Audio,top,Winner,91,,Layout from xEdit wbDefinitionsFO4.pas. C
 FURN,Furniture,Base Objects,top,Specialised,35,,
 GDRY,God Rays,Visual Effects,top,Winner,130,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 GLOB,Global,Game Data,top,Specialised,7,,
-GMST,Game Setting,Game Data,top,Candidate,0,,"Value type from the first letter of the Editor ID (string, localised in a localised plugin, or a number). Candidate until the analysis's candidate check confirms it.",
+GMST,Game Setting,Game Data,top,Winner,0,,"Value type from the first letter of the Editor ID (string, localised in a localised plugin, or a number). Confirmed by a real load order (2,225 records).",
 GRAS,Grass,Base Objects,top,Winner,32,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 HAZD,Hazard,Combat,top,Specialised,46,,
 HDPT,Head Part,Actors,top,Winner,11,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve). LooksMenu presets and saves that use a compiled head part refer to its old FormID.
@@ -99,7 +99,7 @@ MSTT,Moveable Static,Base Objects,top,Specialised,31,,
 MSWP,Material Swap,Visual Effects,top,Specialised,119,,
 MUSC,Music Type,Audio,top,Winner,89,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 MUST,Music Track,Audio,top,Winner,96,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
-NAVI,Navmesh Info Map,World,top,Candidate,55,,"Layout from xEdit wbDefinitionsFO4.pas (NVMI navmesh infos, NVPP precomputed pathing, NVSI deleted navmeshes). Candidate: checked by the analysis, not compiled. Every plugin with navmeshes overrides the one NAVI record, so compiling needs its navmesh infos combined, not the last one taken."
+NAVI,Navmesh Info Map,World,top,Candidate,55,,"Layout from xEdit wbDefinitionsFO4.pas (NVMI navmesh infos, NVPP precomputed pathing, NVSI deleted navmeshes). Confirmed by a real load order (291 records, 99.9% of 2,019,040 FormIDs resolve) but kept a Candidate: every plugin with navmeshes overrides the one NAVI record, so compiling needs its navmesh infos combined, not the last one taken."
 NAVM,Navmesh,World,cell child,Candidate,,,"Layout from xEdit wbDefinitionsFO4.pas (NVNM geometry with edge and door links, MNAM precut map). Candidate: checked by the analysis, not compiled. Deleting navmeshes can crash the game (xEdit docs 7.5.4)."
 NOCM,Navmesh Obstacle Manager,World,top,Preserve,128,,
 NOTE,Note,Items,top,Specialised,44,11,

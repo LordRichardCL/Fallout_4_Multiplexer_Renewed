@@ -556,3 +556,10 @@ NPC_ is no longer overrides only: new NPCs compile with new FormIDs. FaceGen is 
   - Every one must end exactly at the end of its subrecord; anything else is reported and scanned.
 - Compiling comes after the check confirms the layouts: every plugin with navmeshes overrides the single NAVI record, so the outputs need its navmesh infos combined per navmesh, not the last plugin's taken.
 - The Validation Report lists the definition and group layout check right after errors, so the row limit of the text export never cuts it off.
+
+## Navmesh stage (M1b): first check
+
+The analysis's candidate check on a real load order (build 54):
+- **GMST** confirmed (2,225 records): promoted to Winner. Game settings compile; the last plugin's value wins, as in game.
+- **NAVI** confirmed (291 records, 99.9% of 2,019,040 FormIDs resolve). It stays a Candidate until navmeshes compile and its navmesh infos can be combined.
+- **NAVM** not confirmed: 99.9% of 745,990 FormIDs resolve, but some `NVNM` subrecords did not decode (3,625 values in their scanned bytes look like FormIDs). Older navmeshes are now read as xEdit notes them (cover data from version 13, waypoints from version 12), and the check lists why each one failed, grouped by reason and navmesh version, so the layout can be corrected.
