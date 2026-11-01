@@ -572,3 +572,11 @@ Compiling, ready for when the check confirms NAVM:
 - **NAVM** compiles like other cell children: with its cell (copied as a container when no compiled plugin provides it), its pathing cell, edge links, door links and precut references rewritten.
 - **NAVI** is not taken from the last plugin. The game combines every plugin's navmesh info map as it loads, one entry per navmesh, so the output carries one NAVI override holding the entries of every compiled plugin (a later plugin's entry for the same navmesh replacing an earlier one) and their deleted navmeshes; the version and precomputed pathing are the last compiled plugin's. Retained plugins keep their own NAVI. Because it references the compiled navmeshes, the dependency rule places it in the output with the last of them.
 - Both stay **Candidates** until the analysis confirms NAVM on a real load order.
+
+## Navmesh stage (M3): promotion
+
+The third check (build 56): NVNM decodes in 28,516 of 28,517 records (the 9 with 4 bytes after the grid now decode, and those bytes name no record). The last one, in one plugin, has 6 bytes after its grid. NAVM and NAVI are promoted to Winner:
+- navmeshes compile with their cells, and the outputs carry one navmesh info map combining every compiled plugin's entries (M2);
+- a plugin with navmesh data that does not decode (NAVM or NAVI) stays in the load order, with the record and the reason in its eligibility: its FormIDs could not be rewritten with certainty, and its entries are part of the combined map.
+
+To watch: the output holding the navmesh info map needs every plugin its entries name as a master. An output past 254 masters is a validation error, never a silent change.

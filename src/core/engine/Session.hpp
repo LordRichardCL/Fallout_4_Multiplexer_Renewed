@@ -212,6 +212,9 @@ public:
     // Plugins kept out of compilation because validation found records it cannot write safely
     // (lowercase name -> the finding that caused it). Rebuilt by every compilation.
     std::map<std::string, std::string> autoRetained;
+    // Plugins whose navmesh data does not decode (plugin -> the first such record and why); worked
+    // out once per scan, when navmeshes are compiled.
+    std::optional<std::map<PluginIndex, std::string>> navmeshFaults;
     // Plugins compiled by the last build (lowercase). After switching over they are disabled, or
     // hidden behind an archive loader; scans still treat them as active sources in their position.
     std::unordered_set<std::string> reactivate;

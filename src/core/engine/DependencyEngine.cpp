@@ -1,5 +1,7 @@
 #include "engine/DependencyEngine.hpp"
 
+#include "esp/FieldDecoder.hpp"
+
 #include "engine/BuildCache.hpp"
 #include "engine/Diagnosis.hpp"
 #include "engine/FieldModel.hpp"
@@ -113,8 +115,39 @@ void reportBlockers(const Session& session, const std::vector<IntrinsicBlock>& b
 
 } // namespace
 
+namespace {
+// A navmesh whose data does not decode would have its FormIDs rewritten by guesswork, and the navmesh
+// info map is combined from every compiled plugin's entries: such a plugin stays in the load order.
+void findNavmeshFaults(Session& session)
+{
+    if (session.navmeshFaults)
+        return;
+    session.navmeshFaults.emplace();
+    const Signature navm("NAVM"), navi("NAVI");
+    if (!session.defs.isCompilable(navm) && !session.defs.isCompilable(navi))
+        return;
+    for (const auto& r : session.records) {
+        if ((r.signature != navm && r.signature != navi) || !session.plugins[r.plugin].active ||
+            session.navmeshFaults->count(r.plugin))
+            continue;
+        try {
+            const Record rec = session.loadRecord(r);
+            for (const auto& is : decodeLayout(session.defs, r.signature, rec.subrecords).issues)
+                if (is.severity != Severity::Info) {
+                    session.navmeshFaults->emplace(r.plugin, session.formLabel(r.key) + " " + is.sub.str() + ": " +
+                                                                 is.message);
+                    break;
+                }
+        } catch (const std::exception& e) {
+            session.navmeshFaults->emplace(r.plugin, session.formLabel(r.key) + ": " + e.what());
+        }
+    }
+}
+} // namespace
+
 void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptions& options, DependencyReport* report)
 {
+    findNavmeshFaults(session);
     std::vector<IntrinsicBlock> blocks(session.plugins.size());
     std::unordered_set<std::string> excluded = session.userRetained;
     for (const auto& e : options.excludedPlugins)
@@ -220,6 +253,13 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
                 unsupported.push_back("+" + std::to_string(extra) + " more types");
             }
             p.reasons.push_back("Contains record types not yet compiled: " + join(unsupported, ", "));
+        }
+        if (auto it = session.navmeshFaults->find(p.index); it != session.navmeshFaults->end()) {
+            p.eligibility = Eligibility::Ineligible;
+            block.otherReason = true;
+            p.reasons.push_back("Navmesh data that does not decode (" + it->second +
+                                "): its FormIDs cannot be rewritten with certainty, and the navmesh info map "
+                                "combines every compiled plugin's entries");
         }
         if (auto it = nameRefs.find(p.index); it != nameRefs.end()) {
             auto& d = session.referenceDecisions[p.index];

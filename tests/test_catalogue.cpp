@@ -64,7 +64,7 @@ TEST(catalogue_strategy_matches_the_layouts)
         winner += e.strategy == MergeStrategy::Winner;
     }
     CHECK_EQ(specialised, size_t(61));
-    CHECK_EQ(winner, size_t(64)); // stages 4 and 5, world, stage 7a, quest types, LCTN and GMST, confirmed by a real load order
+    CHECK_EQ(winner, size_t(66)); // stages 4 and 5, world, stage 7a, quest types, LCTN, GMST and navmeshes, confirmed by a real load order
     CHECK_EQ(specialised + winner, defs.compilableTypes().size());
     CHECK_EQ(defs.recordName(Signature("MISC")), std::string("Misc. Item"));
     CHECK_EQ(defs.recordName(Signature("XYZW")), std::string("XYZW"));
@@ -220,8 +220,8 @@ TEST(update_layouts_and_guards)
     CHECK(d.strategy(Signature("QUST")) == MergeStrategy::Winner); // quest stage, confirmed
 
     // Navmeshes (xEdit layouts): every FormID found, and the data must end exactly.
-    CHECK(d.strategy(Signature("NAVM")) == MergeStrategy::Candidate);
-    CHECK(d.strategy(Signature("NAVI")) == MergeStrategy::Candidate);
+    CHECK(d.strategy(Signature("NAVM")) == MergeStrategy::Winner); // confirmed (M2)
+    CHECK(d.strategy(Signature("NAVI")) == MergeStrategy::Winner);
     struct Bytes {
         std::vector<uint8_t> v;
         Bytes& u8(uint8_t x) { v.push_back(x); return *this; }

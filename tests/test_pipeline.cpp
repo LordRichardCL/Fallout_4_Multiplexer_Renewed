@@ -2031,7 +2031,12 @@ TEST(navmeshes_compile_with_a_combined_info_map)
                          u32("NVSI", 0x01000F00)}),
                  record("CELL", 0x02000800, {zs("EDID", "QCell")}),
                  record("NAVM", 0x02000801, {geometry(0x02000800)})});
-    writeFile(root / "plugins.txt", "*NavBase.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n*ModQ.esp\n");
+    // A navmesh whose geometry has data past its end keeps its plugin out.
+    auto broken = geometry(0x02000800);
+    broken.data.insert(broken.data.end(), {1, 2, 3, 4, 5, 6});
+    writePlugin(data / "ModR.esp", {"Fallout4.esm"},
+                {record("CELL", 0x01000800, {zs("EDID", "RCell")}), record("NAVM", 0x01000801, {broken})});
+    writeFile(root / "plugins.txt", "*NavBase.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n*ModQ.esp\n*ModR.esp\n");
     auto cfg = configFor(root);
     cfg.definitions = defs;
     cfg.analysis.excludedPlugins = {"NavBase.esm"};
@@ -2040,6 +2045,11 @@ TEST(navmeshes_compile_with_a_combined_info_map)
     p.analyse();
     CHECK_EQ(p.session().findPlugin("ModP.esp")->eligibility, Eligibility::Eligible);
     CHECK_EQ(p.session().findPlugin("ModQ.esp")->eligibility, Eligibility::Eligible);
+    const auto* modR = p.session().findPlugin("ModR.esp");
+    CHECK_EQ(modR->eligibility, Eligibility::Ineligible);
+    CHECK(std::any_of(modR->reasons.begin(), modR->reasons.end(), [](const std::string& r) {
+        return r.find("Navmesh data that does not decode") != std::string::npos && r.find("6 trailing bytes") != std::string::npos;
+    }));
     CHECK(p.compile());
     CHECK_EQ(p.validation()->errors, uint64_t(0));
     auto result = p.exportOutputs();
@@ -2219,7 +2229,9 @@ TEST(analysis_checks_candidate_types)
                 {record("CELL", 0x01000800, {zs("EDID", "ModNCell")}),
                  record("NAVM", 0x01000801, {raw("NVNM", {15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 1, 0xFF, 0xFF, 0, 0})})});
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModN.esp\n");
-    Pipeline p(configFor(root));
+    auto cfg = configFor(root);
+    cfg.definitions = trialDefinitions({{"NAVM", "Candidate"}});
+    Pipeline p(cfg);
     p.scan();
     p.analyse();
     CHECK(p.compile());
