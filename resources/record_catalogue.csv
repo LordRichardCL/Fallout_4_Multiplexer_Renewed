@@ -61,7 +61,7 @@ FSTS,Footstep Set,Audio,top,Winner,91,,Layout from xEdit wbDefinitionsFO4.pas. C
 FURN,Furniture,Base Objects,top,Specialised,35,,
 GDRY,God Rays,Visual Effects,top,Winner,130,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 GLOB,Global,Game Data,top,Specialised,7,,
-GMST,Game Setting,Game Data,top,Preserve,0,,
+GMST,Game Setting,Game Data,top,Candidate,0,,"Value type from the first letter of the Editor ID (string, localised in a localised plugin, or a number). Candidate until the analysis's candidate check confirms it.",
 GRAS,Grass,Base Objects,top,Winner,32,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 HAZD,Hazard,Combat,top,Specialised,46,,
 HDPT,Head Part,Actors,top,Winner,11,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve). LooksMenu presets and saves that use a compiled head part refer to its old FormID.
@@ -80,7 +80,7 @@ KYWD,Keyword,Game Data,top,Specialised,1,0,
 LAND,Landscape,World,cell child,Winner,,,"Layout from xEdit wbDefinitionsFO4.pas. Written with their cell and worldspace: overrides (stage W2) and new records (stage W4, new FormIDs). New cells with precombine or previs data keep their plugin; an output with new cells or worldspaces is never ESL-flagged. Confirmed by a real load order (definition and group layout checks).",
 LAYR,Layer,World,top,Winner,116,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 LCRT,Location Reference Type,World,top,Specialised,2,,
-LCTN,Location,World,top,Candidate,84,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it.
+LCTN,Location,World,top,Winner,84,,"Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (99.9% of 414,878 FormIDs resolve; RCSR, removed special references, matches xEdit and fails only on references that no longer exist).",
 LENS,Lens Flare,Visual Effects,top,Winner,129,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 LGTM,Lighting Template,Visual Effects,top,Winner,88,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 LIGH,Light,Base Objects,top,Specialised,27,,

@@ -8,6 +8,7 @@
 #include "util/Compression.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -63,7 +64,7 @@ TEST(catalogue_strategy_matches_the_layouts)
         winner += e.strategy == MergeStrategy::Winner;
     }
     CHECK_EQ(specialised, size_t(61));
-    CHECK_EQ(winner, size_t(62)); // stages 4 and 5, world, stage 7a and quest types, confirmed by a real load order
+    CHECK_EQ(winner, size_t(63)); // stages 4 and 5, world, stage 7a, quest types and LCTN, confirmed by a real load order
     CHECK_EQ(specialised + winner, defs.compilableTypes().size());
     CHECK_EQ(defs.recordName(Signature("MISC")), std::string("Misc. Item"));
     CHECK_EQ(defs.recordName(Signature("XYZW")), std::string("XYZW"));
@@ -200,7 +201,21 @@ TEST(update_layouts_and_guards)
     }
     CHECK(d.strategy(Signature("NPC_")) == MergeStrategy::Winner); // confirmed
     CHECK(!d.overridesOnly(Signature("NPC_")));                    // new NPCs too (N1)
-    CHECK(d.strategy(Signature("LCTN")) == MergeStrategy::Candidate); // RCSR layout not confirmed
+    CHECK(d.strategy(Signature("LCTN")) == MergeStrategy::Winner); // RCSR matches xEdit; only stale data failed
+    // GMST: the value is a localised string for 's' settings, a number otherwise.
+    CHECK(d.strategy(Signature("GMST")) == MergeStrategy::Candidate);
+    auto gmst = [&](const char* edid) {
+        Subrecord e;
+        e.signature = Signature("EDID");
+        e.data.assign(edid, edid + std::strlen(edid) + 1);
+        Subrecord data;
+        data.signature = Signature("DATA");
+        data.data = {1, 0, 0, 0};
+        return decodeLayout(d, Signature("GMST"), {e, data});
+    };
+    CHECK_EQ(gmst("sSomeText").localized.size(), size_t(1));
+    CHECK(gmst("fSomeValue").localized.empty());
+    CHECK(gmst("fSomeValue").heuristic.empty() && gmst("fSomeValue").formIdSlots.empty());
     CHECK(d.strategy(Signature("WTHR")) == MergeStrategy::Candidate);
     CHECK(d.strategy(Signature("QUST")) == MergeStrategy::Winner); // quest stage, confirmed
 

@@ -157,6 +157,17 @@ private:
         case FieldKind::VendorLocation:
             decodeVendorLocation(i, sr);
             break;
+        case FieldKind::GameSetting: {
+            // The setting's type is the first letter of its Editor ID: s = string (localised in a
+            // localised plugin), f, i, u, b = numbers. No FormIDs either way.
+            for (const auto& other : subs_)
+                if (other.signature == Signature("EDID")) {
+                    if (!other.data.empty() && (other.data[0] == 's' || other.data[0] == 'S'))
+                        out_.localized.push_back({i, StringFileKind::Strings});
+                    break;
+                }
+            break;
+        }
         case FieldKind::TopicData:
             if (size == 8 && loadLE<uint32_t>(sr.data.data()) == 0)
                 slot(i, 4); // a topic

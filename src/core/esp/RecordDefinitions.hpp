@@ -33,6 +33,7 @@ enum class FieldKind : uint8_t {
     PerkEntryData,  // PERK EPFD (meaning depends on the preceding EPFT)
     VendorLocation, // FACT PLVD
     TopicData,      // PDTO: type 0 = topic (FormID at +4), type 1 = 4-character subtype
+    GameSetting,    // GMST DATA: a localised string when the Editor ID starts with 's', else a number
 };
 
 // How two plugins' edits of a field combine during merging.

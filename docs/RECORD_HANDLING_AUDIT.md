@@ -542,3 +542,8 @@ The analysis's candidate check on a real load order confirmed QUST (11,474 recor
 ## NPC stage (N1)
 
 NPC_ is no longer overrides only: new NPCs compile with new FormIDs. FaceGen is found by the defining plugin's name and the NPC's FormID, so a plugin that ships FaceGen keeps its NPCs through its FaceGen folder (a Compatibility Required filename reference, loose files and archives alike); new NPCs without FaceGen look the same compiled. Relocating FaceGen to the output (N2) comes after confirming how the engine finds the face textures.
+
+## Locations and game settings
+
+- **LCTN** is promoted to Winner. Its overall check passed on a real load order; the 86.4% resolve rate is in `RCSR` (removed persistent references), which xEdit also reads as a plain FormID array: the failures fall at scattered offsets, so they are stale references left by the plugins, not a layout fault. They are rewritten like any other FormID or left as they are when they resolve to nothing.
+- **GMST** has a layout and is a **Candidate**. Its value type follows the first letter of its Editor ID (`s` string, `f` float, `i`/`u` integer, `b` bool); a string setting holds a localized string in a localized plugin, which the Normalizer turns into inline text like any other localized field. The next analysis checks it.

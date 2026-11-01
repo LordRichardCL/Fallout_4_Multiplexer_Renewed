@@ -277,6 +277,10 @@ Quests (QUST) and the story manager nodes that start them (SMQN, SMBN) are compi
 - **Quests with dialogue stay with their plugin**: dialogue (DIAL, INFO, SCEN, DLBR) is not compiled, since voice files are found by the plugin's name and the line's FormID.
 - **Saves:** quests get new FormIDs; start a new game.
 
+## Locations and game settings
+
+Locations (LCTN) compile. Game settings (GMST) are checked by the analysis and compile once a real load order confirms their layout; a setting changed by two plugins keeps the last one's value, as in game.
+
 ## Filename references
 
 Some files find a plugin by its **file name** rather than by its records: a script calling `Game.GetFormFromFile(0x812, "MyMod.esp")`, an MCM menu that requires `MyMod.esp`, a RobCo Patcher line `MyMod.esp|812`, FaceGen meshes in a folder called `MyMod.esp`. If that plugin were compiled away, those files would point at a plugin that is no longer loaded.

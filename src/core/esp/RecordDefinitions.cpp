@@ -1098,6 +1098,8 @@ void buildOldGen(RecordDefinitions& d)
         .conditionRegion();
     // Story manager quest and branch nodes (xEdit SMQN, SMBN). SMQN lists its quests: NNAM quest,
     // RNAM hours until reset, kept in order.
+    // Game setting: its value's type follows the first letter of its Editor ID (xEdit GMST).
+    b.record("GMST", "Game Setting", true).field("DATA", special(FieldKind::GameSetting));
     b.record("SMBN", "Story Manager Branch Node", true)
         .field("PNAM", formId())   // parent node
         .field("SNAM", formId())   // previous node
