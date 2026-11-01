@@ -540,6 +540,39 @@ void DatabaseWriter::writeValidation(const std::string& stage, const ValidationR
     setMeta("validation_" + stage + "_errors", std::to_string(report.errors));
 }
 
+std::optional<ValidationReport> DatabaseWriter::loadValidation(const std::string& stage)
+{
+    ValidationReport r;
+    auto count = [&](const char* what) -> uint64_t {
+        auto st = db_.prepare("SELECT value FROM Meta WHERE key = ?");
+        st.bind(1, "validation_" + stage + "_" + what);
+        return st.step() ? std::strtoull(st.columnText(0).c_str(), nullptr, 10) : 0;
+    };
+    r.checks = count("checks");
+    r.passed = count("passed");
+    r.warnings = count("warnings");
+    r.errors = count("errors");
+    auto st = db_.prepare("SELECT severity, category, message, plugin, form_id, cause FROM ValidationResults "
+                          "WHERE stage = ? ORDER BY id");
+    st.bind(1, stage);
+    while (st.step()) {
+        ValidationIssue is;
+        const std::string sev = st.columnText(0);
+        is.severity = sev == severityName(Severity::Error)     ? Severity::Error
+                      : sev == severityName(Severity::Warning) ? Severity::Warning
+                                                               : Severity::Info;
+        is.category = st.columnText(1);
+        is.message = st.columnText(2);
+        is.plugin = st.columnText(3);
+        is.formId = st.columnText(4);
+        is.cause = st.columnText(5);
+        r.issues.push_back(std::move(is));
+    }
+    if (r.issues.empty() && r.checks == 0)
+        return std::nullopt;
+    return r;
+}
+
 void DatabaseWriter::writeAssetTrace(const CompiledOutput& compiled, const AssetTrace& trace)
 {
     Transaction tx(db_);

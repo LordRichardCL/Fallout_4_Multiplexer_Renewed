@@ -30,6 +30,8 @@ public:
                        ProgressSink& progress = nullProgress());
     void writeCompilation(const Session& session, const CompiledOutput& compiled);
     void writeValidation(const std::string& stage, const ValidationReport& report, bool clearPrevious);
+    // The findings and counts of a stage written earlier (the definition check survives a new scan).
+    std::optional<ValidationReport> loadValidation(const std::string& stage);
     // Advanced Users Auto-Merger results (report null: the Auto-Merger is off, tables are cleared).
     void writeAutoMerge(const Session& session, const AutoMergeReport* report, const CompiledOutput* compiled);
     void updatePlugins(const Session& session);

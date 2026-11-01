@@ -2278,6 +2278,16 @@ TEST(definition_check_checks_group_layouts)
     std::ifstream in(root / "Reports" / "ValidationReport.txt");
     std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     CHECK(txt.find("Group Layout") != std::string::npos);
+
+    // Also after a new scan (the app starts a fresh pipeline for it), from the database.
+    Pipeline fresh(configFor(root));
+    fresh.scan();
+    fresh.analyse();
+    CHECK(fresh.compile());
+    fresh.writeReports(root / "Reports2");
+    std::ifstream in2(root / "Reports2" / "ValidationReport.txt");
+    std::string txt2((std::istreambuf_iterator<char>(in2)), std::istreambuf_iterator<char>());
+    CHECK(txt2.find("Group Layout") != std::string::npos);
 }
 
 // ---- Filename references --------------------------------------------------------------------------

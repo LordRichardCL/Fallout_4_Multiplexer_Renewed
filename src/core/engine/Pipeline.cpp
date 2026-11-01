@@ -209,6 +209,11 @@ DefinitionCheck Pipeline::checkDefinitions(const std::vector<Signature>& types, 
 
 const ValidationReport* Pipeline::reportValidation() const
 {
+    // A definition check run before the last scan (which starts a fresh pipeline in the app) is
+    // still in the database.
+    if (!definitionCheck_ && db_)
+        if (auto stored = db::DatabaseWriter(*db_).loadValidation("definitions"))
+            definitionCheck_ = std::move(*stored);
     if (!definitionCheck_)
         return validation();
     reportValidation_ = validation_ ? *validation_ : ValidationReport{};
