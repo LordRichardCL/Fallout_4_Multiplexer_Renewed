@@ -283,7 +283,7 @@ Locations (LCTN) and game settings (GMST) compile (both confirmed by a real load
 
 ## Navmeshes
 
-Navmeshes (NAVM) and the navmesh info map (NAVI) are checked by every analysis and not compiled yet: plugins with navmeshes stay in the load order. Once a real load order confirms the layouts, compiling them needs the navmesh info map combined across plugins (each plugin with navmeshes overrides the same record), which is the next part of this stage.
+Navmeshes (NAVM) and the navmesh info map (NAVI) are checked by every analysis and not compiled yet: plugins with navmeshes stay in the load order. Once a real load order confirms the layouts, navmeshes compile with their cells, and the outputs carry one navmesh info map combining the entries of every compiled plugin (the game combines each plugin's map as it loads, so each plugin's own entries count, not only the last plugin's).
 
 ## Filename references
 

@@ -223,6 +223,93 @@ void placeFromImpl(const Session& session, EmittedRecord& e, const RecordInstanc
 
 } // namespace
 
+// The navmesh info map (NAVI): the game combines every plugin's version as it loads, one entry per
+// navmesh, so each plugin's own entries count, not only the last plugin's. The output carries the
+// entries of every compiled plugin (a later plugin's entry for the same navmesh replacing an earlier
+// one) and their deleted navmeshes; the version and the precomputed pathing are the last compiled
+// plugin's. Retained plugins keep their own NAVI, which the game still combines.
+static EmittedRecord combineNavmeshInfos(Session& session, const CompiledOutput& out, std::span<const RecordInstance> inst,
+                                  bool isNew)
+{
+    const Signature nvmi("NVMI"), nvsi("NVSI");
+    Normalizer norm(session);
+    std::optional<NormRecord> base;
+    const RecordInstance* last = nullptr;
+    std::vector<NormSub> infos;
+    std::map<FormKey, size_t> infoAt;
+    std::vector<FormKey> deleted;
+    std::set<FormKey> deletedSeen;
+    EmittedRecord e;
+    for (const auto& r : inst) {
+        e.chain.push_back(r.plugin);
+        if (!out.isCompiled(r.plugin))
+            continue;
+        auto nr = norm.normalize(r);
+        e.issues.insert(e.issues.end(), nr.issues.begin(), nr.issues.end());
+        e.contributors.push_back(r.plugin);
+        for (auto& sub : nr.subs) {
+            if (sub.sig == nvmi) {
+                auto ref = std::find_if(sub.refs.begin(), sub.refs.end(), [](const auto& p) { return p.first == 0; });
+                if (sub.heuristic || ref == sub.refs.end())
+                    throw FormatError("a navmesh info in " + session.pluginName(r.plugin) +
+                                      " could not be decoded, so the navmesh infos cannot be combined");
+                if (auto it = infoAt.find(ref->second); it != infoAt.end()) {
+                    infos[it->second] = std::move(sub);
+                } else {
+                    infoAt.emplace(ref->second, infos.size());
+                    infos.push_back(std::move(sub));
+                }
+            } else if (sub.sig == nvsi) {
+                if (sub.heuristic)
+                    throw FormatError("the deleted navmeshes of " + session.pluginName(r.plugin) + " could not be decoded");
+                for (const auto& [off, k] : sub.refs)
+                    if (deletedSeen.insert(k).second)
+                        deleted.push_back(k);
+            }
+        }
+        base = std::move(nr);
+        last = &r;
+    }
+    if (!base)
+        throw FormatError("no compiled plugin has a navmesh info map");
+
+    // EDID and NVER, the navmesh infos, then the rest (NVPP), then the deleted navmeshes.
+    std::vector<NormSub> subs, rest;
+    for (auto& sub : base->subs) {
+        if (sub.sig == nvmi || sub.sig == nvsi)
+            continue;
+        if (sub.sig == Signature("EDID") || sub.sig == Signature("NVER"))
+            subs.push_back(std::move(sub));
+        else
+            rest.push_back(std::move(sub));
+    }
+    for (auto& info : infos)
+        subs.push_back(std::move(info));
+    for (auto& sub : rest)
+        subs.push_back(std::move(sub));
+    if (!deleted.empty()) {
+        NormSub d;
+        d.sig = nvsi;
+        d.bytes.assign(deleted.size() * 4, 0);
+        for (size_t k = 0; k < deleted.size(); ++k)
+            d.refs.emplace_back(static_cast<uint32_t>(k * 4), deleted[k]);
+        subs.push_back(std::move(d));
+    }
+    base->subs = std::move(subs);
+
+    e.key = inst[0].key;
+    e.sig = inst[0].signature;
+    if (last->editorId)
+        e.editorId = session.strings.get(last->editorId);
+    e.isNew = isNew;
+    e.merged = e.contributors.size() > 1;
+    e.winner = last->plugin;
+    e.fields = splitFields(*base, session.defs);
+    e.size = estimateSize(e.fields);
+    placeFromImpl(session, e, *last);
+    return e;
+}
+
 CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions& opts, ProgressSink& progress)
 {
     CompiledOutput out;
@@ -258,6 +345,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         bool retainedWinner;
         int forced;
         bool patch;
+        bool combine = false; // the navmesh info map: the compiled plugins' versions combined
     };
     std::vector<Candidate> candidates;
     for (uint32_t gi = 0; gi < session.groups.size(); ++gi) {
@@ -289,6 +377,10 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
         bool originCompiled = key.valid() && out.compiledFlag_[key.origin];
         bool lastCompiled = out.compiledFlag_[inst.back().plugin];
+        if (inst[0].signature == Signature("NAVI") && !originCompiled) {
+            candidates.push_back({gi, false, !lastCompiled, -1, false, true});
+            continue;
+        }
 
         if (originCompiled) {
             for (const auto& r : inst)
@@ -320,6 +412,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     if (cache) {
         for (size_t ci = 0; ci < candidates.size(); ++ci) {
             const auto& c = candidates[ci];
+            if (c.combine)
+                continue; // built from the compiled plugins' versions every time
             uint64_t opts = (options.mergeCompatible ? 1ull : 0ull) | (static_cast<uint64_t>(c.forced + 1) << 8);
             keys[ci] = chainSignature(session, session.groups[c.group]) ^ ((opts + 1) * 0xC2B2AE3D27D4EB4FULL);
             if (auto blob = cache->get("merges", keys[ci]))
@@ -336,6 +430,13 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             const auto& c = candidates[ci];
             auto inst = session.instances(session.groups[c.group]);
             try {
+                if (c.combine) {
+                    emitted[ci] = combineNavmeshInfos(session, out, inst, c.isNew);
+                    size_t n = ++done;
+                    if ((n & 0x3FF) == 0 || n == candidates.size())
+                        progress.progress(n, candidates.size(), "merging records");
+                    return;
+                }
                 if (!merges[ci]) {
                     Normalizer norm(session);
                     std::vector<FieldSet> chain;

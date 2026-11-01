@@ -267,6 +267,13 @@ TEST(update_layouts_and_guards)
         auto lo = decode("NAVM", "NVNM", o.v);
         CHECK(lo.issues.empty());
         CHECK((offsets(lo) == std::vector<uint32_t>{12}));
+        // Four bytes after the grid: kept, a FormID only if one is there.
+        auto extra = b.v;
+        extra.insert(extra.end(), {1, 2, 3, 4});
+        auto le = decode("NAVM", "NVNM", extra);
+        CHECK(le.heuristic.empty() && le.issues.size() == 1 && le.issues[0].severity == Severity::Info);
+        CHECK((offsets(le) == std::vector<uint32_t>{12, 65, 82}));
+        CHECK(le.probableSlots.size() == 1 && le.probableSlots[0].offset == uint32_t(b.v.size()));
         // A byte too many: reported and scanned, no slots kept.
         auto bad = b.v;
         bad.push_back(0);

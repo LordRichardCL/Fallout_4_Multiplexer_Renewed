@@ -569,6 +569,14 @@ private:
         } catch (const FormatError& e) {
             throw FormatError("version " + std::to_string(version) + ": " + e.what());
         }
+        // Some navmeshes end with 4 more bytes than xEdit describes (10 of 28,517 in a real load
+        // order). They are kept as they are; if they name an existing record they are treated as a
+        // FormID, so the check counts them.
+        if (r.remaining() == 4) {
+            probable(i, r.position());
+            issue(Severity::Info, Signature("NVNM"), "4 bytes after the navmesh grid, beyond the xEdit layout");
+            r.skip(4);
+        }
         if (!r.atEnd())
             throw FormatError("version " + std::to_string(version) + ": " + std::to_string(r.remaining()) +
                               " trailing bytes");

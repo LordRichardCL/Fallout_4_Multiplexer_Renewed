@@ -563,3 +563,12 @@ The analysis's candidate check on a real load order (build 54):
 - **GMST** confirmed (2,225 records): promoted to Winner. Game settings compile; the last plugin's value wins, as in game.
 - **NAVI** confirmed (291 records, 99.9% of 2,019,040 FormIDs resolve). It stays a Candidate until navmeshes compile and its navmesh infos can be combined.
 - **NAVM** not confirmed: 99.9% of 745,990 FormIDs resolve, but some `NVNM` subrecords did not decode (3,625 values in their scanned bytes look like FormIDs). Older navmeshes are now read as xEdit notes them (cover data from version 13, waypoints from version 12), and the check lists why each one failed, grouped by reason and navmesh version, so the layout can be corrected.
+
+## Navmesh stage (M2): compiling navmeshes
+
+The second check (build 55): NVNM decodes in 28,507 of 28,517 records. The other 10 are version 15 with 4 bytes after the navmesh grid, which xEdit does not describe; they are now kept as they are, and treated as a FormID only if they name an existing record (so the check counts them).
+
+Compiling, ready for when the check confirms NAVM:
+- **NAVM** compiles like other cell children: with its cell (copied as a container when no compiled plugin provides it), its pathing cell, edge links, door links and precut references rewritten.
+- **NAVI** is not taken from the last plugin. The game combines every plugin's navmesh info map as it loads, one entry per navmesh, so the output carries one NAVI override holding the entries of every compiled plugin (a later plugin's entry for the same navmesh replacing an earlier one) and their deleted navmeshes; the version and precomputed pathing are the last compiled plugin's. Retained plugins keep their own NAVI. Because it references the compiled navmeshes, the dependency rule places it in the output with the last of them.
+- Both stay **Candidates** until the analysis confirms NAVM on a real load order.

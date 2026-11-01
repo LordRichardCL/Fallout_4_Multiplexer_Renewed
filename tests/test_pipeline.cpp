@@ -1994,6 +1994,97 @@ TEST(new_cells_and_worldspaces_compile)
         CHECK(checkLayout(PluginFile::load(f), true).problems.empty());
 }
 
+// Navmesh stage (M2): navmeshes compile with their cells, and the navmesh info map the game combines
+// at load carries the entries of every compiled plugin, a later plugin's entry for the same navmesh
+// winning, with their deleted navmeshes.
+TEST(navmeshes_compile_with_a_combined_info_map)
+{
+    const auto* defs = trialDefinitions({{"NAVM", "Winner"}, {"NAVI", "Winner"}});
+    auto root = buildInstall("navmeshes");
+    auto data = root / "Game" / "Data";
+    auto geometry = [](uint32_t cell) {
+        std::vector<uint8_t> b(80, 0);
+        storeLE<uint32_t>(b.data(), 15);
+        storeLE<uint32_t>(b.data() + 12, cell);
+        return raw("NVNM", b);
+    };
+    auto info = [](uint32_t navmesh, uint32_t flags, uint32_t cell) {
+        std::vector<uint8_t> b(49, 0);
+        storeLE<uint32_t>(b.data(), navmesh);
+        storeLE<uint32_t>(b.data() + 4, flags);
+        storeLE<uint32_t>(b.data() + 45, cell);
+        return raw("NVMI", b);
+    };
+    writePlugin(data / "NavBase.esm", {"Fallout4.esm"},
+                {record("NAVI", 0x01000FF1, {u32("NVER", 12), info(0x01000F00, 0, 0x01000F01)}),
+                 record("CELL", 0x01000F01, {zs("EDID", "BaseCell")}),
+                 record("NAVM", 0x01000F00, {geometry(0x01000F01)})},
+                ESM);
+    writePlugin(data / "ModP.esp", {"Fallout4.esm", "NavBase.esm"},
+                {record("NAVI", 0x01000FF1,
+                        {u32("NVER", 12), info(0x01000F00, 0, 0x01000F01), info(0x02000801, 0, 0x02000800)}),
+                 record("CELL", 0x02000800, {zs("EDID", "PCell")}),
+                 record("NAVM", 0x02000801, {geometry(0x02000800)})});
+    writePlugin(data / "ModQ.esp", {"Fallout4.esm", "NavBase.esm"},
+                {record("NAVI", 0x01000FF1,
+                        {u32("NVER", 12), info(0x01000F00, 1, 0x01000F01), info(0x02000801, 0, 0x02000800),
+                         u32("NVSI", 0x01000F00)}),
+                 record("CELL", 0x02000800, {zs("EDID", "QCell")}),
+                 record("NAVM", 0x02000801, {geometry(0x02000800)})});
+    writeFile(root / "plugins.txt", "*NavBase.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n*ModQ.esp\n");
+    auto cfg = configFor(root);
+    cfg.definitions = defs;
+    cfg.analysis.excludedPlugins = {"NavBase.esm"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK_EQ(p.session().findPlugin("ModP.esp")->eligibility, Eligibility::Eligible);
+    CHECK_EQ(p.session().findPlugin("ModQ.esp")->eligibility, Eligibility::Eligible);
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    OutputSet out(result.pluginFiles);
+
+    std::vector<const OutputSet::Rec*> navmeshes, maps;
+    for (const auto& r : out.records) {
+        if (r.record.signature() == Signature("NAVM"))
+            navmeshes.push_back(&r);
+        if (r.record.signature() == Signature("NAVI"))
+            maps.push_back(&r);
+    }
+    CHECK_EQ(navmeshes.size(), size_t(2));
+    CHECK_EQ(maps.size(), size_t(1));
+    if (navmeshes.size() != 2 || maps.size() != 1)
+        return;
+    for (const auto* n : navmeshes) {
+        CHECK(n->placement.kind == Placement::Kind::CellChild);
+        const auto parent = out.resolve(*n, n->placement.parent);
+        const auto* nvnm = n->record.find(Signature("NVNM"));
+        CHECK(out.resolve(*n, loadLE<uint32_t>(nvnm->data.data() + 12)) == parent); // the pathing cell, rewritten
+    }
+    const auto& map = *maps[0];
+    CHECK(out.identity(map) == std::make_pair(std::string("NavBase.esm"), 0xFF1u));
+    std::vector<std::pair<std::string, uint32_t>> navmeshOf;
+    std::vector<uint32_t> flags;
+    for (const auto& sub : map.record.subrecords)
+        if (sub.signature == Signature("NVMI")) {
+            navmeshOf.push_back(out.resolve(map, loadLE<uint32_t>(sub.data.data())));
+            flags.push_back(loadLE<uint32_t>(sub.data.data() + 4));
+        }
+    CHECK_EQ(navmeshOf.size(), size_t(3));
+    if (navmeshOf.size() != 3)
+        return;
+    CHECK(navmeshOf[0] == std::make_pair(std::string("NavBase.esm"), 0xF00u));
+    CHECK_EQ(flags[0], 1u); // ModQ's entry for the same navmesh replaces ModP's
+    std::set<std::pair<std::string, uint32_t>> compiled = {out.identity(*navmeshes[0]), out.identity(*navmeshes[1])};
+    CHECK((std::set<std::pair<std::string, uint32_t>>{navmeshOf[1], navmeshOf[2]} == compiled));
+    const auto* nvsi = map.record.find(Signature("NVSI"));
+    CHECK(nvsi && out.resolve(map, loadLE<uint32_t>(nvsi->data.data())) == std::make_pair(std::string("NavBase.esm"), 0xF00u));
+    for (const auto& f : result.pluginFiles)
+        CHECK(checkLayout(PluginFile::load(f), true).problems.empty());
+}
+
 // A new cell with precombine data keeps its plugin out (the files are found by plugin name and cell
 // FormID); two new cells at the same grid of one worldspace keep one plugin out.
 TEST(new_cells_with_precombines_or_clashing_grids_stay)
