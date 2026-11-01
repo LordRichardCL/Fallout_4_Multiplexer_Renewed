@@ -168,6 +168,12 @@ private:
                 }
             break;
         }
+        case FieldKind::Navmesh:
+        case FieldKind::PrecutMap:
+        case FieldKind::NavmeshInfo:
+        case FieldKind::PrecomputedPathing:
+            decodeNavmesh(i, sr, def.kind);
+            break;
         case FieldKind::TopicData:
             if (size == 8 && loadLE<uint32_t>(sr.data.data()) == 0)
                 slot(i, 4); // a topic
@@ -520,6 +526,124 @@ private:
             break;
         default:
             heuristic(i, 4, static_cast<uint32_t>(sr.data.size()));
+        }
+    }
+
+    // --- Navmeshes (layouts from xEdit) -----------------------------------------
+    // Every one must end exactly at the end of its subrecord; anything else is scanned and reported.
+
+    // A uint32 count of `size`-byte elements that must fit in what is left.
+    uint32_t counted(BinaryReader& r, size_t size, const char* what)
+    {
+        const uint32_t n = r.read<uint32_t>();
+        if (static_cast<uint64_t>(n) * size > r.remaining())
+            throw FormatError(std::string("implausible ") + what + " count " + std::to_string(n));
+        return n;
+    }
+    void formIds(BinaryReader& r, uint32_t i, uint32_t n)
+    {
+        for (uint32_t k = 0; k < n; ++k) {
+            slot(i, r.position());
+            r.skip(4);
+        }
+    }
+    // Pathing cell: CRC, parent world, then the grid (exterior) or the parent cell (world 0).
+    void pathingCell(BinaryReader& r, uint32_t i)
+    {
+        r.skip(4);
+        const auto world = r.position();
+        const bool interior = r.read<uint32_t>() == 0;
+        if (interior)
+            slot(i, r.position());
+        else
+            slot(i, world);
+        r.skip(4);
+    }
+
+    void navmeshGeometry(BinaryReader& r, uint32_t i)
+    {
+        r.skip(4); // version
+        pathingCell(r, i);
+        r.skip(static_cast<size_t>(counted(r, 12, "vertex")) * 12);
+        r.skip(static_cast<size_t>(counted(r, 21, "triangle")) * 21);
+        for (uint32_t n = counted(r, 11, "edge link"), k = 0; k < n; ++k) { // type, navmesh, triangle, edge
+            r.skip(4);
+            slot(i, r.position());
+            r.skip(7);
+        }
+        for (uint32_t n = counted(r, 10, "door link"), k = 0; k < n; ++k) { // triangle, CRC, door reference
+            r.skip(6);
+            slot(i, r.position());
+            r.skip(4);
+        }
+        r.skip(static_cast<size_t>(counted(r, 8, "cover")) * 8);
+        r.skip(static_cast<size_t>(counted(r, 4, "cover triangle")) * 4);
+        r.skip(static_cast<size_t>(counted(r, 18, "waypoint")) * 18);
+        const uint32_t divisor = r.read<uint32_t>();
+        r.skip(8 + 24); // grid size, bounds
+        const uint32_t cells = divisor <= 12 ? divisor * divisor : 0;
+        for (uint32_t k = 0; k < cells; ++k)
+            r.skip(static_cast<size_t>(counted(r, 2, "grid cell triangle")) * 2);
+    }
+
+    void navmeshInfo(BinaryReader& r, uint32_t i)
+    {
+        slot(i, r.position()); // the navmesh
+        r.skip(4 + 4 + 12 + 4); // navmesh, flags, approximate location, preferred %
+        formIds(r, i, counted(r, 4, "edge link"));
+        formIds(r, i, counted(r, 4, "preferred edge link"));
+        for (uint32_t n = counted(r, 8, "door link"), k = 0; k < n; ++k) { // CRC, door reference
+            r.skip(4);
+            slot(i, r.position());
+            r.skip(4);
+        }
+        if (r.read<uint8_t>() != 0) { // island data: bounds, triangles, vertices
+            r.skip(24);
+            r.skip(static_cast<size_t>(counted(r, 6, "island triangle")) * 6);
+            r.skip(static_cast<size_t>(counted(r, 12, "island vertex")) * 12);
+        }
+        pathingCell(r, i);
+    }
+
+    void precomputedPathing(BinaryReader& r, uint32_t i)
+    {
+        for (uint32_t n = counted(r, 4, "path"), k = 0; k < n; ++k)
+            formIds(r, i, counted(r, 4, "path navmesh"));
+        for (uint32_t n = counted(r, 8, "road marker"), k = 0; k < n; ++k) { // navmesh, index
+            slot(i, r.position());
+            r.skip(8);
+        }
+    }
+
+    void precutMap(BinaryReader& r, uint32_t i)
+    {
+        while (!r.atEnd()) { // reference, uint16 count of uint16 triangles
+            slot(i, r.position());
+            r.skip(4);
+            const uint16_t n = r.read<uint16_t>();
+            if (static_cast<size_t>(n) * 2 > r.remaining())
+                throw FormatError("implausible triangle count " + std::to_string(n));
+            r.skip(static_cast<size_t>(n) * 2);
+        }
+    }
+
+    void decodeNavmesh(uint32_t i, const Subrecord& sr, FieldKind kind)
+    {
+        const size_t slotsBefore = out_.formIdSlots.size();
+        try {
+            BinaryReader r(sr.data);
+            switch (kind) {
+            case FieldKind::Navmesh: navmeshGeometry(r, i); break;
+            case FieldKind::NavmeshInfo: navmeshInfo(r, i); break;
+            case FieldKind::PrecomputedPathing: precomputedPathing(r, i); break;
+            default: precutMap(r, i); break;
+            }
+            if (!r.atEnd())
+                throw FormatError(std::to_string(r.remaining()) + " trailing bytes");
+        } catch (const FormatError& e) {
+            out_.formIdSlots.resize(slotsBefore);
+            issue(Severity::Warning, sr.signature, std::string("navmesh data not decoded: ") + e.what());
+            heuristic(i, 0, static_cast<uint32_t>(sr.data.size()));
         }
     }
 

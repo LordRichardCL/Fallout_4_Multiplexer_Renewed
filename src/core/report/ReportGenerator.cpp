@@ -555,7 +555,16 @@ std::string validationReport(const ReportContext& ctx)
     std::vector<const ValidationIssue*> list;
     for (const auto& is : v.issues)
         list.push_back(&is);
-    std::stable_sort(list.begin(), list.end(), [](auto a, auto b) { return a->severity > b->severity; });
+    // Errors first, then the definition and group layout check (a few summary lines that must not
+    // fall past the row limit behind thousands of decoding warnings), then the rest by severity.
+    auto rank = [](const ValidationIssue* is) {
+        if (is->severity == Severity::Error)
+            return 0;
+        if (is->category == "Definitions" || is->category == "Group Layout")
+            return 1;
+        return 4 - static_cast<int>(is->severity);
+    };
+    std::stable_sort(list.begin(), list.end(), [&](auto a, auto b) { return rank(a) < rank(b); });
     size_t shown = 0;
     for (auto is : list) {
         if (shown++ >= ctx.maxRows)

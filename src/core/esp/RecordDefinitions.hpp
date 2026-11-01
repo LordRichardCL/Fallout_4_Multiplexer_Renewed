@@ -34,6 +34,10 @@ enum class FieldKind : uint8_t {
     VendorLocation, // FACT PLVD
     TopicData,      // PDTO: type 0 = topic (FormID at +4), type 1 = 4-character subtype
     GameSetting,    // GMST DATA: a localised string when the Editor ID starts with 's', else a number
+    Navmesh,        // NAVM NVNM: navmesh geometry (parent world/cell, edge links, door links)
+    PrecutMap,      // NAVM MNAM: references with the triangles cut for them
+    NavmeshInfo,    // NAVI NVMI: one navmesh's connections, island data and pathing cell
+    PrecomputedPathing, // NAVI NVPP: precomputed paths and road markers
 };
 
 // How two plugins' edits of a field combine during merging.

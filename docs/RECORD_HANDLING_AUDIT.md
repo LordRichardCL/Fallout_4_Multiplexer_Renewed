@@ -547,3 +547,12 @@ NPC_ is no longer overrides only: new NPCs compile with new FormIDs. FaceGen is 
 
 - **LCTN** is promoted to Winner. Its overall check passed on a real load order; the 86.4% resolve rate is in `RCSR` (removed persistent references), which xEdit also reads as a plain FormID array: the failures fall at scattered offsets, so they are stale references left by the plugins, not a layout fault. They are rewritten like any other FormID or left as they are when they resolve to nothing.
 - **GMST** has a layout and is a **Candidate**. Its value type follows the first letter of its Editor ID (`s` string, `f` float, `i`/`u` integer, `b` bool); a string setting holds a localized string in a localized plugin, which the Normalizer turns into inline text like any other localized field. The next analysis checks it.
+
+## Navmesh stage (M1): layouts
+
+- **NAVM** and **NAVI** have layouts from xEdit and are **Candidates**: checked by every analysis, not compiled.
+  - NAVM `NVNM`: version, pathing cell (parent world, then the grid or, in an interior, the parent cell), vertices, triangles (21 bytes), edge links (the linked navmesh), door links (the door reference), cover, cover triangle mappings, waypoints and the navmesh grid (divisor² cells). `MNAM`: references with the triangles cut for them. `ONAM`: base objects.
+  - NAVI `NVMI`: the navmesh, its edge and preferred edge links, door links, optional island data and its pathing cell. `NVPP`: precomputed paths and road markers. `NVSI`: deleted navmeshes.
+  - Every one must end exactly at the end of its subrecord; anything else is reported and scanned.
+- Compiling comes after the check confirms the layouts: every plugin with navmeshes overrides the single NAVI record, so the outputs need its navmesh infos combined per navmesh, not the last plugin's taken.
+- The Validation Report lists the definition and group layout check right after errors, so the row limit of the text export never cuts it off.

@@ -84,13 +84,13 @@ TEST(catalogue_strategy_matches_the_layouts)
 
     // Marking a type without a layout Specialised does not make it compilable; it is reported.
     std::string promoted = readText("resources/record_catalogue.csv");
-    pos = promoted.find("\nNAVM,");
+    pos = promoted.find("\nPACK,");
     auto pres = promoted.find("Preserve", pos);
     promoted.replace(pres, std::string("Preserve").size(), "Specialised");
     auto promotedCat = RecordCatalogue::parse(promoted);
     RecordDefinitions d2 = defs;
     d2.applyCatalogue(promotedCat);
-    CHECK(!d2.isCompilable(Signature("NAVM")));
+    CHECK(!d2.isCompilable(Signature("PACK")));
     CHECK_EQ(d2.strategyWithoutLayout().size(), size_t(1));
 }
 
@@ -218,6 +218,78 @@ TEST(update_layouts_and_guards)
     CHECK(gmst("fSomeValue").heuristic.empty() && gmst("fSomeValue").formIdSlots.empty());
     CHECK(d.strategy(Signature("WTHR")) == MergeStrategy::Candidate);
     CHECK(d.strategy(Signature("QUST")) == MergeStrategy::Winner); // quest stage, confirmed
+
+    // Navmeshes (xEdit layouts): every FormID found, and the data must end exactly.
+    CHECK(d.strategy(Signature("NAVM")) == MergeStrategy::Candidate);
+    CHECK(d.strategy(Signature("NAVI")) == MergeStrategy::Candidate);
+    struct Bytes {
+        std::vector<uint8_t> v;
+        Bytes& u8(uint8_t x) { v.push_back(x); return *this; }
+        Bytes& u16(uint16_t x) { return u8(uint8_t(x)).u8(uint8_t(x >> 8)); }
+        Bytes& u32(uint32_t x) { return u16(uint16_t(x)).u16(uint16_t(x >> 16)); }
+        Bytes& zero(size_t n) { v.insert(v.end(), n, 0); return *this; }
+    };
+    auto decode = [&](const char* rec, const char* sub, const std::vector<uint8_t>& data) {
+        Subrecord sr;
+        sr.signature = Signature::fromString(sub);
+        sr.data = data;
+        return decodeLayout(d, Signature::fromString(rec), {sr});
+    };
+    auto offsets = [](const DecodedLayout& l) {
+        std::vector<uint32_t> o;
+        for (const auto& s : l.formIdSlots)
+            o.push_back(s.offset);
+        return o;
+    };
+    {
+        // Interior navmesh: version, CRC, world 0, parent cell; 1 vertex, 1 triangle, 1 edge link,
+        // 1 door link, no cover, no waypoints, grid divisor 1 with one empty cell.
+        Bytes b;
+        b.u32(15).u32(0).u32(0).u32(0x01000805);
+        b.u32(1).zero(12);
+        b.u32(1).zero(21);
+        b.u32(1).u32(0).u32(0x01000900).u16(0).u8(0); // edge link navmesh at 65
+        b.u32(1).u16(0).u32(0).u32(0x01000901);       // door at 82
+        b.u32(0).u32(0).u32(0);
+        b.u32(1).zero(8 + 24).u32(0);
+        auto l = decode("NAVM", "NVNM", b.v);
+        CHECK(l.issues.empty() && l.heuristic.empty());
+        CHECK((offsets(l) == std::vector<uint32_t>{12, 65, 82}));
+        // An exterior navmesh: the world is the FormID, the grid is not.
+        auto ext = b.v;
+        storeLE<uint32_t>(ext.data() + 8, 0x0000003C);
+        CHECK((offsets(decode("NAVM", "NVNM", ext)) == std::vector<uint32_t>{8, 65, 82}));
+        // A byte too many: reported and scanned, no slots kept.
+        auto bad = b.v;
+        bad.push_back(0);
+        auto lb = decode("NAVM", "NVNM", bad);
+        CHECK(!lb.issues.empty() && lb.formIdSlots.empty() && !lb.heuristic.empty());
+    }
+    {
+        // Navmesh info: navmesh, flags, location, preferred %, 1 edge link, 0 preferred, 1 door,
+        // island data with 1 triangle and 1 vertex, interior pathing cell.
+        Bytes b;
+        b.u32(0x01000900).u32(0).zero(12).u32(0);
+        b.u32(1).u32(0x01000901);
+        b.u32(0);
+        b.u32(1).u32(0).u32(0x01000902);
+        b.u8(1).zero(24).u32(1).zero(6).u32(1).zero(12);
+        b.u32(0).u32(0).u32(0x01000805);
+        auto l = decode("NAVI", "NVMI", b.v);
+        CHECK(l.issues.empty());
+        const uint32_t cell = uint32_t(b.v.size() - 4);
+        CHECK((offsets(l) == std::vector<uint32_t>{0, 28, 44, cell}));
+        // Precomputed paths: 1 path of 2 navmeshes, 1 road marker.
+        Bytes p;
+        p.u32(1).u32(2).u32(0x01000900).u32(0x01000901).u32(1).u32(0x01000902).u32(7);
+        auto lp = decode("NAVI", "NVPP", p.v);
+        CHECK(lp.issues.empty());
+        CHECK((offsets(lp) == std::vector<uint32_t>{8, 12, 20}));
+        // Precut map: reference, 2 triangles; reference, 0 triangles.
+        Bytes m;
+        m.u32(0x01000903).u16(2).u16(1).u16(2).u32(0x01000904).u16(0);
+        CHECK((offsets(decode("NAVM", "MNAM", m.v)) == std::vector<uint32_t>{0, 10}));
+    }
 
     // Same subrecord, different meaning per record.
     CHECK(d.field(Signature("RACE"), Signature("ZNAM")).kind == FieldKind::ZString);

@@ -281,6 +281,10 @@ Quests (QUST) and the story manager nodes that start them (SMQN, SMBN) are compi
 
 Locations (LCTN) compile. Game settings (GMST) are checked by the analysis and compile once a real load order confirms their layout; a setting changed by two plugins keeps the last one's value, as in game.
 
+## Navmeshes
+
+Navmeshes (NAVM) and the navmesh info map (NAVI) are checked by every analysis and not compiled yet: plugins with navmeshes stay in the load order. Once a real load order confirms the layouts, compiling them needs the navmesh info map combined across plugins (each plugin with navmeshes overrides the same record), which is the next part of this stage.
+
 ## Filename references
 
 Some files find a plugin by its **file name** rather than by its records: a script calling `Game.GetFormFromFile(0x812, "MyMod.esp")`, an MCM menu that requires `MyMod.esp`, a RobCo Patcher line `MyMod.esp|812`, FaceGen meshes in a folder called `MyMod.esp`. If that plugin were compiled away, those files would point at a plugin that is no longer loaded.

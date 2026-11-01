@@ -99,8 +99,8 @@ MSTT,Moveable Static,Base Objects,top,Specialised,31,,
 MSWP,Material Swap,Visual Effects,top,Specialised,119,,
 MUSC,Music Type,Audio,top,Winner,89,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 MUST,Music Track,Audio,top,Winner,96,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
-NAVI,Navmesh Info Map,World,top,Preserve,55,,
-NAVM,Navmesh,World,cell child,Preserve,,,Deleting navmeshes can crash the game (xEdit docs 7.5.4).
+NAVI,Navmesh Info Map,World,top,Candidate,55,,"Layout from xEdit wbDefinitionsFO4.pas (NVMI navmesh infos, NVPP precomputed pathing, NVSI deleted navmeshes). Candidate: checked by the analysis, not compiled. Every plugin with navmeshes overrides the one NAVI record, so compiling needs its navmesh infos combined, not the last one taken."
+NAVM,Navmesh,World,cell child,Candidate,,,"Layout from xEdit wbDefinitionsFO4.pas (NVNM geometry with edge and door links, MNAM precut map). Candidate: checked by the analysis, not compiled. Deleting navmeshes can crash the game (xEdit docs 7.5.4)."
 NOCM,Navmesh Obstacle Manager,World,top,Preserve,128,,
 NOTE,Note,Items,top,Specialised,44,11,
 NPC_,Non-Player Character,Actors,top,Winner,38,,"Layout from xEdit wbDefinitionsFO4.pas. Overrides and new NPCs (stage N1, new FormIDs); a plugin that ships FaceGen for its NPCs (stored under its name) keeps them through its FaceGen folder. Confirmed by a real load order (definition check).",

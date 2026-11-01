@@ -1100,6 +1100,20 @@ void buildOldGen(RecordDefinitions& d)
     // RNAM hours until reset, kept in order.
     // Game setting: its value's type follows the first letter of its Editor ID (xEdit GMST).
     b.record("GMST", "Game Setting", true).field("DATA", special(FieldKind::GameSetting));
+    // Navmeshes (xEdit NAVM, NAVI). NVNM: geometry, edge links to other navmeshes, door links;
+    // MNAM: references with the triangles cut for them. NAVI holds one NVMI per navmesh (its
+    // connections, island data and pathing cell), the precomputed paths and the deleted navmeshes.
+    b.record("NAVM", "Navmesh", true)
+        .field("NVNM", special(FieldKind::Navmesh))
+        .field("ONAM", formIdArray()) // base objects
+        .field("PNAM", noRefs())      // preferred connector vertices
+        .field("NNAM", noRefs())      // non-connector vertices
+        .field("MNAM", special(FieldKind::PrecutMap));
+    b.record("NAVI", "Navmesh Info Map", true)
+        .field("NVER", noRefs()) // version
+        .field("NVMI", special(FieldKind::NavmeshInfo))
+        .field("NVPP", special(FieldKind::PrecomputedPathing))
+        .field("NVSI", formIdArray()); // deleted navmeshes
     b.record("SMBN", "Story Manager Branch Node", true)
         .field("PNAM", formId())   // parent node
         .field("SNAM", formId())   // previous node
