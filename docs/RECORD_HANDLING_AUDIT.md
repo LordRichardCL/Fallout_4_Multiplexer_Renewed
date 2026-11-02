@@ -609,3 +609,12 @@ The candidate check on a real load order (build 59):
 ## Archives without a name table
 
 Archive2 can write a BA2 without its name table (`-nostrings`); the game finds files by their hashes, so it loads. These archives were reported unreadable. They are now read: each file is matched by the game's hashes (xEdit TwbHash.FO4: CRC32 of the folder and of the file name without extension, lower case with backslashes, and the extension) to the path another archive or loose file gives it; a file no other source names keeps the name xEdit shows (`<dir hash>\<name hash>.<ext>`). Conflicts and archive priority then cover them like any other archive.
+
+## Dialogue stage (D2): dialogue compiles
+
+The candidate check on a real load order (build 60) confirmed DIAL (144,595 records), INFO (289,355), SCEN (13,166) and DLBR (442): every candidate type is now confirmed. They are promoted to Winner and compile:
+- topics (DIAL) in their quest's group, responses (INFO) in their topic's group, scenes (SCEN) and branches (DLBR) in their quest's group, as the nested group writer already writes them;
+- a response or topic whose topic or quest no compiled plugin changes is written in a copy of it as the game loads it now (a container, as for cells), so the output changes nothing about it;
+- a quest holding compiled dialogue goes to the same output as its dialogue (it joins the world clusters);
+- response order comes from each INFO's PNAM (previous INFO), a FormID, rewritten like any other;
+- **voice files** are found by the defining plugin's name and the response's FormID (`Sound\Voice\<plugin>\<voice type>\<FormID>_<n>.fuz`): a plugin with such a folder (loose or in an archive) stays in the load order (Compatibility Required). Relocating voice files to the output is the next stage (D3). Overrides of other plugins' responses keep their voice files, which are found under the defining plugin.

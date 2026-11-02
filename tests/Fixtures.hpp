@@ -87,14 +87,26 @@ inline void writePlugin(const std::filesystem::path& path, const std::vector<std
     // worldspace is that worldspace's cell, any other cell is an interior cell; placed references,
     // landscape and navmeshes go into the cell listed before them (temporary, or persistent when
     // flagged).
-    uint32_t firstCell = 0, cell = 0, world = 0;
+    // Dialogue as in Fallout 4: a topic that follows a quest is in that quest's group, a response in
+    // the topic listed before it, scenes and branches in the quest listed before them.
+    uint32_t firstCell = 0, cell = 0, world = 0, quest = 0, topic = 0;
     for (const auto& r : records)
         if (r.signature() == sig::CELL && !firstCell)
             firstCell = r.header.formId;
     for (auto& r : records) {
         Placement p;
         const auto* entry = RecordCatalogue::get().find(r.signature());
-        if (r.signature() == Signature("WRLD")) {
+        if (r.signature() == Signature("QUST")) {
+            quest = r.header.formId;
+        } else if (r.signature() == Signature("DIAL")) {
+            topic = r.header.formId;
+            if (quest)
+                p = {Placement::Kind::QuestChild, quest, false};
+        } else if (r.signature() == Signature("INFO")) {
+            p = {Placement::Kind::TopicChild, topic, false};
+        } else if ((r.signature() == Signature("SCEN") || r.signature() == Signature("DLBR")) && quest) {
+            p = {Placement::Kind::QuestChild, quest, false};
+        } else if (r.signature() == Signature("WRLD")) {
             world = r.header.formId;
         } else if (r.signature() == sig::CELL) {
             cell = r.header.formId;

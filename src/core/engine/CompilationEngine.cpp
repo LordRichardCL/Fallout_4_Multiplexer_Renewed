@@ -610,6 +610,17 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         }
     }
 
+    // A quest holding compiled dialogue (topics, scenes, branches) is written with it, in one output.
+    {
+        std::set<FormKey> quests;
+        for (const auto& e : out.records)
+            if (e.parent.valid() && (e.placement == Placement::Kind::QuestChild))
+                quests.insert(e.parent);
+        for (const auto& k : quests)
+            if (auto it = out.indexByKey.find(k); it != out.indexByKey.end())
+                out.records[it->second].world = true;
+    }
+
     // ---- Precombines and previs --------------------------------------------------
     // A new reference listed in a cell's precombine (XCRI) or previs (XPRI) data was combined into
     // meshes made for its FormID; whether those files depend on it cannot be checked, so its plugin

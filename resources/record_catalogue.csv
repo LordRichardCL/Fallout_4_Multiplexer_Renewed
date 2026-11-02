@@ -40,8 +40,8 @@ CPTH,Camera Path,Visual Effects,top,Winner,77,,Layout from xEdit wbDefinitionsFO
 CSTY,Combat Style,Actors,top,Winner,61,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 DEBR,Debris,Visual Effects,top,Winner,68,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 DFOB,Default Object,Game Data,top,Specialised,87,,
-DIAL,Dialog Topic,Quests and Dialogue,top with children,Candidate,,,"Has a child group per topic holding its INFO records. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
-DLBR,Dialog Branch,Quests and Dialogue,quest child,Candidate,95,,Stored in its quest's child group (Fallout 4). Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (dialogue stays in its plugin).,
+DIAL,Dialog Topic,Quests and Dialogue,top with children,Winner,,,"Has a child group per topic holding its INFO records. Layout from xEdit wbDefinitionsFO4.pas. Confirmed by a real load order (DIAL 144,595, INFO 289,355, SCEN 13,166, DLBR 442 records): compiled in their quest and topic groups; a plugin whose voice files are found by its name stays in the load order (voice relocation is not implemented)."
+DLBR,Dialog Branch,Quests and Dialogue,quest child,Winner,95,,"Stored in its quest's child group (Fallout 4). Layout from xEdit wbDefinitionsFO4.pas. Confirmed by a real load order (DIAL 144,595, INFO 289,355, SCEN 13,166, DLBR 442 records): compiled in their quest and topic groups; a plugin whose voice files are found by its name stays in the load order (voice relocation is not implemented).",
 DLVW,Dialog View,Quests and Dialogue,top,Preserve,97,,
 DMGT,Damage Type,Combat,top,Specialised,8,,
 DOBJ,Default Object Manager,Game Data,top,Winner,86,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
@@ -69,7 +69,7 @@ IDLE,Idle Animation,Animation,top,Winner,59,,Layout from xEdit wbDefinitionsFO4.
 IDLM,Idle Marker,Base Objects,top,Winner,43,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 IMAD,Image Space Adapter,Visual Effects,top,Winner,70,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 IMGS,Image Space,Visual Effects,top,Winner,69,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
-INFO,Dialog response,Quests and Dialogue,topic child,Candidate,,,"Child of a dialogue topic; tied to voice file paths. Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (stored inside cells, worldspaces or dialogue topics, which the app does not write)."
+INFO,Dialog response,Quests and Dialogue,topic child,Winner,,,"Child of a dialogue topic; tied to voice file paths. Layout from xEdit wbDefinitionsFO4.pas. Confirmed by a real load order (DIAL 144,595, INFO 289,355, SCEN 13,166, DLBR 442 records): compiled in their quest and topic groups; a plugin whose voice files are found by its name stays in the load order (voice relocation is not implemented)."
 INGR,Ingredient,Items,top,Specialised,26,8,
 INNR,Instance Naming Rules,Item Components,top,Specialised,121,,
 IPCT,Impact,Combat,top,Specialised,80,,
@@ -129,7 +129,7 @@ REVB,Reverb Parameters,Audio,top,Winner,112,,Layout from xEdit wbDefinitionsFO4.
 RFCT,Visual Effect,Visual Effects,top,Specialised,53,,
 RFGP,Reference Group,World,top,Winner,114,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 SCCO,Scene Collection,Quests and Dialogue,top,Winner,124,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
-SCEN,Scene,Quests and Dialogue,quest child,Candidate,100,,Stored in its quest's child group (Fallout 4). Layout from xEdit wbDefinitionsFO4.pas. Analysed and checked; not compiled (dialogue stays in its plugin).,
+SCEN,Scene,Quests and Dialogue,quest child,Winner,100,,"Stored in its quest's child group (Fallout 4). Layout from xEdit wbDefinitionsFO4.pas. Confirmed by a real load order (DIAL 144,595, INFO 289,355, SCEN 13,166, DLBR 442 records): compiled in their quest and topic groups; a plugin whose voice files are found by its name stays in the load order (voice relocation is not implemented).",
 SCOL,Static Collection,Base Objects,top,Specialised,30,,
 SCSN,Audio Category Snapshot,Audio,top,Winner,126,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 SMBN,Story Manager Branch Node,Quests and Dialogue,top,Winner,92,,Layout from xEdit wbDefinitionsFO4.pas. Confirmed by a real load order (definition check).,

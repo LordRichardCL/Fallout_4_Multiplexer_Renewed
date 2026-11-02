@@ -46,8 +46,9 @@ struct CatalogueEntry {
     bool writable() const
     {
         return placement == RecordPlacement::Top || placement == RecordPlacement::CellChild ||
-               placement == RecordPlacement::Cell ||
-               (placement == RecordPlacement::TopWithChildren && sig == Signature("WRLD"));
+               placement == RecordPlacement::Cell || placement == RecordPlacement::TopicChild ||
+               placement == RecordPlacement::QuestChild ||
+               (placement == RecordPlacement::TopWithChildren && (sig == Signature("WRLD") || sig == Signature("DIAL")));
     }
     // Compiled scope: false = every record; true = only overrides of records defined elsewhere (a
     // plugin that adds new records of the type is not compiled). Used where new records are tied to

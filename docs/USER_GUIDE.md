@@ -274,7 +274,7 @@ NPC records compile: overrides of existing NPCs, and **new NPCs** with new FormI
 Quests (QUST) and the story manager nodes that start them (SMQN, SMBN) are compiled (confirmed by a real load order: 11,474 quests, 99.9% of their FormIDs resolve):
 - **Quests without dialogue compile** (setup, tracking and script quests, MCM quests). Stages, objectives and aliases are kept exactly in order, and every FormID in them, including the quest's scripts, fragments and alias scripts, is rewritten.
 - **Start-game-enabled quests** are listed in `seq\<output>.seq` for each output, so the game starts them as before.
-- **Quests with dialogue stay with their plugin**: dialogue (DIAL, INFO, SCEN, DLBR) is not compiled, since voice files are found by the plugin's name and the line's FormID.
+- **Dialogue compiles** (DIAL, INFO, SCEN, DLBR, confirmed by a real load order) in its quest and topic groups, with the quest in the same output. A plugin that ships voice files for its own lines (`Sound\Voice\<plugin>\`, loose or in an archive) stays in the load order, since the game finds them by the plugin's name and the line's FormID; moving voice files to the output is a later stage.
 - **Saves:** quests get new FormIDs; start a new game.
 
 ## Locations and game settings

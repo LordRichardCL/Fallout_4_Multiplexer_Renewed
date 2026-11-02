@@ -64,7 +64,7 @@ TEST(catalogue_strategy_matches_the_layouts)
         winner += e.strategy == MergeStrategy::Winner;
     }
     CHECK_EQ(specialised, size_t(61));
-    CHECK_EQ(winner, size_t(69)); // stages 4 and 5, world, stage 7a, quest types, LCTN, GMST, navmeshes, packages, WTHR and PKIN, confirmed by a real load order
+    CHECK_EQ(winner, size_t(73)); // stages 4 and 5, world, stage 7a, quest types, LCTN, GMST, navmeshes, packages, WTHR, PKIN and dialogue, confirmed by a real load order
     CHECK_EQ(specialised + winner, defs.compilableTypes().size());
     CHECK_EQ(defs.recordName(Signature("MISC")), std::string("Misc. Item"));
     CHECK_EQ(defs.recordName(Signature("XYZW")), std::string("XYZW"));
@@ -195,7 +195,7 @@ TEST(update_layouts_and_guards)
 {
     const auto& d = RecordDefinitions::get();
     // Requested types are Candidates, not compiled (the confirmed world types are checked below).
-    for (const char* t : {"PBAR", "PBEA", "PCON", "PFLA", "INFO", "DIAL"}) {
+    for (const char* t : {"PBAR", "PBEA", "PCON", "PFLA"}) {
         CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Candidate);
         CHECK(d.supportSummary(Signature::fromString(t)).find("not compiled") != std::string::npos);
     }
@@ -402,15 +402,15 @@ TEST(update_layouts_and_guards)
         // A placed reference type set to Winner compiles (overrides and new references, W2/W3); dialogue
         // never does.
         RecordDefinitions t = d;
-        auto trial = RecordCatalogue::parse(promote(promote(text, "PBAR", false), "INFO", false));
+        auto trial = RecordCatalogue::parse(promote(text, "PBAR", false));
         t.applyCatalogue(trial);
         CHECK(t.isCompilable(Signature("PBAR")));
         CHECK(!t.overridesOnly(Signature("PBAR")));
-        CHECK(!t.isCompilable(Signature("INFO")));
-        CHECK(t.strategy(Signature("INFO")) == MergeStrategy::Candidate);
     }
-    // Dialogue topics own child groups like worldspaces but never compile.
-    CHECK(!d.isCompilable(Signature("DIAL")));
+    // Dialogue (D2): topics own child groups like worldspaces, responses are topic children, scenes
+    // and branches quest children; all compile.
+    for (const char* t : {"DIAL", "INFO", "SCEN", "DLBR"})
+        CHECK(d.isCompilable(Signature::fromString(t)));
     for (const char* t : {"REFR", "CELL", "WRLD", "LAND"}) // new records compile (W3, W4)
         CHECK(!d.overridesOnly(Signature::fromString(t)));
     CHECK(d.field(Signature("CELL"), Signature("XCRI")).skipCountAt == 0);

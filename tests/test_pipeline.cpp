@@ -85,7 +85,7 @@ std::filesystem::path buildInstall(const std::string& name)
                     record("WEAP", 0x00001000,
                            {zs("EDID", "Pistol10mm"), zs("FULL", "Pistol (Mod C)"), u32("KSIZ", 2),
                             formIds("KWDA", {0x800, 0x801}), weaponData(0x900, 0x11)}),
-                    record("DIAL", 0x01000800, {zs("EDID", "ModCTopic")}),
+                    record("LVSP", 0x01000800, {zs("EDID", "ModCTopic")}),
                 });
 
     writeFile(root / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
@@ -587,11 +587,11 @@ TEST(conflict_resolution_patch_merges_retained_chains)
                                              raw("DNAM", std::vector<uint8_t>(16, 0))}),
                  record("LVLI", 0x00001200,
                         {zs("EDID", "LootPistols"), raw("LLCT", {2}), lvlo(1, 0x1000, 1), lvlo(2, 0x900, 10)}),
-                 record("DIAL", 0x01000800, {zs("EDID", "ModETopic")})});
+                 record("LVSP", 0x01000800, {zs("EDID", "ModETopic")})});
     writePlugin(data / "ModF.esp", {"Fallout4.esm"},
                 {record("AMMO", 0x00000900, {zs("EDID", "Ammo10mm"), zs("FULL", "10mm Round"),
                                              raw("DNAM", std::vector<uint8_t>(16, 7))}),
-                 record("DIAL", 0x01000800, {zs("EDID", "ModFTopic")})});
+                 record("LVSP", 0x01000800, {zs("EDID", "ModFTopic")})});
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModF.esp\n");
 
     // Alongside compilation: chains with a compiled plugin go to the Dummy outputs,
@@ -774,7 +774,7 @@ TEST(undescribed_formid_with_shifted_master_is_isolated)
 {
     auto root = buildInstall("softref");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("DIAL", 0x01000800, {zs("EDID", "ModETopic")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("LVSP", 0x01000800, {zs("EDID", "ModETopic")})});
     // ModG keeps ModE and ModC (both retained) as masters 1 and 2, and refers to ModC's cell
     // from a subrecord the definitions do not describe.
     writePlugin(data / "ModG.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
@@ -787,10 +787,10 @@ TEST(undescribed_formid_with_shifted_master_is_isolated)
     p.scan();
     CHECK_EQ(p.session().findPlugin("ModG.esp")->eligibility, Eligibility::Eligible);
     p.analyse();
-    // Blocker report: DIAL is the only thing keeping ModC and ModE out.
+    // Blocker report: LVSP is the only thing keeping ModC and ModE out.
     const auto& blockers = p.dependencies()->blockers;
     CHECK(!blockers.empty());
-    CHECK_EQ(blockers.front().sig.str(), std::string("DIAL"));
+    CHECK_EQ(blockers.front().sig.str(), std::string("LVSP"));
     CHECK_EQ(blockers.front().plugins, size_t(2));
     CHECK_EQ(blockers.front().soleBlocker, size_t(2));
     CHECK_EQ(blockers.front().unlocks, size_t(2));
@@ -873,7 +873,7 @@ TEST(conditions_with_unlisted_functions_and_hardcoded_forms)
 {
     auto root = buildInstall("conditions");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("DIAL", 0x01000800, {zs("EDID", "ModETopic")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("LVSP", 0x01000800, {zs("EDID", "ModETopic")})});
     // ModC is master 2 here but will be master 1 in the output; the condition function is not in
     // the definitions' table, and the condition runs on PlayerRef (hard-coded, not in Fallout4.esm).
     writePlugin(data / "ModH.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
@@ -1023,7 +1023,7 @@ TEST(archive_priority_change_is_reported)
     auto root = buildInstall("archprio");
     auto data = root / "Game" / "Data";
     // ModE stays in the load order (it has a dialogue topic), loads before ModA and ships the same mesh.
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("DIAL", 0x01000800, {zs("EDID", "ModETopic")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("LVSP", 0x01000800, {zs("EDID", "ModETopic")})});
     writeGeneralBa2(data / "ModE - Main.ba2", {{"meshes\\moda\\gun.nif", std::vector<uint8_t>(64, 9)}}, true);
     writeFile(root / "plugins.txt", "*ModE.esp\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
     auto cfg = configFor(root);
@@ -1134,7 +1134,7 @@ TEST(unaligned_undescribed_formid_is_caught)
 {
     auto root = buildInstall("unaligned");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("DIAL", 0x01000800, {zs("EDID", "ModETopic")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("LVSP", 0x01000800, {zs("EDID", "ModETopic")})});
     // ModC's cell at an odd offset of a subrecord the definitions do not describe.
     std::vector<uint8_t> bytes(10, 0);
     storeLE<uint32_t>(bytes.data() + 3, 0x02000800);
@@ -1169,7 +1169,7 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
     writeFile(inst / "profiles" / "Default" / "modlist.txt", "+ModWeap\n+ModStay\n");
     writeFile(inst / "profiles" / "Default" / "plugins.txt", "*ModStay.esp\n*ModWeap.esp\n");
     writePlugin(inst / "mods" / "ModStay" / "ModStay.esp", {"Fallout4.esm"},
-                {record("DIAL", 0x01000800, {zs("EDID", "StayTopic")})});
+                {record("LVSP", 0x01000800, {zs("EDID", "StayTopic")})});
     writeGeneralBa2(inst / "mods" / "ModStay" / "ModStay - Main.ba2", {{"textures\\gun.dds", std::vector<uint8_t>(32, 1)}},
                     false);
     writePlugin(inst / "mods" / "ModWeap" / "ModWeap.esp", {"Fallout4.esm"},
@@ -1994,6 +1994,84 @@ TEST(new_cells_and_worldspaces_compile)
         CHECK(checkLayout(PluginFile::load(f), true).problems.empty());
 }
 
+// Dialogue stage (D2): topics, responses, scenes and branches compile in their quest and topic
+// groups. A response override is written in a copy of its topic and quest when no compiled plugin
+// changes them (here the plugin's own copies are identical, so they are only containers). A plugin
+// whose voice files are found by its name stays.
+TEST(dialogue_compiles_in_its_quest_and_topic)
+{
+    auto root = buildInstall("dialogue");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "QBase.esm", {"Fallout4.esm"},
+                {record("QUST", 0x01000800, {zs("EDID", "BaseQuest")}),
+                 record("DIAL", 0x01000801, {zs("EDID", "BaseTopic")}),
+                 record("INFO", 0x01000802, {zs("NAM1", "Hello.")})},
+                ESM);
+    writePlugin(data / "ModQ.esp", {"Fallout4.esm", "QBase.esm"},
+                {record("QUST", 0x01000800, {zs("EDID", "BaseQuest")}),
+                 record("DIAL", 0x01000801, {zs("EDID", "BaseTopic")}),
+                 record("INFO", 0x01000802, {zs("NAM1", "Hello there.")}),
+                 record("QUST", 0x02000810, {zs("EDID", "NewQuest")}),
+                 record("DIAL", 0x02000811, {zs("EDID", "NewTopic")}),
+                 record("INFO", 0x02000812, {zs("NAM1", "New line.")}),
+                 record("SCEN", 0x02000813, {zs("EDID", "NewScene")})});
+    writePlugin(data / "ModV.esp", {"Fallout4.esm"},
+                {record("QUST", 0x01000800, {zs("EDID", "VoicedQuest")}),
+                 record("DIAL", 0x01000801, {zs("EDID", "VoicedTopic")}),
+                 record("INFO", 0x01000802, {zs("NAM1", "Spoken.")})});
+    writeFile(data / "Sound" / "Voice" / "ModV.esp" / "MaleEvenToned" / "00000802_1.fuz", "fuz");
+    writeFile(root / "plugins.txt", "*QBase.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModQ.esp\n*ModV.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"QBase.esm"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK_EQ(p.session().findPlugin("ModQ.esp")->eligibility, Eligibility::Eligible);
+    const auto* voiced = p.session().findPlugin("ModV.esp");
+    CHECK_EQ(voiced->eligibility, Eligibility::Ineligible);
+    CHECK(std::any_of(voiced->reasons.begin(), voiced->reasons.end(),
+                      [](const std::string& r) { return r.find("voice files") != std::string::npos; }));
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    OutputSet out(result.pluginFiles);
+    auto bySig = [&](const char* sig, const std::string& text) -> const OutputSet::Rec* {
+        for (const auto& r : out.records)
+            if (r.record.signature() == Signature::fromString(sig) &&
+                (r.record.editorId() == text || (r.record.find(Signature("NAM1")) && ::text(r.record.find(Signature("NAM1"))) == text)))
+                return &r;
+        return nullptr;
+    };
+    using K = Placement::Kind;
+    const auto* changed = bySig("INFO", "Hello there.");
+    const auto* topic = bySig("DIAL", "BaseTopic");
+    const auto* quest = bySig("QUST", "BaseQuest");
+    CHECK(changed && topic && quest);
+    if (changed && topic && quest) {
+        CHECK(out.identity(*changed) == std::make_pair(std::string("QBase.esm"), 0x802u)); // an override
+        CHECK(changed->placement.kind == K::TopicChild);
+        CHECK(out.resolve(*changed, changed->placement.parent) == out.identity(*topic));
+        CHECK(topic->placement.kind == K::QuestChild);
+        CHECK(out.resolve(*topic, topic->placement.parent) == std::make_pair(std::string("QBase.esm"), 0x800u));
+        CHECK(changed->plugin == topic->plugin && topic->plugin == quest->plugin); // one output
+    }
+    const auto* newQuest = bySig("QUST", "NewQuest");
+    const auto* newTopic = bySig("DIAL", "NewTopic");
+    const auto* newLine = bySig("INFO", "New line.");
+    const auto* scene = bySig("SCEN", "NewScene");
+    CHECK(newQuest && newTopic && newLine && scene);
+    if (newQuest && newTopic && newLine && scene) {
+        CHECK_EQ(out.identity(*newLine).first, newLine->plugin); // new FormIDs in the output
+        CHECK(out.resolve(*newLine, newLine->placement.parent) == out.identity(*newTopic));
+        CHECK(out.resolve(*newTopic, newTopic->placement.parent) == out.identity(*newQuest));
+        CHECK(scene->placement.kind == K::QuestChild && out.resolve(*scene, scene->placement.parent) == out.identity(*newQuest));
+    }
+    CHECK(bySig("INFO", "Spoken.") == nullptr);
+    for (const auto& f : result.pluginFiles)
+        CHECK(checkLayout(PluginFile::load(f), true).problems.empty());
+}
+
 // An archive written without a name table (Archive2 -nostrings) is read: its files are matched by
 // the game's hashes to the paths other archives and loose files give them.
 TEST(archives_without_names_are_matched_by_hash)
@@ -2251,14 +2329,15 @@ TEST(quest_compiles_with_aliases_in_order)
 // whether they are confirmed without a separate definition check.
 TEST(analysis_checks_candidate_types)
 {
-    auto root = buildInstall("candidatecheck"); // ModC.esp has a dialogue topic
+    auto root = buildInstall("candidatecheck");
+    writePlugin(root / "Game" / "Data" / "ModT.esp", {"Fallout4.esm"}, {record("DIAL", 0x01000800, {zs("EDID", "ModTTopic")})});
     // A navmesh whose geometry ends early: the check says it was not decoded, and why.
     writePlugin(root / "Game" / "Data" / "ModN.esp", {"Fallout4.esm"},
                 {record("CELL", 0x01000800, {zs("EDID", "ModNCell")}),
                  record("NAVM", 0x01000801, {raw("NVNM", {15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 1, 0xFF, 0xFF, 0, 0})})});
-    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModN.esp\n");
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModT.esp\n*ModN.esp\n");
     auto cfg = configFor(root);
-    cfg.definitions = trialDefinitions({{"NAVM", "Candidate"}});
+    cfg.definitions = trialDefinitions({{"NAVM", "Candidate"}, {"DIAL", "Candidate"}});
     Pipeline p(cfg);
     p.scan();
     p.analyse();
@@ -2411,10 +2490,12 @@ TEST(auto_merger_relinks_scripts_and_configs)
 TEST(definition_check_checks_group_layouts)
 {
     auto root = buildInstall("layoutcheck");
+    writePlugin(root / "Game" / "Data" / "ModT.esp", {"Fallout4.esm"}, {record("DIAL", 0x01000800, {zs("EDID", "ModTTopic")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModT.esp\n");
     Pipeline p(configFor(root));
     p.scan();
     auto check = p.checkDefinitions({});
-    CHECK_EQ(check.layoutPlugins, size_t(1)); // ModC.esp has a dialogue topic
+    CHECK_EQ(check.layoutPlugins, size_t(1)); // ModT.esp has a dialogue topic
     CHECK_EQ(check.layoutRebuilt, size_t(1));
     CHECK_EQ(check.layoutProblems, size_t(0));
     bool summary = false;
