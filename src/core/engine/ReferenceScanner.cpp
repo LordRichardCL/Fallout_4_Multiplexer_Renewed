@@ -60,7 +60,8 @@ enum class Fact {
     ConfigPlain,         // a config naming the plugin without a FormID
     SettlementBlueprint, // Transfer Settlements blueprint
     BinaryString,        // F4SE DLL
-    EngineFolder,        // FaceGen / face textures / voice / LOD billboards folder named after the plugin
+    EngineFolder,        // FaceGen / face textures / LOD billboards folder named after the plugin
+    VoiceFolder,         // sound\voice\<plugin>\: relocated with the plugin's responses at export
     OtherFolder,         // any other folder named after the plugin
     EngineFileName,      // seq\<plugin>.seq (start-game-enabled quests)
     ToolFileName,        // RobCo Patcher INI named after the plugin
@@ -115,6 +116,10 @@ Rule rule(Fact f)
     case Fact::BinaryString:
         return {K::Binary, C::Unsafe, "compiled code",
                 "an F4SE plugin (DLL) contains the name: what its code does with it cannot be established or changed"};
+    case Fact::VoiceFolder:
+        return {K::Directory, C::Safe, "voice files",
+                "voice files: copied at export into the output's voice folder, named after the responses' new "
+                "FormIDs, so the game finds them as before"};
     case Fact::EngineFolder:
         return {K::Directory, C::CompatibilityRequired, "engine folder",
                 "the game finds these files by the defining plugin's name; moving them to the output is not "
@@ -520,9 +525,10 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
         for (const auto& nf : kEngineFolders)
             if (folder == std::string(nf.prefix) + session.plugins[plugin].key + "\\")
                 engine = &nf;
-        auto r = make(engine ? Fact::EngineFolder : Fact::OtherFolder, plugin, folder, "Folder",
-                      session.plugins[plugin].key, std::to_string(value.first) + " files");
-        if (engine) {
+        const bool voice = engine && std::string(engine->prefix) == "sound\\voice\\";
+        auto r = make(voice ? Fact::VoiceFolder : engine ? Fact::EngineFolder : Fact::OtherFolder, plugin, folder,
+                      "Folder", session.plugins[plugin].key, std::to_string(value.first) + " files");
+        if (engine && !voice) {
             r.context = engine->what;
             r.reason = std::string(engine->what) + " are found by the plugin's file name; moving them to the output "
                                                    "is not implemented";

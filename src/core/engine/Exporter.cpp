@@ -6,9 +6,14 @@
 #include "util/Text.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <map>
+#include <set>
 #include <unordered_set>
 
 #include <spdlog/spdlog.h>
@@ -295,6 +300,81 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
         writeBinary(seq, w.buffer());
         r.seqFiles.push_back(seq);
         spdlog::info("Wrote {} ({} start-game-enabled quests)", pathToUtf8(seq.filename()), op.seqFormIds.size());
+    }
+    // Voice files (D3). The game finds a response's voice as sound\voice\<defining plugin>\<voice
+    // type>\<FormID without its load order index>_<n>.<ext>. A compiled new response is defined by
+    // its output with a new FormID, so its files are copied there under the new name.
+    {
+        std::map<std::pair<std::string, uint32_t>, const FormMapping*> moved; // (source plugin, object id)
+        for (const auto& m : c.mappings)
+            if (m.sig == Signature("INFO"))
+                moved[{toLower(m.sourcePlugin), m.sourceObjectId}] = &m;
+        const auto manifestPath = r.directory / "Multiplexer_Voices.tsv";
+        std::set<std::string> previous, current;
+        {
+            std::ifstream in(manifestPath);
+            for (std::string line; std::getline(in, line);)
+                if (!line.empty() && line[0] != '#')
+                    previous.insert(line.substr(0, line.find('\t')));
+        }
+        std::string manifest = "# Fallout 4 Multiplexer Renewed voice files v1\n#output_file\tsource_file\n";
+        const auto& idx = session.assets;
+        if (!moved.empty())
+            for (const auto& e : idx.entries) {
+                const std::string& path = idx.path(e);
+                if (!istartsWith(path, "sound\\voice\\"))
+                    continue;
+                // sound\voice\<plugin>\<voice type>\<8 hex digits>_<rest>
+                const size_t p1 = path.find('\\', 12), p2 = p1 == std::string::npos ? p1 : path.find('\\', p1 + 1);
+                if (p2 == std::string::npos || path.size() < p2 + 10 || path[p2 + 9] != '_' ||
+                    path.find('\\', p2 + 1) != std::string::npos)
+                    continue;
+                const std::string plugin = path.substr(12, p1 - 12);
+                const std::string hex = path.substr(p2 + 1, 8);
+                if (!std::all_of(hex.begin(), hex.end(), [](char ch) { return std::isxdigit(static_cast<unsigned char>(ch)); }))
+                    continue;
+                auto it = moved.find({plugin, static_cast<uint32_t>(std::strtoul(hex.c_str(), nullptr, 16))});
+                if (it == moved.end())
+                    continue;
+                char id[16];
+                std::snprintf(id, sizeof(id), "%08x", it->second->objectId);
+                const std::string rel = "sound\\voice\\" + toLower(it->second->outputPlugin) +
+                                        path.substr(p1, p2 - p1) + "\\" + id + path.substr(p2 + 9);
+                std::string relFs = rel;
+                std::replace(relFs.begin(), relFs.end(), '\\', '/');
+                const auto dest = r.directory / utf8ToPath(relFs);
+                try {
+                    auto bytes = idx.read(e, e.sources.size() - 1, session.vfs);
+                    std::error_code ec;
+                    fs::create_directories(dest.parent_path(), ec);
+                    if (sameContent(dest, bytes)) {
+                        ++r.voiceFilesUnchanged;
+                    } else {
+                        writeBinary(dest, bytes);
+                    }
+                    ++r.voiceFiles;
+                    current.insert(rel);
+                    manifest += rel + "\t" + path + "\n";
+                } catch (const std::exception& ex) {
+                    spdlog::error("Could not copy voice file {}: {}", path, ex.what());
+                }
+            }
+        for (const auto& old : previous)
+            if (!current.count(old)) {
+                std::string relFs = old;
+                std::replace(relFs.begin(), relFs.end(), '\\', '/');
+                std::error_code ec;
+                fs::remove(r.directory / utf8ToPath(relFs), ec);
+            }
+        std::error_code ec;
+        if (current.empty()) {
+            fs::remove(manifestPath, ec);
+        } else {
+            writeText(manifestPath, manifest);
+            r.voiceManifest = manifestPath;
+            spdlog::info("Voice files: {} copied for compiled responses ({} unchanged)", r.voiceFiles,
+                         r.voiceFilesUnchanged);
+        }
     }
     // Outputs from the previous build that this build no longer produces.
     for (const auto& name : previousOutputs) {

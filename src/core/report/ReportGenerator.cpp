@@ -553,6 +553,19 @@ std::string validationReport(const ReportContext& ctx)
              {"Errors", formatCount(v.errors)}});
     h.note(v.critical() ? "Critical failures were found: compilation output must not be used."
                         : "No critical failures.");
+    // Every category with its count first, so none is hidden by the row limit.
+    {
+        std::map<std::pair<int, std::string>, size_t> counts;
+        for (const auto& is : v.issues)
+            ++counts[{-static_cast<int>(is.severity), is.category}];
+        h.h2("By category");
+        h.tableStart({"Severity", "Category", "Rows"});
+        for (const auto& [k, n] : counts)
+            h.row({severityName(static_cast<Severity>(-k.first)), k.second, formatCount(n)},
+                  {severityName(static_cast<Severity>(-k.first))});
+        h.tableEnd(counts.size(), counts.size());
+        h.h2("Findings");
+    }
     h.tableStart({"Severity", "Category", "Plugin", "FormID", "Message", "Likely Cause"});
     std::vector<const ValidationIssue*> list;
     for (const auto& is : v.issues)
@@ -567,15 +580,21 @@ std::string validationReport(const ReportContext& ctx)
         return 4 - static_cast<int>(is->severity);
     };
     std::stable_sort(list.begin(), list.end(), [&](auto a, auto b) { return rank(a) < rank(b); });
+    // At most a tenth of the rows per category, so one large category cannot hide the others.
+    const size_t perCategory = std::max<size_t>(ctx.maxRows / 10, 50);
+    std::map<std::string, size_t> perCat;
     size_t shown = 0;
     for (auto is : list) {
-        if (shown++ >= ctx.maxRows)
+        if (shown >= ctx.maxRows)
             break;
+        if (++perCat[is->category] > perCategory && is->severity != Severity::Error)
+            continue;
+        ++shown;
         h.row({severityName(is->severity), is->category, is->plugin, is->formId, is->message,
                is->cause.empty() ? diagnosis::forCategory(is->category, is->message) : is->cause},
               {severityName(is->severity), "", "", "mono"});
     }
-    h.tableEnd(std::min(ctx.maxRows, list.size()), list.size());
+    h.tableEnd(shown, list.size());
     return h.finish();
 }
 

@@ -618,3 +618,11 @@ The candidate check on a real load order (build 60) confirmed DIAL (144,595 reco
 - a quest holding compiled dialogue goes to the same output as its dialogue (it joins the world clusters);
 - response order comes from each INFO's PNAM (previous INFO), a FormID, rewritten like any other;
 - **voice files** are found by the defining plugin's name and the response's FormID (`Sound\Voice\<plugin>\<voice type>\<FormID>_<n>.fuz`): a plugin with such a folder (loose or in an archive) stays in the load order (Compatibility Required). Relocating voice files to the output is the next stage (D3). Overrides of other plugins' responses keep their voice files, which are found under the defining plugin.
+
+## Dialogue stage (D3): voice files
+
+Build 61 compiled dialogue on a real load order: 1,626 plugins (+64), 416,559 new FormIDs, 0 errors.
+
+Voice files move with their responses. The game finds a response's voice as `sound\voice\<defining plugin>\<voice type>\<FormID without its load order index>_<n>.<ext>`. At export, every voice file of a compiled new response (loose or from an archive) is copied into the output folder as `sound\voice\<output>\<voice type>\<new FormID>_<n>.<ext>`; `Multiplexer_Voices.tsv` lists the copies and their sources, and copies a later build no longer needs are removed. A plugin's voice folder is therefore a Safe filename reference instead of Compatibility Required. Overrides of other plugins' responses keep their voice files, found under the defining plugin.
+
+The Validation Report now opens with the number of rows per category, and shows at most a tenth of its row limit per category, so one large category no longer hides the others.

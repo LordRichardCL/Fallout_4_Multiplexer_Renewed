@@ -27,6 +27,11 @@ struct ExportResult {
     std::filesystem::path summary;
     std::vector<std::filesystem::path> archiveLoaders; // empty ESL plugins keeping compiled plugins' archives loading
     std::vector<std::filesystem::path> seqFiles;       // seq\<output>.seq for start-game-enabled quests
+    // Voice files of compiled new responses, copied as sound\voice\<output>\<voice type>\<new FormID>_<n>.*
+    // (Multiplexer_Voices.tsv lists them; copies a later build no longer needs are removed).
+    size_t voiceFiles = 0;
+    size_t voiceFilesUnchanged = 0;
+    std::filesystem::path voiceManifest;
 };
 
 // Stage Export: writes the output plugins and everything needed to switch

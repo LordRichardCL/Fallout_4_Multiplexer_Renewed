@@ -1997,7 +1997,8 @@ TEST(new_cells_and_worldspaces_compile)
 // Dialogue stage (D2): topics, responses, scenes and branches compile in their quest and topic
 // groups. A response override is written in a copy of its topic and quest when no compiled plugin
 // changes them (here the plugin's own copies are identical, so they are only containers). A plugin
-// whose voice files are found by its name stays.
+// whose voice files are found by its name compiles too (D3): the files are copied into the output's
+// voice folder under the responses' new FormIDs.
 TEST(dialogue_compiles_in_its_quest_and_topic)
 {
     auto root = buildInstall("dialogue");
@@ -2028,9 +2029,7 @@ TEST(dialogue_compiles_in_its_quest_and_topic)
     p.analyse();
     CHECK_EQ(p.session().findPlugin("ModQ.esp")->eligibility, Eligibility::Eligible);
     const auto* voiced = p.session().findPlugin("ModV.esp");
-    CHECK_EQ(voiced->eligibility, Eligibility::Ineligible);
-    CHECK(std::any_of(voiced->reasons.begin(), voiced->reasons.end(),
-                      [](const std::string& r) { return r.find("voice files") != std::string::npos; }));
+    CHECK_EQ(voiced->eligibility, Eligibility::Eligible);
     CHECK(p.compile());
     CHECK_EQ(p.validation()->errors, uint64_t(0));
     auto result = p.exportOutputs();
@@ -2067,7 +2066,20 @@ TEST(dialogue_compiles_in_its_quest_and_topic)
         CHECK(out.resolve(*newTopic, newTopic->placement.parent) == out.identity(*newQuest));
         CHECK(scene->placement.kind == K::QuestChild && out.resolve(*scene, scene->placement.parent) == out.identity(*newQuest));
     }
-    CHECK(bySig("INFO", "Spoken.") == nullptr);
+    const auto* spoken = bySig("INFO", "Spoken.");
+    CHECK(spoken != nullptr);
+    if (spoken) {
+        const auto [plugin, id] = out.identity(*spoken);
+        CHECK_EQ(plugin, spoken->plugin);
+        char name[32];
+        std::snprintf(name, sizeof(name), "%08x_1.fuz", id);
+        const auto voice = result.directory / "sound" / "voice" / toLower(plugin) / "maleeventoned" / name;
+        CHECK(std::filesystem::exists(voice));
+        std::ifstream vin(voice, std::ios::binary);
+        CHECK_EQ(std::string((std::istreambuf_iterator<char>(vin)), std::istreambuf_iterator<char>()), std::string("fuz"));
+        CHECK_EQ(result.voiceFiles, size_t(1));
+        CHECK(std::filesystem::exists(result.directory / "Multiplexer_Voices.tsv"));
+    }
     for (const auto& f : result.pluginFiles)
         CHECK(checkLayout(PluginFile::load(f), true).problems.empty());
 }
