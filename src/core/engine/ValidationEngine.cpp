@@ -80,6 +80,31 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
                    session.pluginName(first.key.origin), session.loadOrderFormId(first.key));
     }
 
+    // Load order slots after switching over: Fallout 4 loads at most 254 full (not ESL-flagged)
+    // plugins; the plugins that stay and every output that is not ESL-flagged share them.
+    {
+        size_t full = 0, outputsFull = 0;
+        for (auto pi : session.loadOrder) {
+            const auto& p = session.plugins[pi];
+            if (p.active && !p.isLight() && !c.isCompiled(pi)) // an archive loader is ESL-flagged
+                ++full;
+        }
+        for (const auto& op : c.outputs)
+            if (!op.records.empty() && !op.light)
+                ++outputsFull;
+        const size_t total = full + outputsFull;
+        const std::string counts = std::to_string(total) + " full plugins after switching over (" +
+                                   std::to_string(full) + " that stay, " + std::to_string(outputsFull) +
+                                   " outputs); Fallout 4 loads at most 254";
+        if (total > 254)
+            v.fail(Severity::Error, "Load Order", counts + ". Lower the number of output plugins, or ESL-flag "
+                                                  "some plugins that stay");
+        else if (total > 240)
+            v.fail(Severity::Warning, "Load Order", counts + ": little room is left");
+        else
+            v.pass();
+    }
+
     // Output plugins: masters and their order.
     std::set<std::string> loadedNames;
     for (auto pi : session.loadOrder)

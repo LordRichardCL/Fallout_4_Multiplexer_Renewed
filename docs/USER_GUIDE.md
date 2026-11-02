@@ -122,11 +122,21 @@ Select a record to see the override chain and a grid of every field per plugin:
 
 Open **Compilation**:
 
-- **Output plugins**: 10–20. Unused slots are not written.
-- **Name prefix**: `Dummy_Plugin_` by default.
-- **Strategy**: A (by record type), B (balanced size), or C (user rules like `WEAP=3` or `MyWeapons.esp=5`). Records always come after everything they reference, so rules are preferences, not guarantees.
+- **Output plugins**: the most output plugins the compiler may create (1 to 64). It fills them in order and starts a new one only when the current one holds its share of the records (at least 2 MB), so a small load order uses fewer; unused ones are not written. Every output that is not ESL-flagged takes one of Fallout 4's **254 full plugin slots**, shared with the plugins that stay enabled; validation stops the export if the total passes 254 (and warns above 240). Outputs master each other, so the worldspace output has 254 minus this number of masters left for the plugins it needs. There is no benefit in more outputs than the load order needs: raise it when outputs grow very large (100 MB and more) or the worldspace output runs out of masters.
+- **Name prefix**: `Dummy_Plugin_` by default (outputs are `<prefix>01.esp`, `<prefix>02.esp`, …).
+- **Record allocation** decides how records are spread over the outputs; it does not change what the game sees. In every strategy a record goes into the same or a later output than the new records it references, cells, worldspaces and quests with dialogue go together into the last outputs, and a record keeps the output it had in the previous build when `Multiplexer_FormMap.tsv` is in the output folder (so saves keep working).
+
+  | Strategy | What it does | Good for | Trade-off |
+  |---|---|---|---|
+  | **Balanced size** (default, recommended) | fills outputs one after another to about the same size, in dependency order | almost every load order | a record's output says nothing about its type |
+  | **Grouped by record type** | gives each group of record types (the catalogue's allocation groups: items, actors, quests, world, …) its own outputs, sized by how much of it there is | browsing the result in xEdit | outputs reference each other more (more masters), uneven sizes |
+  | **Balanced, with my rules** | balanced size, then rules such as `WEAP=3` (a record type) or `MyWeapons.esp=5` (the defining plugin, or a compiled plugin that changes the record) send records to that output | keeping a mod's records together in a known output | dependencies still win, so a rule is a preference, not a guarantee |
+
 - **Merge compatible edits**: on by default. Turn it off for strict last-plugin-wins.
-- **ESL-flag outputs**: saves load order slots when an output has ≤ 2048 new records.
+- **ESL-flag outputs**: an output with 2,048 or fewer new records is ESL-flagged and takes no full slot. Outputs with new cells or worldspaces never are.
+- **Rewrite values that look like FormIDs in data the app cannot read field by field** (off by default). Almost all record data is read field by field, so every reference to another record is known and moved to its new FormID. A few fields are not described yet ("undescribed data"); in them the app looks for 4-byte values that name a record existing in your load order (probable FormIDs).
+  - *Off:* undescribed data is copied unchanged. When a probable FormID there points to a record being compiled (which gets a new FormID), that record's plugin is kept out automatically (**Kept Out Automatically**: "…probably refers to compiled record…"), so nothing can break.
+  - *On:* those values are rewritten too, so such plugins compile. The risk: a number that only looks like a FormID (a float, a count, flags) is changed by mistake and subtly alters that record. Turn it on only when many plugins are kept out for this reason and you will test the result in game.
 - **Conflict resolution patch**: also writes `Multiplexer_Patch.esp`, similar to Wrye Bash's Bashed Patch. Plugins that stay in the load order still lose edits to last-plugin-wins: two mods adding to the same leveled list, form list or keyword list, or changing different fields of the same record. The patch carries the merged record instead, and respects winners you forced in the Conflict Centre.
   - It only overrides existing records, so it adds no FormIDs, is always ESL-flagged and takes no full load order slot.
   - It must load last. The proposed `plugins.txt` puts it there.
@@ -138,16 +148,31 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 
 ## 6. Export and switch over
 
-**Export Plugins** writes, to the output folder (by default an MO2 mod folder named `Fallout 4 Multiplexer Output`, otherwise `Data`):
+**Export Plugins** writes, to the output folder (by default an MO2 mod folder named `Fallout 4 Multiplexer Output`, otherwise `Data`). The output folder is meant to be loaded by the game as **one mod that wins over the original mods' files**: in MO2 enable it and keep it below the original mods; with Vortex you can export into `Data` (the default) or, cleaner, export into a separate folder and install that folder in Vortex as a mod that loads after the original mods, so Vortex manages its files.
+
+Files the game reads (they mirror the `Data` folder layout because the game finds them by path):
+
+| Files | Why they are there | Needed |
+|---|---|---|
+| `<prefix>XX.esp`, `Multiplexer_Patch.esp` | the compiled game state and the conflict patch | always |
+| `seq\<output>.seq` | start-game-enabled quests of each output; the game reads a plugin's SEQ file by its name | when an output has such quests |
+| `sound\voice\<output>\…` | voice files of compiled new dialogue lines, renamed to the line's new FormID (the game finds voice by plugin name and FormID) | when compiled mods have voiced lines |
+| `meshes\actors\character\facegendata\facegeom\<output>\…`, `textures\actors\character\facecustomization\<output>\…` | FaceGen of compiled new NPCs, renamed the same way | when compiled mods have NPCs with FaceGen |
+| loose copies of meshes, textures and other files | without archive loaders, compiled plugins' archives load earlier (from the INI list); each file such an archive wins today is written loose so it keeps winning | Vortex / plain installs |
+| copies of scripts and configs | the Advanced Users Auto-Merger's relinked copies, which must override the originals | when the Auto-Merger is on |
+| archive loaders (same file name as the compiled plugin) | empty ESL-flagged plugins that keep a compiled mod's archives loading in place | MO2 with the output in the mods folder |
+
+Files for you and for the next build (the game does not read them; nothing else needs F4SE or any other runtime component):
 
 | File | Purpose |
 |---|---|
-| `Dummy_Plugin_XX.esp` | the compiled game state |
-| `Multiplexer_FormMap.tsv` | every old → new FormID; also lets the next compilation keep the same FormIDs |
-| `Multiplexer_Archives.ini` | the compiled plugins' BA2s, for `Fallout4Custom.ini` (**Apply to Game** does this for you) |
-| `Multiplexer_ArchivePriority.txt` | only when needed: files whose winning archive changes after switching (see below) |
-| `Multiplexer_DisablePlugins.txt` | plugins that are now compiled |
-| `Multiplexer_plugins.txt` | a proposed `plugins.txt` |
+| `Multiplexer_FormMap.tsv` | every old → new FormID; read by the next compilation to keep the same FormIDs (save compatibility) |
+| `Multiplexer_Archives.ini` | a copy of the archive line **Apply to Game** writes into `Fallout4Custom.ini`; the game does not read this file itself |
+| `Multiplexer_RegisteredArchives.txt` | archives Apply to Game added to the INI, so the next build compares with the load order as it was |
+| `Multiplexer_ArchiveWinners.tsv`, `Multiplexer_Voices.tsv`, `Multiplexer_FaceGen.tsv`, `Multiplexer_Relinked.tsv` | what each copy above is and where it came from; the next export removes copies no longer needed, and the next scan does not mistake them for mod files |
+| `Multiplexer_ArchivePriority.txt` | only when loose copies are off: files whose winning archive would change |
+| `Multiplexer_ArchiveLoaders.txt` | MO2: which compiled plugins have an archive loader |
+| `Multiplexer_DisablePlugins.txt`, `Multiplexer_plugins.txt` | plugins to disable, and a proposed `plugins.txt` (for Vortex and manual installs) |
 | `Multiplexer_Compilation.json` | machine-readable summary |
 | `Multiplexer Reports/` | all reports (HTML + JSON) |
 
@@ -164,7 +189,7 @@ Then:
 
 ### Archive priority
 
-With archive loaders (MO2) nothing changes: every archive keeps its position. Without them, archives listed in the INI load before every plugin's own archives. Once compiled plugins' archives move into that list, an archive of a plugin that stays could start winning a file it used to lose. The app does not let that happen: a plugin whose archives would lose any file they serve today stays in the load order (**Kept Out Automatically**, "Archive priority: N files…"), and the compilation runs again without it. This matters most for mods that ship large archives, such as LOD packs. With Mod Organizer 2 and the output inside the mods folder, archive loaders keep every archive in place, so nothing is kept out for this reason. Any remaining change is listed under **Archive Priority** (up to 50, with the full list in `Multiplexer_ArchivePriority.txt`).
+With archive loaders (MO2) nothing changes: every archive keeps its position. Without them, archives listed in the INI load before every plugin's own archives. Once compiled plugins' archives move into that list, an archive of a plugin that stays could start winning a file it used to lose. The app does not let that happen: each file a compiled plugin's archive wins today is written loose into the output folder (a loose file wins over every archive), so the same version still wins (`Multiplexer_ArchiveWinners.tsv`). A plugin that would need more than 2,000 such copies, such as a LOD pack, stays in the load order instead (**Kept Out Automatically**, "Archive priority: N files…"), and the compilation runs again without it. With Mod Organizer 2 and the output inside the mods folder, archive loaders keep every archive in place, so nothing is kept out for this reason. With loose copies turned off, any remaining change is listed under **Archive Priority** (up to 50, with the full list in `Multiplexer_ArchivePriority.txt`).
 
 The comparison is always with your load order **as it was before this app changed the INI**: archives an earlier **Apply to Game** added count as their plugin's own. The app knows them from `Multiplexer_RegisteredArchives.txt` in the output folder, from the last build in its database, and from the oldest `Fallout4Custom.ini.multiplexer-backup-*` next to your INI (the INI before the first change). If you delete generated files between builds, keep those backups, or restore the oldest one first.
 

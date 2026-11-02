@@ -27,6 +27,7 @@ public:
 
 private:
     void loadOptions();
+    void updateStrategyNote();
     void storeOptions();
     void updateButtons();
     void showTrace(int row);
@@ -34,6 +35,8 @@ private:
     QSpinBox* outputs_;
     QLineEdit* prefix_;
     QComboBox* strategy_;
+    QLabel* strategyNote_ = nullptr;
+    QLabel* outputsNote_ = nullptr;
     QPlainTextEdit* rules_;
     QCheckBox* merge_;
     QCheckBox* light_;

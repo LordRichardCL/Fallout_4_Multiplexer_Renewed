@@ -80,21 +80,65 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     form->addRow("Output plugins", outputs_);
     form->addRow("Name prefix", prefix_);
     form->addRow("Output folder", dirRow);
+    outputs_->setToolTip(QString(
+        "The most output plugins the compiler may create (%1 to %2). It fills them in order and starts a new one only "
+        "when the current one holds about its share of the records, so a small load order uses fewer.\n\n"
+        "Each output that is not ESL-flagged takes one of Fallout 4's 254 full plugin slots, shared with the plugins "
+        "that stay enabled; validation stops the export if the total would pass 254. More outputs also leave fewer "
+        "masters for the worldspace output (254 minus this number).")
+                             .arg(fo4mx::CompileOptions::kMinOutputs)
+                             .arg(fo4mx::CompileOptions::kMaxOutputs));
+    prefix_->setToolTip("Output plugins are named <prefix>01.esp, <prefix>02.esp, …");
+    outputDir_->setToolTip(
+        "Where the output plugins and their files are written. Everything in it is meant to be loaded by the game as "
+        "one mod that wins over the original mods' files:\n"
+        "• Mod Organizer 2: the default is a mod folder, \"Fallout 4 Multiplexer Output\"; enable it and place it "
+        "below the original mods.\n"
+        "• Vortex or a plain install: the default is the game's Data folder. You can instead export to a separate "
+        "folder and install it in Vortex as a mod that loads after (wins over) the original mods.");
+    outputsNote_ = new QLabel;
+    outputsNote_->setObjectName("PageSubtitle");
+    outputsNote_->setWordWrap(true);
+    form->addRow(outputsNote_);
+    auto updateOutputsNote = [this] {
+        outputsNote_->setText(QString(
+            "Compiles eligible plugins into up to %1 output plugins, plus Multiplexer_Patch.esp when the patch is on. "
+            "The output folder also receives the files the game finds by plugin name and FormID (voice files, FaceGen, "
+            "start-game quest lists in seq\\), loose copies that keep archive winners, and the Auto-Merger's relinked "
+            "scripts and configs. Files named Multiplexer_*.tsv / .txt / .ini / .json are notes for you and for the "
+            "next build; the game does not read them.")
+                                  .arg(outputs_->value()));
+    };
+    connect(outputs_, &QSpinBox::valueChanged, this, updateOutputsNote);
+    updateOutputsNote();
     ol->addWidget(outBox);
 
     auto* allocBox = new QGroupBox("Record allocation");
     auto* al = new QVBoxLayout(allocBox);
     strategy_ = new QComboBox;
-    strategy_->addItem("Strategy A — By record type", int(AllocationStrategy::ByRecordType));
-    strategy_->addItem("Strategy B — Balanced size", int(AllocationStrategy::Balanced));
-    strategy_->addItem("Strategy C — User defined", int(AllocationStrategy::UserDefined));
+    strategy_->addItem("Balanced size (recommended)", int(AllocationStrategy::Balanced));
+    strategy_->addItem("Grouped by record type", int(AllocationStrategy::ByRecordType));
+    strategy_->addItem("Balanced, with my rules", int(AllocationStrategy::UserDefined));
+    strategy_->setItemData(0, "Fills the outputs one after another to about the same size, in dependency order.",
+                           Qt::ToolTipRole);
+    strategy_->setItemData(1, "Gives each group of record types (items, NPCs, quests, world, …) its own outputs.",
+                           Qt::ToolTipRole);
+    strategy_->setItemData(2, "Balanced size, then your rules send record types or mods to the output you name.",
+                           Qt::ToolTipRole);
     al->addWidget(strategy_);
+    strategyNote_ = new QLabel;
+    strategyNote_->setObjectName("PageSubtitle");
+    strategyNote_->setWordWrap(true);
+    al->addWidget(strategyNote_);
     rules_ = new QPlainTextEdit;
     rules_->setPlaceholderText("One rule per line: PATTERN=OUTPUT\nWEAP=3\nMyWeaponPack.esp=5");
     rules_->setMaximumHeight(110);
     al->addWidget(rules_);
-    auto* note = new QLabel("Records are always placed after everything they reference, so dependencies can move "
-                            "records to a later output.");
+    auto* note = new QLabel("Whatever the strategy: a record always goes into the same or a later output than the "
+                            "new records it references; cells, worldspaces and quests with dialogue go together into "
+                            "the last outputs; and records keep the output they had in the previous build when its "
+                            "FormID map is in the output folder. The strategy changes how records are spread, not "
+                            "what the game sees.");
     note->setObjectName("PageSubtitle");
     note->setWordWrap(true);
     al->addWidget(note);
@@ -104,7 +148,22 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     auto* ml = new QVBoxLayout(mergeBox);
     merge_ = new QCheckBox("Merge compatible edits (keyword lists, leveled lists, form lists, different fields)");
     light_ = new QCheckBox("ESL-flag outputs that fit the light plugin range (≤ 2048 new records)");
-    heuristic_ = new QCheckBox("Also rewrite probable FormIDs in undescribed data (advanced)");
+    heuristic_ = new QCheckBox("Rewrite values that look like FormIDs in data the app cannot read field by field");
+    heuristic_->setToolTip(
+        "Most record data is read field by field, so every reference to another record (FormID) is known and moved "
+        "to its new place. A few fields are not described yet (\"undescribed data\"). In them the app looks for "
+        "4-byte values that name a record that exists in your load order: those are probable FormIDs.\n\n"
+        "Off (recommended): undescribed data is copied unchanged. If a probable FormID in it points to a record that "
+        "is being compiled (and so gets a new FormID), the record's plugin is kept out of compilation automatically, "
+        "so nothing can break; it stays in your load order as it is.\n\n"
+        "On: those values are rewritten to the record's new FormID, so such plugins compile too. The risk is a "
+        "number that only looks like a FormID (a float, a count, flags) being changed by mistake, which could "
+        "subtly alter that record in game. Turn it on only if many plugins are kept out for \"probably refers to "
+        "compiled record\" and you will test the result in game.");
+    merge_->setToolTip("Where two or more mods change the same record in different ways (a leveled list, keywords, "
+                       "different fields), combine their changes instead of keeping only the last mod's version.");
+    light_->setToolTip("An output with few enough new records (2,048 or fewer) is ESL-flagged, so it takes no full "
+                       "plugin slot. Outputs with new cells or worldspaces are never ESL-flagged.");
     for (auto* c : {merge_, light_, heuristic_}) {
         c->setStyleSheet("QCheckBox { spacing: 8px; }");
         ml->addWidget(c);
@@ -232,9 +291,36 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
             patch_->setChecked(true);
         patch_->setEnabled(!on);
     });
-    connect(strategy_, &QComboBox::currentIndexChanged, this,
-            [this] { rules_->setEnabled(strategy_->currentData().toInt() == int(AllocationStrategy::UserDefined)); });
+    connect(strategy_, &QComboBox::currentIndexChanged, this, [this] {
+        rules_->setEnabled(strategy_->currentData().toInt() == int(AllocationStrategy::UserDefined));
+        updateStrategyNote();
+    });
     loadOptions();
+}
+
+void CompilationPage::updateStrategyNote()
+{
+    switch (static_cast<AllocationStrategy>(strategy_->currentData().toInt())) {
+    case AllocationStrategy::Balanced:
+        strategyNote_->setText(
+            "Outputs are filled one after another, each with about the same amount of data (at least 2 MB), keeping "
+            "records that reference each other together. Fewest cross-output masters and the most even sizes; best for "
+            "almost every load order. A record's output says nothing about what kind of record it is.");
+        break;
+    case AllocationStrategy::ByRecordType:
+        strategyNote_->setText(
+            "Each group of record types (the catalogue's allocation groups: items, actors, quests, world, …) gets its "
+            "own outputs, sized by how much of it there is. Easier to browse in xEdit; but outputs reference each other "
+            "more, so they need more masters, and sizes are uneven. Useful when you want to inspect the result.");
+        break;
+    case AllocationStrategy::UserDefined:
+        strategyNote_->setText(
+            "Balanced size, then each rule sends matching records to the output you name: a record type (WEAP=3) or a "
+            "plugin, either the record's defining plugin or a compiled plugin that changes it (MyWeaponPack.esp=5). "
+            "Dependencies still win, so a record can end up later than its rule says. For keeping a mod's records "
+            "together in a known output.");
+        break;
+    }
 }
 
 void CompilationPage::loadOptions()
@@ -248,6 +334,7 @@ void CompilationPage::loadOptions()
         rules << qs(r.pattern) + "=" + QString::number(r.output);
     rules_->setPlainText(rules.join("\n"));
     rules_->setEnabled(c.strategy == AllocationStrategy::UserDefined);
+    updateStrategyNote();
     merge_->setChecked(c.mergeCompatible);
     light_->setChecked(c.lightOutputsWhenPossible);
     heuristic_->setChecked(c.rewriteHeuristicReferences);
@@ -397,8 +484,8 @@ void CompilationPage::showTrace(int row)
             origin = "<span style='color:#ff5c5c'>missing: no installed mod provides this file</span>";
         else if (!a.value(5).toString().isEmpty())
             origin = QString("%1 → <b>%2</b>%3").arg(a.value(4).toString().toHtmlEscaped(), a.value(5).toString().toHtmlEscaped(),
-                                                      a.value(8).toInt() ? " <span style='color:#f5c542'>(kept loading via "
-                                                                           "Multiplexer_Archives.ini)</span>"
+                                                      a.value(8).toInt() ? " <span style='color:#f5c542'>(kept loading through "
+                                                                           "Fallout4Custom.ini after Apply to Game)</span>"
                                                                          : "");
         else
             origin = QString("%1 (loose file)").arg(a.value(4).toString().toHtmlEscaped());

@@ -555,7 +555,8 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
     {
         auto list = result.directory / "Multiplexer_ArchivePriority.txt";
         std::error_code ec;
-        if (archiveChanges_.empty()) {
+        // With loose copies the winners do not change: the list would only mislead.
+        if (archiveChanges_.empty() || config_.archiveWinnerCopies) {
             std::filesystem::remove(list, ec);
         } else {
             std::ofstream out(list, std::ios::binary | std::ios::trunc);

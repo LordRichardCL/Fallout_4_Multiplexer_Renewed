@@ -325,7 +325,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     CompiledOutput out;
     out.options = opts;
     CompileOptions& options = out.options;
-    options.outputCount = std::clamp(options.outputCount, 1, 64);
+    options.outputCount = std::clamp(options.outputCount, CompileOptions::kMinOutputs, CompileOptions::kMaxOutputs);
 
     out.compiledFlag_.assign(session.plugins.size(), 0);
     if (options.patchOnly)

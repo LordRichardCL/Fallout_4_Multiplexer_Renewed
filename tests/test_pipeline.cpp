@@ -2025,6 +2025,30 @@ TEST(new_cells_and_worldspaces_compile)
         CHECK(checkLayout(PluginFile::load(f), true).problems.empty());
 }
 
+// More than 20 output plugins (up to CompileOptions::kMaxOutputs): names, the patch after the last
+// output, and the load order slot check.
+TEST(output_count_above_twenty)
+{
+    auto root = buildInstall("manyoutputs");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    cfg.compile.outputCount = 40;
+    cfg.compile.buildPatch = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto& outs = p.compiledOutput()->outputs;
+    CHECK(outs.size() >= size_t(40));
+    CHECK_EQ(outs[39].name, cfg.compile.outputPrefix + "40.esp");
+    bool slots = false;
+    for (const auto& is : p.validation()->issues)
+        slots |= is.category == "Load Order";
+    CHECK(!slots); // a few plugins: far from 254
+    CHECK_EQ(CompilationEngine::outputFileName(cfg.compile, CompileOptions::kMaxOutputs - 1),
+             cfg.compile.outputPrefix + std::to_string(CompileOptions::kMaxOutputs) + ".esp");
+}
+
 // Dialogue stage (D2): topics, responses, scenes and branches compile in their quest and topic
 // groups. A response override is written in a copy of its topic and quest when no compiled plugin
 // changes them (here the plugin's own copies are identical, so they are only containers). A plugin

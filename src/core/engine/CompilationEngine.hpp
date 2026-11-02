@@ -57,8 +57,13 @@ struct CompileOptions {
     std::unordered_map<uint64_t, PluginIndex> forcedWinners; // FormKey::packed() -> plugin
     unsigned threads = 0;
 
-    static constexpr int kMinOutputs = 10;
-    static constexpr int kMaxOutputs = 20;
+    // Output plugins are the most the compiler may use: small load orders fill fewer (each output
+    // takes at least 2 MB of records before the next one starts). Every output that is not
+    // ESL-flagged takes one of the game's 254 full plugin slots, shared with the plugins that stay in
+    // the load order (validation checks the total), and outputs master each other, so a worldspace
+    // output has 254 minus this many masters left for the plugins it needs.
+    static constexpr int kMinOutputs = 1;
+    static constexpr int kMaxOutputs = 64;
 };
 
 struct EmittedRecord {
