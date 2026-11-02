@@ -1695,7 +1695,7 @@ TEST(body_part_data_candidate_is_confirmed_by_the_definition_check)
 // NPCs (stage N1): overrides and new NPCs compile. A new NPC without FaceGen looks the same compiled
 // (there was no face file to find before either); a plugin that ships FaceGen for its NPCs (found by
 // its name and the NPC's FormID) keeps them through its FaceGen folder.
-TEST(npcs_compile_unless_they_have_facegen)
+TEST(npcs_compile_with_their_facegen)
 {
     CHECK(!RecordDefinitions::get().overridesOnly(Signature("NPC_")));
     auto root = buildInstall("npcs");
@@ -1713,6 +1713,7 @@ TEST(npcs_compile_unless_they_have_facegen)
                 {record("NPC_", 0x01000800, {zs("EDID", "Raider"), zs("FULL", "Raider Boss"), u32("COCT", 1), item(0x1000, 2)})});
     writePlugin(data / "ModNF.esp", {"Fallout4.esm"}, {record("NPC_", 0x01000800, {zs("EDID", "FacedGuy")})});
     writeFile(data / "Meshes" / "Actors" / "Character" / "FaceGenData" / "FaceGeom" / "ModNF.esp" / "00000800.nif", "nif");
+    writeFile(data / "Textures" / "Actors" / "Character" / "FaceCustomization" / "ModNF.esp" / "00000800_d.dds", "dds");
     writeFile(root / "plugins.txt", "*ModN.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModNO.esp\n*ModNF.esp\n");
     Pipeline p(configFor(root));
     p.scan();
@@ -1720,10 +1721,8 @@ TEST(npcs_compile_unless_they_have_facegen)
     auto& s = p.session();
     CHECK_EQ(s.findPlugin("ModN.esm")->eligibility, Eligibility::Eligible);
     CHECK_EQ(s.findPlugin("ModNO.esp")->eligibility, Eligibility::Eligible);
-    const auto* faced = s.findPlugin("ModNF.esp");
-    CHECK_EQ(faced->eligibility, Eligibility::Ineligible);
-    CHECK(std::any_of(faced->reasons.begin(), faced->reasons.end(),
-                      [](const std::string& r) { return r.find("FaceGen meshes") != std::string::npos; }));
+    // FaceGen moves with the NPC (N2): the plugin compiles.
+    CHECK_EQ(s.findPlugin("ModNF.esp")->eligibility, Eligibility::Eligible);
 
     CHECK(p.compile());
     CHECK_EQ(p.validation()->errors, uint64_t(0));
@@ -1736,7 +1735,20 @@ TEST(npcs_compile_unless_they_have_facegen)
     CHECK_EQ(text(boss->record.find(sig::FULL)), std::string("Raider Boss")); // ModNO's version wins
     auto cnto = boss->record.find(Signature("CNTO"));
     CHECK(out.resolve(*boss, loadLE<uint32_t>(cnto->data.data())) == std::make_pair(std::string("Fallout4.esm"), 0x1000u));
-    CHECK(out.byEditorId("FacedGuy") == nullptr);
+    // Its FaceGen mesh and face texture are copied under the output's name and the NPC's new FormID.
+    const OutputSet::Rec* faced = out.byEditorId("FacedGuy");
+    CHECK(faced != nullptr);
+    if (faced) {
+        const auto [plugin, id] = out.identity(*faced);
+        char nif[32], dds[32];
+        std::snprintf(nif, sizeof(nif), "%08x.nif", id);
+        std::snprintf(dds, sizeof(dds), "%08x_d.dds", id);
+        const auto dir = p.config().exportOptions.outputDirectory.empty() ? Exporter::defaultOutputDirectory(s)
+                                                                          : p.config().exportOptions.outputDirectory;
+        CHECK(std::filesystem::exists(dir / "meshes" / "actors" / "character" / "facegendata" / "facegeom" / toLower(plugin) / nif));
+        CHECK(std::filesystem::exists(dir / "textures" / "actors" / "character" / "facecustomization" / toLower(plugin) / dds));
+        CHECK(std::filesystem::exists(dir / "Multiplexer_FaceGen.tsv"));
+    }
 }
 
 // World stages W2 and W3: overrides of placed references, landscape, cells and worldspaces, and new
@@ -2712,14 +2724,15 @@ TEST(references_pex_uses)
     CHECK_EQ(un[0].context, std::string("string table"));
 }
 
-// 6. Folders the game finds by the plugin's name keep it out, with or without the Auto-Merger; other
-//    folders and file names named after it are unknown.
+// 6. Folders the game finds by the plugin's name keep it out, with or without the Auto-Merger, unless
+//    their files move with their records (voice, FaceGen); other folders and file names are unknown.
 TEST(references_folder_and_path)
 {
     auto root = referenceInstall("refpaths");
     auto data = root / "Game" / "Data";
-    writeFile(data / "Meshes" / "Actors" / "Character" / "FaceGenData" / "FaceGeom" / "ModS.esp" / "00000812.nif", "x");
-    writeFile(data / "Meshes" / "Actors" / "Character" / "FaceGenData" / "FaceGeom" / "ModS.esp" / "00000813.nif", "x");
+    writeFile(data / "Meshes" / "Precombined" / "ModS.esp" / "00000812_0A1B2C3D_OC.nif", "x");
+    writeFile(data / "Meshes" / "Precombined" / "ModS.esp" / "00000813_0A1B2C3D_OC.nif", "x");
+    writeFile(data / "Meshes" / "Actors" / "Character" / "FaceGenData" / "FaceGeom" / "ModT.esp" / "00000812.nif", "x");
     writeFile(data / "Textures" / "ModT.esp_readme.txt", "x");
     writeFile(data / "Vis" / "ModT.esp" / "0000ABCD.uvd", "x");
     auto cfg = configFor(root);
@@ -2733,14 +2746,18 @@ TEST(references_folder_and_path)
     CHECK_EQ(refs[0]->kind, ReferenceKind::Directory);
     CHECK_EQ(refs[0]->cls, ReferenceClass::CompatibilityRequired);
     CHECK_EQ(refs[0]->location, std::string("2 files"));
-    CHECK_EQ(refs[0]->context, std::string("FaceGen meshes"));
+    CHECK_EQ(refs[0]->context, std::string("precombined meshes"));
     CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Ineligible);
     auto t = referencesOf(s, "ModT.esp");
-    CHECK_EQ(t.size(), size_t(2));
-    CHECK_EQ(t[0]->kind, ReferenceKind::FilePath);
-    CHECK_EQ(t[0]->cls, ReferenceClass::Unknown);
-    CHECK_EQ(t[1]->context, std::string("previs data"));
-    CHECK_EQ(t[1]->cls, ReferenceClass::CompatibilityRequired);
+    CHECK_EQ(t.size(), size_t(3));
+    if (t.size() != 3)
+        return;
+    std::map<std::string, ReferenceClass> byContext;
+    for (const auto* r : t)
+        byContext[r->kind == ReferenceKind::FilePath ? std::string("file") : r->context] = r->cls;
+    CHECK(byContext["file"] == ReferenceClass::Unknown);
+    CHECK(byContext["previs data"] == ReferenceClass::CompatibilityRequired);
+    CHECK(byContext["FaceGen meshes"] == ReferenceClass::Safe); // moved with its NPCs (N2)
     CHECK_EQ(s.findPlugin("ModT.esp")->eligibility, Eligibility::Ineligible);
 }
 

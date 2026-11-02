@@ -267,7 +267,7 @@ Every finding on the **Validation** page and under **Dependencies → Missing Re
 
 ## NPCs
 
-NPC records compile: overrides of existing NPCs, and **new NPCs** with new FormIDs (start a new game). The game finds an NPC's face (FaceGen) as `facegeom\<plugin>\<FormID>.nif`, so a plugin that ships FaceGen for its NPCs stays in the load order (its FaceGen folder is a *Compatibility Required* filename reference); moving FaceGen to the output is a later stage. New NPCs without FaceGen (creatures, robots, NPCs that take their face from a template) look the same compiled.
+NPC records compile: overrides of existing NPCs, and **new NPCs** with new FormIDs (start a new game). The game finds an NPC's face (FaceGen) as `facegeom\<plugin>\<FormID>.nif`, so the export copies the FaceGen meshes and face textures of every compiled new NPC into the output folder under the output's name and the NPC's new FormID (`Multiplexer_FaceGen.tsv` lists them). The face mesh still names its textures by their original path, so keep the original mod installed (its plugin disabled). New NPCs without FaceGen (creatures, robots, NPCs that take their face from a template) look the same compiled.
 
 ## Quests
 

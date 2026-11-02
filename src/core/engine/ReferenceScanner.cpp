@@ -117,9 +117,9 @@ Rule rule(Fact f)
         return {K::Binary, C::Unsafe, "compiled code",
                 "an F4SE plugin (DLL) contains the name: what its code does with it cannot be established or changed"};
     case Fact::VoiceFolder:
-        return {K::Directory, C::Safe, "voice files",
-                "voice files: copied at export into the output's voice folder, named after the responses' new "
-                "FormIDs, so the game finds them as before"};
+        return {K::Directory, C::Safe, "relocated folder",
+                "copied at export into the output's folder, named after the records' new FormIDs, so the game "
+                "finds them as before"};
     case Fact::EngineFolder:
         return {K::Directory, C::CompatibilityRequired, "engine folder",
                 "the game finds these files by the defining plugin's name; moving them to the output is not "
@@ -525,9 +525,17 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
         for (const auto& nf : kEngineFolders)
             if (folder == std::string(nf.prefix) + session.plugins[plugin].key + "\\")
                 engine = &nf;
-        const bool voice = engine && std::string(engine->prefix) == "sound\\voice\\";
+        // Voice files and FaceGen move with their records at export (Exporter relocations).
+        const std::string pre = engine ? engine->prefix : "";
+        const bool voice = pre == "sound\\voice\\" || pre == "meshes\\actors\\character\\facegendata\\facegeom\\" ||
+                           pre == "textures\\actors\\character\\facecustomization\\";
         auto r = make(voice ? Fact::VoiceFolder : engine ? Fact::EngineFolder : Fact::OtherFolder, plugin, folder,
                       "Folder", session.plugins[plugin].key, std::to_string(value.first) + " files");
+        if (voice) {
+            r.context = engine->what;
+            r.reason = std::string(engine->what) + ": copied at export into the output's folder, named after the "
+                                                   "records' new FormIDs, so the game finds them as before";
+        }
         if (engine && !voice) {
             r.context = engine->what;
             r.reason = std::string(engine->what) + " are found by the plugin's file name; moving them to the output "

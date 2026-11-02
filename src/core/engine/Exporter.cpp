@@ -13,7 +13,9 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <cstring>
 #include <map>
+#include <tuple>
 #include <set>
 #include <unordered_set>
 
@@ -319,81 +321,114 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
         r.seqFiles.push_back(seq);
         spdlog::info("Wrote {} ({} start-game-enabled quests)", pathToUtf8(seq.filename()), op.seqFormIds.size());
     }
-    // Voice files (D3). The game finds a response's voice as sound\voice\<defining plugin>\<voice
-    // type>\<FormID without its load order index>_<n>.<ext>. A compiled new response is defined by
-    // its output with a new FormID, so its files are copied there under the new name.
-    {
-        std::map<std::pair<std::string, uint32_t>, const FormMapping*> moved; // (source plugin, object id)
-        for (const auto& m : c.mappings)
-            if (m.sig == Signature("INFO"))
-                moved[{toLower(m.sourcePlugin), m.sourceObjectId}] = &m;
-        const auto manifestPath = r.directory / "Multiplexer_Voices.tsv";
-        std::set<std::string> previous, current;
-        {
-            std::ifstream in(manifestPath);
+    // Files the game finds by a record's defining plugin and FormID (FormID without its load order
+    // index, 8 hex digits): a compiled new record is defined by its output with a new FormID, so its
+    // files are copied there under the new name. Voice files (D3) for responses, FaceGen meshes and
+    // face textures (N2) for NPCs. The FaceGen mesh keeps naming its textures by their original
+    // path; those files stay installed with the original mod, and copies under the new name are
+    // written as well.
+    struct Relocation {
+        const char* prefix;   // up to the plugin folder
+        Signature sig;
+        int folders;          // folders between the plugin folder and the file (voice type)
+        const char* manifest;
+        size_t* counter;
+    };
+    const Relocation relocations[] = {
+        {"sound\\voice\\", Signature("INFO"), 1, "Multiplexer_Voices.tsv", &r.voiceFiles},
+        {"meshes\\actors\\character\\facegendata\\facegeom\\", Signature("NPC_"), 0, "Multiplexer_FaceGen.tsv",
+         &r.faceGenFiles},
+        {"textures\\actors\\character\\facecustomization\\", Signature("NPC_"), 0, nullptr, &r.faceGenFiles},
+    };
+    std::map<std::string, std::set<std::string>> previousCopies, currentCopies; // manifest -> files
+    std::map<std::string, std::string> manifests;
+    for (const auto& rel : relocations)
+        if (rel.manifest && !previousCopies.count(rel.manifest)) {
+            std::ifstream in(r.directory / rel.manifest);
+            auto& prev = previousCopies[rel.manifest];
             for (std::string line; std::getline(in, line);)
                 if (!line.empty() && line[0] != '#')
-                    previous.insert(line.substr(0, line.find('\t')));
+                    prev.insert(line.substr(0, line.find('\t')));
+            manifests[rel.manifest] = "# Fallout 4 Multiplexer Renewed relocated files v1\n#output_file\tsource_file\n";
         }
-        std::string manifest = "# Fallout 4 Multiplexer Renewed voice files v1\n#output_file\tsource_file\n";
+    {
+        std::map<std::tuple<Signature, std::string, uint32_t>, const FormMapping*> moved; // (type, plugin, id)
+        for (const auto& m : c.mappings)
+            if (m.sig == Signature("INFO") || m.sig == Signature("NPC_"))
+                moved[{m.sig, toLower(m.sourcePlugin), m.sourceObjectId}] = &m;
         const auto& idx = session.assets;
-        if (!moved.empty())
+        const char* lastManifest = nullptr;
+        for (const auto& rel : relocations) {
+            const char* manifest = rel.manifest ? rel.manifest : lastManifest;
+            lastManifest = manifest;
+            if (moved.empty())
+                continue;
+            const size_t plen = std::strlen(rel.prefix);
             for (const auto& e : idx.entries) {
                 const std::string& path = idx.path(e);
-                if (!istartsWith(path, "sound\\voice\\"))
+                if (!istartsWith(path, rel.prefix))
                     continue;
-                // sound\voice\<plugin>\<voice type>\<8 hex digits>_<rest>
-                const size_t p1 = path.find('\\', 12), p2 = p1 == std::string::npos ? p1 : path.find('\\', p1 + 1);
-                if (p2 == std::string::npos || path.size() < p2 + 10 || path[p2 + 9] != '_' ||
-                    path.find('\\', p2 + 1) != std::string::npos)
+                // <prefix><plugin>\[<folder>\]<8 hex digits>(_|.)<rest>
+                const size_t pluginEnd = path.find('\\', plen);
+                if (pluginEnd == std::string::npos)
                     continue;
-                const std::string plugin = path.substr(12, p1 - 12);
-                const std::string hex = path.substr(p2 + 1, 8);
+                size_t fileStart = pluginEnd + 1;
+                bool ok = true;
+                for (int f = 0; f < rel.folders && ok; ++f) {
+                    const size_t next = path.find('\\', fileStart);
+                    ok = next != std::string::npos;
+                    fileStart = ok ? next + 1 : fileStart;
+                }
+                if (!ok || path.find('\\', fileStart) != std::string::npos || path.size() < fileStart + 9 ||
+                    (path[fileStart + 8] != '_' && path[fileStart + 8] != '.'))
+                    continue;
+                const std::string hex = path.substr(fileStart, 8);
                 if (!std::all_of(hex.begin(), hex.end(), [](char ch) { return std::isxdigit(static_cast<unsigned char>(ch)); }))
                     continue;
-                auto it = moved.find({plugin, static_cast<uint32_t>(std::strtoul(hex.c_str(), nullptr, 16))});
+                auto it = moved.find({rel.sig, path.substr(plen, pluginEnd - plen),
+                                      static_cast<uint32_t>(std::strtoul(hex.c_str(), nullptr, 16))});
                 if (it == moved.end())
                     continue;
                 char id[16];
                 std::snprintf(id, sizeof(id), "%08x", it->second->objectId);
-                const std::string rel = "sound\\voice\\" + toLower(it->second->outputPlugin) +
-                                        path.substr(p1, p2 - p1) + "\\" + id + path.substr(p2 + 9);
-                std::string relFs = rel;
-                std::replace(relFs.begin(), relFs.end(), '\\', '/');
-                const auto dest = r.directory / utf8ToPath(relFs);
+                const std::string dest = std::string(rel.prefix) + toLower(it->second->outputPlugin) +
+                                         path.substr(pluginEnd, fileStart - pluginEnd) + id + path.substr(fileStart + 8);
+                std::string destFs = dest;
+                std::replace(destFs.begin(), destFs.end(), '\\', '/');
+                const auto target = r.directory / utf8ToPath(destFs);
                 try {
                     auto bytes = idx.read(e, e.sources.size() - 1, session.vfs);
                     std::error_code ec;
-                    fs::create_directories(dest.parent_path(), ec);
-                    if (sameContent(dest, bytes)) {
-                        ++r.voiceFilesUnchanged;
-                    } else {
-                        writeBinary(dest, bytes);
-                    }
-                    ++r.voiceFiles;
-                    current.insert(rel);
-                    manifest += rel + "\t" + path + "\n";
+                    fs::create_directories(target.parent_path(), ec);
+                    if (!sameContent(target, bytes))
+                        writeBinary(target, bytes);
+                    ++*rel.counter;
+                    currentCopies[manifest].insert(dest);
+                    manifests[manifest] += dest + "\t" + path + "\n";
                 } catch (const std::exception& ex) {
-                    spdlog::error("Could not copy voice file {}: {}", path, ex.what());
+                    spdlog::error("Could not copy {}: {}", path, ex.what());
                 }
             }
-        for (const auto& old : previous)
-            if (!current.count(old)) {
+        }
+    }
+    for (const auto& [manifest, prev] : previousCopies) {
+        const auto& now = currentCopies[manifest];
+        for (const auto& old : prev)
+            if (!now.count(old)) {
                 std::string relFs = old;
                 std::replace(relFs.begin(), relFs.end(), '\\', '/');
                 std::error_code ec;
                 fs::remove(r.directory / utf8ToPath(relFs), ec);
             }
         std::error_code ec;
-        if (current.empty()) {
-            fs::remove(manifestPath, ec);
-        } else {
-            writeText(manifestPath, manifest);
-            r.voiceManifest = manifestPath;
-            spdlog::info("Voice files: {} copied for compiled responses ({} unchanged)", r.voiceFiles,
-                         r.voiceFilesUnchanged);
-        }
+        if (now.empty())
+            fs::remove(r.directory / manifest, ec);
+        else
+            writeText(r.directory / manifest, manifests[manifest]);
     }
+    if (r.voiceFiles)
+        r.voiceManifest = r.directory / "Multiplexer_Voices.tsv";
+    spdlog::info("Relocated files: {} voice files, {} FaceGen files", r.voiceFiles, r.faceGenFiles);
     // Archive winners: a compiled plugin's archive loads from the INI list after switching over, before
     // every plugin's own archives, so a file it serves today could be served by another archive. Each
     // such file is written loose into the output folder (a loose file wins over every archive), so the

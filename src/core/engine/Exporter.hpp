@@ -35,6 +35,7 @@ struct ExportResult {
     // (Multiplexer_Voices.tsv lists them; copies a later build no longer needs are removed).
     size_t voiceFiles = 0;
     size_t voiceFilesUnchanged = 0;
+    size_t faceGenFiles = 0; // FaceGen meshes and face textures of compiled new NPCs (Multiplexer_FaceGen.tsv)
     std::filesystem::path voiceManifest;
     size_t archiveWinnerFiles = 0;
 };
