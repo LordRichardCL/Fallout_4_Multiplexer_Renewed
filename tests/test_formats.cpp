@@ -1,3 +1,4 @@
+#include "util/Zip.hpp"
 #include <cstdio>
 #include "Fixtures.hpp"
 #include "papyrus/Pex.hpp"
@@ -667,4 +668,27 @@ TEST(pex_scan_and_rewrite)
     CHECK(!pex::scan(skyrim).ok);
     // Some compilers count the size field itself: accepted.
     CHECK(pex::scan(testScript(0x812, "ModS.esp", 4)).ok);
+}
+
+// The installable package's zip: names under Data/, deflated or stored, and zip64 records once there
+// are more than 65,535 files.
+TEST(zip_package_with_zip64)
+{
+    auto dir = tempDir("zip");
+    auto data = dir / "Data";
+    std::filesystem::create_directories(data / "many");
+    for (int i = 0; i < 66000; ++i) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "%05d.txt", i);
+        std::ofstream(data / "many" / name) << i;
+    }
+    std::ofstream(data / "Plugin.esp") << std::string(5000, 'x');
+    const auto stats = writeZip(dir / "Package.zip", data, "Data/");
+    CHECK_EQ(stats.files, size_t(66001));
+    std::ifstream in(dir / "Package.zip", std::ios::binary);
+    std::string zip((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(zip.find(std::string("\x50\x4b\x06\x06", 4)) != std::string::npos); // zip64 end of central directory
+    CHECK(zip.find("Data/Plugin.esp") != std::string::npos);
+    CHECK(zip.find("Data/many/65999.txt") != std::string::npos);
+    CHECK(zip.size() < 66001u * 200u);
 }

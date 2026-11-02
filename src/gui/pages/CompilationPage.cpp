@@ -1,6 +1,7 @@
 #include "pages/CompilationPage.hpp"
 
 #include "Format.hpp"
+#include "models/GroupedSqlModel.hpp"
 #include "models/SqlModel.hpp"
 #include "widgets/Widgets.hpp"
 
@@ -24,6 +25,7 @@
 #include <QSplitter>
 #include <QTabWidget>
 #include <QTableView>
+#include <QTreeView>
 #include <QTextBrowser>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -72,7 +74,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     outputs_->setRange(fo4mx::CompileOptions::kMinOutputs, fo4mx::CompileOptions::kMaxOutputs);
     prefix_ = new QLineEdit;
     outputDir_ = new QLineEdit;
-    outputDir_->setPlaceholderText("Default: MO2 mod folder \"Fallout 4 Multiplexer Output\", or Data");
+    outputDir_->setPlaceholderText("Default: <game folder>\\Multiplexer Output\\Data");
     auto* browse = makeButton("…");
     auto* dirRow = new QHBoxLayout;
     dirRow->addWidget(outputDir_, 1);
@@ -90,12 +92,11 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                              .arg(fo4mx::CompileOptions::kMaxOutputs));
     prefix_->setToolTip("Output plugins are named <prefix>01.esp, <prefix>02.esp, …");
     outputDir_->setToolTip(
-        "Where the output plugins and their files are written. Everything in it is meant to be loaded by the game as "
-        "one mod that wins over the original mods' files:\n"
-        "• Mod Organizer 2: the default is a mod folder, \"Fallout 4 Multiplexer Output\"; enable it and place it "
-        "below the original mods.\n"
-        "• Vortex or a plain install: the default is the game's Data folder. You can instead export to a separate "
-        "folder and install it in Vortex as a mod that loads after (wins over) the original mods.");
+        "Where the generated mod is built. By default \"Multiplexer Output\" next to the game: its Data folder holds "
+        "everything the game loads, and the export zips it into \"Multiplexer Output.zip\" for your mod manager to "
+        "install. The package is the same for Vortex and Mod Organizer 2.\n\n"
+        "Advanced: a folder inside Mod Organizer 2's mods folder is used as the mod directly; then compiled plugins "
+        "that have archives are replaced by archive loaders instead of loose copies and INI entries.");
     outputsNote_ = new QLabel;
     outputsNote_->setObjectName("PageSubtitle");
     outputsNote_->setWordWrap(true);
@@ -105,12 +106,17 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
             "Compiles eligible plugins into up to %1 output plugins, plus Multiplexer_Patch.esp when the patch is on. "
             "The output folder also receives the files the game finds by plugin name and FormID (voice files, FaceGen, "
             "start-game quest lists in seq\\), loose copies that keep archive winners, and the Auto-Merger's relinked "
-            "scripts and configs. Files named Multiplexer_*.tsv / .txt / .ini / .json are notes for you and for the "
-            "next build; the game does not read them.")
+            "scripts and configs. The Multiplexer_*.tsv files in Data are the build's records for the next build; the "
+            "lists, INI line, summary and reports next to Data are notes for you. The game reads none of them.")
                                   .arg(outputs_->value()));
     };
     connect(outputs_, &QSpinBox::valueChanged, this, updateOutputsNote);
     updateOutputsNote();
+    installNote_ = new QLabel;
+    installNote_->setObjectName("PageSubtitle");
+    installNote_->setWordWrap(true);
+    installNote_->setTextFormat(Qt::RichText);
+    form->addRow(installNote_);
     ol->addWidget(outBox);
 
     auto* allocBox = new QGroupBox("Record allocation");
@@ -148,7 +154,8 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     auto* ml = new QVBoxLayout(mergeBox);
     merge_ = new QCheckBox("Merge compatible edits (keyword lists, leveled lists, form lists, different fields)");
     light_ = new QCheckBox("ESL-flag outputs that fit the light plugin range (≤ 2048 new records)");
-    heuristic_ = new QCheckBox("Rewrite values that look like FormIDs in data the app cannot read field by field");
+    heuristic_ = new QCheckBox("Advanced users only: rewrite values that look like FormIDs in data the app cannot "
+                               "read field by field");
     heuristic_->setToolTip(
         "Most record data is read field by field, so every reference to another record (FormID) is known and moved "
         "to its new place. A few fields are not described yet (\"undescribed data\"). In them the app looks for "
@@ -199,23 +206,28 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     rl->addWidget(summary_);
     tabs_ = new QTabWidget;
     outputsView_ = new QTableView;
-    recordsView_ = new QTableView;
-    mappingsView_ = new QTableView;
     outputsModel_ = new SqlModel(this);
-    recordsModel_ = new SqlModel(this);
-    mappingsModel_ = new SqlModel(this);
-    for (auto [v, m] : {std::pair{outputsView_, outputsModel_}, std::pair{recordsView_, recordsModel_},
-                        std::pair{mappingsView_, mappingsModel_}}) {
-        styleTable(v);
-        v->setModel(m);
-    }
+    styleTable(outputsView_);
+    outputsView_->setModel(outputsModel_);
+    // The detailed tabs are grouped by plugin: collapsed groups, each expanded and sorted on its own.
+    recordsView_ = new QTreeView;
+    mappingsView_ = new QTreeView;
+    assetsView_ = new QTreeView;
+    recordsModel_ = new GroupedSqlModel(this);
+    mappingsModel_ = new GroupedSqlModel(this);
+    assetsModel_ = new GroupedSqlModel(this);
+    styleGroupedTree(recordsView_, recordsModel_);
+    styleGroupedTree(mappingsView_, mappingsModel_);
+    styleGroupedTree(assetsView_, assetsModel_);
+    recordsView_->setToolTip("Grouped by output plugin. Expand a plugin to see its records; click a column header to "
+                             "sort the records inside each group.");
+    mappingsView_->setToolTip("Grouped by the plugin the records came from. Expand a plugin to see where each of its "
+                              "records went; click a column header to sort inside each group.");
+    assetsView_->setToolTip("Grouped by output plugin. Expand a plugin to see the files its records use; click a "
+                            "column header to sort inside each group.");
     tabs_->addTab(outputsView_, "Output Plugins");
     tabs_->addTab(recordsView_, "Generated Records");
     tabs_->addTab(mappingsView_, "FormID Mappings");
-    assetsView_ = new QTableView;
-    styleTable(assetsView_);
-    assetsModel_ = new SqlModel(this);
-    assetsView_->setModel(assetsModel_);
     tabs_->addTab(assetsView_, "Assets Used");
     auto* resultSplit = new QSplitter(Qt::Vertical);
     resultSplit->addWidget(tabs_);
@@ -228,7 +240,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     resultSplit->setStretchFactor(1, 3);
     rl->addWidget(resultSplit, 1);
     connect(recordsView_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
-            [this](const QModelIndex& i) { showTrace(i.row()); });
+            [this](const QModelIndex& i) { showTrace(i); });
     split->addWidget(results);
     split->setStretchFactor(0, 2);
     split->setStretchFactor(1, 3);
@@ -272,7 +284,9 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     connect(openFolder_, &QPushButton::clicked, this, [this] {
         auto* p = app_->pipeline();
         if (p && p->exportResult())
-            QDesktopServices::openUrl(QUrl::fromLocalFile(toQString(p->exportResult()->directory)));
+            QDesktopServices::openUrl(QUrl::fromLocalFile(toQString(p->exportResult()->packageRoot.empty()
+                                                                        ? p->exportResult()->directory
+                                                                        : p->exportResult()->packageRoot)));
     });
     connect(app_, &AppController::taskStarted, this, [this](const QString& task) {
         if (task != "Check")
@@ -323,6 +337,29 @@ void CompilationPage::updateStrategyNote()
     }
 }
 
+void CompilationPage::updateInstallNote()
+{
+    using fo4mx::InstallKind;
+    const auto kind = app_->config().install.kind;
+    QString how;
+    if (kind == InstallKind::Vortex)
+        how = "<b>Vortex:</b> after Export, drag <b>Multiplexer Output.zip</b> onto Vortex's Mods page, install and "
+              "enable it, and let it win every file conflict (load after all other mods). In Vortex's Plugins page "
+              "disable the plugins listed in Multiplexer_DisablePlugins.txt and enable the output plugins. Then press "
+              "<b>Apply to Game</b> so the compiled mods' archives keep loading.";
+    else if (kind == InstallKind::ModOrganizer2)
+        how = "<b>Mod Organizer 2:</b> after Export, install <b>Multiplexer Output.zip</b> (Install a new mod from an "
+              "archive), enable it and keep it at the bottom of the left pane so it wins over the original mods. Then "
+              "press <b>Apply to Game</b>: it switches the profile's plugins to the outputs and keeps the compiled "
+              "mods' archives loading.";
+    else
+        how = "<b>Manual install:</b> after Export, extract <b>Multiplexer Output.zip</b> into the game folder (its Data "
+              "folder merges with the game's), disable the plugins listed in Multiplexer_DisablePlugins.txt, enable the "
+              "output plugins, and press <b>Apply to Game</b> so the compiled mods' archives keep loading.";
+    installNote_->setText(how + " Keep the original mods installed: only their plugins are disabled; their files "
+                                "are still used.");
+}
+
 void CompilationPage::loadOptions()
 {
     const auto& c = app_->config().compile;
@@ -335,6 +372,7 @@ void CompilationPage::loadOptions()
     rules_->setPlainText(rules.join("\n"));
     rules_->setEnabled(c.strategy == AllocationStrategy::UserDefined);
     updateStrategyNote();
+    updateInstallNote();
     merge_->setChecked(c.mergeCompatible);
     light_->setChecked(c.lightOutputsWhenPossible);
     heuristic_->setChecked(c.rewriteHeuristicReferences);
@@ -388,31 +426,59 @@ void CompilationPage::refresh()
                         "SELECT output_name AS Plugin, record_count AS Records, new_records AS 'New FormIDs', overrides AS "
                         "Overrides, size_bytes AS Size, CASE light WHEN 1 THEN 'Yes' ELSE 'No' END AS Light, masters AS "
                         "Masters FROM CompilationGroups WHERE record_count > 0 ORDER BY output_index");
-    recordsModel_->setMonoColumns({1});
-    recordsModel_->setBytesColumns({7});
-    recordsModel_->load(db,
-                        "SELECT output_plugin AS Output, form_id AS FormID, signature AS Type, editor_id AS 'Editor ID', "
-                        "CASE WHEN is_new = 1 THEN 'New' WHEN instr(',' || ? || ',', ',' || output_plugin || ',') > 0 THEN 'Patch' "
-                        "ELSE 'Override' END AS Kind, CASE merged WHEN 1 THEN 'Merged' ELSE "
-                        "'' END AS Merge, p.name AS 'Source Winner', size_bytes AS Size, contributors AS Contributors "
-                        "FROM GeneratedRecords g LEFT JOIN Plugins p ON p.id = g.winner_plugin_id ORDER BY output_index, "
-                        "signature, form_id LIMIT 500000",
-                        {patchName});
-    recordsModel_->setStatusColumns({5});
-    mappingsModel_->setMonoColumns({1, 3});
-    mappingsModel_->load(db,
-                         "SELECT source_plugin AS 'Source Plugin', printf('%06X', source_object_id) AS 'Source Object', "
-                         "output_plugin AS Output, printf('%06X', output_object_id) AS 'New Object', signature AS Type, "
-                         "editor_id AS 'Editor ID' FROM FormMappings ORDER BY source_plugin, source_object_id LIMIT 500000");
-    assetsModel_->setStatusColumns({4});
-    assetsModel_->load(db,
-                       "SELECT output_plugin AS Output, form_id AS FormID, editor_id AS 'Editor ID', asset_path AS Asset, "
-                       "CASE WHEN found = 0 THEN 'Missing' WHEN needs_registration = 1 THEN 'Via Archive INI' ELSE "
-                       "'OK' END AS Status, role AS Role, origin_mod AS 'Origin Mod', archive AS Archive, archive_owner "
-                       "AS 'Archive Owner', physical AS 'Physical Path' FROM RecordAssets ORDER BY output_plugin, form_id, "
-                       "role LIMIT 500000");
-    for (auto* v : {outputsView_, recordsView_, mappingsView_, assetsView_})
-        fitColumns(v);
+    {
+        GroupedSqlModel::Spec r;
+        r.groupSql = "SELECT output_plugin, COUNT(*) FROM GeneratedRecords GROUP BY output_index, output_plugin "
+                     "ORDER BY output_index";
+        r.rowSql = "SELECT form_id, signature, editor_id, CASE WHEN is_new = 1 THEN 'New' WHEN instr(',' || ? || ',', "
+                   "',' || output_plugin || ',') > 0 THEN 'Patch' ELSE 'Override' END, CASE merged WHEN 1 THEN "
+                   "'Merged' ELSE '' END, p.name, size_bytes, contributors FROM GeneratedRecords g LEFT JOIN Plugins "
+                   "p ON p.id = g.winner_plugin_id WHERE g.output_plugin = ? %ORDER% LIMIT ? OFFSET ?";
+        r.headers = {"FormID", "Type", "Editor ID", "Kind", "Merge", "Source Winner", "Size", "Contributors"};
+        r.sortExpr = {"form_id", "signature, form_id", "editor_id", "is_new, form_id", "merged, form_id",
+                      "p.name, form_id", "size_bytes", "contributors"};
+        r.defaultOrder = "ORDER BY signature, form_id";
+        r.rowNoun = "records";
+        // The patch plugins' names, written into the row query (the group query has no placeholder).
+        r.rowSql.replace("instr(',' || ? || ',',", "instr(',' || '" + QString(patchName).replace("'", "''") + "' || ',',");
+        recordsModel_->setMonoColumns({0});
+        recordsModel_->setBytesColumns({6});
+        recordsModel_->setStatusColumns({4});
+        recordsModel_->load(db, r);
+    }
+    {
+        GroupedSqlModel::Spec m;
+        m.groupSql = "SELECT source_plugin, COUNT(*) FROM FormMappings GROUP BY source_plugin ORDER BY source_plugin "
+                     "COLLATE NOCASE";
+        m.rowSql = "SELECT printf('%06X', source_object_id), output_plugin, printf('%06X', output_object_id), signature, "
+                   "editor_id FROM FormMappings WHERE source_plugin = ? %ORDER% LIMIT ? OFFSET ?";
+        m.headers = {"Source Object", "Output", "New Object", "Type", "Editor ID"};
+        m.sortExpr = {"source_object_id", "output_index, output_object_id", "output_object_id",
+                      "signature, source_object_id", "editor_id"};
+        m.defaultOrder = "ORDER BY source_object_id";
+        m.rowNoun = "records moved";
+        mappingsModel_->setMonoColumns({0, 2});
+        mappingsModel_->load(db, m);
+    }
+    {
+        GroupedSqlModel::Spec a;
+        a.groupSql = "SELECT output_plugin, COUNT(*) FROM RecordAssets GROUP BY output_plugin ORDER BY output_plugin";
+        a.rowSql = "SELECT form_id, editor_id, asset_path, CASE WHEN found = 0 THEN 'Missing' WHEN needs_registration = 1 "
+                   "THEN 'Via Archive INI' ELSE 'OK' END, role, origin_mod, archive, archive_owner, physical FROM "
+                   "RecordAssets WHERE output_plugin = ? %ORDER% LIMIT ? OFFSET ?";
+        a.headers = {"FormID", "Editor ID", "Asset", "Status", "Role", "Origin Mod", "Archive", "Archive Owner",
+                     "Physical Path"};
+        a.sortExpr = {"form_id, role", "editor_id", "asset_path", "found, needs_registration, asset_path", "role, form_id",
+                      "origin_mod", "archive", "archive_owner", "physical"};
+        a.defaultOrder = "ORDER BY form_id, role";
+        a.rowNoun = "asset uses";
+        assetsModel_->setStatusColumns({3});
+        assetsModel_->load(db, a);
+    }
+    fitColumns(outputsView_);
+    for (auto* v : {recordsView_, mappingsView_, assetsView_})
+        for (int c = 0; c + 1 < v->model()->columnCount(); ++c)
+            v->setColumnWidth(c, c == 0 ? 220 : 150);
 
     QString compiled = meta("compiled_plugins");
     QString patchText;
@@ -439,12 +505,12 @@ void CompilationPage::refresh()
     updateButtons();
 }
 
-void CompilationPage::showTrace(int row)
+void CompilationPage::showTrace(const QModelIndex& index)
 {
-    if (row < 0)
+    if (!index.isValid() || recordsModel_->isGroup(index))
         return;
-    QString output = recordsModel_->value(row, 0).toString();
-    QString formId = recordsModel_->value(row, 1).toString();
+    QString output = recordsModel_->groupKey(index);
+    QString formId = recordsModel_->rowValue(index, 0).toString();
     QSqlDatabase db = app_->readDb();
     QSqlQuery q(db);
     q.prepare("SELECT g.editor_id, g.signature, o.name, w.name, g.contributors, g.is_new, g.merged, g.object_id "

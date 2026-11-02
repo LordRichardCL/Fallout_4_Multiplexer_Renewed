@@ -148,7 +148,22 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 
 ## 6. Export and switch over
 
-**Export Plugins** writes, to the output folder (by default an MO2 mod folder named `Fallout 4 Multiplexer Output`, otherwise `Data`). The output folder is meant to be loaded by the game as **one mod that wins over the original mods' files**: in MO2 enable it and keep it below the original mods; with Vortex you can export into `Data` (the default) or, cleaner, export into a separate folder and install that folder in Vortex as a mod that loads after the original mods, so Vortex manages its files.
+**Export Plugins** builds one installable mod, the same for every mod manager:
+
+```
+<game folder>\Multiplexer Output\
+├── Data\                      everything the game loads (see below)
+├── Multiplexer Output.zip      the Data folder, zipped (Data\ at its root): install this
+├── Multiplexer_DisablePlugins.txt, Multiplexer_plugins.txt, Multiplexer_Archives.ini, Multiplexer_Compilation.json
+└── Multiplexer Reports\
+```
+
+Install `Multiplexer Output.zip` like any other mod, and make it win over every other mod (install it last):
+- **Vortex:** drag the zip onto the Mods page, install and enable it, and let it win every file conflict (load after all other mods).
+- **Mod Organizer 2:** *Install a new mod from an archive*, enable it, and keep it at the bottom of the left pane.
+- **Manual:** extract the zip into the game folder (its Data folder merges with the game's).
+
+The package is identical for every mod manager; only these instructions differ. (Advanced: an output folder set to a mod inside Mod Organizer 2's mods folder is used as the mod directly, without a zip; then compiled plugins that have archives get archive loaders instead of loose copies and INI entries. That is the only case where the generated files differ, because only there can the app check that the output mod overrides the original plugins.)
 
 Files the game reads (they mirror the `Data` folder layout because the game finds them by path):
 
@@ -162,7 +177,7 @@ Files the game reads (they mirror the `Data` folder layout because the game find
 | copies of scripts and configs | the Advanced Users Auto-Merger's relinked copies, which must override the originals | when the Auto-Merger is on |
 | archive loaders (same file name as the compiled plugin) | empty ESL-flagged plugins that keep a compiled mod's archives loading in place | MO2 with the output in the mods folder |
 
-Files for you and for the next build (the game does not read them; nothing else needs F4SE or any other runtime component):
+Files for you and for the next build (the game does not read them; nothing needs F4SE or any other runtime component). The build's records (`Multiplexer_FormMap.tsv` and the copy lists) are in `Data`, so they are installed with the package and the next scan finds them even if the `Multiplexer Output` folder was deleted; the notes (lists, INI line, summary, reports) are next to `Data` and are not installed:
 
 | File | Purpose |
 |---|---|
@@ -178,13 +193,12 @@ Files for you and for the next build (the game does not read them; nothing else 
 
 Then:
 
-1. In MO2, enable the output mod (or refresh if you exported into an existing mod).
+1. Install and enable `Multiplexer Output.zip` as above (replace the previous version when you rebuild).
 2. On the **Compilation** page, press **Apply to Game…**. It makes a timestamped backup of every file first, then:
-   - **Mod Organizer 2, output folder inside the mods folder (the default):** compiled plugins that have archives are replaced by **archive loaders**. An archive loader is an empty, ESL-flagged plugin with the same file name, written into the output mod. It stays enabled in the same load order position, so the game loads that mod's archives at exactly the same priority as before, and it takes no full load order slot. The records themselves are in the Dummy plugins. Keep the output mod at the **bottom of the left pane** so it overrides the original plugins; validation warns if it does not.
-   - **Mod Organizer 2:** rewrites the profile's `plugins.txt`/`loadorder.txt` so compiled plugins are disabled and the generated ones enabled.
-   - **Other installs (or MO2 with an output folder outside the mods folder):** adds the compiled plugins' archives to `SResourceArchiveList2` in `Fallout4Custom.ini`, in the folder the game reads its INIs from (the MO2 profile when it uses profile-local INIs). Archives an earlier build added but this one no longer needs are taken out again. Every other line of the INI is kept as it was.
+   - adds the compiled plugins' archives to `SResourceArchiveList2` in `Fallout4Custom.ini`, in the folder the game reads its INIs from (the MO2 profile when it uses profile-local INIs), so their textures and meshes keep loading. Archives an earlier build added but this one no longer needs are taken out again. Every other line of the INI is kept as it was.
+   - **Mod Organizer 2:** also rewrites the profile's `plugins.txt`/`loadorder.txt` so compiled plugins are disabled and the generated ones enabled.
    - **Vortex and manual installs:** disable the plugins in `Multiplexer_DisablePlugins.txt` and enable the generated plugins yourself (Vortex manages `plugins.txt`).
-3. **Keep the compiled mods installed.** In MO2, untick only their *plugins* (right pane), never the mods themselves (left pane). Their textures, meshes and archives must stay in the Data folder.
+3. **Keep the compiled mods installed.** Disable only their *plugins*, never the mods themselves: their textures, meshes, archives, voice files and FaceGen are still used.
 4. Open the outputs in FO4Edit and spot-check a few records.
 
 ### Archive priority

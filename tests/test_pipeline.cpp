@@ -1203,6 +1203,26 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
     cfg.databasePath = root / "db.sqlite";
     cfg.compile.outputCount = 10;
     {
+        // The default output is the installable package, the same for MO2 as for Vortex: no archive
+        // loaders; ModWeap's texture keeps winning as a loose copy instead.
+        auto package = cfg;
+        package.databasePath = root / "db0.sqlite";
+        Pipeline p(package);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        CHECK(p.compiledOutput()->archiveLoaders.empty());
+        CHECK(p.compiledOutput()->isCompiled(p.session().findPlugin("ModWeap.esp")->index));
+        auto result = p.exportOutputs();
+        CHECK(result.directory == game / "Multiplexer Output" / "Data");
+        CHECK_EQ(result.archiveWinnerFiles, size_t(1));
+        CHECK(std::filesystem::exists(game / "Multiplexer Output" / "Multiplexer Output.zip"));
+        CHECK(std::filesystem::exists(game / "Multiplexer Output" / "Multiplexer_DisablePlugins.txt"));
+        CHECK(!std::filesystem::exists(result.directory / "Multiplexer_DisablePlugins.txt"));
+    }
+    // Archive loaders: only with the output folder set to a mod inside MO2's mods folder.
+    cfg.exportOptions.outputDirectory = inst / "mods" / "Fallout 4 Multiplexer Output";
+    {
         Pipeline p(cfg);
         p.scan();
         p.analyse();
@@ -1249,7 +1269,8 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
         bool explained = false;
         for (const auto& is : q.validation()->issues)
             explained |= is.category == "Archive Loaders" &&
-                         is.message.find("is not inside Mod Organizer's mods folder") != std::string::npos;
+                         is.message.find("archive loaders are only written when the output folder is a mod inside") !=
+                             std::string::npos;
         CHECK(explained);
     }
 

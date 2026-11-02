@@ -12,6 +12,7 @@ add_executable(Fallout4MultiplexerRenewed WIN32
     widgets/GraphView.cpp
     widgets/Widgets.cpp
     models/SqlModel.cpp
+    models/GroupedSqlModel.cpp
     pages/Page.hpp
     pages/AssetsPage.cpp
     pages/AutoMergerPage.cpp

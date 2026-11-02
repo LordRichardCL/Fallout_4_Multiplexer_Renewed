@@ -4,6 +4,7 @@ fo4mx_embed_text(${PROJECT_SOURCE_DIR}/resources/record_catalogue.csv
 
 add_library(fo4mx_core STATIC
     util/Compression.cpp
+    util/Zip.cpp
     util/IniFile.cpp
     util/Json.cpp
     util/Log.cpp

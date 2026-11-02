@@ -125,8 +125,19 @@ void Pipeline::scan(ProgressSink& progress)
     PluginScanner::scan(*session_, config_.scan, progress);
     // The Auto-Merger's copies in the output folder are never read as originals, and archives an
     // earlier build added to the INI list count as their plugin's.
-    const auto outputDir = config_.exportOptions.outputDirectory.empty() ? Exporter::defaultOutputDirectory(*session_)
-                                                                         : config_.exportOptions.outputDirectory;
+    auto outputDir = config_.exportOptions.outputDirectory.empty() ? Exporter::defaultOutputDirectory(*session_)
+                                                                   : config_.exportOptions.outputDirectory;
+    // The build's own records ship inside the package's Data folder: when the output folder is gone
+    // (deleted between builds) but the package is installed, they are read from the game's Data.
+    if (!std::filesystem::exists(outputDir / "Multiplexer_FormMap.tsv"))
+        for (const auto* f : session_->vfs.rootFiles())
+            if (iequals(f->relativePath, "Multiplexer_FormMap.tsv")) {
+                outputDir = session_->vfs.winnerPath(*f).parent_path();
+                spdlog::info("Reading the previous build's records from the installed package in {}",
+                             pathToUtf8(outputDir));
+                break;
+            }
+    session_->buildRecordsDirectory = outputDir;
     session_->relinkedCopies = AutoMerger::readManifest(outputDir);
     session_->archiveWinnerCopies = Exporter::archiveWinnerCopies(outputDir);
     session_->registeredArchives.clear();
@@ -287,8 +298,10 @@ bool Pipeline::compile(ProgressSink& progress)
             config_.compile.forcedWinners.emplace(k, v);
     }
     if (config_.compile.previousFormMap.empty()) {
-        auto dir = config_.exportOptions.outputDirectory.empty() ? Exporter::defaultOutputDirectory(*session_)
-                                                                 : config_.exportOptions.outputDirectory;
+        auto dir = session_->buildRecordsDirectory.empty()
+                       ? (config_.exportOptions.outputDirectory.empty() ? Exporter::defaultOutputDirectory(*session_)
+                                                                        : config_.exportOptions.outputDirectory)
+                       : session_->buildRecordsDirectory;
         auto previous = dir / "Multiplexer_FormMap.tsv";
         if (std::filesystem::exists(previous))
             config_.compile.previousFormMap = previous;
@@ -329,9 +342,9 @@ bool Pipeline::compile(ProgressSink& progress)
             outputMod = rest.substr(0, rest.find('/'));
             options.archiveLoaders = true;
         } else {
-            loadersOff = "the output folder (" + pathToUtf8(outputDir) + ") is not inside Mod Organizer's mods folder (" +
-                         pathToUtf8(session_->install.modsPath) +
-                         "); leave Output folder empty in Setup to use the default MO2 output mod";
+            loadersOff = "the output is the installable package (" + pathToUtf8(outputDir) +
+                         "), the same for every mod manager; archive loaders are only written when the output folder "
+                         "is a mod inside Mod Organizer's mods folder (" + pathToUtf8(session_->install.modsPath) + ")";
         }
     }
     std::map<std::string, std::string> isolatedPatchRecords; // record label -> finding
@@ -553,7 +566,7 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
     exportOptions.archiveWinnerCopies = config_.archiveWinnerCopies;
     auto result = Exporter::write(*session_, *compiled_, exportOptions, previousOutputs);
     {
-        auto list = result.directory / "Multiplexer_ArchivePriority.txt";
+        auto list = result.packageRoot / "Multiplexer_ArchivePriority.txt";
         std::error_code ec;
         // With loose copies the winners do not change: the list would only mislead.
         if (archiveChanges_.empty() || config_.archiveWinnerCopies) {
@@ -585,6 +598,14 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
     validation_->merge(post);
     if (db_)
         db::DatabaseWriter(*db_).writeValidation("post-export", post, false);
+    // Every file is in Data now: zip it into the installable package.
+    if (config_.exportOptions.writeZip && !post.critical()) {
+        try {
+            Exporter::writePackageZip(result);
+        } catch (const std::exception& e) {
+            spdlog::error("Could not write Multiplexer Output.zip: {}", e.what());
+        }
+    }
     exported_ = result;
     if (db_ && !post.critical()) {
         // This build becomes the reference state for change detection.
@@ -600,7 +621,7 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         w.setMeta("export_unchanged", std::to_string(result.unchangedOutputs.size()));
         w.setMeta("export_removed", std::to_string(result.removedOutputs.size()));
     }
-    auto reportDir = config_.reportDirectory.empty() ? result.directory / "Multiplexer Reports" : config_.reportDirectory;
+    auto reportDir = config_.reportDirectory.empty() ? result.packageRoot / "Multiplexer Reports" : config_.reportDirectory;
     writeReports(reportDir);
     if (post.critical())
         spdlog::error("Written files failed verification ({} errors)", post.errors);

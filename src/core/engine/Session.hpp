@@ -205,6 +205,8 @@ public:
     std::unordered_map<std::string, uint64_t> relinkedCopies;
     // Loose copies an earlier export wrote to keep archive winners (path -> content hash): not sources.
     std::unordered_map<std::string, uint64_t> archiveWinnerCopies;
+    // Where the previous build's records were read from: the output folder, or the installed package.
+    std::filesystem::path buildRecordsDirectory;
     // Archives an earlier build added to the INI list (lowercase). The scan loads them as their plugin's
     // archives, where the game loaded them before that build: the load order as it was.
     std::unordered_set<std::string> registeredArchives;

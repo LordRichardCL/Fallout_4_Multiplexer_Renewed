@@ -10,12 +10,15 @@ class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
 class QTableView;
+class QTreeView;
+class QModelIndex;
 class QTabWidget;
 class QTextBrowser;
 
 namespace gui {
 
 class SqlModel;
+class GroupedSqlModel;
 class StageIndicator;
 
 // Multiplexer Compilation System: options, pipeline, generated output.
@@ -28,15 +31,17 @@ public:
 private:
     void loadOptions();
     void updateStrategyNote();
+    void updateInstallNote();
     void storeOptions();
     void updateButtons();
-    void showTrace(int row);
+    void showTrace(const QModelIndex& index);
 
     QSpinBox* outputs_;
     QLineEdit* prefix_;
     QComboBox* strategy_;
     QLabel* strategyNote_ = nullptr;
     QLabel* outputsNote_ = nullptr;
+    QLabel* installNote_ = nullptr;
     QPlainTextEdit* rules_;
     QCheckBox* merge_;
     QCheckBox* light_;
@@ -52,13 +57,13 @@ private:
     QLabel* summary_;
     QTabWidget* tabs_;
     SqlModel* outputsModel_;
-    SqlModel* recordsModel_;
-    SqlModel* mappingsModel_;
+    GroupedSqlModel* recordsModel_;
+    GroupedSqlModel* mappingsModel_;
     QTableView* outputsView_;
-    QTableView* recordsView_;
-    QTableView* mappingsView_;
-    QTableView* assetsView_;
-    SqlModel* assetsModel_;
+    QTreeView* recordsView_;
+    QTreeView* mappingsView_;
+    QTreeView* assetsView_;
+    GroupedSqlModel* assetsModel_;
     QTextBrowser* trace_;
 };
 

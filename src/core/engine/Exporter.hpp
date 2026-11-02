@@ -16,10 +16,14 @@ struct ExportOptions {
     // Files a compiled plugin's archive wins today but would lose once its archives load from the
     // INI list: written loose into the output folder (Multiplexer_ArchiveWinners.tsv lists them).
     bool archiveWinnerCopies = true;
+    // Also write "Multiplexer Output.zip" next to Data: one archive any mod manager installs.
+    bool writeZip = true;
 };
 
 struct ExportResult {
-    std::filesystem::path directory;
+    std::filesystem::path directory;   // the package's Data folder (or the output folder chosen)
+    std::filesystem::path packageRoot; // "Multiplexer Output": Data, the zip and the notes for the user
+    std::filesystem::path zipPath;     // "Multiplexer Output.zip" (Data\ at its root), when written
     std::vector<std::filesystem::path> pluginFiles;   // every current output (written or unchanged)
     std::vector<std::string> writtenOutputs;          // content changed: file rewritten
     std::vector<std::string> unchangedOutputs;        // identical to the file on disk: left untouched
@@ -51,8 +55,12 @@ public:
     // The loose copies an earlier export wrote to keep archive winners (path -> content hash).
     static std::unordered_map<std::string, uint64_t> archiveWinnerCopies(const std::filesystem::path& outputDir);
 
-    // Default output folder: an MO2 mod folder for MO2 users, otherwise Data.
+    // Default output folder: "<game folder>\Multiplexer Output\Data", for every mod manager.
     static std::filesystem::path defaultOutputDirectory(const Session& session);
+    // The folder holding Data, the zip and the notes: the output folder's parent when it is named Data.
+    static std::filesystem::path packageRoot(const std::filesystem::path& outputDirectory);
+    // Zips the package's Data folder into "Multiplexer Output.zip" (after every file is written).
+    static std::filesystem::path writePackageZip(ExportResult& result);
 
     // Updates the MO2 profile's plugins.txt / loadorder.txt (with backups):
     // compiled plugins are disabled and the outputs enabled at the end.

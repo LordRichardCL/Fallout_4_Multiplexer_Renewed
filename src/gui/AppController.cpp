@@ -474,6 +474,8 @@ void AppController::runExport()
     ensurePipeline(false);
     runTask("Export", [this](ProgressSink& p) {
         auto r = pipeline_->exportOutputs(p);
+        if (!r.zipPath.empty())
+            return QString("Wrote %1 plugins; the installable package is %2").arg(r.pluginFiles.size()).arg(toQString(r.zipPath));
         return QString("Wrote %1 plugins to %2").arg(r.pluginFiles.size()).arg(toQString(r.directory));
     });
 }

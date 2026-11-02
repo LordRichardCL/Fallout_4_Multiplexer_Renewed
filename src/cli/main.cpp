@@ -60,7 +60,7 @@ Compile options:
   --auto-merge         Advanced Users Auto-Merger: also compile plugins named in
                        scripts/configs that can be relinked, and write relinked copies
   --exclude PLUGIN     never compile PLUGIN (repeatable)
-  --out DIR            output folder (default: MO2 mod folder or Data)
+  --out DIR            output folder (default: <game>\\Multiplexer Output\\Data, zipped as Multiplexer Output.zip)
   --reports DIR        report folder
   --dry-run            compile and validate without writing files
   --no-cache           ignore the build cache (full rescan, analysis and merge)

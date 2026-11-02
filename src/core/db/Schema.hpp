@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS FormMappings (
     editor_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_mappings_src ON FormMappings(source_plugin_id, source_object_id);
+CREATE INDEX IF NOT EXISTS idx_mappings_plugin ON FormMappings(source_plugin);
 
 CREATE TABLE IF NOT EXISTS GeneratedRecords (
     id INTEGER PRIMARY KEY,
