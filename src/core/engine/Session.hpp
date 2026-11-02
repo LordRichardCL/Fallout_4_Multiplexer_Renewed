@@ -203,6 +203,8 @@ public:
     // Copies the Auto-Merger wrote into the output folder (path -> content hash, from its manifest).
     // They are never read as originals.
     std::unordered_map<std::string, uint64_t> relinkedCopies;
+    // Loose copies an earlier export wrote to keep archive winners (path -> content hash): not sources.
+    std::unordered_map<std::string, uint64_t> archiveWinnerCopies;
     // Archives an earlier build added to the INI list (lowercase). The scan loads them as their plugin's
     // archives, where the game loaded them before that build: the load order as it was.
     std::unordered_set<std::string> registeredArchives;

@@ -1,5 +1,6 @@
 #include "engine/Exporter.hpp"
 
+#include "engine/ValidationEngine.hpp"
 #include "esp/PluginFile.hpp"
 #include "esp/PluginWriter.hpp"
 #include "util/Json.hpp"
@@ -257,6 +258,23 @@ std::string Exporter::proposedPluginsTxt(const Session& session, const CompiledO
     return out;
 }
 
+std::unordered_map<std::string, uint64_t> Exporter::archiveWinnerCopies(const std::filesystem::path& outputDir)
+{
+    std::unordered_map<std::string, uint64_t> out;
+    std::ifstream in(outputDir / "Multiplexer_ArchiveWinners.tsv");
+    for (std::string line; std::getline(in, line);) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line.empty() || line[0] == '#')
+            continue;
+        const auto tab = line.find('\t');
+        if (tab == std::string::npos)
+            continue;
+        out[line.substr(0, tab)] = std::strtoull(line.c_str() + tab + 1, nullptr, 16);
+    }
+    return out;
+}
+
 ExportResult Exporter::write(const Session& session, const CompiledOutput& c, const ExportOptions& options,
                              const std::vector<std::string>& previousOutputs)
 {
@@ -374,6 +392,54 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
             r.voiceManifest = manifestPath;
             spdlog::info("Voice files: {} copied for compiled responses ({} unchanged)", r.voiceFiles,
                          r.voiceFilesUnchanged);
+        }
+    }
+    // Archive winners: a compiled plugin's archive loads from the INI list after switching over, before
+    // every plugin's own archives, so a file it serves today could be served by another archive. Each
+    // such file is written loose into the output folder (a loose file wins over every archive), so the
+    // game shows the same version.
+    {
+        const auto manifestPath = r.directory / "Multiplexer_ArchiveWinners.tsv";
+        const auto previous = archiveWinnerCopies(r.directory);
+        std::set<std::string> current;
+        std::string manifest = "# Fallout 4 Multiplexer Renewed archive winners v1\n#file\tcontent_hash\tarchive\n";
+        const auto& idx = session.assets;
+        if (options.archiveWinnerCopies)
+            for (const auto& [entry, slot] : ValidationEngine::archiveWinners(session, c)) {
+                const auto& e = idx.entries[entry];
+                const auto& path = idx.path(e);
+                std::string relFs = path;
+                std::replace(relFs.begin(), relFs.end(), '\\', '/');
+                const auto dest = r.directory / utf8ToPath(relFs);
+                try {
+                    auto bytes = idx.read(e, slot, session.vfs);
+                    std::error_code ec;
+                    fs::create_directories(dest.parent_path(), ec);
+                    if (!sameContent(dest, bytes))
+                        writeBinary(dest, bytes);
+                    char hash[24];
+                    std::snprintf(hash, sizeof(hash), "%016llx",
+                                  static_cast<unsigned long long>(fnv1a64(bytes.data(), bytes.size())));
+                    manifest += path + "\t" + hash + "\t" + idx.archives[e.sources[slot].archive].name + "\n";
+                    current.insert(path);
+                    ++r.archiveWinnerFiles;
+                } catch (const std::exception& ex) {
+                    spdlog::error("Could not keep {} as a loose copy: {}", path, ex.what());
+                }
+            }
+        for (const auto& [old, hash] : previous)
+            if (!current.count(old)) {
+                std::string relFs = old;
+                std::replace(relFs.begin(), relFs.end(), '\\', '/');
+                std::error_code ec;
+                fs::remove(r.directory / utf8ToPath(relFs), ec);
+            }
+        std::error_code ec;
+        if (current.empty()) {
+            fs::remove(manifestPath, ec);
+        } else {
+            writeText(manifestPath, manifest);
+            spdlog::info("Archive winners: {} files kept as loose copies", r.archiveWinnerFiles);
         }
     }
     // Outputs from the previous build that this build no longer produces.

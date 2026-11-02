@@ -128,6 +128,7 @@ void Pipeline::scan(ProgressSink& progress)
     const auto outputDir = config_.exportOptions.outputDirectory.empty() ? Exporter::defaultOutputDirectory(*session_)
                                                                          : config_.exportOptions.outputDirectory;
     session_->relinkedCopies = AutoMerger::readManifest(outputDir);
+    session_->archiveWinnerCopies = Exporter::archiveWinnerCopies(outputDir);
     session_->registeredArchives.clear();
     for (const auto& a : Exporter::registeredArchives(outputDir))
         session_->registeredArchives.insert(a);
@@ -351,13 +352,18 @@ bool Pipeline::compile(ProgressSink& progress)
         // the game shows: it stays in the load order instead.
         if (config_.keepArchivePriority)
             for (const auto& [pi, files] : ValidationEngine::archiveLosers(*session_, *compiled_))
-                if (session_->autoRetained
+                if ((!config_.archiveWinnerCopies || files > config_.archiveWinnerCopyLimit) &&
+                    session_->autoRetained
                         .emplace(session_->plugins[pi].key,
                                  "Archive priority: " + std::to_string(files) +
                                      " files its archives provide today would be served by other archives once "
-                                     "they load from the INI list (before every plugin's own archives). On Mod "
-                                     "Organizer 2, with the output inside the mods folder, archive loaders keep "
-                                     "their place")
+                                     "they load from the INI list (before every plugin's own archives)" +
+                                     (config_.archiveWinnerCopies
+                                          ? ", more than the " + std::to_string(config_.archiveWinnerCopyLimit) +
+                                                " kept as loose copies"
+                                          : std::string()) +
+                                     ". On Mod Organizer 2, with the output inside the mods folder, archive "
+                                     "loaders keep their place")
                         .second)
                     ++isolated;
         if (isolated && round < 8)
@@ -462,7 +468,15 @@ bool Pipeline::compile(ProgressSink& progress)
         validation_->fail(Severity::Info, "Archive Loaders",
                           "Archive loaders are not used because " + loadersOff + ". Compiled plugins' archives are "
                           "added to the INI list instead (Apply to Game).");
-    if (!archiveChanges_.empty()) {
+    if (!archiveChanges_.empty() && config_.archiveWinnerCopies) {
+        validation_->fail(Severity::Info, "Archive Priority",
+                          std::to_string(archiveChanges_.size()) +
+                              " files a compiled plugin's archive serves today would be served by another archive "
+                              "once compiled plugins' archives load from the INI list; they are written loose into "
+                              "the output folder on export (Multiplexer_ArchiveWinners.tsv), so the same version "
+                              "wins");
+        validation_->pass();
+    } else if (!archiveChanges_.empty()) {
         validation_->fail(Severity::Warning, "Archive Priority",
                           std::to_string(archiveChanges_.size()) +
                               " files would be served by a different archive once compiled plugins' archives load "
@@ -483,14 +497,25 @@ bool Pipeline::compile(ProgressSink& progress)
     assetTrace_ = AssetTrace{};
     if (config_.traceAssets) {
         assetTrace_ = AssetTracer::trace(*session_, *compiled_, true, progress);
+        // Compiling never changes asset paths: a file no installed mod provides was already missing for
+        // the source plugin (the game shows the same result). Summed up, with examples.
+        size_t missing = 0;
         for (const auto& a : assetTrace_.assets) {
             if (a.found || !a.via.empty())
                 continue;
+            if (++missing > 50)
+                continue;
             const auto& e = compiled_->records[a.record];
-            validation_->fail(Severity::Warning, "Missing Assets",
-                              session_->formLabel(e.key) + " uses " + a.path + ", which no installed mod provides",
+            validation_->fail(Severity::Info, "Missing Assets",
+                              session_->formLabel(e.key) + " uses " + a.path +
+                                  ", which no installed mod provides (as for its source plugin)",
                               compiled_->outputName(e.output), formatFormId(e.rawFormId));
         }
+        if (missing)
+            validation_->fail(Severity::Info, "Missing Assets",
+                              std::to_string(missing) + " asset paths named by compiled records are provided by no "
+                              "installed mod. Compiling does not change asset paths, so they were missing for the "
+                              "source plugins too (the game shows the same result); the first 50 are listed");
         if (assetTrace_.viaRegisteredArchives)
             validation_->fail(Severity::Info, "Assets",
                               std::to_string(assetTrace_.viaRegisteredArchives) +
@@ -524,7 +549,9 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
     if (build && build->isBuild && utf8ToPath(build->outputDirectory) == directory)
         for (const auto& o : build->outputs)
             previousOutputs.push_back(o.name);
-    auto result = Exporter::write(*session_, *compiled_, config_.exportOptions, previousOutputs);
+    auto exportOptions = config_.exportOptions;
+    exportOptions.archiveWinnerCopies = config_.archiveWinnerCopies;
+    auto result = Exporter::write(*session_, *compiled_, exportOptions, previousOutputs);
     {
         auto list = result.directory / "Multiplexer_ArchivePriority.txt";
         std::error_code ec;

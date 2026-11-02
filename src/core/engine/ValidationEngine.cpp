@@ -724,6 +724,17 @@ std::map<PluginIndex, size_t> ValidationEngine::archiveLosers(const Session& ses
     return out;
 }
 
+std::vector<std::pair<uint32_t, uint32_t>> ValidationEngine::archiveWinners(const Session& session,
+                                                                          const CompiledOutput& compiled)
+{
+    std::vector<std::pair<uint32_t, uint32_t>> out;
+    const auto& idx = session.assets;
+    forEachArchiveChange(session, compiled, [&](const AssetEntry& e, const AssetSource& before, const AssetSource&) {
+        out.emplace_back(static_cast<uint32_t>(&e - idx.entries.data()), static_cast<uint32_t>(&before - e.sources.data()));
+    });
+    return out;
+}
+
 std::vector<ArchivePriorityChange> ValidationEngine::checkArchivePriority(const Session& session,
                                                                          const CompiledOutput& compiled)
 {

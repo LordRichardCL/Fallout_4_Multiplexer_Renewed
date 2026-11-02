@@ -90,6 +90,10 @@ public:
     // Compiled plugins whose archives (loaded from the INI list after switching over) would no longer
     // serve files they serve today, with the number of such files.
     static std::map<PluginIndex, size_t> archiveLosers(const Session& session, const CompiledOutput& compiled);
+    // Each file that would change winner: its asset entry and the source (index into sources) that
+    // wins today, which a loose copy keeps winning.
+    static std::vector<std::pair<uint32_t, uint32_t>> archiveWinners(const Session& session,
+                                                                     const CompiledOutput& compiled);
     static std::vector<ArchivePriorityChange> checkArchivePriority(const Session& session,
                                                                    const CompiledOutput& compiled);
 

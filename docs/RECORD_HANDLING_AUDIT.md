@@ -626,3 +626,11 @@ Build 61 compiled dialogue on a real load order: 1,626 plugins (+64), 416,559 ne
 Voice files move with their responses. The game finds a response's voice as `sound\voice\<defining plugin>\<voice type>\<FormID without its load order index>_<n>.<ext>`. At export, every voice file of a compiled new response (loose or from an archive) is copied into the output folder as `sound\voice\<output>\<voice type>\<new FormID>_<n>.<ext>`; `Multiplexer_Voices.tsv` lists the copies and their sources, and copies a later build no longer needs are removed. A plugin's voice folder is therefore a Safe filename reference instead of Compatibility Required. Overrides of other plugins' responses keep their voice files, found under the defining plugin.
 
 The Validation Report now opens with the number of rows per category, and shows at most a tenth of its row limit per category, so one large category no longer hides the others.
+
+## Archive winners as loose copies (A1)
+
+Build 62: 1,653 plugins compiled (+27, voiced dialogue), 719,923 new FormIDs, 0 errors. 164 plugins were kept out automatically, 146 of them for archive priority, mostly over 1 to 5 files.
+
+On an install without archive loaders (Vortex), a compiled plugin's archives load from the INI list after switching over, before every plugin's own archives, so a file its archive wins today can be won by another archive. Instead of keeping the plugin out, the export now writes each such file loose into the output folder: a loose file wins over every archive, so the game shows the same version. `Multiplexer_ArchiveWinners.tsv` lists the copies with their content hash; a new scan does not take a listed copy for a source (the archive is), and copies a later build no longer needs are removed. A plugin that would need more than 2,000 copies (`archiveWinnerCopyLimit`) is still kept out.
+
+Missing Assets are now Info, summed up with 50 examples: compiling never changes asset paths, so a file no installed mod provides was missing for the source plugin too (6,586 in build 62, such as Fallout4.esm's own `.egt` references).

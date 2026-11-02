@@ -1029,7 +1029,26 @@ TEST(archive_priority_change_is_reported)
     auto cfg = configFor(root);
     cfg.databasePath.clear();
     {
-        // By default ModA stays: compiled, its archive would lose the mesh to ModE's.
+        // By default ModA compiles and the mesh its archive wins today is written loose into the
+        // output folder, so the same version wins; a new scan does not take the copy for a source.
+        auto copies = cfg;
+        copies.exportOptions.outputDirectory = root / "copies";
+        Pipeline q(copies);
+        q.scan();
+        q.analyse();
+        CHECK(q.compile());
+        CHECK(q.compiledOutput()->isCompiled(q.session().findPlugin("ModA.esp")->index));
+        auto out = q.exportOutputs();
+        CHECK_EQ(out.archiveWinnerFiles, size_t(1));
+        const auto copy = out.directory / "meshes" / "moda" / "gun.nif";
+        CHECK(std::filesystem::exists(copy));
+        CHECK_EQ(std::filesystem::file_size(copy), uintmax_t(64));
+        CHECK(std::filesystem::exists(out.directory / "Multiplexer_ArchiveWinners.tsv"));
+        CHECK_EQ(Exporter::archiveWinnerCopies(out.directory).size(), size_t(1));
+    }
+    cfg.archiveWinnerCopies = false;
+    {
+        // Without copies ModA stays: compiled, its archive would lose the mesh to ModE's.
         Pipeline q(cfg);
         q.scan();
         q.analyse();

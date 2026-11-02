@@ -42,6 +42,11 @@ struct PipelineConfig {
     // Keep a plugin out of compilation when its archives, loaded from the INI list after switching
     // over, would no longer serve files they serve today (other archives would win them).
     bool keepArchivePriority = true;
+    // Instead of keeping it out, keep each such file's winner by writing it loose into the output
+    // folder (a loose file wins over every archive, as the archive did); a plugin needing more copies
+    // than the limit is kept out.
+    bool archiveWinnerCopies = true;
+    size_t archiveWinnerCopyLimit = 2000;
     // Record definitions to use instead of the runtime profile's (tests, trial catalogues). Not owned.
     const RecordDefinitions* definitions = nullptr;
 };

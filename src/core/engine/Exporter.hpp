@@ -4,6 +4,7 @@
 #include "engine/Session.hpp"
 
 #include <filesystem>
+#include <unordered_map>
 #include <vector>
 
 namespace fo4mx {
@@ -12,6 +13,9 @@ struct ExportOptions {
     std::filesystem::path outputDirectory;
     bool writeEmptyOutputs = false;
     bool compressLargeRecords = false;
+    // Files a compiled plugin's archive wins today but would lose once its archives load from the
+    // INI list: written loose into the output folder (Multiplexer_ArchiveWinners.tsv lists them).
+    bool archiveWinnerCopies = true;
 };
 
 struct ExportResult {
@@ -32,6 +36,7 @@ struct ExportResult {
     size_t voiceFiles = 0;
     size_t voiceFilesUnchanged = 0;
     std::filesystem::path voiceManifest;
+    size_t archiveWinnerFiles = 0;
 };
 
 // Stage Export: writes the output plugins and everything needed to switch
@@ -41,6 +46,9 @@ public:
     // previousOutputs: generated plugins of the last build in this folder; ones no longer produced are deleted.
     static ExportResult write(const Session& session, const CompiledOutput& compiled, const ExportOptions& options,
                               const std::vector<std::string>& previousOutputs = {});
+
+    // The loose copies an earlier export wrote to keep archive winners (path -> content hash).
+    static std::unordered_map<std::string, uint64_t> archiveWinnerCopies(const std::filesystem::path& outputDir);
 
     // Default output folder: an MO2 mod folder for MO2 users, otherwise Data.
     static std::filesystem::path defaultOutputDirectory(const Session& session);

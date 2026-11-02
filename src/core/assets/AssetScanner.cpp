@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <fstream>
+#include <iterator>
 #include <cctype>
 #include <tuple>
 #include <mutex>
@@ -180,8 +182,22 @@ void AssetScanner::scan(Session& session, const AssetScanOptions& options, Progr
         std::string key = normalizeAssetPath(f.relativePath);
         if (istartsWith(key, "fomod\\"))
             continue;
-        auto& entry = idx.getOrAdd(key);
+        // A loose copy an earlier export wrote to keep an archive winner is not a source: the archive is.
+        const auto copy = session.archiveWinnerCopies.find(key);
+        std::vector<uint32_t> slots;
         for (uint32_t slot = 0; slot < f.sources.size(); ++slot) {
+            if (copy != session.archiveWinnerCopies.end()) {
+                std::ifstream in(vfs.physicalPath(f, slot), std::ios::binary);
+                std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                if (fnv1a64(bytes.data(), bytes.size()) == copy->second)
+                    continue;
+            }
+            slots.push_back(slot);
+        }
+        if (slots.empty())
+            continue; // only our copy: the archive version is the source
+        auto& entry = idx.getOrAdd(key);
+        for (uint32_t slot : slots) {
             AssetSource s;
             s.archive = kLooseFile;
             s.entry = fi;
