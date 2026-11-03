@@ -55,6 +55,9 @@ struct StringUsage {
 struct PropertyRead {
     enum class Use : uint8_t { GetFormFromFile, IsPluginInstalled, Other };
     std::string property; // lower case
+    // The script type the property or function is read from (lower case): the receiver's declared
+    // type, the script itself for "self", the type named by a static call. Empty: unknown.
+    std::string object;
     Use use = Use::Other;
     bool formIdLiteral = false; // GetFormFromFile with a constant FormID
     int32_t formId = 0;
@@ -97,6 +100,8 @@ struct Scan {
     std::vector<bool> usedElsewhere;
     // Every use of every string constant, with its context.
     std::vector<StringUsage> uses;
+    // The script's own object and the one it extends (lower case).
+    std::string objectName, parentName;
     // Every property this script reads into a variable, and where the value goes.
     std::vector<PropertyRead> propertyReads;
     // Constants followed through variables and the script's own functions.

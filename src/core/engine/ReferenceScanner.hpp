@@ -43,7 +43,8 @@ public:
     // classifying named constants by what their readers do.
     static std::vector<PluginReference> inspect(const PluginNames& names, const std::string& path,
                                                 const std::vector<uint8_t>& bytes, const std::string& source = {},
-                                                std::vector<pex::PropertyRead>* propertyReads = nullptr);
+                                                std::vector<pex::PropertyRead>* propertyReads = nullptr,
+                                                std::pair<std::string, std::string>* extends = nullptr);
 
     // A plugin name in text, used as a whole name ("Armor.esp" is not found in "Power Armor.esp"),
     // with the "|FormID" that may follow it.

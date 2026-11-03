@@ -171,7 +171,9 @@ private:
         object_ = out_.strings[str()]; // name
         const uint32_t size = r_.read<uint32_t>();
         const size_t start = r_.position();
-        strs(2); // parent class, doc
+        out_.objectName = lower(object_);
+        out_.parentName = lower(out_.strings[str()]); // parent class
+        str();                                        // doc
         r_.read<uint8_t>();  // const
         r_.read<uint32_t>(); // user flags
         str();               // auto state
@@ -190,7 +192,7 @@ private:
         const uint16_t variables = r_.read<uint16_t>();
         for (uint16_t i = 0; i < variables; ++i) {
             const std::string name = out_.strings[str()];
-            str(); // type
+            objectTypes_[lower(name)] = lower(out_.strings[str()]); // type
             r_.read<uint32_t>();
             const Value v = value();
             markString(v, StringUse::Default);
@@ -243,14 +245,16 @@ private:
         Function f;
         f.name = functionName_;
         f.where = where_;
+        localTypes_.clear();
         for (uint16_t i = 0; i < params; ++i) {
             f.params.push_back(out_.strings[str()]);
-            str(); // type
+            localTypes_[lower(f.params.back())] = lower(out_.strings[str()]); // type
         }
         const uint16_t locals = r_.read<uint16_t>();
         for (uint16_t i = 0; i < locals; ++i) {
-            f.locals.insert(out_.strings[str()]);
-            str();
+            const std::string local = out_.strings[str()];
+            f.locals.insert(local);
+            localTypes_[lower(local)] = lower(out_.strings[str()]);
         }
         functions_.push_back(std::move(f));
         const uint16_t instructions = r_.read<uint16_t>();
@@ -286,15 +290,29 @@ private:
                                      iequals(out_.strings[args[1].string], "GetFormFromFile");
         // A property's value followed through this function: read into a variable (propget), copied
         // (assign), then used.
-        auto propertyOf = [&](const Value& v) -> const std::string* {
+        auto propertyOf = [&](const Value& v) -> const std::pair<std::string, std::string>* {
             if (v.type != 1)
                 return nullptr;
             auto it = propertyVars_.find(out_.strings[v.string]);
             return it == propertyVars_.end() ? nullptr : &it->second;
         };
-        auto readOf = [&](const std::string& property, PropertyRead::Use use) {
+        // The script type of a receiver: "self", a parameter or local, a script variable.
+        auto typeOf = [&](const Value& v) -> std::string {
+            if (v.type != 1)
+                return {};
+            const std::string n = lower(out_.strings[v.string]);
+            if (n == "self")
+                return lower(object_);
+            if (auto it = localTypes_.find(n); it != localTypes_.end())
+                return it->second;
+            if (auto it = objectTypes_.find(n); it != objectTypes_.end())
+                return it->second;
+            return {};
+        };
+        auto readOf = [&](const std::pair<std::string, std::string>& property, PropertyRead::Use use) {
             PropertyRead pr;
-            pr.property = property;
+            pr.property = property.first;
+            pr.object = property.second;
             pr.use = use;
             pr.opcode = kOpNames[op];
             pr.where = where_;
@@ -303,22 +321,20 @@ private:
         // A call's result is the called function's return value: a variable holding it is followed like a
         // property read (matched by the function's name).
         auto callResult = [&]() {
-            std::string fn;
-            if (op == kCallMethod && args.size() == 3 && args[0].type == 1 && args[2].type == 1)
+            std::string fn, type;
+            if (op == kCallMethod && args.size() == 3 && args[0].type == 1 && args[2].type == 1) {
                 fn = out_.strings[args[0].string];
-            else if (op == kCallStatic && args.size() == 3 && args[1].type == 1 && args[2].type == 1)
+                type = typeOf(args[1]);
+            } else if (op == kCallStatic && args.size() == 3 && args[1].type == 1 && args[2].type == 1) {
                 fn = out_.strings[args[1].string];
+                type = lower(out_.strings[args[0].string]);
+            }
             if (fn.empty())
                 return;
-            for (auto& ch : fn)
-                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            propertyVars_[out_.strings[args[2].string]] = fn;
+            propertyVars_[out_.strings[args[2].string]] = {lower(fn), type};
         };
         if (op == 0x1C && args.size() == 3 && args[0].type == 1 && args[2].type == 1) { // propget name, object, dest
-            std::string p = out_.strings[args[0].string];
-            for (auto& ch : p)
-                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            propertyVars_[out_.strings[args[2].string]] = p;
+            propertyVars_[out_.strings[args[2].string]] = {lower(out_.strings[args[0].string]), typeOf(args[1])};
         } else if (op == 0x0D && args.size() == 2 && args[0].type == 1) { // assign dest, source
             if (const auto* p = propertyOf(args[1]))
                 propertyVars_[out_.strings[args[0].string]] = *p;
@@ -339,10 +355,7 @@ private:
                  iequals(out_.strings[args[0].string], "SetPropertyValue")))
                 for (const auto& v : varargs)
                     if (v.type == 2) {
-                        std::string p = out_.strings[v.string];
-                        for (auto& ch : p)
-                            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-                        auto pr = readOf(p, PropertyRead::Use::Other);
+                        auto pr = readOf({lower(out_.strings[v.string]), typeOf(args[1])}, PropertyRead::Use::Other);
                         pr.opcode = out_.strings[args[0].string];
                         out_.propertyReads.push_back(std::move(pr));
                     }
@@ -687,7 +700,15 @@ private:
     std::set<std::string> autoVars_;
     std::string functionName_;
     bool getter_ = false;
-    std::unordered_map<std::string, std::string> propertyVars_; // variable -> property it holds
+    // variable -> (property or function it holds, script type it was read from)
+    std::unordered_map<std::string, std::pair<std::string, std::string>> propertyVars_;
+    std::unordered_map<std::string, std::string> objectTypes_, localTypes_; // variable -> script type
+    static std::string lower(std::string s)
+    {
+        for (auto& ch : s)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        return s;
+    }
 };
 
 } // namespace

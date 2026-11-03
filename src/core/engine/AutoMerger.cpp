@@ -509,14 +509,17 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
     }
 
     std::vector<RelinkFile*> formIdInis;
+    // A failed check of an earlier round of this compilation: it stays on record while the file is not
+    // planned (its plugins are kept out); when this round plans the file, it becomes a note.
+    std::vector<std::string> earlier(report.files.size());
+    for (size_t i = 0; i < report.files.size(); ++i)
+        earlier[i] = std::move(report.files[i].validation);
     for (auto& f : report.files) {
         f.planned = false;
         f.target.clear();
         f.changes.clear();
         f.output.clear();
-        // A failed check of an earlier round of this compilation stays on record (its plugins are kept out).
-        if (std::none_of(f.plugins.begin(), f.plugins.end(), [&](PluginIndex p) { return report.keptOut.count(p); }))
-            f.validation.clear();
+        f.validation.clear();
         f.notes.clear();
         f.originalHash = f.outputHash = 0;
         f.changedCalls = f.changedPairs = f.renamed = 0;
@@ -785,6 +788,16 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
         }
     }
     planFormIdInis(session, where, previous, outputDir, formIdInis, failed);
+    for (size_t i = 0; i < report.files.size(); ++i) {
+        auto& f = report.files[i];
+        if (earlier[i].empty() || !f.validation.empty())
+            continue;
+        // Restored only while none of its plugins compiles (a file that needs no change now is fine).
+        if (std::none_of(f.plugins.begin(), f.plugins.end(), [&](PluginIndex p) { return compiled.isCompiled(p); }))
+            f.validation = earlier[i];
+        else
+            f.notes.push_back("an earlier round kept a plugin out: " + earlier[i]);
+    }
     report.keptOut.insert(failed.begin(), failed.end());
     size_t planned = 0;
     for (const auto& f : report.files)

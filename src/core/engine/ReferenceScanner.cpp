@@ -596,13 +596,16 @@ void flowReferences(std::vector<PluginReference>& out, const pex::ValueFlow& flo
 
 std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names, const std::string& path,
                                                        const std::vector<uint8_t>& bytes, const std::string& source,
-                                                       std::vector<pex::PropertyRead>* propertyReads)
+                                                       std::vector<pex::PropertyRead>* propertyReads,
+                                                       std::pair<std::string, std::string>* extends)
 {
     std::vector<PluginReference> out;
     const std::string format = extensionFormat(path);
 
     if (format == "PEX") {
         auto scan = pex::scan(bytes);
+        if (extends && scan.ok)
+            *extends = {scan.objectName, scan.parentName};
         if (propertyReads && scan.ok)
             *propertyReads = std::move(scan.propertyReads);
         // A script that does not read back may read any property: each of its strings counts as a read
@@ -999,6 +1002,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
     progress.stage("Scanning scripts and configs for plugin names");
     std::vector<std::vector<PluginReference>> found(candidates.size());
     std::vector<std::vector<pex::PropertyRead>> reads(candidates.size());
+    std::vector<std::pair<std::string, std::string>> extends(candidates.size()); // (script, parent)
     std::atomic<size_t> scanned{0};
     parallelFor(
         candidates.size(),
@@ -1007,7 +1011,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             const auto& path = idx.path(e);
             try {
                 auto bytes = readOriginal(session, e);
-                found[i] = inspect(names, toLower(path), bytes, idx.modName(e.winner()), &reads[i]);
+                found[i] = inspect(names, toLower(path), bytes, idx.modName(e.winner()), &reads[i], &extends[i]);
             } catch (const std::exception& ex) {
                 spdlog::debug("Could not read {}: {}", path, ex.what());
             }
@@ -1031,13 +1035,41 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
         for (size_t i = 0; i < candidates.size(); ++i)
             for (const auto& pr : reads[i])
                 readers[pr.property].push_back({&pr, idx.path(idx.entries[candidates[i]])});
+        // Script inheritance across the load order: a read reaches a constant of script X when it is
+        // read from X, from a script extending X (inherited), or from a script X extends (X's version
+        // may run). A read whose type is unknown, or names a script not in the load order, counts.
+        std::unordered_map<std::string, std::string> parentOf;
+        for (const auto& [script, parent] : extends)
+            if (!script.empty())
+                parentOf[script] = parent;
+        auto ancestors = [&](std::string s) {
+            std::set<std::string> out;
+            for (int depth = 0; depth < 64 && !s.empty() && out.insert(s).second; ++depth) {
+                auto it = parentOf.find(s);
+                if (it == parentOf.end())
+                    break;
+                s = it->second;
+            }
+            return out;
+        };
+        auto reaches = [&](const std::string& readFrom, const std::string& owner) {
+            if (readFrom.empty() || !parentOf.count(readFrom))
+                return true;
+            return ancestors(readFrom).count(owner) > 0 || ancestors(owner).count(readFrom) > 0;
+        };
         for (auto& r : session.nameReferences) {
             if (r.context != "constant property")
                 continue;
             const auto dot = r.location.rfind('.');
             const std::string property = toLower(dot == std::string::npos ? r.location : r.location.substr(dot + 1));
-            const auto it = readers.find(property);
-            if (it == readers.end() || it->second.empty()) {
+            const std::string owner = toLower(r.location.substr(0, r.location.find('.')));
+            auto it = readers.find(property);
+            std::vector<Reader> own;
+            if (it != readers.end())
+                for (const auto& rd : it->second)
+                    if (reaches(rd.read->object, owner))
+                        own.push_back(rd);
+            if (own.empty()) {
                 r.cls = ReferenceClass::Safe;
                 r.reason = "the value of the constant " + r.location + ", which no script in the load order reads";
                 continue;
@@ -1045,7 +1077,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             size_t gfff = 0, presence = 0, other = 0;
             const Reader* firstGfff = nullptr;
             const Reader* firstOther = nullptr;
-            for (const auto& rd : it->second) {
+            for (const auto& rd : own) {
                 if (rd.read->use == pex::PropertyRead::Use::GetFormFromFile) {
                     ++gfff;
                     if (!firstGfff)
@@ -1058,7 +1090,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                         firstOther = &rd;
                 }
             }
-            const std::string counts = std::to_string(it->second.size()) + " reads: " + std::to_string(gfff) +
+            const std::string counts = std::to_string(own.size()) + " reads: " + std::to_string(gfff) +
                                        " GetFormFromFile, " + std::to_string(presence) + " IsPluginInstalled, " +
                                        std::to_string(other) + " other";
             if (gfff) {

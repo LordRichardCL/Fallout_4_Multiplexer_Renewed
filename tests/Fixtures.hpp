@@ -440,10 +440,10 @@ inline std::vector<uint8_t> constantsScript(const std::string& plugin)
 }
 
 // "Program" with a function GetPluginName() returning `plugin` (a mod's way of naming itself).
-inline std::vector<uint8_t> nameFunctionScript(const std::string& plugin)
+inline std::vector<uint8_t> nameFunctionScript(const std::string& plugin, const std::string& object = "Program")
 {
     using namespace fo4mx;
-    const std::vector<std::string> strings = {"Program", "", "GetPluginName", "String", plugin};
+    const std::vector<std::string> strings = {object, "", "GetPluginName", "String", plugin};
     BinaryWriter o;
     o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
     o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0); // structs, variables, properties
@@ -455,18 +455,26 @@ inline std::vector<uint8_t> nameFunctionScript(const std::string& plugin)
     o.write<uint16_t>(0); o.write<uint16_t>(0); // params, locals
     o.write<uint16_t>(1);
     o.write<uint8_t>(0x1A); o.write<uint8_t>(2); o.write<uint16_t>(4); // return "Plugin.esp"
-    return pexFile(strings, "Program", o.take());
+    return pexFile(strings, object, o.take());
 }
 
 // "Caller": OnInit calls kProgram.GetPluginName() and passes the result to Game.IsPluginInstalled.
-inline std::vector<uint8_t> nameCallerScript()
+// With `receiverType`, kProgram is a script variable of that type (otherwise undeclared: unknown).
+inline std::vector<uint8_t> nameCallerScript(const std::string& receiverType = {})
 {
     using namespace fo4mx;
     const std::vector<std::string> strings = {"Caller", "", "OnInit", "None", "GetPluginName", "kProgram", "::temp0",
-                                              "Bool", "::temp1", "String", "Game", "IsPluginInstalled"};
+                                              "Bool", "::temp1", "String", "Game", "IsPluginInstalled", receiverType};
     BinaryWriter o;
     o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
-    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0);
+    o.write<uint16_t>(0); // structs
+    if (receiverType.empty()) {
+        o.write<uint16_t>(0);
+    } else {
+        o.write<uint16_t>(1); // variable kProgram : receiverType = None
+        o.write<uint16_t>(5); o.write<uint16_t>(12); o.write<uint32_t>(0); o.write<uint8_t>(0); o.write<uint8_t>(0);
+    }
+    o.write<uint16_t>(0); // properties
     o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint16_t>(2);
     o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
     o.write<uint16_t>(0);
@@ -555,6 +563,36 @@ inline std::vector<uint8_t> flowScript(const std::string& plugin, uint32_t formI
         o.write<uint8_t>(0x1A); ident(5); // return asName
     }
     return pexFile(strings, "Flow", o.take());
+}
+
+// Two plugins in one script (as Vlt04ExternalContentScript): OnInit keeps "first" in sName, looks up
+// firstId with it and checks IsPluginInstalled(sName); then looks up secondId in "second" directly.
+inline std::vector<uint8_t> twoPluginScript(const std::string& first, uint32_t firstId, const std::string& second,
+                                            uint32_t secondId)
+{
+    using namespace fo4mx;
+    const std::vector<std::string> strings = {"Two", "", "OnInit", "None", "sName", "String", "::temp0", "Form",
+                                              "::temp1", "Bool", "Game", "GetFormFromFile", "IsPluginInstalled",
+                                              first, second};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0); // structs, variables, properties
+    o.write<uint16_t>(1); // states
+    o.write<uint16_t>(1); // default state
+    o.write<uint16_t>(1); // functions
+    auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    auto str = [&](uint16_t i) { o.write<uint8_t>(2); o.write<uint16_t>(i); };
+    auto integer = [&](int32_t v) { o.write<uint8_t>(3); o.write<int32_t>(v); };
+    o.write<uint16_t>(2); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0); // params
+    o.write<uint16_t>(3); o.write<uint16_t>(4); o.write<uint16_t>(5); o.write<uint16_t>(6); o.write<uint16_t>(7);
+    o.write<uint16_t>(8); o.write<uint16_t>(9);
+    o.write<uint16_t>(4);
+    o.write<uint8_t>(0x0D); ident(4); str(13);                                                             // sName = first
+    o.write<uint8_t>(0x19); ident(10); ident(11); ident(6); integer(2); integer(static_cast<int32_t>(firstId)); ident(4);
+    o.write<uint8_t>(0x19); ident(10); ident(12); ident(8); integer(1); ident(4);                          // IsPluginInstalled(sName)
+    o.write<uint8_t>(0x19); ident(10); ident(11); ident(6); integer(2); integer(static_cast<int32_t>(secondId)); str(14);
+    return pexFile(strings, "Two", o.take());
 }
 
 // A script looking records up through its own function, as mods do (PirateCompatUpdater):

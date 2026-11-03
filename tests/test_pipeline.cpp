@@ -2942,6 +2942,25 @@ TEST(references_functions_returning_a_plugin_name)
         if (!refs.empty())
             CHECK_EQ(refs[0]->cls, called ? ReferenceClass::Rewritable : ReferenceClass::Safe);
     }
+    // Every mod has its own Program.GetPluginName(): a call on another script's type does not read
+    // this one's (build 78 matched them by the function's name alone).
+    {
+        auto root = referenceInstall("reffntyped");
+        auto data = root / "Game" / "Data";
+        const auto mine = nameFunctionScript("ModS.esp", "ModS:Program");
+        const auto theirs = nameFunctionScript("ModT.esp", "ModT:Program");
+        const auto caller = nameCallerScript("ModT:Program");
+        writeFile(data / "Scripts" / "ModS" / "Program.pex", std::string(reinterpret_cast<const char*>(mine.data()), mine.size()));
+        writeFile(data / "Scripts" / "ModT" / "Program.pex", std::string(reinterpret_cast<const char*>(theirs.data()), theirs.size()));
+        writeFile(data / "Scripts" / "Caller.pex", std::string(reinterpret_cast<const char*>(caller.data()), caller.size()));
+        Pipeline p(configFor(root));
+        p.scan();
+        p.analyse();
+        const auto s = referencesOf(p.session(), "ModS.esp");
+        const auto t = referencesOf(p.session(), "ModT.esp");
+        CHECK(s.size() == 1 && s[0]->cls == ReferenceClass::Safe); // nothing reads ModS:Program's
+        CHECK(t.size() == 1 && t[0]->cls == ReferenceClass::Rewritable);
+    }
 }
 
 // 6d. A plugin name kept in a variable is followed to where it goes, through the script's own
@@ -3266,6 +3285,23 @@ TEST(references_left_lookup_sharing_a_renamed_name)
     CHECK(kept.count("mods.esp") && kept.at("mods.esp").find("shares the plugin's name with a use that is renamed") !=
                                         std::string::npos);
     CHECK(kept.count("modt.esp") == 0);
+
+    // In one script with another plugin's lookup (build 78): only ModS stays out; ModT's lookup is
+    // rewritten in the next round, the file is not left marked as failed, and nothing is an error.
+    auto two = referenceInstall("refleftsharedtwo");
+    const auto both = twoPluginScript("ModS.esp", 0x999, "ModT.esp", 0x800);
+    writeFile(two / "Game" / "Data" / "Scripts" / "Two.pex", std::string(reinterpret_cast<const char*>(both.data()), both.size()));
+    auto cfg2 = configFor(two);
+    cfg2.compile.autoMerge = true;
+    Pipeline q(cfg2);
+    q.scan();
+    q.analyse();
+    CHECK(q.compile());
+    CHECK(q.session().autoRetained.count("mods.esp") == 1);
+    CHECK(q.compiledOutput()->isCompiled(q.session().findPlugin("ModT.esp")->index));
+    auto result = q.exportOutputs();
+    CHECK_EQ(q.validation()->errors, uint64_t(0));
+    CHECK(std::filesystem::exists(result.directory / "scripts" / "two.pex"));
 }
 
 // 6j. A lookup through the script's own function (AddItem(asPlugin, aiFormID) calling
