@@ -2993,10 +2993,36 @@ TEST(references_followed_through_variables)
 }
 
 // 6e. Configs written "0x<FormID>:Plugin.esp" (X-Cell) are FormID pairs too; Transfer Settlements
-//     blueprints are rewritable: each item's plugin_name with its FormID in hex and decimal, and the
-//     plugins_required entries, and the settlement's workbench ("workshop": plugin, id, id_dec) when
-//     its base object is from Fallout4.esm. A worldspace or a workbench whose base may belong to
-//     another plugin stays out.
+//     blueprints are rewritable: every plugin name written with its FormID (items' plugin_name,
+//     cell_plugin, PlotPlanPlugin, PlotPath01Plugin with only a decimal, the workbench), and the
+//     plugins_required entries. The workbench moves only when its base object does not (checked
+//     against its record: the blueprint stores the base without a plugin name).
+namespace {
+const char* kBlueprint = R"({
+    "header": { "cell_id": "000900", "cell_id_dec": 2304, "cell_plugin": "ModS.esp",
+                "plugins_required": [ "Fallout4.esm", "ModS.esp" ], "worldspace_plugin": "Fallout4.esm" },
+    "items": [
+        { "FormID": "000812", "FormID_dec": 2066, "PlotPath01FormID_dec": 2066, "PlotPath01Plugin": "ModS.esp",
+          "PlotPlanFormID": "000812", "PlotPlanFormID_dec": 2066, "PlotPlanPlugin": "ModS.esp",
+          "name": "Thing", "plugin_name": "ModS.esp", "posX": 1.0 },
+        { "FormID": "0C01C6", "FormID_dec": 786886, "name": "Conduit", "plugin_name": "Fallout4.esm", "posX": 2.0 }
+    ],
+    "workshop": { "baseid_dec": 31374, "id": "000901", "id_dec": 2305, "plugin": "ModS.esp", "posX": 0.0 }
+})";
+// ModS with a new interior cell holding the settlement's workbench, whose base is `base`.
+std::filesystem::path blueprintInstall(const std::string& name, uint32_t base)
+{
+    auto root = referenceInstall(name);
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModS.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000812, {zs("EDID", "ModS_Keyword")}),
+                 record("CELL", 0x01000900, {zs("EDID", "ModS_Home")}),
+                 record("REFR", 0x01000901, {zs("EDID", "ModS_Workbench"), u32("NAME", base)})});
+    writeFile(data / "F4SE" / "Plugins" / "TransferSettlements" / "blueprints" / "Test.json", kBlueprint);
+    return root;
+}
+} // namespace
+
 TEST(references_reverse_pairs_and_settlement_blueprints)
 {
     auto pairs = ReferenceScanner::inspect(kNames, "f4se\\plugins\\x-cell-exceptions.ini",
@@ -3007,37 +3033,31 @@ TEST(references_reverse_pairs_and_settlement_blueprints)
         CHECK(pairs[0].hasFormId && pairs[0].formId == 0x812u);
     }
 
-    const std::string blueprint = R"({
-    "header": { "plugins_required": [ "Fallout4.esm", "ModS.esp" ], "worldspace_plugin": "Fallout4.esm" },
-    "items": [
-        { "FormID": "000812", "FormID_dec": 2066, "name": "Thing", "plugin_name": "ModS.esp", "posX": 1.0 },
-        { "FormID": "0C01C6", "FormID_dec": 786886, "name": "Conduit", "plugin_name": "Fallout4.esm", "posX": 2.0 }
-    ],
-    "workshop": { "baseid_dec": 31374, "id": "000812", "id_dec": 2066, "plugin": "ModS.esp", "posX": 0.0 }
-})";
+    const std::string blueprint = kBlueprint;
     {
         auto refs = ReferenceScanner::inspect(kNames, "f4se\\plugins\\transfersettlements\\blueprints\\a.json",
                                               bytesOf(blueprint));
-        size_t workbench = 0;
-        for (const auto& r : refs)
-            if (r.context == "Transfer Settlements workbench") {
-                ++workbench;
-                CHECK_EQ(r.cls, ReferenceClass::Rewritable);
-                CHECK(r.hasFormId && r.formId == 0x812u && r.decEnd > r.decBegin);
-            }
-        CHECK_EQ(workbench, size_t(1));
-        // A base object given with a load-order index other than 00: its plugin is unknown.
+        std::map<std::string, uint32_t> byContext;
+        for (const auto& r : refs) {
+            CHECK_EQ(r.cls, ReferenceClass::Rewritable);
+            if (r.hasFormId)
+                byContext[r.context] = r.formId;
+        }
+        CHECK(byContext["Transfer Settlements workbench"] == 0x901u);
+        CHECK(byContext["Transfer Settlements cell_plugin"] == 0x900u);
+        CHECK(byContext["Transfer Settlements PlotPlanPlugin"] == 0x812u);
+        CHECK(byContext["Transfer Settlements PlotPath01Plugin"] == 0x812u); // decimal only
+        // Hex and decimal disagree: which one the tool reads is unknown.
         std::string other = blueprint;
-        other.replace(other.find("31374"), 5, "33585806");
+        other.replace(other.find("\"cell_id_dec\": 2304"), 19, "\"cell_id_dec\": 2305");
         refs = ReferenceScanner::inspect(kNames, "f4se\\plugins\\transfersettlements\\blueprints\\a.json",
                                          bytesOf(other));
         bool unknown = false;
         for (const auto& r : refs)
-            unknown |= r.context == "Transfer Settlements workbench" && r.cls == ReferenceClass::Unknown;
+            unknown |= r.cls == ReferenceClass::Unknown && r.reason.find("cell_plugin") != std::string::npos;
         CHECK(unknown);
     }
-    auto root = referenceInstall("refblueprint");
-    writeFile(root / "Game" / "Data" / "F4SE" / "Plugins" / "TransferSettlements" / "blueprints" / "Test.json", blueprint);
+    auto root = blueprintInstall("refblueprint", 0x00007A8E); // a Fallout4.esm workbench
     // A reverse pair with more lines after it (the reference's text stops at the name).
     writeFile(root / "Game" / "Data" / "F4SE" / "Plugins" / "x-cell-exceptions.ini",
               "[facegen_exception]\npiper=0x812:ModS.esp\nnick=0x2F1F:Fallout4.esm\n\n[other]\nkey=1\n");
@@ -3047,7 +3067,7 @@ TEST(references_reverse_pairs_and_settlement_blueprints)
     p.scan();
     p.analyse();
     const auto refs = referencesOf(p.session(), "ModS.esp");
-    CHECK_EQ(refs.size(), size_t(4));
+    CHECK_EQ(refs.size(), size_t(7));
     for (const auto* r : refs)
         CHECK_EQ(r->cls, ReferenceClass::Rewritable);
     CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
@@ -3071,10 +3091,22 @@ TEST(references_reverse_pairs_and_settlement_blueprints)
             CHECK(text.find(hex) != std::string::npos);
             CHECK(text.find("\"FormID_dec\": " + std::to_string(moved->objectId)) != std::string::npos);
             CHECK(text.find("\"plugin_name\": \"" + moved->outputPlugin + "\"") != std::string::npos);
-            CHECK(text.find("\"plugin\": \"" + moved->outputPlugin + "\"") != std::string::npos);
-            CHECK(text.find("\"id_dec\": " + std::to_string(moved->objectId)) != std::string::npos);
-            CHECK(text.find("\"baseid_dec\": 31374") != std::string::npos); // the base is not changed
+            CHECK(text.find("\"PlotPlanFormID_dec\": " + std::to_string(moved->objectId)) != std::string::npos);
+            CHECK(text.find("\"PlotPath01FormID_dec\": " + std::to_string(moved->objectId)) != std::string::npos);
+            CHECK(text.find("\"PlotPath01Plugin\": \"" + moved->outputPlugin + "\"") != std::string::npos);
         }
+        for (const auto& mp : m->mappings) {
+            if (!iequals(mp.sourcePlugin, "ModS.esp"))
+                continue;
+            if (mp.sourceObjectId == 0x901) { // the workbench
+                CHECK(text.find("\"plugin\": \"" + mp.outputPlugin + "\"") != std::string::npos);
+                CHECK(text.find("\"id_dec\": " + std::to_string(mp.objectId)) != std::string::npos);
+            }
+            if (mp.sourceObjectId == 0x900) // the settlement's cell
+                CHECK(text.find("\"cell_id_dec\": " + std::to_string(mp.objectId) + ", \"cell_plugin\": \"" +
+                                mp.outputPlugin + "\"") != std::string::npos);
+        }
+        CHECK(text.find("\"baseid_dec\": 31374") != std::string::npos); // the base is not changed
         CHECK(text.find("786886") != std::string::npos); // other plugins' items unchanged
     }
     const auto xcell = result.directory / "f4se" / "plugins" / "x-cell-exceptions.ini";
@@ -3091,6 +3123,95 @@ TEST(references_reverse_pairs_and_settlement_blueprints)
             }
     }
     CHECK(p.session().findPlugin("ModS.esp")->eligibility == Eligibility::Eligible);
+}
+
+// 6f. A workbench whose base object is a record of a compiled plugin: the blueprint stores that base
+//     as a bare number, so the copy is not written and the plugin stays.
+TEST(references_settlement_workbench_with_a_moving_base)
+{
+    auto root = blueprintInstall("refworkbenchbase", 0x01000812); // its base is ModS's own record
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+    CHECK(p.compile());
+    auto result = p.exportOutputs();
+    CHECK(!std::filesystem::exists(result.directory / "f4se" / "plugins" / "transfersettlements" / "blueprints" /
+                                   "test.json"));
+    const auto* c = p.compiledOutput();
+    CHECK(!c || !c->isCompiled(p.session().findPlugin("ModS.esp")->index));
+    const auto& kept = p.session().autoRetained;
+    CHECK(kept.count("mods.esp") && kept.at("mods.esp").find("workbench has its base object") != std::string::npos);
+}
+
+// 6g. Per-plugin FormID INIs (bcr\<plugin>.ini, FormIDs relative to the plugin): written again as
+//     bcr\<output>.ini with the new FormIDs, the INIs of plugins compiled into one output merged. A
+//     key in two of them, or a line that is not "[section]" / "key=<FormID>", keeps the plugins out.
+TEST(references_per_plugin_formid_inis)
+{
+    {
+        const auto ok = ReferenceScanner::parseFormIdIni("[Weapons]\r\nweaponFormId_SPAS12=83528\r\n");
+        CHECK(ok.ok && ok.crlf && ok.entries.size() == 1 && ok.entries[0].formId == 0x83528u);
+        CHECK(!ReferenceScanner::parseFormIdIni("[Weapons]\nweaponFormId_SPAS12=83528,1\n").ok);
+        CHECK(!ReferenceScanner::parseFormIdIni("weaponFormId_SPAS12=83528\n").ok); // outside a section
+        CHECK(!ReferenceScanner::parseFormIdIni("[Weapons]\nname=Shotgun\n").ok);
+    }
+    auto run = [](const std::string& name, const std::string& iniS, const std::string& iniT) {
+        auto root = referenceInstall(name);
+        auto data = root / "Game" / "Data";
+        writeFile(data / "BCR" / "ModS.esp.ini", iniS);
+        writeFile(data / "BCR" / "ModT.esp.ini", iniT);
+        auto cfg = configFor(root);
+        cfg.compile.autoMerge = true;
+        auto p = std::make_unique<Pipeline>(cfg);
+        p->scan();
+        p->analyse();
+        return p;
+    };
+    {
+        auto p = run("refbcr", "[Weapons]\nweaponFormId_A=812\n", "[Weapons]\nweaponFormId_B=0x800\n");
+        for (const char* n : {"ModS.esp", "ModT.esp"}) {
+            const auto refs = referencesOf(p->session(), n);
+            CHECK_EQ(refs.size(), size_t(1));
+            if (!refs.empty())
+                CHECK_EQ(refs[0]->cls, ReferenceClass::Rewritable);
+        }
+        CHECK(p->compile());
+        auto result = p->exportOutputs();
+        const auto* c = p->compiledOutput();
+        uint32_t s = 0, t = 0;
+        std::string output;
+        for (const auto& mp : c->mappings) {
+            if (iequals(mp.sourcePlugin, "ModS.esp") && mp.sourceObjectId == 0x812)
+                s = mp.objectId, output = mp.outputPlugin;
+            if (iequals(mp.sourcePlugin, "ModT.esp") && mp.sourceObjectId == 0x800)
+                t = mp.objectId;
+        }
+        CHECK(!output.empty());
+        const auto ini = result.directory / "bcr" / (output + ".ini");
+        CHECK(std::filesystem::exists(ini));
+        char expect[128];
+        std::snprintf(expect, sizeof(expect), "[Weapons]\nweaponFormId_A=%x\nweaponFormId_B=0x%x\n", s, t);
+        CHECK_EQ(slurpFile(ini), std::string(expect));
+        CHECK(slurpFile(result.directory / "Multiplexer_Relinked.tsv").find("bcr\\" + output + ".ini") != std::string::npos);
+    }
+    {
+        auto p = run("refbcrdup", "[Weapons]\nweaponFormId_A=812\n", "[weapons]\nWEAPONFORMID_A=800\n");
+        CHECK(p->compile());
+        const auto& kept = p->session().autoRetained;
+        CHECK(kept.count("mods.esp") && kept.at("mods.esp").find("is in the INIs of both") != std::string::npos);
+        CHECK(kept.count("modt.esp") == 1);
+    }
+    {
+        auto p = run("refbcrodd", "[Weapons]\nweaponFormId_A=812\nmode=fast\n", "[Weapons]\nweaponFormId_B=800\n");
+        const auto refs = referencesOf(p->session(), "ModS.esp");
+        CHECK(refs.size() == 1 && refs[0]->cls == ReferenceClass::Unknown);
+        CHECK(refs.size() == 1 && refs[0]->reason.find("line 3") != std::string::npos);
+        CHECK_EQ(p->session().findPlugin("ModS.esp")->eligibility, Eligibility::Ineligible);
+        CHECK_EQ(p->session().findPlugin("ModT.esp")->eligibility, Eligibility::Eligible);
+    }
 }
 
 // 7. Safe and unsafe references together: the most restrictive decides.

@@ -28,7 +28,9 @@ namespace fo4mx {
 // (fail closed). Export (relink()) is a transaction: all copies are written beside their targets and
 // only then moved into place, earlier copies are restored if any step fails, and every change is
 // recorded with its old and new value in Multiplexer_Relinked.tsv. The user's mods are never changed.
-enum class RelinkKind : uint8_t { Script, McmConfig, PairConfig, Unsupported };
+//   - per-plugin FormID INIs (bcr\<plugin>.ini): written again as <folder>\<output>.ini with the records'
+//     new FormIDs; the INIs of plugins compiled into the same output are merged into one.
+enum class RelinkKind : uint8_t { Script, McmConfig, PairConfig, FormIdIni, Unsupported };
 const char* relinkKindName(RelinkKind k);
 
 // One change to one reference.
@@ -42,6 +44,7 @@ struct RelinkChange {
 
 struct RelinkFile {
     std::string path; // data-relative, lowercase
+    std::string target; // where the copy is written, when not at `path` (per-plugin INIs)
     std::string mod;  // mod providing the winning copy
     RelinkKind kind = RelinkKind::Unsupported;
     std::vector<PluginIndex> plugins;   // plugins it names
@@ -61,6 +64,8 @@ struct RelinkFile {
     bool written = false;
     size_t changedCalls = 0, changedPairs = 0, renamed = 0;
     std::vector<std::string> notes;
+
+    const std::string& written_path() const { return target.empty() ? path : target; }
 };
 
 struct AutoMergeReport {

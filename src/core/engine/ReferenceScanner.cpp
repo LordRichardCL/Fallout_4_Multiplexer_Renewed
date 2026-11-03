@@ -74,6 +74,8 @@ enum class Fact {
     AssetFolder,         // a folder named after the plugin under meshes, textures, materials, sound or music
     EngineFileName,      // seq\<plugin>.seq (start-game-enabled quests)
     ToolFileName,        // RobCo Patcher INI named after the plugin
+    FormIdIni,           // bcr\<plugin>.ini: FormIDs relative to the plugin, rewritten under the output's name
+    FormIdIniUnknown,    // bcr\<plugin>.ini with lines that are not "[section]" or "key=<FormID>"
     OtherFileName,       // any other file named after the plugin
 };
 
@@ -167,6 +169,14 @@ Rule rule(Fact f)
     case Fact::ToolFileName:
         return {K::FilePath, C::Safe, "file name",
                 "RobCo Patcher reads every INI in its folders: the file name is not used to find the plugin"};
+    case Fact::FormIdIni:
+        return {K::FilePath, C::Rewritable, "per-plugin FormID INI",
+                "a tool INI named after the plugin, listing FormIDs relative to it: the Auto-Merger writes the same "
+                "entries, with the records' new FormIDs, into an INI named after the output plugin"};
+    case Fact::FormIdIniUnknown:
+        return {K::FilePath, C::Unknown, "per-plugin FormID INI",
+                "a tool INI named after the plugin, with lines that are not \"[section]\" or \"key=<FormID>\": "
+                "what the tool reads from them is unknown"};
     case Fact::OtherFileName:
         return {K::FilePath, C::Unknown, "file name",
                 "a file named after the plugin: something may find it by the plugin's name"};
@@ -435,6 +445,28 @@ std::string blueprintKey(std::string_view text, size_t begin)
         return "plugins_required";
     return {};
 }
+// The keys holding the FormID that goes with a plugin-name key, in hex (may be empty: not written)
+// and in decimal; both empty for a key that is not such a pair.
+//   plugin_name -> FormID, FormID_dec            (items)
+//   workshop    -> id, id_dec                    (the settlement's workbench)
+//   cell_plugin -> cell_id, cell_id_dec          (any "<x>_plugin")
+//   PlotPlanPlugin -> PlotPlanFormID, PlotPlanFormID_dec   (any "<x>Plugin")
+std::pair<std::string, std::string> blueprintIdKeys(const std::string& key)
+{
+    if (key == "plugin_name")
+        return {"FormID", "FormID_dec"};
+    if (key == "workshop")
+        return {"id", "id_dec"};
+    if (key.size() > 7 && key.ends_with("_plugin")) {
+        const std::string x = key.substr(0, key.size() - 7);
+        return {x + "_id", x + "_id_dec"};
+    }
+    if (key.size() > 6 && key.ends_with("Plugin")) {
+        const std::string x = key.substr(0, key.size() - 6);
+        return {x + "FormID", x + "FormID_dec"};
+    }
+    return {};
+}
 // The value span of "key": "..." (string) or "key": 123 (number) within [from, to).
 std::pair<size_t, size_t> jsonValue(std::string_view text, size_t from, size_t to, const std::string& key)
 {
@@ -668,17 +700,16 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                 if (longest[m.end] != name.size())
                     continue;
                 Fact f;
-                bool workshop = false;
+                std::string bpKey;
                 if (format == "PSC")
                     f = Fact::PscSource;
                 else if (commentLine(text, m.begin, format))
                     f = Fact::ConfigComment;
                 else if (blueprint) {
-                    const std::string key = blueprintKey(text, m.begin);
-                    f = key == "plugin_name" || key == "workshop" ? Fact::BlueprintItem
-                        : key == "plugins_required"               ? Fact::BlueprintRequired
-                                                                  : Fact::SettlementBlueprint;
-                    workshop = key == "workshop";
+                    bpKey = blueprintKey(text, m.begin);
+                    f = bpKey == "plugins_required"         ? Fact::BlueprintRequired
+                        : blueprintIdKeys(bpKey).second.empty() ? Fact::SettlementBlueprint
+                                                                : Fact::BlueprintItem;
                 }
                 else if (m.pair)
                     f = Fact::ConfigPair;
@@ -703,45 +734,50 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                     r.idEnd = m.idEnd;
                 }
                 if (f == Fact::BlueprintItem) {
-                    // The item's object: its FormID (6 hex digits) and the same in decimal.
+                    // The object the name belongs to: its FormID in hex (when the blueprint writes it)
+                    // and the same number in decimal, keys of the same JSON object.
+                    const auto [hexKey, decKey] = blueprintIdKeys(bpKey);
                     const size_t open = text.rfind('{', m.begin);
                     const size_t close = text.find('}', m.end);
-                    // The settlement's workbench: "id" and "id_dec" instead.
                     const size_t from = open == std::string_view::npos ? 0 : open;
-                    const auto hex = jsonValue(text, from, close, workshop ? "id" : "FormID");
-                    const auto dec = jsonValue(text, from, close, workshop ? "id_dec" : "FormID_dec");
-                    bool ok = hex.second > hex.first && dec.second > dec.first;
-                    if (ok && workshop) {
-                        // Its base object is stored as a load-order FormID without a plugin name: only
-                        // a base from Fallout4.esm (load-order index 00, never compiled) is certain to be
-                        // unaffected by the move.
-                        const auto base = jsonValue(text, from, close, "baseid_dec");
-                        const std::string digits(text.substr(base.first, base.second - base.first));
-                        if (base.second <= base.first || digits.size() > 10 || std::stoull(digits) >= 0x01000000ull) {
-                            r.cls = ReferenceClass::Unknown;
-                            r.context = "Transfer Settlements workbench";
-                            r.reason = "the settlement's workbench, whose base object (baseid_dec) is a load-order "
-                                       "FormID of a plugin the blueprint does not name: it may change with the move";
-                            out.push_back(std::move(r));
-                            continue;
-                        }
-                        r.context = "Transfer Settlements workbench";
-                        r.reason = "the settlement's workbench: its plugin name and FormID (hex and decimal) are "
-                                   "rewritten together; its base object is from Fallout4.esm";
-                    }
+                    const auto hex = hexKey.empty() ? std::pair<size_t, size_t>{0, 0} : jsonValue(text, from, close, hexKey);
+                    const auto dec = jsonValue(text, from, close, decKey);
+                    // Items always write both; the other pairs may write only the decimal.
+                    bool ok = dec.second > dec.first && dec.second - dec.first <= 10 && hex.second - hex.first <= 8 &&
+                              (bpKey != "plugin_name" || hex.second > hex.first);
+                    for (size_t c = dec.first; ok && c < dec.second; ++c)
+                        ok = std::isdigit(static_cast<unsigned char>(text[c])) != 0;
                     for (size_t c = hex.first; ok && c < hex.second; ++c)
                         ok = std::isxdigit(static_cast<unsigned char>(text[c])) != 0;
-                    if (ok) {
+                    uint64_t value = 0;
+                    if (ok)
+                        value = std::stoull(std::string(text.substr(dec.first, dec.second - dec.first)));
+                    // Both written: they must agree, or which one the tool reads is unknown.
+                    if (ok && hex.second > hex.first &&
+                        std::stoull(std::string(text.substr(hex.first, hex.second - hex.first)), nullptr, 16) != value)
+                        ok = false;
+                    if (ok && value <= 0xFFFFFF) {
                         r.hasFormId = true;
-                        r.formId = static_cast<uint32_t>(std::stoul(std::string(text.substr(hex.first, hex.second - hex.first)), nullptr, 16));
+                        r.formId = static_cast<uint32_t>(value);
                         r.idBegin = hex.first;
                         r.idEnd = hex.second;
                         r.decBegin = dec.first;
                         r.decEnd = dec.second;
                         r.text = std::string(text.substr(m.begin, m.end - m.begin)) + "|" + formatFormId(r.formId).substr(2);
+                        if (bpKey == "workshop") {
+                            // Its base object (baseid_dec) is stored without a plugin name: the Auto-Merger
+                            // rewrites the workbench only when that base does not move (checked against the
+                            // workbench's record).
+                            r.context = "Transfer Settlements workbench";
+                            r.reason = "the settlement's workbench: its plugin name and FormID (hex and decimal) are "
+                                       "rewritten together when its base object is from a plugin that is not compiled";
+                        } else if (bpKey != "plugin_name") {
+                            r.context = "Transfer Settlements " + bpKey;
+                            r.reason = "a plugin name with its FormID (" + bpKey + "): rewritten together";
+                        }
                     } else {
                         r.cls = ReferenceClass::Unknown;
-                        r.reason = "a blueprint item whose FormID could not be read";
+                        r.reason = "a blueprint entry (" + bpKey + ") whose FormID could not be read";
                     }
                 }
                 out.push_back(std::move(r));
@@ -750,6 +786,73 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
     }
     for (auto& r : out)
         r.source = source;
+    return out;
+}
+
+bool ReferenceScanner::isFormIdIniPath(const std::string& lowerPath, const std::string& lowerPlugin)
+{
+    return lowerPath == "bcr\\" + lowerPlugin + ".ini";
+}
+
+ReferenceScanner::FormIdIni ReferenceScanner::parseFormIdIni(std::string_view text)
+{
+    FormIdIni out;
+    if (text.size() >= 3 && static_cast<unsigned char>(text[0]) == 0xEF && static_cast<unsigned char>(text[1]) == 0xBB &&
+        static_cast<unsigned char>(text[2]) == 0xBF)
+        text.remove_prefix(3); // UTF-8 byte order mark
+    out.crlf = text.find("\r\n") != std::string_view::npos;
+    auto trim = [](std::string_view v) {
+        while (!v.empty() && (v.front() == ' ' || v.front() == '\t' || v.front() == '\r'))
+            v.remove_prefix(1);
+        while (!v.empty() && (v.back() == ' ' || v.back() == '\t' || v.back() == '\r'))
+            v.remove_suffix(1);
+        return v;
+    };
+    std::string section;
+    size_t lineNo = 0;
+    for (size_t at = 0; at <= text.size();) {
+        size_t nl = text.find('\n', at);
+        if (nl == std::string_view::npos)
+            nl = text.size();
+        const auto line = trim(text.substr(at, nl - at));
+        at = nl + 1;
+        ++lineNo;
+        if (line.empty() || line.front() == ';' || line.front() == '#')
+            continue;
+        auto fail = [&](const std::string& why) {
+            out.problem = "line " + std::to_string(lineNo) + ": " + why;
+            return out;
+        };
+        if (line.front() == '[') {
+            if (line.back() != ']' || line.size() < 3)
+                return fail("not a section header");
+            section = std::string(trim(line.substr(1, line.size() - 2)));
+            continue;
+        }
+        const size_t eq = line.find('=');
+        if (eq == std::string_view::npos || section.empty())
+            return fail(section.empty() ? "an entry outside a section" : "not \"key=value\"");
+        FormIdIni::Entry e;
+        e.section = section;
+        e.key = std::string(trim(line.substr(0, eq)));
+        auto value = trim(line.substr(eq + 1));
+        if (value.size() > 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X')) {
+            e.prefixed = true;
+            value.remove_prefix(2);
+        }
+        if (e.key.empty() || value.empty() || value.size() > 6)
+            return fail("not a FormID of up to 6 hex digits");
+        for (char c : value) {
+            if (!std::isxdigit(static_cast<unsigned char>(c)))
+                return fail("not a FormID of up to 6 hex digits");
+            e.uppercase |= c >= 'A' && c <= 'F';
+        }
+        e.formId = static_cast<uint32_t>(std::stoul(std::string(value), nullptr, 16));
+        out.entries.push_back(std::move(e));
+    }
+    if (out.entries.empty())
+        return out.problem = "no FormIDs", out;
+    out.ok = true;
     return out;
 }
 
@@ -819,7 +922,22 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             if (it == names.end() || toLower(file) == n)
                 continue;
             Fact f = istartsWith(p, "f4se\\plugins\\robco_patcher\\") ? Fact::ToolFileName : Fact::OtherFileName;
+            std::string problem;
+            if (isFormIdIniPath(toLower(p), n)) {
+                try {
+                    const auto bytes = readOriginal(session, idx.entries[i], 1 << 20);
+                    const auto ini = parseFormIdIni(
+                        std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+                    f = ini.ok ? Fact::FormIdIni : Fact::FormIdIniUnknown;
+                    problem = ini.problem;
+                } catch (const std::exception& e) {
+                    f = Fact::FormIdIniUnknown;
+                    problem = std::string("could not be read: ") + e.what();
+                }
+            }
             auto r = make(f, it->second, toLower(p), "File name", file, {});
+            if (!problem.empty())
+                r.reason += " (" + problem + ")";
             r.source = idx.modName(idx.entries[i].winner());
             session.nameReferences.push_back(std::move(r));
         }

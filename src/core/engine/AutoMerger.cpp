@@ -22,6 +22,7 @@ const char* relinkKindName(RelinkKind k)
     case RelinkKind::Script: return "Script";
     case RelinkKind::McmConfig: return "MCM Config";
     case RelinkKind::PairConfig: return "Config";
+    case RelinkKind::FormIdIni: return "Per-plugin INI";
     case RelinkKind::Unsupported: return "Not Relinkable";
     }
     return "";
@@ -105,7 +106,12 @@ struct Relocation {
     }
     const std::pair<std::string, uint32_t>* find(const Session& session, PluginIndex plugin, uint32_t formId) const
     {
-        const uint32_t mask = session.plugins[plugin].isLight() ? 0xFFF : 0xFFFFFF;
+        // A light plugin's records are 000-FFF, written alone or as a load-order FormID FExxx<id>;
+        // anything else names no record of it (masking would pick an unrelated one).
+        const bool light = session.plugins[plugin].isLight();
+        if (light && (formId & 0x00FFF000u) != 0 && (formId >> 24) != 0xFE)
+            return nullptr;
+        const uint32_t mask = light ? 0xFFF : 0xFFFFFF;
         auto it = byRecord.find((uint64_t(plugin) << 32) | (formId & mask));
         return it == byRecord.end() ? nullptr : &it->second;
     }
@@ -298,7 +304,11 @@ AutoMergeReport AutoMerger::analyse(const Session& session)
                 problems.push_back(p);
         }
         f.problem = join(problems, "; ");
+        const bool formIdIni = std::any_of(f.references.begin(), f.references.end(), [&](size_t ri) {
+            return session.nameReferences[ri].context == "per-plugin FormID INI";
+        });
         f.kind = !f.problem.empty()  ? RelinkKind::Unsupported
+                 : formIdIni           ? RelinkKind::FormIdIni
                  : isScript(f.path)    ? RelinkKind::Script
                  : isMcmConfig(f.path) ? RelinkKind::McmConfig
                  : isText(f.path)      ? RelinkKind::PairConfig
@@ -314,6 +324,151 @@ AutoMergeReport AutoMerger::analyse(const Session& session)
     return report;
 }
 
+namespace {
+// Per-plugin FormID INIs (bcr\<plugin>.ini): the tool finds the file by the plugin's name and reads
+// FormIDs relative to that plugin. For a compiled plugin the same entries, with the records' new
+// FormIDs, are written as <folder>\<output>.ini; the INIs of plugins compiled into one output are
+// merged. Fails closed when an entry is not a record of its plugin, when a file's records went into
+// different outputs, or when two INIs share a key; the written text is parsed back and compared.
+void planFormIdInis(const Session& session, const Relocation& where,
+                    const std::unordered_map<std::string, uint64_t>& previous, const std::filesystem::path& outputDir,
+                    const std::vector<RelinkFile*>& files, std::map<PluginIndex, std::string>& failed)
+{
+    struct Part {
+        RelinkFile* file = nullptr;
+        PluginIndex plugin = kInvalidPlugin;
+        ReferenceScanner::FormIdIni ini;
+        std::vector<uint32_t> ids;
+    };
+    std::map<std::string, std::vector<Part>> byTarget; // lowercase target -> parts
+    std::map<std::string, std::string> targetName;
+    auto fail = [&](RelinkFile& f, PluginIndex p, const std::string& why) {
+        f.validation = why;
+        f.output.clear();
+        f.changes.clear();
+        f.planned = false;
+        f.target.clear();
+        failed.emplace(p, "Advanced Users Auto-Merger: " + f.path + " could not be rewritten safely (" + why + ")");
+    };
+    for (RelinkFile* f : files) {
+        const PluginIndex p = f->plugins.size() == 1 ? f->plugins.front() : kInvalidPlugin;
+        try {
+            if (p == kInvalidPlugin)
+                throw std::runtime_error("it is named after more than one plugin");
+            const auto* entry = session.assets.find(f->path);
+            if (!entry)
+                throw std::runtime_error("not found in the load order's files");
+            const auto original = ReferenceScanner::readOriginal(session, *entry);
+            f->originalHash = hashOf(original);
+            Part part{f, p, ReferenceScanner::parseFormIdIni(std::string_view(
+                                reinterpret_cast<const char*>(original.data()), original.size())), {}};
+            if (!part.ini.ok)
+                throw std::runtime_error(part.ini.problem);
+            std::string output;
+            for (const auto& e : part.ini.entries) {
+                const auto* moved = where.find(session, p, e.formId);
+                if (!moved)
+                    throw std::runtime_error("[" + e.section + "] " + e.key + " = " + formatFormId(e.formId) +
+                                             " is not a record of " + session.plugins[p].name +
+                                             ": in the output it could name an unrelated record");
+                if (output.empty())
+                    output = moved->first;
+                else if (!iequals(output, moved->first))
+                    throw std::runtime_error("its records went into different outputs (" + output + ", " + moved->first +
+                                             "), but the tool reads one file per plugin");
+                part.ids.push_back(moved->second);
+            }
+            const std::string target = f->path.substr(0, f->path.rfind('\\') + 1) + output + ".ini";
+            targetName[toLower(target)] = target;
+            byTarget[toLower(target)].push_back(std::move(part));
+        } catch (const std::exception& e) {
+            fail(*f, p, e.what());
+        }
+    }
+    for (auto& [lowerTarget, parts] : byTarget) {
+        const std::string& target = targetName[lowerTarget];
+        std::sort(parts.begin(), parts.end(), [](const Part& a, const Part& b) { return a.plugin < b.plugin; });
+        try {
+            std::error_code ec;
+            const auto onDisk = below(outputDir, target);
+            if (std::filesystem::exists(onDisk, ec)) {
+                auto it = previous.find(target);
+                if (it == previous.end() || (it->second != 0 && it->second != hashOf(readFile(onDisk))))
+                    throw std::runtime_error(target + " is already in the output folder and was not written by this app");
+            }
+            // Merge: sections in first-seen order, every key once.
+            std::vector<std::string> order;
+            std::map<std::string, std::vector<std::string>> lines; // lowercase section -> "key=value"
+            std::map<std::string, std::string> sectionName;
+            std::map<std::pair<std::string, std::string>, PluginIndex> seen;
+            std::vector<std::tuple<std::string, std::string, uint32_t>> expected;
+            bool crlf = false;
+            for (const auto& part : parts) {
+                crlf |= part.ini.crlf;
+                for (size_t i = 0; i < part.ini.entries.size(); ++i) {
+                    const auto& e = part.ini.entries[i];
+                    const std::string sec = toLower(e.section);
+                    auto [it, added] = seen.emplace(std::make_pair(sec, toLower(e.key)), part.plugin);
+                    if (!added)
+                        throw std::runtime_error("[" + e.section + "] " + e.key + " is in the INIs of both " +
+                                                 session.plugins[it->second].name + " and " +
+                                                 session.plugins[part.plugin].name);
+                    if (!lines.count(sec)) {
+                        order.push_back(sec);
+                        sectionName[sec] = e.section;
+                    }
+                    char hex[16];
+                    std::snprintf(hex, sizeof(hex), e.uppercase ? "%X" : "%x", part.ids[i]);
+                    lines[sec].push_back(e.key + "=" + (e.prefixed ? "0x" : "") + hex);
+                    expected.emplace_back(sec, toLower(e.key), part.ids[i]);
+                }
+            }
+            const std::string eol = crlf ? "\r\n" : "\n";
+            std::string text;
+            for (const auto& sec : order) {
+                if (!text.empty())
+                    text += eol;
+                text += "[" + sectionName[sec] + "]" + eol;
+                for (const auto& l : lines[sec])
+                    text += l + eol;
+            }
+            // Read it back as the tool would.
+            const auto back = ReferenceScanner::parseFormIdIni(text);
+            std::vector<std::tuple<std::string, std::string, uint32_t>> got;
+            for (const auto& e : back.entries)
+                got.emplace_back(toLower(e.section), toLower(e.key), e.formId);
+            std::sort(got.begin(), got.end());
+            std::sort(expected.begin(), expected.end());
+            if (!back.ok || got != expected)
+                throw std::runtime_error("the written INI does not read back with exactly the expected entries");
+
+            RelinkFile* first = parts.front().file;
+            first->target = target;
+            first->output.assign(text.begin(), text.end());
+            first->outputHash = hashOf(first->output);
+            first->planned = true;
+            const std::string output = target.substr(target.rfind('\\') + 1, target.size() - target.rfind('\\') - 5);
+            for (const auto& part : parts) {
+                for (size_t i = 0; i < part.ini.entries.size(); ++i) {
+                    const auto& e = part.ini.entries[i];
+                    first->changes.push_back({part.plugin, "[" + e.section + "] " + e.key, "per-plugin FormID INI",
+                                              session.plugins[part.plugin].name + "|" + formatFormId(e.formId).substr(2),
+                                              output + "|" + formatFormId(part.ids[i]).substr(2)});
+                    ++first->changedPairs;
+                }
+                if (part.file != first)
+                    part.file->notes.push_back("merged into " + target);
+            }
+            if (parts.size() > 1)
+                first->notes.push_back("merges the INIs of " + std::to_string(parts.size()) + " plugins compiled into " + output);
+        } catch (const std::exception& e) {
+            for (const auto& part : parts)
+                fail(*part.file, part.plugin, e.what());
+        }
+    }
+}
+} // namespace
+
 std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, const CompiledOutput& compiled,
                                                     const std::filesystem::path& outputDir, AutoMergeReport& report)
 {
@@ -328,8 +483,10 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
         outputSet.insert(toLower(o.name));
     }
 
+    std::vector<RelinkFile*> formIdInis;
     for (auto& f : report.files) {
         f.planned = false;
+        f.target.clear();
         f.changes.clear();
         f.output.clear();
         // A failed check of an earlier round of this compilation stays on record (its plugins are kept out).
@@ -355,6 +512,10 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
         }
         if (compiledHere.empty())
             continue;
+        if (f.kind == RelinkKind::FormIdIni && blocking.empty()) {
+            formIdInis.push_back(&f);
+            continue;
+        }
 
         try {
             if (!blocking.empty())
@@ -388,6 +549,25 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                 f.notes.push_back(r.text + " (" + r.location + "): " + formatFormId(r.formId) + " is not a record of " +
                                   session.plugins[r.plugin].name +
                                   ", so the game found nothing before either: left as it was");
+            };
+            // A settlement's workbench is stored with its base object as a bare number (baseid_dec,
+            // no plugin name). Moving the workbench is exact only when that base does not move: its
+            // base, as the game loads the workbench, must come from a plugin that is not compiled.
+            auto workbenchBaseStays = [&](const PluginReference& r) {
+                const uint32_t mask = session.plugins[r.plugin].isLight() ? 0xFFF : 0xFFFFFF;
+                const auto* inst = session.winner(FormKey{r.plugin, r.formId & mask});
+                if (!inst)
+                    throw std::runtime_error("the settlement's workbench " + formatFormId(r.formId) + " is not a record of " +
+                                             session.plugins[r.plugin].name);
+                const Record rec = const_cast<Session&>(session).loadRecord(*inst);
+                const auto* name = rec.find(Signature("NAME"));
+                if (!name || name->data.size() < 4)
+                    throw std::runtime_error("the settlement's workbench has no base object");
+                const FormKey base = session.resolve(session.plugins[inst->plugin], loadLE<uint32_t>(name->data.data()));
+                if (!base.valid() || compiled.isCompiled(base.origin))
+                    throw std::runtime_error("the settlement's workbench has its base object " + session.formLabel(base) +
+                                             " in a compiled plugin; the blueprint stores that base without a plugin "
+                                             "name, so it cannot be rewritten with certainty");
             };
             auto primaryOf = [&](PluginIndex p) {
                 // Only names without a FormID (presence checks, requirements) are renamed: any
@@ -478,9 +658,12 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                             leave(*r);
                             continue;
                         }
+                        if (r->context == "Transfer Settlements workbench")
+                            workbenchBaseStays(*r);
                         const std::string id = hexLike(moved->second, r->idEnd - r->idBegin);
                         edits.push_back({r->nameBegin, r->nameEnd, moved->first});
-                        edits.push_back({r->idBegin, r->idEnd, id});
+                        if (r->idEnd > r->idBegin) // some pairs write the FormID only in decimal
+                            edits.push_back({r->idBegin, r->idEnd, id});
                         if (r->decEnd > r->decBegin) // the same FormID in decimal (Transfer Settlements)
                             edits.push_back({r->decBegin, r->decEnd, std::to_string(moved->second)});
                         expected.insert({toLower(moved->first), true, moved->second});
@@ -529,6 +712,7 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                                       f.validation + ")");
         }
     }
+    planFormIdInis(session, where, previous, outputDir, formIdInis, failed);
     report.keptOut.insert(failed.begin(), failed.end());
     size_t planned = 0;
     for (const auto& f : report.files)
@@ -560,13 +744,13 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
             fs::remove(st.first, ec);
     };
     for (auto* f : planned) {
-        const auto target = below(outputDir, f->path);
+        const auto target = below(outputDir, f->written_path());
         auto tmp = target;
         tmp += ".fo4mx-new";
         try {
             std::error_code ec;
             if (fs::exists(target, ec)) {
-                auto it = previous.find(f->path);
+                auto it = previous.find(f->written_path());
                 if (it == previous.end() || (it->second != 0 && it->second != hashOf(readFile(target))))
                     throw std::runtime_error("a file this app did not write is in the output folder; it is not replaced");
             }
@@ -637,7 +821,7 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
 
     // 3. Remove copies an earlier export wrote that this build no longer produces (unless changed since).
     for (const auto& [path, hash] : previous) {
-        if (std::any_of(planned.begin(), planned.end(), [&](const RelinkFile* f) { return f->path == path; }))
+        if (std::any_of(planned.begin(), planned.end(), [&](const RelinkFile* f) { return f->written_path() == path; }))
             continue;
         const auto target = below(outputDir, path);
         std::error_code ec;
@@ -661,7 +845,7 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
                    "# file\twritten fnv1a64\toriginal fnv1a64\tplugin\tlocation\tuse\tbefore\tafter\n";
             for (const auto* f : planned)
                 for (const auto& c : f->changes)
-                    out << f->path << '\t' << hex64(f->outputHash) << '\t' << hex64(f->originalHash) << '\t'
+                    out << f->written_path() << '\t' << hex64(f->outputHash) << '\t' << hex64(f->originalHash) << '\t'
                         << session.plugins[c.plugin].name << '\t' << c.location << '\t' << c.context << '\t'
                         << c.before << '\t' << c.after << '\n';
         }
@@ -671,7 +855,7 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
     }
     for (auto* f : planned) {
         f->written = true;
-        report.written.push_back(below(outputDir, f->path));
+        report.written.push_back(below(outputDir, f->written_path()));
     }
     spdlog::info("Auto-Merger: relinked {} files ({} errors)", planned.size(), report.errors.size());
 }

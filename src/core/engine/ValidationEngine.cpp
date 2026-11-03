@@ -180,9 +180,21 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
             else
                 v.fail(Severity::Error, "Broken FormIDs", label + " has an invalid FormID " + fid, op.name, fid);
 
-            for (const auto& is : e.issues)
-                v.fail(is.severity == Severity::Error ? Severity::Error : is.severity, "Record Decoding",
-                       label + " " + is.sub.str() + ": " + is.message, op.name, fid);
+            // Decoding notes are about the source record: name the plugin they come from. A FormID
+            // past the source's master list reads as none in game and is written as none (Broken in
+            // Source reports it with its cause), so the output is correct: Info.
+            for (const auto& is : e.issues) {
+                const bool badMaster = is.message.find("master index beyond the master list") != std::string::npos;
+                const std::string source = e.winner != kInvalidPlugin ? session.pluginName(e.winner) : op.name;
+                if (badMaster)
+                    v.fail(Severity::Info, "Record Decoding",
+                           label + " " + is.sub.str() + ": in " + source + ", " + is.message +
+                               "; the game reads it as none, and " + op.name + " writes it as none",
+                           source, fid);
+                else
+                    v.fail(is.severity == Severity::Error ? Severity::Error : is.severity, "Record Decoding",
+                           label + " " + is.sub.str() + ": " + is.message + " (from " + source + ")", source, fid);
+            }
 
             for (const auto& f : e.fields.fields) {
                 auto checkSub = [&](const NormSub& s) {

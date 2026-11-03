@@ -57,6 +57,25 @@ public:
 
     // Verdict for one plugin: the most restrictive class among its references.
     static ReferenceDecision decide(const std::vector<const PluginReference*>& references);
+
+    // A per-plugin FormID INI (bcr\<plugin>.ini): "[section]" lines and "key=<FormID>" lines, the
+    // FormIDs in hex relative to the plugin the file is named after. ok is false (with the reason)
+    // for any other line, so nothing this app does not understand is ever rewritten.
+    struct FormIdIni {
+        struct Entry {
+            std::string section, key;
+            uint32_t formId = 0;
+            bool prefixed = false;  // written "0x..."
+            bool uppercase = false; // hex digits written in upper case
+        };
+        bool ok = false;
+        std::string problem;
+        bool crlf = false;
+        std::vector<Entry> entries;
+    };
+    static FormIdIni parseFormIdIni(std::string_view text);
+    // Whether `path` is such an INI for an installed plugin of this name ("bcr\<plugin>.ini").
+    static bool isFormIdIniPath(const std::string& lowerPath, const std::string& lowerPlugin);
 };
 
 } // namespace fo4mx
