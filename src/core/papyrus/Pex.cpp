@@ -300,6 +300,20 @@ private:
             pr.where = where_;
             return pr;
         };
+        // A call's result is the called function's return value: a variable holding it is followed like a
+        // property read (matched by the function's name).
+        auto callResult = [&]() {
+            std::string fn;
+            if (op == kCallMethod && args.size() == 3 && args[0].type == 1 && args[2].type == 1)
+                fn = out_.strings[args[0].string];
+            else if (op == kCallStatic && args.size() == 3 && args[1].type == 1 && args[2].type == 1)
+                fn = out_.strings[args[1].string];
+            if (fn.empty())
+                return;
+            for (auto& ch : fn)
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            propertyVars_[out_.strings[args[2].string]] = fn;
+        };
         if (op == 0x1C && args.size() == 3 && args[0].type == 1 && args[2].type == 1) { // propget name, object, dest
             std::string p = out_.strings[args[0].string];
             for (auto& ch : p)
@@ -342,6 +356,9 @@ private:
                         readOf(*p, presence && k >= args.size() ? PropertyRead::Use::IsPluginInstalled : PropertyRead::Use::Other));
             }
         }
+
+        if (!getFormFromFile)
+            callResult();
 
         if (getFormFromFile) {
             FormFromFileCall c;
@@ -389,7 +406,11 @@ private:
             use = StringUse::Comparison;
         else if (op == 0x1B) // strcat
             use = StringUse::Concatenation;
-        if (getter_ && op == 0x1A) // return: the property's value
+        // A plugin name returned as a constant, by a property's read handler or by a function (such as a
+        // mod's GetPluginName()): a named constant, classified by the scripts that read or call it.
+        if (op == 0x1A && args.size() == 1 && args[0].type == 2 &&
+            (getter_ || iendsWith(out_.strings[args[0].string], ".esp") || iendsWith(out_.strings[args[0].string], ".esm") ||
+             iendsWith(out_.strings[args[0].string], ".esl")))
             use = StringUse::PropertyValue;
         for (const auto& a : args)
             markString(a, use == StringUse::IsPluginInstalled ? StringUse::Other : use, function);

@@ -2909,6 +2909,29 @@ TEST(references_named_constants_by_their_readers)
     }
 }
 
+// 6c'. A function returning a plugin name (a mod naming itself) is a named constant too: its callers
+//     decide. Called only for a presence check: rewritable; called by nothing: Safe.
+TEST(references_functions_returning_a_plugin_name)
+{
+    for (bool called : {false, true}) {
+        auto root = referenceInstall(called ? "reffncalled" : "reffnunused");
+        auto data = root / "Game" / "Data";
+        const auto program = nameFunctionScript("ModS.esp");
+        writeFile(data / "Scripts" / "Program.pex", std::string(reinterpret_cast<const char*>(program.data()), program.size()));
+        if (called) {
+            const auto caller = nameCallerScript();
+            writeFile(data / "Scripts" / "Caller.pex", std::string(reinterpret_cast<const char*>(caller.data()), caller.size()));
+        }
+        Pipeline p(configFor(root));
+        p.scan();
+        p.analyse();
+        const auto refs = referencesOf(p.session(), "ModS.esp");
+        CHECK_EQ(refs.size(), size_t(1));
+        if (!refs.empty())
+            CHECK_EQ(refs[0]->cls, called ? ReferenceClass::Rewritable : ReferenceClass::Safe);
+    }
+}
+
 // 6d. A plugin name kept in a variable is followed to where it goes, through the script's own
 //     functions: GetFormFromFile with a constant FormID, IsPluginInstalled and log text are
 //     rewritable, one shared constant; returned from a function, its meaning is unknown.

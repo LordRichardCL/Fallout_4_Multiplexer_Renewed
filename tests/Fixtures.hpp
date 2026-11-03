@@ -439,6 +439,45 @@ inline std::vector<uint8_t> constantsScript(const std::string& plugin)
     return pexFile(strings, "Consts", o.take());
 }
 
+// "Program" with a function GetPluginName() returning `plugin` (a mod's way of naming itself).
+inline std::vector<uint8_t> nameFunctionScript(const std::string& plugin)
+{
+    using namespace fo4mx;
+    const std::vector<std::string> strings = {"Program", "", "GetPluginName", "String", plugin};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0); // structs, variables, properties
+    o.write<uint16_t>(1); // states
+    o.write<uint16_t>(1); // default state
+    o.write<uint16_t>(1); // functions
+    o.write<uint16_t>(2); // GetPluginName
+    o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); // params, locals
+    o.write<uint16_t>(1);
+    o.write<uint8_t>(0x1A); o.write<uint8_t>(2); o.write<uint16_t>(4); // return "Plugin.esp"
+    return pexFile(strings, "Program", o.take());
+}
+
+// "Caller": OnInit calls kProgram.GetPluginName() and passes the result to Game.IsPluginInstalled.
+inline std::vector<uint8_t> nameCallerScript()
+{
+    using namespace fo4mx;
+    const std::vector<std::string> strings = {"Caller", "", "OnInit", "None", "GetPluginName", "kProgram", "::temp0",
+                                              "Bool", "::temp1", "String", "Game", "IsPluginInstalled"};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0);
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint16_t>(2);
+    o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0);
+    o.write<uint16_t>(2); o.write<uint16_t>(6); o.write<uint16_t>(7); o.write<uint16_t>(8); o.write<uint16_t>(9);
+    o.write<uint16_t>(2);
+    auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    o.write<uint8_t>(0x17); ident(4); ident(5); ident(8); o.write<uint8_t>(3); o.write<int32_t>(0); // ::temp1 = kProgram.GetPluginName()
+    o.write<uint8_t>(0x19); ident(10); ident(11); ident(6); o.write<uint8_t>(3); o.write<int32_t>(1); ident(8);
+    return pexFile(strings, "Caller", o.take());
+}
+
 inline std::vector<uint8_t> readerScript(const std::string& how, uint32_t formId = 0x812)
 {
     using namespace fo4mx;

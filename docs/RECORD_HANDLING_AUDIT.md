@@ -704,3 +704,9 @@ Each script's code is now followed: a plugin-name constant that enters a variabl
 - Anything else (returned, stored in an array, passed to another script's function): Unknown, naming the instruction or function.
 
 On the uploaded scripts: every name in Vlt04ExternalContentScript is rewritable; in AR_ExternalContentControlSystemScript every name except AmericaRising2.esm (stored in an array for Settlement Menu Manager) is; Integration's are all Auto property defaults.
+
+## Functions returning a plugin name (S2b)
+
+Build 73: 1,877 plugins compiled, 0 errors; the Auto-Merger relinked 532 files with 0 errors and finds 450 relinkable plugins (263 before S2). What keeps plugins out now: precombined meshes (34), Transfer Settlements blueprints (20), `x-cell-exceptions.ini` (7), a script function returning the plugin's name (7: mods that name themselves with `GetPluginName()` in their Program script), F4SE DLLs (9) and GetFormFromFile with FormIDs computed at run time (9).
+
+A plugin name returned as a constant by any function (not only a property's read handler) is now a named constant: a call's result is followed like a property read, matched by the function's name across every script in the load order (a match across unrelated scripts only makes the verdict stricter). Called by nothing: Safe; called only for presence checks: Rewritable; called for GetFormFromFile: Compatibility Required with the caller named; anything else: Unknown.
