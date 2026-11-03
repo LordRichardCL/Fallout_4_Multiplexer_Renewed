@@ -765,6 +765,9 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                         r.decEnd = dec.second;
                         r.text = std::string(text.substr(m.begin, m.end - m.begin)) + "|" + formatFormId(r.formId).substr(2);
                         if (bpKey == "workshop") {
+                            const auto base = jsonValue(text, from, close, "baseid_dec");
+                            r.baseBegin = base.first;
+                            r.baseEnd = base.second;
                             // Its base object (baseid_dec) is stored without a plugin name: the Auto-Merger
                             // rewrites the workbench only when that base does not move (checked against the
                             // workbench's record).

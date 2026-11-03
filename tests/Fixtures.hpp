@@ -557,6 +557,42 @@ inline std::vector<uint8_t> flowScript(const std::string& plugin, uint32_t formI
     return pexFile(strings, "Flow", o.take());
 }
 
+// A script looking records up through its own function, as mods do (PirateCompatUpdater):
+// OnInit calls self.AddItem("plugin", formId), and AddItem(asPlugin, aiFormID) calls
+// Game.GetFormFromFile(aiFormID, asPlugin). With `traceId`, AddItem also logs aiFormID (read twice).
+inline std::vector<uint8_t> pairedLookupScript(const std::string& plugin, uint32_t formId, bool traceId = false)
+{
+    using namespace fo4mx;
+    const std::vector<std::string> strings = {"Paired", "", "OnInit", "None", "AddItem", "asPlugin", "String",
+                                              "aiFormID", "Int", "::temp0", "Form", "self", "::nonevar", "Game",
+                                              "GetFormFromFile", plugin, "Debug", "Trace"};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0); // structs, variables, properties
+    o.write<uint16_t>(1); // states
+    o.write<uint16_t>(1); // default state
+    o.write<uint16_t>(2); // functions
+    auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    auto str = [&](uint16_t i) { o.write<uint8_t>(2); o.write<uint16_t>(i); };
+    auto integer = [&](int32_t v) { o.write<uint8_t>(3); o.write<int32_t>(v); };
+    // OnInit: self.AddItem("plugin", formId)
+    o.write<uint16_t>(2); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0); // params
+    o.write<uint16_t>(0); // locals
+    o.write<uint16_t>(1);
+    o.write<uint8_t>(0x17); ident(4); ident(11); ident(12); integer(2); str(15); integer(static_cast<int32_t>(formId));
+    // AddItem(asPlugin, aiFormID)
+    o.write<uint16_t>(4); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(2); o.write<uint16_t>(5); o.write<uint16_t>(6); o.write<uint16_t>(7); o.write<uint16_t>(8);
+    o.write<uint16_t>(1); o.write<uint16_t>(9); o.write<uint16_t>(10); // ::temp0 : Form
+    o.write<uint16_t>(traceId ? 2 : 1);
+    o.write<uint8_t>(0x19); ident(13); ident(14); ident(9); integer(2); ident(7); ident(5); // GetFormFromFile(aiFormID, asPlugin)
+    if (traceId) {
+        o.write<uint8_t>(0x19); ident(16); ident(17); ident(12); integer(1); ident(7); // Debug.Trace(aiFormID)
+    }
+    return pexFile(strings, "Paired", o.take());
+}
+
 inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugin, int sizeAdjust = 0)
 {
     ScriptOptions opt;

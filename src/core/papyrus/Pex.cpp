@@ -456,6 +456,50 @@ public:
         for (size_t f = 0; f < functions_.size(); ++f)
             if (!functions_[f].name.empty())
                 byName.emplace(toLower(functions_[f].name), f);
+        // The operand an instruction writes (-1: none), as the flow below skips it.
+        auto destOf = [&](uint8_t op) {
+            if ((op >= 0x01 && op <= 0x13) || op == 0x1B || op == 0x1E || op == 0x1F || op == 0x20 || op == 0x24 ||
+                op == 0x25 || op == 0x26)
+                return 0;
+            if (op == 0x1C || op == kCallStatic || op == kCallMethod)
+                return 2;
+            if (op == kCallParent || op == 0x22 || op == 0x23 || op == 0x28 || op == 0x29)
+                return 1;
+            return -1;
+        };
+        // An own function passing two of its parameters straight to Game.GetFormFromFile(M, N), M read
+        // nowhere else and neither ever written (addModItemToFormList(pluginName, formId, ...)): each
+        // call site then gives the lookup its FormID, and a constant there is a fixed FormID.
+        std::map<size_t, std::pair<size_t, size_t>> pairedLookup; // function -> (FormID param, name param)
+        for (size_t f = 0; f < functions_.size(); ++f) {
+            const auto& F = functions_[f];
+            auto paramIndex = [&](const Value& v) -> int {
+                if (v.type != 1)
+                    return -1;
+                const auto it = std::find(F.params.begin(), F.params.end(), out_.strings[v.string]);
+                return it == F.params.end() ? -1 : static_cast<int>(it - F.params.begin());
+            };
+            int m = -1, n = -1, lookups = 0;
+            std::map<int, int> reads, writes;
+            for (const auto& in : F.code) {
+                const int dest = destOf(in.op);
+                for (size_t k = 0; k < in.args.size() + in.varargs.size(); ++k) {
+                    const int pi = paramIndex(k < in.args.size() ? in.args[k] : in.varargs[k - in.args.size()]);
+                    if (pi < 0)
+                        continue;
+                    ++(static_cast<int>(k) == dest ? writes : reads)[pi];
+                }
+                if (in.op == kCallStatic && in.args.size() == 3 && in.args[0].type == 1 && in.args[1].type == 1 &&
+                    iequals(out_.strings[in.args[0].string], "Game") &&
+                    iequals(out_.strings[in.args[1].string], "GetFormFromFile") && in.varargs.size() == 2) {
+                    ++lookups;
+                    m = paramIndex(in.varargs[0]);
+                    n = paramIndex(in.varargs[1]);
+                }
+            }
+            if (lookups == 1 && m >= 0 && n >= 0 && m != n && reads[m] == 1 && !writes.count(m) && !writes.count(n))
+                pairedLookup[f] = {static_cast<size_t>(m), static_cast<size_t>(n)};
+        }
         auto nodeOf = [&](size_t f, const std::string& n) {
             const auto& F = functions_[f];
             if (F.locals.count(n) || std::find(F.params.begin(), F.params.end(), n) != F.params.end())
@@ -528,6 +572,9 @@ public:
                                 s.kind = ValueSink::Kind::Log;
                                 sink(p, s);
                                 sink(t, s);
+                            } else if (gfff && k == 1 && pairedLookup.count(f) && va[0].type == 1 && va[1].type == 1) {
+                                // Recorded at each call site instead (the FormID comes from there).
+                                continue;
                             } else if (gfff && k == 1) {
                                 ValueSink s;
                                 s.kind = ValueSink::Kind::GetFormFromFile;
@@ -550,6 +597,24 @@ public:
                         const std::string fn = out_.strings[a[0].string];
                         const bool own = a[1].type == 1 && iequals(out_.strings[a[1].string], "self");
                         auto callee = own ? byName.find(toLower(fn)) : byName.end();
+                        if (callee != byName.end()) {
+                            if (auto pl = pairedLookup.find(callee->second);
+                                pl != pairedLookup.end() && pl->second.first < va.size() && pl->second.second < va.size()) {
+                                const Value& id = va[pl->second.first];
+                                const Value& nm = va[pl->second.second];
+                                std::set<size_t> names;
+                                of(nm, names, t);
+                                if (pluginLike(nm))
+                                    names.insert(originOf(nm, false));
+                                ValueSink s;
+                                s.kind = ValueSink::Kind::GetFormFromFile;
+                                s.formIdLiteral = id.type == 3;
+                                s.formId = id.integer;
+                                s.formIdOffset = id.offset;
+                                sink(names, s);
+                                other(t, "GetFormFromFile with text built from the name");
+                            }
+                        }
                         for (size_t k = 0; k < va.size(); ++k) {
                             if (callee != byName.end() && k < functions_[callee->second].params.size()) {
                                 const auto param = std::to_string(callee->second) + ":" + functions_[callee->second].params[k];

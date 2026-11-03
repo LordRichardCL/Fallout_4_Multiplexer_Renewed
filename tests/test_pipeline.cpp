@@ -3147,8 +3147,9 @@ TEST(references_settlement_workbench_with_a_moving_base)
 }
 
 // 6g. Per-plugin FormID INIs (bcr\<plugin>.ini, FormIDs relative to the plugin): written again as
-//     bcr\<output>.ini with the new FormIDs, the INIs of plugins compiled into one output merged. A
-//     key in two of them, or a line that is not "[section]" / "key=<FormID>", keeps the plugins out.
+//     bcr\<output>.ini with the new FormIDs, the INIs of plugins compiled into one output merged (a
+//     key two of them use gets the plugin's name appended). A line that is not "[section]" or
+//     "key=<FormID>" keeps the plugin out.
 TEST(references_per_plugin_formid_inis)
 {
     {
@@ -3198,11 +3199,18 @@ TEST(references_per_plugin_formid_inis)
         CHECK(slurpFile(result.directory / "Multiplexer_Relinked.tsv").find("bcr\\" + output + ".ini") != std::string::npos);
     }
     {
+        // A key both INIs use: the later plugin's gets its name appended.
         auto p = run("refbcrdup", "[Weapons]\nweaponFormId_A=812\n", "[weapons]\nWEAPONFORMID_A=800\n");
         CHECK(p->compile());
-        const auto& kept = p->session().autoRetained;
-        CHECK(kept.count("mods.esp") && kept.at("mods.esp").find("is in the INIs of both") != std::string::npos);
-        CHECK(kept.count("modt.esp") == 1);
+        auto result = p->exportOutputs();
+        CHECK(p->session().autoRetained.empty());
+        std::string output;
+        for (const auto& mp : p->compiledOutput()->mappings)
+            if (iequals(mp.sourcePlugin, "ModT.esp"))
+                output = mp.outputPlugin;
+        const auto text = slurpFile(result.directory / "bcr" / (output + ".ini"));
+        CHECK(text.find("weaponFormId_A=") != std::string::npos);
+        CHECK(text.find("WEAPONFORMID_A_ModT=") != std::string::npos);
     }
     {
         auto p = run("refbcrodd", "[Weapons]\nweaponFormId_A=812\nmode=fast\n", "[Weapons]\nweaponFormId_B=800\n");
@@ -3211,6 +3219,100 @@ TEST(references_per_plugin_formid_inis)
         CHECK(refs.size() == 1 && refs[0]->reason.find("line 3") != std::string::npos);
         CHECK_EQ(p->session().findPlugin("ModS.esp")->eligibility, Eligibility::Ineligible);
         CHECK_EQ(p->session().findPlugin("ModT.esp")->eligibility, Eligibility::Eligible);
+    }
+}
+
+// 6h. The workbench's base object is its own plugin's record and baseid_dec is that record's ID: the
+//     base moves with the workbench, so baseid_dec gets its new ID too.
+TEST(references_settlement_workbench_with_its_own_base)
+{
+    auto root = blueprintInstall("refworkbenchown", 0x01000812);
+    std::string bp = kBlueprint;
+    bp.replace(bp.find("\"baseid_dec\": 31374"), 19, "\"baseid_dec\": 2066");
+    writeFile(root / "Game" / "Data" / "F4SE" / "Plugins" / "TransferSettlements" / "blueprints" / "Test.json", bp);
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    auto result = p.exportOutputs();
+    CHECK(p.compiledOutput()->isCompiled(p.session().findPlugin("ModS.esp")->index));
+    const auto copy = result.directory / "f4se" / "plugins" / "transfersettlements" / "blueprints" / "test.json";
+    CHECK(std::filesystem::exists(copy));
+    if (std::filesystem::exists(copy)) {
+        const auto text = slurpFile(copy);
+        for (const auto& mp : p.compiledOutput()->mappings)
+            if (iequals(mp.sourcePlugin, "ModS.esp") && mp.sourceObjectId == 0x812)
+                CHECK(text.find("\"baseid_dec\": " + std::to_string(mp.objectId) + ",") != std::string::npos);
+        CHECK(text.find("\"baseid_dec\": 2066") == std::string::npos);
+    }
+}
+
+// 6i. A lookup of a FormID that is no record of its plugin shares the name with a presence check that
+//     is renamed: only that plugin stays out, with the reason.
+TEST(references_left_lookup_sharing_a_renamed_name)
+{
+    auto root = referenceInstall("refleftshared");
+    const auto script = flowScript("ModS.esp", 0x999); // ModS has no record 999
+    writeFile(root / "Game" / "Data" / "Scripts" / "Flow.pex", std::string(reinterpret_cast<const char*>(script.data()), script.size()));
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto& kept = p.session().autoRetained;
+    CHECK(kept.count("mods.esp") && kept.at("mods.esp").find("shares the plugin's name with a use that is renamed") !=
+                                        std::string::npos);
+    CHECK(kept.count("modt.esp") == 0);
+}
+
+// 6j. A lookup through the script's own function (AddItem(asPlugin, aiFormID) calling
+//     GetFormFromFile(aiFormID, asPlugin)): the FormID is the constant at the call site, so the
+//     lookup is rewritable there. Read anywhere else in the function, it is not.
+TEST(references_lookup_through_own_function)
+{
+    auto refs = ReferenceScanner::inspect(kNames, "scripts\\paired.pex", pairedLookupScript("ModS.esp", 0x812));
+    CHECK_EQ(refs.size(), size_t(1));
+    if (!refs.empty()) {
+        CHECK_EQ(refs[0].cls, ReferenceClass::Rewritable);
+        CHECK(refs[0].hasFormId && refs[0].formId == 0x812u && refs[0].pexFormIdOffset != 0);
+    }
+    auto traced = ReferenceScanner::inspect(kNames, "scripts\\paired.pex", pairedLookupScript("ModS.esp", 0x812, true));
+    CHECK(traced.size() == 1 && traced[0].cls == ReferenceClass::Unsafe);
+
+    auto root = referenceInstall("refpaired");
+    const auto script = pairedLookupScript("ModS.esp", 0x812);
+    writeFile(root / "Game" / "Data" / "Scripts" / "Paired.pex", std::string(reinterpret_cast<const char*>(script.data()), script.size()));
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+    CHECK(p.compile());
+    auto result = p.exportOutputs();
+    const auto copy = result.directory / "scripts" / "paired.pex";
+    CHECK(std::filesystem::exists(copy));
+    if (std::filesystem::exists(copy)) {
+        std::ifstream in(copy, std::ios::binary);
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        auto names = kNames;
+        uint32_t moved = 0;
+        std::string output;
+        for (const auto& mp : p.compiledOutput()->mappings)
+            if (iequals(mp.sourcePlugin, "ModS.esp") && mp.sourceObjectId == 0x812)
+                moved = mp.objectId, output = mp.outputPlugin;
+        names[toLower(output)] = 99;
+        const auto after = ReferenceScanner::inspect(names, "scripts\\paired.pex", bytes);
+        size_t lookups = 0; // the old name stays unused in the string table (Safe)
+        for (const auto& r : after)
+            if (r.cls != ReferenceClass::Safe) {
+                ++lookups;
+                CHECK(r.plugin == 99 && r.hasFormId && r.formId == moved);
+            }
+        CHECK_EQ(lookups, size_t(1));
     }
 }
 

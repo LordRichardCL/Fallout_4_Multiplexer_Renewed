@@ -117,6 +117,13 @@ struct Relocation {
     }
 };
 
+// A planned change that only one plugin makes unsafe: that plugin stays out, and the file is
+// planned again without it in the next round (the others are not kept out with it).
+struct PluginFailure : std::runtime_error {
+    PluginIndex plugin;
+    PluginFailure(PluginIndex p, const std::string& what) : std::runtime_error(what), plugin(p) {}
+};
+
 // A span of the original file and what replaces it.
 struct Edit {
     size_t begin = 0, end = 0;
@@ -402,25 +409,39 @@ void planFormIdInis(const Session& session, const Relocation& where,
             std::map<std::string, std::string> sectionName;
             std::map<std::pair<std::string, std::string>, PluginIndex> seen;
             std::vector<std::tuple<std::string, std::string, uint32_t>> expected;
+            std::map<std::pair<PluginIndex, size_t>, std::string> renamedKeys; // (plugin, entry) -> new key
             bool crlf = false;
             for (const auto& part : parts) {
                 crlf |= part.ini.crlf;
                 for (size_t i = 0; i < part.ini.entries.size(); ++i) {
                     const auto& e = part.ini.entries[i];
                     const std::string sec = toLower(e.section);
-                    auto [it, added] = seen.emplace(std::make_pair(sec, toLower(e.key)), part.plugin);
-                    if (!added)
-                        throw std::runtime_error("[" + e.section + "] " + e.key + " is in the INIs of both " +
-                                                 session.plugins[it->second].name + " and " +
-                                                 session.plugins[part.plugin].name);
+                    // Keys are each file's own labels ("weaponFormId_<anything>"), so the tool lists a
+                    // section's keys rather than looking up fixed names. A key two INIs share gets the
+                    // plugin's name appended, keeping the original key as its prefix.
+                    std::string key = e.key;
+                    auto [it, added] = seen.emplace(std::make_pair(sec, toLower(key)), part.plugin);
+                    if (!added) {
+                        std::string suffix;
+                        for (char ch : session.plugins[part.plugin].baseName())
+                            if (std::isalnum(static_cast<unsigned char>(ch)))
+                                suffix += ch;
+                        const PluginIndex other = it->second;
+                        key = e.key + "_" + suffix;
+                        if (suffix.empty() || !seen.emplace(std::make_pair(sec, toLower(key)), part.plugin).second)
+                            throw std::runtime_error("[" + e.section + "] " + e.key + " is in the INIs of both " +
+                                                     session.plugins[other].name + " and " +
+                                                     session.plugins[part.plugin].name);
+                        renamedKeys[{part.plugin, i}] = key;
+                    }
                     if (!lines.count(sec)) {
                         order.push_back(sec);
                         sectionName[sec] = e.section;
                     }
                     char hex[16];
                     std::snprintf(hex, sizeof(hex), e.uppercase ? "%X" : "%x", part.ids[i]);
-                    lines[sec].push_back(e.key + "=" + (e.prefixed ? "0x" : "") + hex);
-                    expected.emplace_back(sec, toLower(e.key), part.ids[i]);
+                    lines[sec].push_back(key + "=" + (e.prefixed ? "0x" : "") + hex);
+                    expected.emplace_back(sec, toLower(key), part.ids[i]);
                 }
             }
             const std::string eol = crlf ? "\r\n" : "\n";
@@ -451,7 +472,11 @@ void planFormIdInis(const Session& session, const Relocation& where,
             for (const auto& part : parts) {
                 for (size_t i = 0; i < part.ini.entries.size(); ++i) {
                     const auto& e = part.ini.entries[i];
-                    first->changes.push_back({part.plugin, "[" + e.section + "] " + e.key, "per-plugin FormID INI",
+                    const auto renamed = renamedKeys.find({part.plugin, i});
+                    first->changes.push_back({part.plugin,
+                                              "[" + e.section + "] " + e.key +
+                                                  (renamed != renamedKeys.end() ? " (written as " + renamed->second + ")" : ""),
+                                              "per-plugin FormID INI",
                                               session.plugins[part.plugin].name + "|" + formatFormId(e.formId).substr(2),
                                               output + "|" + formatFormId(part.ids[i]).substr(2)});
                     ++first->changedPairs;
@@ -553,7 +578,9 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
             // A settlement's workbench is stored with its base object as a bare number (baseid_dec,
             // no plugin name). Moving the workbench is exact only when that base does not move: its
             // base, as the game loads the workbench, must come from a plugin that is not compiled.
-            auto workbenchBaseStays = [&](const PluginReference& r) {
+            // Returns the decimal to write for baseid_dec (empty: unchanged).
+            auto workbenchBase = [&](const PluginReference& r, const std::string& workbenchOutput,
+                                     std::string_view text) -> std::string {
                 const uint32_t mask = session.plugins[r.plugin].isLight() ? 0xFFF : 0xFFFFFF;
                 const auto* inst = session.winner(FormKey{r.plugin, r.formId & mask});
                 if (!inst)
@@ -564,10 +591,26 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                 if (!name || name->data.size() < 4)
                     throw std::runtime_error("the settlement's workbench has no base object");
                 const FormKey base = session.resolve(session.plugins[inst->plugin], loadLE<uint32_t>(name->data.data()));
-                if (!base.valid() || compiled.isCompiled(base.origin))
-                    throw std::runtime_error("the settlement's workbench has its base object " + session.formLabel(base) +
-                                             " in a compiled plugin; the blueprint stores that base without a plugin "
-                                             "name, so it cannot be rewritten with certainty");
+                if (!base.valid())
+                    throw PluginFailure(r.plugin, "the settlement's workbench has no valid base object");
+                if (!compiled.isCompiled(base.origin))
+                    return {}; // the base does not move
+                // baseid_dec is the base's object ID in the workbench's own plugin (no plugin name is
+                // written for it): rewritten when that is what it holds and the base moves with the
+                // workbench into the same output.
+                const uint32_t baseMask = session.plugins[base.origin].isLight() ? 0xFFF : 0xFFFFFF;
+                const std::string digits = r.baseEnd > r.baseBegin
+                                               ? std::string(text.substr(r.baseBegin, r.baseEnd - r.baseBegin))
+                                               : std::string();
+                const auto* movedBase = where.find(session, base.origin, base.objectId);
+                if (base.origin == r.plugin && !digits.empty() && digits.size() <= 10 &&
+                    std::stoull(digits) == (base.objectId & baseMask) && movedBase &&
+                    iequals(movedBase->first, workbenchOutput))
+                    return std::to_string(movedBase->second);
+                throw PluginFailure(r.plugin, "the settlement's workbench has its base object " + session.formLabel(base) +
+                                                  " in a compiled plugin, and baseid_dec does not name it in the "
+                                                  "workbench's own plugin and output, so it cannot be rewritten with "
+                                                  "certainty");
             };
             auto primaryOf = [&](PluginIndex p) {
                 // Only names without a FormID (presence checks, requirements) are renamed: any
@@ -605,6 +648,26 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                             throw std::runtime_error(r->text + " is shared by lookups of records that are in " + it->second +
                                                      " and " + moved->first + "; one name cannot point at both");
                     }
+                }
+                // A lookup whose FormID is no record of its plugin is left as it was (the game finds
+                // nothing, before and after). When its name is one constant with a use that is renamed,
+                // the left lookup would read the output with its old FormID, which may be an unrelated
+                // record: that plugin stays out (the others are planned again without it).
+                {
+                    std::map<size_t, PluginIndex> leftSlot;
+                    std::set<size_t> renamedSlot;
+                    for (const auto* r : todo) {
+                        if (r->hasFormId && !where.find(session, r->plugin, r->formId))
+                            leftSlot.emplace(r->pexStringOffset, r->plugin);
+                        else
+                            renamedSlot.insert(r->pexStringOffset);
+                    }
+                    for (const auto& [slot, plugin] : leftSlot)
+                        if (renamedSlot.count(slot))
+                            throw PluginFailure(plugin, "a GetFormFromFile of a FormID that is no record of " +
+                                                            session.plugins[plugin].name +
+                                                            " shares the plugin's name with a use that is renamed; it "
+                                                            "would read the output with that FormID");
                 }
                 std::set<size_t> stringPatched;
                 for (const auto* r : todo) {
@@ -658,8 +721,11 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                             leave(*r);
                             continue;
                         }
-                        if (r->context == "Transfer Settlements workbench")
-                            workbenchBaseStays(*r);
+                        if (r->context == "Transfer Settlements workbench") {
+                            const auto base = workbenchBase(*r, moved->first, text);
+                            if (!base.empty())
+                                edits.push_back({r->baseBegin, r->baseEnd, base});
+                        }
                         const std::string id = hexLike(moved->second, r->idEnd - r->idBegin);
                         edits.push_back({r->nameBegin, r->nameEnd, moved->first});
                         if (r->idEnd > r->idBegin) // some pairs write the FormID only in decimal
@@ -703,6 +769,12 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                 throw std::runtime_error(problem);
             f.outputHash = hashOf(f.output);
             f.planned = true;
+        } catch (const PluginFailure& e) {
+            f.validation = e.what();
+            f.output.clear();
+            f.changes.clear();
+            failed.emplace(e.plugin, "Advanced Users Auto-Merger: " + f.path + " could not be rewritten safely (" +
+                                         f.validation + ")");
         } catch (const std::exception& e) {
             f.validation = e.what();
             f.output.clear();
