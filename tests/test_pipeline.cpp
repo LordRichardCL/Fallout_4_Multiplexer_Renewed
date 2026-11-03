@@ -2806,6 +2806,35 @@ TEST(references_folder_and_path)
     CHECK_EQ(s.findPlugin("ModT.esp")->eligibility, Eligibility::Ineligible);
 }
 
+// 6b. A folder named after the plugin whose every file the plugin's records name by path (a static
+//     collection's mesh) is Safe: the game loads those files by path. One more file nobody names keeps
+//     it Unknown.
+TEST(references_folder_of_record_paths)
+{
+    auto root = referenceInstall("refrecordpaths");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModS.esp", {"Fallout4.esm"},
+                {record("SCOL", 0x01000812, {zs("EDID", "ModS_Collection"), zs("MODL", "SCOL\\ModS.esp\\CM01000812.NIF")})});
+    writePlugin(data / "ModT.esp", {"Fallout4.esm"},
+                {record("SCOL", 0x01000800, {zs("EDID", "ModT_Collection"), zs("MODL", "SCOL\\ModT.esp\\CM01000800.NIF")})});
+    writeFile(data / "Meshes" / "SCOL" / "ModS.esp" / "CM01000812.NIF", "nif");
+    writeFile(data / "Meshes" / "SCOL" / "ModT.esp" / "CM01000800.NIF", "nif");
+    writeFile(data / "Meshes" / "SCOL" / "ModT.esp" / "Unlisted.nif", "nif");
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    auto refs = referencesOf(s, "ModS.esp");
+    CHECK_EQ(refs.size(), size_t(1));
+    if (!refs.empty())
+        CHECK_EQ(refs[0]->cls, ReferenceClass::Safe);
+    CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+    auto t = referencesOf(s, "ModT.esp");
+    CHECK_EQ(t.size(), size_t(1));
+    if (!t.empty())
+        CHECK_EQ(t[0]->cls, ReferenceClass::Unknown);
+}
+
 // 7. Safe and unsafe references together: the most restrictive decides.
 TEST(references_mixed_safe_and_unsafe)
 {

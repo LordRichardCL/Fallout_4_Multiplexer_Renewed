@@ -653,3 +653,9 @@ Build 66: 1,804 plugins compiled, 0 errors; 42 kept out automatically. Most of t
 The other keep-outs are by design: new references and cells in precombine or previs data, five plugins that would need more than 2,000 archive winner copies, and three records that reference a record their plugin does not compile.
 
 `Multiplexer_Compilation.json` is no longer written: everything in it is in the Compilation Report.
+
+## Folders of record paths (R1)
+
+Build 67: 1,860 plugins compiled (+56), 975,125 new FormIDs, 0 errors; 25 kept out automatically (as planned: precombine/previs data, very large archive packs and records referencing records their plugin does not compile). Every record type compiles; what keeps plugins out is filename references.
+
+The largest group of Unknown references was a folder named after the plugin, most of them `meshes\scol\<plugin>\` (24). A static collection's mesh is named by its full path in the SCOL record's model, so the game loads it by that path, which compiling keeps unchanged. A folder named after the plugin is now Safe when every file in it is named by path in the plugin's own records (models, textures, sounds); a folder with any file nothing names stays Unknown.

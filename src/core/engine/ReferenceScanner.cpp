@@ -6,6 +6,8 @@
 #include "util/Text.hpp"
 
 #include <algorithm>
+#include <cstring>
+#include <unordered_set>
 #include <atomic>
 #include <cctype>
 #include <map>
@@ -63,6 +65,7 @@ enum class Fact {
     EngineFolder,        // FaceGen / face textures / LOD billboards folder named after the plugin
     VoiceFolder,         // sound\voice\<plugin>\: relocated with the plugin's responses at export
     OtherFolder,         // any other folder named after the plugin
+    RecordPathFolder,    // a folder named after the plugin whose every file its records name by path
     EngineFileName,      // seq\<plugin>.seq (start-game-enabled quests)
     ToolFileName,        // RobCo Patcher INI named after the plugin
     OtherFileName,       // any other file named after the plugin
@@ -124,6 +127,10 @@ Rule rule(Fact f)
         return {K::Directory, C::CompatibilityRequired, "engine folder",
                 "the game finds these files by the defining plugin's name; moving them to the output is not "
                 "implemented"};
+    case Fact::RecordPathFolder:
+        return {K::Directory, C::Safe, "folder of record paths",
+                "every file in this folder is named by its full path in the plugin's records (models, sounds): the "
+                "game loads them by that path, which compiling keeps unchanged"};
     case Fact::OtherFolder:
         return {K::Directory, C::Unknown, "folder",
                 "a folder named after the plugin: something may find these files by the plugin's name"};
@@ -262,6 +269,39 @@ const NamedFolder kEngineFolders[] = {
     {"vis\\", "previs data"},
     {"f4se\\plugins\\f4ee\\overlays\\", "LooksMenu overlays (loaded only for an installed plugin of this name)"},
 };
+
+// Every asset path (model, texture, sound, ...) the plugin's records name, normalised as the asset
+// index has them; read once per plugin.
+const std::unordered_set<std::string>& assetPathsOf(const Session& session, PluginIndex plugin,
+                                                    std::map<PluginIndex, std::unordered_set<std::string>>& cache)
+{
+    if (auto it = cache.find(plugin); it != cache.end())
+        return it->second;
+    auto& out = cache[plugin];
+    for (const auto& r : session.records) {
+        if (r.plugin != plugin)
+            continue;
+        try {
+            const Record rec = const_cast<Session&>(session).loadRecord(r);
+            for (const auto& sub : rec.subrecords) {
+                const AssetRole role = session.defs.assetRole(r.signature, sub.signature);
+                if (role == AssetRole::None || sub.data.empty())
+                    continue;
+                std::string value(reinterpret_cast<const char*>(sub.data.data()),
+                                  strnlen(reinterpret_cast<const char*>(sub.data.data()), sub.data.size()));
+                std::string path = normalizeAssetPath(value);
+                if (path.empty())
+                    continue;
+                const std::string root = assetRoot(role);
+                if (!istartsWith(path, root))
+                    path = root + path;
+                out.insert(toLower(path));
+            }
+        } catch (const std::exception&) {
+        }
+    }
+    return out;
+}
 
 bool contentCandidate(const std::string& p, const ReferenceScanOptions& o)
 {
@@ -477,6 +517,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
 
     std::vector<uint32_t> candidates;
     std::map<std::pair<PluginIndex, std::string>, std::pair<size_t, std::string>> folders; // -> (files, mod)
+    std::map<std::pair<PluginIndex, std::string>, std::vector<std::string>> folderFiles;
     for (uint32_t i = 0; i < idx.entries.size(); ++i) {
         const auto& p = idx.path(idx.entries[i]);
         if (contentCandidate(p, options))
@@ -505,6 +546,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                 auto& f = folders[{it->second, toLower(p.substr(0, slash + 1))}];
                 if (f.first++ == 0)
                     f.second = idx.modName(idx.entries[i].winner());
+                folderFiles[{it->second, toLower(p.substr(0, slash + 1))}].push_back(toLower(p));
             }
             begin = slash + 1;
         }
@@ -519,6 +561,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             session.nameReferences.push_back(std::move(r));
         }
     }
+    std::map<PluginIndex, std::unordered_set<std::string>> pathCache;
     for (const auto& [key, value] : folders) {
         const auto& [plugin, folder] = key;
         const NamedFolder* engine = nullptr;
@@ -529,8 +572,20 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
         const std::string pre = engine ? engine->prefix : "";
         const bool voice = pre == "sound\\voice\\" || pre == "meshes\\actors\\character\\facegendata\\facegeom\\" ||
                            pre == "textures\\actors\\character\\facecustomization\\";
-        auto r = make(voice ? Fact::VoiceFolder : engine ? Fact::EngineFolder : Fact::OtherFolder, plugin, folder,
-                      "Folder", session.plugins[plugin].key, std::to_string(value.first) + " files");
+        // Any other folder: Safe when the plugin's records name every file in it by path (static
+        // collection meshes in meshes\scol\<plugin>\, sound files): those are found by path, not by name.
+        bool byPath = false;
+        if (!engine) {
+            const auto& named = assetPathsOf(session, plugin, pathCache);
+            const auto& files = folderFiles[key];
+            byPath = !files.empty() && std::all_of(files.begin(), files.end(),
+                                                   [&](const std::string& f) { return named.count(f) > 0; });
+        }
+        auto r = make(voice    ? Fact::VoiceFolder
+                      : engine ? Fact::EngineFolder
+                      : byPath ? Fact::RecordPathFolder
+                               : Fact::OtherFolder,
+                      plugin, folder, "Folder", session.plugins[plugin].key, std::to_string(value.first) + " files");
         if (voice) {
             r.context = engine->what;
             r.reason = std::string(engine->what) + ": copied at export into the output's folder, named after the "
