@@ -345,6 +345,7 @@ private:
                 auto pr = readOf(*p, PropertyRead::Use::GetFormFromFile);
                 pr.formIdLiteral = varargs[0].type == 3;
                 pr.formId = varargs[0].integer;
+                pr.formIdOffset = varargs[0].offset;
                 out_.propertyReads.push_back(std::move(pr));
             }
         } else {

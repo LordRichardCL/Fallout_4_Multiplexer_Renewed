@@ -460,11 +460,13 @@ inline std::vector<uint8_t> nameFunctionScript(const std::string& plugin, const 
 
 // "Caller": OnInit calls kProgram.GetPluginName() and passes the result to Game.IsPluginInstalled.
 // With `receiverType`, kProgram is a script variable of that type (otherwise undeclared: unknown).
-inline std::vector<uint8_t> nameCallerScript(const std::string& receiverType = {})
+// With `lookup` (>= 0), the result goes to Game.GetFormFromFile(lookup, name) instead.
+inline std::vector<uint8_t> nameCallerScript(const std::string& receiverType = {}, int64_t lookup = -1)
 {
     using namespace fo4mx;
     const std::vector<std::string> strings = {"Caller", "", "OnInit", "None", "GetPluginName", "kProgram", "::temp0",
-                                              "Bool", "::temp1", "String", "Game", "IsPluginInstalled", receiverType};
+                                              "Bool", "::temp1", "String", "Game", "IsPluginInstalled", receiverType,
+                                              "GetFormFromFile"};
     BinaryWriter o;
     o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
     o.write<uint16_t>(0); // structs
@@ -482,7 +484,12 @@ inline std::vector<uint8_t> nameCallerScript(const std::string& receiverType = {
     o.write<uint16_t>(2);
     auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
     o.write<uint8_t>(0x17); ident(4); ident(5); ident(8); o.write<uint8_t>(3); o.write<int32_t>(0); // ::temp1 = kProgram.GetPluginName()
-    o.write<uint8_t>(0x19); ident(10); ident(11); ident(6); o.write<uint8_t>(3); o.write<int32_t>(1); ident(8);
+    if (lookup >= 0) { // ::temp0 = Game.GetFormFromFile(lookup, ::temp1)
+        o.write<uint8_t>(0x19); ident(10); ident(13); ident(6); o.write<uint8_t>(3); o.write<int32_t>(2);
+        o.write<uint8_t>(3); o.write<int32_t>(static_cast<int32_t>(lookup)); ident(8);
+    } else {
+        o.write<uint8_t>(0x19); ident(10); ident(11); ident(6); o.write<uint8_t>(3); o.write<int32_t>(1); ident(8);
+    }
     return pexFile(strings, "Caller", o.take());
 }
 

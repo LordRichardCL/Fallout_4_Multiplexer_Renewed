@@ -124,6 +124,13 @@ struct PluginFailure : std::runtime_error {
     PluginFailure(PluginIndex p, const std::string& what) : std::runtime_error(what), plugin(p) {}
 };
 
+// A lookup reading its plugin name from another script's constant (its FormID is patched; the name
+// is changed where the constant is).
+bool readsConstant(const PluginReference& r)
+{
+    return r.context.size() > 24 && r.context.ends_with(") through the constant");
+}
+
 // A span of the original file and what replaces it.
 struct Edit {
     size_t begin = 0, end = 0;
@@ -615,6 +622,28 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                                                   "workbench's own plugin and output, so it cannot be rewritten with "
                                                   "certainty");
             };
+            // The output a constant read by lookups names: the one every lookup's record went into.
+            auto constantTarget = [&](PluginIndex p, const std::string& constant) {
+                std::string to;
+                for (const auto& rr : session.nameReferences) {
+                    if (rr.plugin != p || !readsConstant(rr) || rr.text != constant)
+                        continue;
+                    const auto* moved = where.find(session, p, rr.formId);
+                    if (!moved)
+                        throw PluginFailure(p, rr.assetPath + " (" + rr.location + ") looks up " + formatFormId(rr.formId) +
+                                                   ", which is no record of " + session.plugins[p].name +
+                                                   ", by the name in " + constant +
+                                                   "; renaming it would make that lookup read the output");
+                    if (to.empty())
+                        to = moved->first;
+                    else if (!iequals(to, moved->first))
+                        throw PluginFailure(p, "the lookups through " + constant + " are of records in " + to + " and " +
+                                                   moved->first + "; one name cannot point at both");
+                }
+                if (to.empty())
+                    throw PluginFailure(p, "no lookup reads " + constant);
+                return to;
+            };
             auto primaryOf = [&](PluginIndex p) {
                 // Only names without a FormID (presence checks, requirements) are renamed: any
                 // installed output answers them as the plugin did. A plugin whose records all went
@@ -643,7 +672,7 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                 // all of them must point at the same output, or the copy is not made (fail closed).
                 std::map<size_t, std::string> sharedTarget; // constant offset -> output
                 for (const auto* r : todo) {
-                    if (!r->hasFormId)
+                    if (!r->hasFormId || readsConstant(*r))
                         continue;
                     if (auto moved = where.find(session, r->plugin, r->formId)) {
                         auto [it, added] = sharedTarget.emplace(r->pexStringOffset, moved->first);
@@ -660,6 +689,8 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                     std::map<size_t, PluginIndex> leftSlot;
                     std::set<size_t> renamedSlot;
                     for (const auto* r : todo) {
+                        if (readsConstant(*r))
+                            continue; // checked with its constant (constantTarget)
                         if (r->hasFormId && !where.find(session, r->plugin, r->formId))
                             leftSlot.emplace(r->pexStringOffset, r->plugin);
                         else
@@ -674,6 +705,21 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                 }
                 std::set<size_t> stringPatched;
                 for (const auto* r : todo) {
+                    if (readsConstant(*r)) {
+                        // Only the FormID changes here: the name comes from the constant, renamed to
+                        // the output every lookup through it goes to.
+                        const std::string to = constantTarget(r->plugin, r->text);
+                        const auto* moved = where.find(session, r->plugin, r->formId);
+                        if (r->pexFormIdOffset < scan.stringTableEnd || r->pexFormIdOffset + 4 > original.size() ||
+                            loadLE<uint32_t>(original.data() + r->pexFormIdOffset) != r->formId)
+                            throw std::runtime_error("the script changed since it was scanned");
+                        pex::Patch id{r->pexFormIdOffset, std::vector<uint8_t>(4)};
+                        storeLE<uint32_t>(id.bytes.data(), moved->second);
+                        patches.push_back(std::move(id));
+                        change(*r, to + " " + formatFormId(moved->second));
+                        ++f.changedCalls;
+                        continue;
+                    }
                     if (r->pexStringOffset < scan.stringTableEnd || r->pexStringOffset + 2 > original.size() ||
                         loadLE<uint16_t>(original.data() + r->pexStringOffset) >= scan.strings.size() ||
                         toLower(scan.strings[loadLE<uint16_t>(original.data() + r->pexStringOffset)]) !=
@@ -695,7 +741,9 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                         ++f.changedCalls;
                     } else {
                         auto shared = sharedTarget.find(r->pexStringOffset);
-                        to = shared != sharedTarget.end() ? shared->second : primaryOf(r->plugin);
+                        to = r->context == "constant property read by GetFormFromFile" ? constantTarget(r->plugin, r->location)
+                             : shared != sharedTarget.end()                         ? shared->second
+                                                                                    : primaryOf(r->plugin);
                         expected.insert({toLower(to), false, 0});
                         change(*r, to);
                         ++f.renamed;

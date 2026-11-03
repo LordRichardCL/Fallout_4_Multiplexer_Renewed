@@ -1030,11 +1030,13 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
         struct Reader {
             const pex::PropertyRead* read;
             std::string script;
+            uint32_t entry;
         };
+        std::vector<PluginReference> readerRefs; // added after the loop (it walks nameReferences)
         std::unordered_map<std::string, std::vector<Reader>> readers; // property -> its reads
         for (size_t i = 0; i < candidates.size(); ++i)
             for (const auto& pr : reads[i])
-                readers[pr.property].push_back({&pr, idx.path(idx.entries[candidates[i]])});
+                readers[pr.property].push_back({&pr, idx.path(idx.entries[candidates[i]]), candidates[i]});
         // Script inheritance across the load order: a read reaches a constant of script X when it is
         // read from X, from a script extending X (inherited), or from a script X extends (X's version
         // may run). A read whose type is unknown, or names a script not in the load order, counts.
@@ -1093,14 +1095,48 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             const std::string counts = std::to_string(own.size()) + " reads: " + std::to_string(gfff) +
                                        " GetFormFromFile, " + std::to_string(presence) + " IsPluginInstalled, " +
                                        std::to_string(other) + " other";
-            if (gfff) {
+            // Read only by lookups with a constant FormID, made on the owner script itself (not a script
+            // it extends or one extending it, whose version may differ), and presence checks: the
+            // constant can name the output, and each lookup's FormID becomes the record's new one.
+            bool exact = gfff > 0 && other == 0;
+            for (const auto& rd : own)
+                if (rd.read->use == pex::PropertyRead::Use::GetFormFromFile)
+                    exact = exact && rd.read->formIdLiteral && rd.read->formIdOffset != 0 && rd.read->object == owner;
+            if (exact) {
+                r.cls = ReferenceClass::Rewritable;
+                r.context = "constant property read by GetFormFromFile";
+                r.reason = "the value of the constant " + r.location + " is only used by lookups with a constant FormID "
+                           "on " + r.location.substr(0, r.location.find('.')) + " and presence checks (" + counts +
+                           "): it can name the output plugin, and each lookup gets the record's new FormID";
+                for (const auto& rd : own) {
+                    if (rd.read->use != pex::PropertyRead::Use::GetFormFromFile)
+                        continue;
+                    PluginReference rr;
+                    rr.plugin = r.plugin;
+                    rr.assetPath = toLower(rd.script);
+                    rr.source = idx.modName(idx.entries[rd.entry].winner());
+                    rr.kind = ReferenceKind::Papyrus;
+                    rr.format = "PEX";
+                    rr.text = r.location; // the constant it reads
+                    rr.hasFormId = true;
+                    rr.formId = static_cast<uint32_t>(rd.read->formId);
+                    rr.pexFormIdOffset = rd.read->formIdOffset;
+                    rr.context = "Game.GetFormFromFile(" + formatFormId(rr.formId) + ") through the constant";
+                    rr.location = rd.read->where;
+                    rr.cls = ReferenceClass::Rewritable;
+                    rr.reason = "a lookup of a record of the plugin, its name read from the constant " + r.location +
+                                ": its FormID becomes the record's new one in the output the constant names";
+                    readerRefs.push_back(std::move(rr));
+                }
+            } else if (gfff) {
                 r.cls = ReferenceClass::CompatibilityRequired;
                 r.context = "constant property read by GetFormFromFile";
                 r.reason = "the value of the constant " + r.location + " is the file name " + firstGfff->script +
                            " (" + firstGfff->read->where + ") passes to Game.GetFormFromFile" +
                            (firstGfff->read->formIdLiteral ? " with FormID " + formatFormId(static_cast<uint32_t>(firstGfff->read->formId))
                                                            : std::string(" with a FormID computed at run time")) +
-                           " (" + counts + "); rewriting a name shared through a constant is not implemented";
+                           " (" + counts + "); only lookups with a constant FormID on " +
+                           r.location.substr(0, r.location.find('.')) + " itself, and presence checks, can be rewritten";
             } else if (other) {
                 r.cls = ReferenceClass::Unknown;
                 r.context = "constant property read by other code";
@@ -1117,6 +1153,8 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                            "(Game.IsPluginInstalled, " + counts + "): it can name the output plugin, which is installed";
             }
         }
+        for (auto& rr : readerRefs)
+            session.nameReferences.push_back(std::move(rr));
     }
 
     std::stable_sort(session.nameReferences.begin(), session.nameReferences.end(),

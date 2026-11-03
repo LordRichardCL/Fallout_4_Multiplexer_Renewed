@@ -61,6 +61,7 @@ struct PropertyRead {
     Use use = Use::Other;
     bool formIdLiteral = false; // GetFormFromFile with a constant FormID
     int32_t formId = 0;
+    size_t formIdOffset = 0;    // byte offset of that constant in the file
     std::string opcode;   // the instruction, for Other
     std::string where;    // "Object.State.Function"
 };

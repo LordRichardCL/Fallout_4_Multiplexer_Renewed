@@ -2961,6 +2961,50 @@ TEST(references_functions_returning_a_plugin_name)
         CHECK(s.size() == 1 && s[0]->cls == ReferenceClass::Safe); // nothing reads ModS:Program's
         CHECK(t.size() == 1 && t[0]->cls == ReferenceClass::Rewritable);
     }
+    // Read by a lookup with a constant FormID on ModS:Program itself: the constant names the output
+    // and the caller's FormID becomes the record's new one (two files, one change each).
+    for (const char* type : {"ModS:Program", ""}) {
+        auto root = referenceInstall(std::string("reffnlookup") + (*type ? "typed" : "untyped"));
+        auto data = root / "Game" / "Data";
+        const auto mine = nameFunctionScript("ModS.esp", "ModS:Program");
+        const auto caller = nameCallerScript(type, 0x812);
+        writeFile(data / "Scripts" / "ModS" / "Program.pex", std::string(reinterpret_cast<const char*>(mine.data()), mine.size()));
+        writeFile(data / "Scripts" / "Caller.pex", std::string(reinterpret_cast<const char*>(caller.data()), caller.size()));
+        auto cfg = configFor(root);
+        cfg.compile.autoMerge = true;
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const auto refs = referencesOf(p.session(), "ModS.esp");
+        if (!*type) {
+            // The caller's receiver type is unknown: it may be another mod's function, so not rewritten.
+            CHECK(refs.size() == 1 && refs[0]->cls == ReferenceClass::CompatibilityRequired);
+            CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Ineligible);
+            continue;
+        }
+        CHECK_EQ(refs.size(), size_t(2)); // the constant, and the lookup in Caller.pex
+        for (const auto* r : refs)
+            CHECK_EQ(r->cls, ReferenceClass::Rewritable);
+        CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+        CHECK(p.compile());
+        auto result = p.exportOutputs();
+        CHECK_EQ(p.validation()->errors, uint64_t(0));
+        uint32_t moved = 0;
+        std::string output;
+        for (const auto& mp : p.compiledOutput()->mappings)
+            if (iequals(mp.sourcePlugin, "ModS.esp") && mp.sourceObjectId == 0x812)
+                moved = mp.objectId, output = mp.outputPlugin;
+        const auto program = slurpFile(result.directory / "scripts" / "mods" / "program.pex");
+        CHECK(program.find(output) != std::string::npos);
+        const auto copy = slurpFile(result.directory / "scripts" / "caller.pex");
+        CHECK(!copy.empty());
+        std::string id(4, '\0');
+        storeLE<uint32_t>(reinterpret_cast<uint8_t*>(id.data()), moved);
+        CHECK(copy.find(id) != std::string::npos);
+        std::string old(4, '\0');
+        storeLE<uint32_t>(reinterpret_cast<uint8_t*>(old.data()), 0x812);
+        CHECK(copy.find(old) == std::string::npos);
+    }
 }
 
 // 6d. A plugin name kept in a variable is followed to where it goes, through the script's own
