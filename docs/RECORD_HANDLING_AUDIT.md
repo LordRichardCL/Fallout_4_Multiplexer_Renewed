@@ -766,3 +766,10 @@ Build 79: 2,106 plugins compiled (as build 78), 0 errors, 832 warnings; the Auto
 - **Fails closed.** A read on another type (a script the owner extends or one extending it), with an unknown type, with a FormID computed at run time, or used any other way keeps the constant Compatibility Required. A lookup of a FormID that is no record of the plugin, or lookups whose records went into different outputs, keep that plugin out (only that plugin).
 - **Expected to stay out:** CHALLENGES and MUTATION (their constant is also used another way), SS2_XPAC_Chapter2 (a FormID computed at run time), ghoulification and CBBE (another mod's constant, `GHUL:Types:TQuest`, names them).
 
+## Reads through scripts that extend the owner; the blocking read named (C7)
+
+Build 80: 2,110 plugins compiled (+4), 0 errors, 677 files relinked with 0 errors. KARMA, REPUTATION and No Sneaking in Power Armor compile (their names rewritten across their scripts). Munitions is now fully rewritable (132 references) but stays as a master of PBWChinaLake, whose BCR INI lists a FormID past FFF for an ESL-flagged plugin; NukaWorldOpenSeasonExtend has 154 lookups with FormIDs computed at run time.
+
+- **Reads through a script extending the owner.** Scripts now record the functions and properties they declare. A read made on a script that extends the owner reaches the owner's member when no script between them declares a member of that name; it is then rewritable like a read on the owner. Otherwise (or when a script in the chain is not in the load order) it is not.
+- **The reason names the blocking read:** the script, function and why (another use, a FormID computed at run time, an unknown type, a type whose member may be another), instead of the first lookup.
+

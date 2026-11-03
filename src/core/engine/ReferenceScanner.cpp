@@ -597,7 +597,8 @@ void flowReferences(std::vector<PluginReference>& out, const pex::ValueFlow& flo
 std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names, const std::string& path,
                                                        const std::vector<uint8_t>& bytes, const std::string& source,
                                                        std::vector<pex::PropertyRead>* propertyReads,
-                                                       std::pair<std::string, std::string>* extends)
+                                                       std::pair<std::string, std::string>* extends,
+                                                       std::vector<std::string>* members)
 {
     std::vector<PluginReference> out;
     const std::string format = extensionFormat(path);
@@ -606,6 +607,8 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
         auto scan = pex::scan(bytes);
         if (extends && scan.ok)
             *extends = {scan.objectName, scan.parentName};
+        if (members && scan.ok)
+            *members = scan.members;
         if (propertyReads && scan.ok)
             *propertyReads = std::move(scan.propertyReads);
         // A script that does not read back may read any property: each of its strings counts as a read
@@ -1003,6 +1006,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
     std::vector<std::vector<PluginReference>> found(candidates.size());
     std::vector<std::vector<pex::PropertyRead>> reads(candidates.size());
     std::vector<std::pair<std::string, std::string>> extends(candidates.size()); // (script, parent)
+    std::vector<std::vector<std::string>> members(candidates.size());            // its own functions, properties
     std::atomic<size_t> scanned{0};
     parallelFor(
         candidates.size(),
@@ -1011,7 +1015,8 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             const auto& path = idx.path(e);
             try {
                 auto bytes = readOriginal(session, e);
-                found[i] = inspect(names, toLower(path), bytes, idx.modName(e.winner()), &reads[i], &extends[i]);
+                found[i] = inspect(names, toLower(path), bytes, idx.modName(e.winner()), &reads[i], &extends[i],
+                                   &members[i]);
             } catch (const std::exception& ex) {
                 spdlog::debug("Could not read {}: {}", path, ex.what());
             }
@@ -1041,9 +1046,26 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
         // read from X, from a script extending X (inherited), or from a script X extends (X's version
         // may run). A read whose type is unknown, or names a script not in the load order, counts.
         std::unordered_map<std::string, std::string> parentOf;
-        for (const auto& [script, parent] : extends)
-            if (!script.empty())
-                parentOf[script] = parent;
+        std::unordered_map<std::string, std::unordered_set<std::string>> membersOf;
+        for (size_t i = 0; i < extends.size(); ++i)
+            if (!extends[i].first.empty()) {
+                parentOf[extends[i].first] = extends[i].second;
+                membersOf[extends[i].first].insert(members[i].begin(), members[i].end());
+            }
+        // A read that certainly reaches the owner's member: made on the owner, or on a script extending
+        // it where no script in between declares a member of that name (it would be that one's).
+        auto certain = [&](const std::string& readFrom, const std::string& owner, const std::string& member) {
+            std::string s = readFrom;
+            for (int depth = 0; depth < 64; ++depth) {
+                if (s == owner)
+                    return true;
+                auto it = parentOf.find(s);
+                if (it == parentOf.end() || membersOf[s].count(member))
+                    return false;
+                s = it->second;
+            }
+            return false;
+        };
         auto ancestors = [&](std::string s) {
             std::set<std::string> out;
             for (int depth = 0; depth < 64 && !s.empty() && out.insert(s).second; ++depth) {
@@ -1099,9 +1121,24 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             // it extends or one extending it, whose version may differ), and presence checks: the
             // constant can name the output, and each lookup's FormID becomes the record's new one.
             bool exact = gfff > 0 && other == 0;
-            for (const auto& rd : own)
-                if (rd.read->use == pex::PropertyRead::Use::GetFormFromFile)
-                    exact = exact && rd.read->formIdLiteral && rd.read->formIdOffset != 0 && rd.read->object == owner;
+            std::string blocker; // the first read that is not rewritable, for the reason
+            for (const auto& rd : own) {
+                std::string why;
+                if (rd.read->use == pex::PropertyRead::Use::Other)
+                    why = "used by " + rd.read->opcode;
+                else if (rd.read->use == pex::PropertyRead::Use::GetFormFromFile && !rd.read->formIdLiteral)
+                    why = "GetFormFromFile with a FormID computed at run time";
+                else if (rd.read->use == pex::PropertyRead::Use::GetFormFromFile &&
+                         !certain(rd.read->object, owner, property))
+                    why = rd.read->object.empty() ? "GetFormFromFile on an object whose script type is unknown"
+                                                  : "GetFormFromFile on " + rd.read->object +
+                                                        ", whose member of that name may not be this one";
+                if (why.empty())
+                    continue;
+                exact = false;
+                if (blocker.empty())
+                    blocker = rd.script + " (" + rd.read->where + "): " + why;
+            }
             if (exact) {
                 r.cls = ReferenceClass::Rewritable;
                 r.context = "constant property read by GetFormFromFile";
@@ -1135,8 +1172,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                            " (" + firstGfff->read->where + ") passes to Game.GetFormFromFile" +
                            (firstGfff->read->formIdLiteral ? " with FormID " + formatFormId(static_cast<uint32_t>(firstGfff->read->formId))
                                                            : std::string(" with a FormID computed at run time")) +
-                           " (" + counts + "); only lookups with a constant FormID on " +
-                           r.location.substr(0, r.location.find('.')) + " itself, and presence checks, can be rewritten";
+                           " (" + counts + "); not rewritable because of " + blocker;
             } else if (other) {
                 r.cls = ReferenceClass::Unknown;
                 r.context = "constant property read by other code";

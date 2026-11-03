@@ -3005,6 +3005,32 @@ TEST(references_functions_returning_a_plugin_name)
         storeLE<uint32_t>(reinterpret_cast<uint8_t*>(old.data()), 0x812);
         CHECK(copy.find(old) == std::string::npos);
     }
+    // Read on a script extending the owner: the owner's member when nothing in between declares one.
+    for (bool overrides : {false, true}) {
+        auto root = referenceInstall(overrides ? "reffnchildown" : "reffnchild");
+        auto data = root / "Game" / "Data";
+        const auto mine = nameFunctionScript("ModS.esp", "ModS:Program");
+        const auto child = childScript("ModS:Child", "ModS:Program", overrides);
+        const auto caller = nameCallerScript("ModS:Child", 0x812);
+        writeFile(data / "Scripts" / "ModS" / "Program.pex", std::string(reinterpret_cast<const char*>(mine.data()), mine.size()));
+        writeFile(data / "Scripts" / "ModS" / "Child.pex", std::string(reinterpret_cast<const char*>(child.data()), child.size()));
+        writeFile(data / "Scripts" / "Caller.pex", std::string(reinterpret_cast<const char*>(caller.data()), caller.size()));
+        auto cfg = configFor(root);
+        cfg.compile.autoMerge = true;
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const auto refs = referencesOf(p.session(), "ModS.esp");
+        bool constant = false;
+        for (const auto* r : refs)
+            if (r->assetPath == "scripts\\mods\\program.pex") {
+                constant = true;
+                CHECK_EQ(r->cls, overrides ? ReferenceClass::CompatibilityRequired : ReferenceClass::Rewritable);
+                if (overrides)
+                    CHECK(r->reason.find("may not be this one") != std::string::npos);
+            }
+        CHECK(constant);
+    }
 }
 
 // 6d. A plugin name kept in a variable is followed to where it goes, through the script's own

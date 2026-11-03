@@ -103,6 +103,8 @@ struct Scan {
     std::vector<StringUsage> uses;
     // The script's own object and the one it extends (lower case).
     std::string objectName, parentName;
+    // The functions and properties the script itself declares (lower case).
+    std::vector<std::string> members;
     // Every property this script reads into a variable, and where the value goes.
     std::vector<PropertyRead> propertyReads;
     // Constants followed through variables and the script's own functions.

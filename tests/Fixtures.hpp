@@ -420,6 +420,27 @@ inline std::vector<uint8_t> pexFile(const std::vector<std::string>& strings, con
     return w.take();
 }
 
+// `object` extending `parent`, empty, or declaring its own GetPluginName() (returning "").
+inline std::vector<uint8_t> childScript(const std::string& object, const std::string& parent, bool ownGetPluginName)
+{
+    using namespace fo4mx;
+    const std::vector<std::string> strings = {object, "", parent, "GetPluginName", "String"};
+    BinaryWriter o;
+    o.write<uint16_t>(2); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0); // structs, variables, properties
+    o.write<uint16_t>(1); // states
+    o.write<uint16_t>(1); // default state
+    o.write<uint16_t>(ownGetPluginName ? 1 : 0);
+    if (ownGetPluginName) {
+        o.write<uint16_t>(3);
+        o.write<uint16_t>(4); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+        o.write<uint16_t>(0); o.write<uint16_t>(0);
+        o.write<uint16_t>(1);
+        o.write<uint8_t>(0x1A); o.write<uint8_t>(2); o.write<uint16_t>(1); // return ""
+    }
+    return pexFile(strings, object, o.take());
+}
+
 inline std::vector<uint8_t> constantsScript(const std::string& plugin)
 {
     using namespace fo4mx;

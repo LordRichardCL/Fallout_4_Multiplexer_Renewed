@@ -202,6 +202,7 @@ private:
         const uint16_t properties = r_.read<uint16_t>();
         for (uint16_t i = 0; i < properties; ++i) {
             const std::string property = out_.strings[str()];
+            out_.members.push_back(lower(property));
             strs(2); // type, doc
             r_.read<uint32_t>();
             const uint8_t flags = r_.read<uint8_t>();
@@ -224,6 +225,8 @@ private:
             const uint16_t functions = r_.read<uint16_t>();
             for (uint16_t f = 0; f < functions; ++f) {
                 const std::string fn = out_.strings[str()];
+                if (state.empty())
+                    out_.members.push_back(lower(fn));
                 where_ = object_ + (state.empty() ? "" : "." + state) + "." + fn;
                 functionName_ = state.empty() ? fn : std::string();
                 function();
