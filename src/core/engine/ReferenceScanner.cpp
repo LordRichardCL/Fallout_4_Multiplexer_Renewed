@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <unordered_map>
 #include <unordered_set>
 #include <atomic>
 #include <cctype>
@@ -53,6 +54,7 @@ enum class Fact {
     PexGetFormRuntime,   // Game.GetFormFromFile(<variable>, "Plugin.esp")
     PexPluginInstalled,  // Game.IsPluginInstalled("Plugin.esp")
     PexOtherUse,         // any other use of the name by the script's code
+    PexConstantProperty, // the value of a property's read handler: classified by the scripts reading it
     PexUnused,           // in the string table, not used by code
     PexUnreadable,       // the script does not read back exactly
     PscSource,           // Papyrus source
@@ -93,6 +95,9 @@ Rule rule(Fact f)
     case Fact::PexPluginInstalled:
         return {K::PluginName, C::Rewritable, "Game.IsPluginInstalled",
                 "presence check: can name the output plugin, which is installed"};
+    case Fact::PexConstantProperty:
+        return {K::Papyrus, C::Unknown, "constant property",
+                "the value of a named constant (a property): what it means depends on the scripts that read it"};
     case Fact::PexOtherUse:
         return {K::Papyrus, C::Unknown, "script code",
                 "used by the script in a way whose meaning cannot be established (it may reach GetFormFromFile "
@@ -384,13 +389,16 @@ ReferenceScanner::PluginNames ReferenceScanner::pluginNames(const Session& sessi
 }
 
 std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names, const std::string& path,
-                                                       const std::vector<uint8_t>& bytes, const std::string& source)
+                                                       const std::vector<uint8_t>& bytes, const std::string& source,
+                                                       std::vector<pex::PropertyRead>* propertyReads)
 {
     std::vector<PluginReference> out;
     const std::string format = extensionFormat(path);
 
     if (format == "PEX") {
         auto scan = pex::scan(bytes);
+        if (propertyReads && scan.ok)
+            *propertyReads = std::move(scan.propertyReads);
         if (!scan.ok) {
             for (const auto& s : AssetScanner::pexStrings(bytes))
                 if (auto it = names.find(toLower(s)); it != names.end()) {
@@ -410,6 +418,7 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                     Fact f = u.use == pex::StringUse::GetFormFromFile
                                  ? (u.formIdLiteral ? Fact::PexGetFormFixed : Fact::PexGetFormRuntime)
                              : u.use == pex::StringUse::IsPluginInstalled ? Fact::PexPluginInstalled
+                             : u.use == pex::StringUse::PropertyValue     ? Fact::PexConstantProperty
                                                                           : Fact::PexOtherUse;
                     auto r = make(f, it->second, path, format, scan.strings[i], u.where);
                     if (f == Fact::PexOtherUse)
@@ -616,6 +625,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
 
     progress.stage("Scanning scripts and configs for plugin names");
     std::vector<std::vector<PluginReference>> found(candidates.size());
+    std::vector<std::vector<pex::PropertyRead>> reads(candidates.size());
     std::atomic<size_t> scanned{0};
     parallelFor(
         candidates.size(),
@@ -624,7 +634,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             const auto& path = idx.path(e);
             try {
                 auto bytes = readOriginal(session, e);
-                found[i] = inspect(names, toLower(path), bytes, idx.modName(e.winner()));
+                found[i] = inspect(names, toLower(path), bytes, idx.modName(e.winner()), &reads[i]);
             } catch (const std::exception& ex) {
                 spdlog::debug("Could not read {}: {}", path, ex.what());
             }
@@ -636,6 +646,71 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
     for (auto& v : found)
         for (auto& r : v)
             session.nameReferences.push_back(std::move(r));
+
+    // Named constants (a property whose read handler returns the plugin's name, such as a mod's table
+    // of plugin names): what the name means is what the scripts reading the property do with it.
+    {
+        struct Reader {
+            const pex::PropertyRead* read;
+            std::string script;
+        };
+        std::unordered_map<std::string, std::vector<Reader>> readers; // property -> its reads
+        for (size_t i = 0; i < candidates.size(); ++i)
+            for (const auto& pr : reads[i])
+                readers[pr.property].push_back({&pr, idx.path(idx.entries[candidates[i]])});
+        for (auto& r : session.nameReferences) {
+            if (r.context != "constant property")
+                continue;
+            const auto dot = r.location.rfind('.');
+            const std::string property = toLower(dot == std::string::npos ? r.location : r.location.substr(dot + 1));
+            const auto it = readers.find(property);
+            if (it == readers.end() || it->second.empty()) {
+                r.cls = ReferenceClass::Safe;
+                r.reason = "the value of the constant " + r.location + ", which no script in the load order reads";
+                continue;
+            }
+            size_t gfff = 0, presence = 0, other = 0;
+            const Reader* firstGfff = nullptr;
+            const Reader* firstOther = nullptr;
+            for (const auto& rd : it->second) {
+                if (rd.read->use == pex::PropertyRead::Use::GetFormFromFile) {
+                    ++gfff;
+                    if (!firstGfff)
+                        firstGfff = &rd;
+                } else if (rd.read->use == pex::PropertyRead::Use::IsPluginInstalled) {
+                    ++presence;
+                } else {
+                    ++other;
+                    if (!firstOther)
+                        firstOther = &rd;
+                }
+            }
+            const std::string counts = std::to_string(it->second.size()) + " reads: " + std::to_string(gfff) +
+                                       " GetFormFromFile, " + std::to_string(presence) + " IsPluginInstalled, " +
+                                       std::to_string(other) + " other";
+            if (gfff) {
+                r.cls = ReferenceClass::CompatibilityRequired;
+                r.context = "constant property read by GetFormFromFile";
+                r.reason = "the value of the constant " + r.location + " is the file name " + firstGfff->script +
+                           " (" + firstGfff->read->where + ") passes to Game.GetFormFromFile" +
+                           (firstGfff->read->formIdLiteral ? " with FormID " + formatFormId(static_cast<uint32_t>(firstGfff->read->formId))
+                                                           : std::string(" with a FormID computed at run time")) +
+                           " (" + counts + "); rewriting a name shared through a constant is not implemented";
+            } else if (other) {
+                r.cls = ReferenceClass::Unknown;
+                r.context = "constant property read by other code";
+                r.reason = "the value of the constant " + r.location + " is used by " + firstOther->script + " (" +
+                           firstOther->read->where + ", " + firstOther->read->opcode + ") in a way whose meaning cannot be "
+                           "established (" + counts + ")";
+            } else {
+                r.cls = ReferenceClass::CompatibilityRequired;
+                r.context = "constant property read by IsPluginInstalled";
+                r.reason = "the value of the constant " + r.location + " is only used for presence checks "
+                           "(Game.IsPluginInstalled, " + counts + "); rewriting a name shared through a constant is "
+                           "not implemented";
+            }
+        }
+    }
 
     std::stable_sort(session.nameReferences.begin(), session.nameReferences.end(),
                      [](const PluginReference& a, const PluginReference& b) {

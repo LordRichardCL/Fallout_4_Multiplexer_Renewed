@@ -2836,6 +2836,40 @@ TEST(references_folder_of_record_paths)
     CHECK_EQ(s.findPlugin("ModT.esp")->eligibility, Eligibility::Eligible);
 }
 
+// 6c. A plugin name kept in a named constant (a property returning it, like a mod's table of plugin
+//     names) is classified by the scripts reading the property: never read is Safe; read as
+//     GetFormFromFile's file name or for a presence check, the reason says where.
+TEST(references_named_constants_by_their_readers)
+{
+    for (const char* how : {"none", "gfff", "presence"}) {
+        auto root = referenceInstall(std::string("refconst_") + how);
+        auto data = root / "Game" / "Data";
+        writeFile(data / "Scripts" / "Consts.pex", std::string(reinterpret_cast<const char*>(constantsScript("ModS.esp").data()), constantsScript("ModS.esp").size()));
+        auto reader = readerScript(how);
+        writeFile(data / "Scripts" / "Reader.pex", std::string(reinterpret_cast<const char*>(reader.data()), reader.size()));
+        Pipeline p(configFor(root));
+        p.scan();
+        p.analyse();
+        const auto refs = referencesOf(p.session(), "ModS.esp");
+        CHECK_EQ(refs.size(), size_t(1));
+        if (refs.empty())
+            continue;
+        const auto* r = refs[0];
+        if (std::string(how) == "none") {
+            CHECK_EQ(r->cls, ReferenceClass::Safe);
+            CHECK(r->reason.find("no script in the load order reads") != std::string::npos);
+            CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+        } else if (std::string(how) == "gfff") {
+            CHECK_EQ(r->cls, ReferenceClass::CompatibilityRequired);
+            CHECK(r->reason.find("scripts\\reader.pex") != std::string::npos);
+            CHECK(r->reason.find("GetFormFromFile with FormID 00000812") != std::string::npos);
+        } else {
+            CHECK_EQ(r->cls, ReferenceClass::CompatibilityRequired);
+            CHECK(r->reason.find("presence checks") != std::string::npos);
+        }
+    }
+}
+
 // 7. Safe and unsafe references together: the most restrictive decides.
 TEST(references_mixed_safe_and_unsafe)
 {

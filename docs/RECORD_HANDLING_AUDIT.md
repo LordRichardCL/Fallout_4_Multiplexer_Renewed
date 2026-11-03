@@ -665,3 +665,13 @@ The largest group of Unknown references was a folder named after the plugin, mos
 Build 68: 1,864 plugins compiled (+4), 0 errors. The record-path check of R1 freed few plugins: the `meshes\scol\<plugin>\` folders hold files the records do not name (combined meshes left from earlier versions of the collections). Those files are never loaded either way: the game finds files under meshes, textures, materials, sound and music only by the paths records and meshes name, never by a plugin's name, apart from the FaceGen, voice, precombine, previs and LOD folders, which keep their own rules. A folder named after the plugin under those roots is now a Safe reference ("asset folder").
 
 Script references: the most common Unknown use is "other instruction" (one script, `scripts\karm\types\tquest.pex`, accounts for 10 plugins). The reason now names the Papyrus opcode (`array_setelement`, `struct_set`, `array_findelement`, ...), so the next report shows what these scripts do with the name; following the name through arrays and variables to `GetFormFromFile` or `IsPluginInstalled` is the next stage (S1).
+
+## Named constants in scripts (S1)
+
+Build 69: 1,873 plugins compiled (+9), 1,100,415 new FormIDs, 29 outputs, 0 errors. With the opcode now in the reason, 21 of the 22 "other instruction" script references are `return`: the plugin name is the value of a property's read handler, a named constant. `scripts\karm\types\tquest.pex` (uploaded) is such a table: one property per supported mod (`sPluginMod_CWPointLookout` returns `CWPointLookoutFO4.esm`, ...), used by nothing in the script itself.
+
+What the name means is what the scripts reading the property do with it, so every script in the load order now records the properties it reads (propget) and follows the value through copies within the function to its use:
+- no script reads the property: the reference is Safe;
+- a reader passes it to Game.GetFormFromFile: Compatibility Required, naming the script, the function and the FormID (rewriting a name shared through a constant, for records that may end up in different outputs, is not implemented);
+- readers only pass it to Game.IsPluginInstalled: Compatibility Required for now, saying so (the rewrite through the constant is the next step);
+- any other use: Unknown, naming the reading script, function and instruction.

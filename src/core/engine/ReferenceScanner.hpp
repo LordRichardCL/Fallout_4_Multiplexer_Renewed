@@ -1,5 +1,7 @@
 #pragma once
 
+#include "papyrus/Pex.hpp"
+
 #include "engine/Session.hpp"
 #include "util/Progress.hpp"
 
@@ -37,8 +39,11 @@ public:
                                              size_t maxBytes = 64u * 1024 * 1024);
 
     // References in one file's content (also used to re-check a transformed file).
+    // `propertyReads` (scripts): every property the script reads and where the value goes, for
+    // classifying named constants by what their readers do.
     static std::vector<PluginReference> inspect(const PluginNames& names, const std::string& path,
-                                                const std::vector<uint8_t>& bytes, const std::string& source = {});
+                                                const std::vector<uint8_t>& bytes, const std::string& source = {},
+                                                std::vector<pex::PropertyRead>* propertyReads = nullptr);
 
     // A plugin name in text, used as a whole name ("Armor.esp" is not found in "Power Armor.esp"),
     // with the "|FormID" that may follow it.

@@ -26,6 +26,7 @@ enum class StringUse : uint8_t {
     Comparison,        // compared with something
     Concatenation,     // joined with other text
     Default,           // default value of a variable, property or struct member
+    PropertyValue,     // the value a property's read handler returns (a named constant: other scripts read it)
     Other,             // any other instruction
 };
 const char* stringUseName(StringUse u);
@@ -48,6 +49,18 @@ struct StringUsage {
 // Fallout 4 compiler writes (as read by Champollion and written by Caprica): every count, string
 // index and opcode is checked, each object's recorded size must match what was read, and the walk
 // must end exactly at the end of the file. Anything else and `ok` is false: the script is not touched.
+// A script reading a property and what the value is then used for, within the same function (the
+// value followed through copies into other variables).
+struct PropertyRead {
+    enum class Use : uint8_t { GetFormFromFile, IsPluginInstalled, Other };
+    std::string property; // lower case
+    Use use = Use::Other;
+    bool formIdLiteral = false; // GetFormFromFile with a constant FormID
+    int32_t formId = 0;
+    std::string opcode;   // the instruction, for Other
+    std::string where;    // "Object.State.Function"
+};
+
 struct Scan {
     bool ok = false;
     std::string error;
@@ -59,6 +72,8 @@ struct Scan {
     std::vector<bool> usedElsewhere;
     // Every use of every string constant, with its context.
     std::vector<StringUsage> uses;
+    // Every property this script reads into a variable, and where the value goes.
+    std::vector<PropertyRead> propertyReads;
 };
 
 Scan scan(const std::vector<uint8_t>& bytes);

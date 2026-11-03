@@ -3,8 +3,10 @@
 #include "util/Binary.hpp"
 #include "util/Text.hpp"
 
+#include <cctype>
 #include <cstring>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace fo4mx::pex {
 
@@ -18,6 +20,7 @@ const char* stringUseName(StringUse u)
     case StringUse::Comparison: return "comparison";
     case StringUse::Concatenation: return "text concatenation";
     case StringUse::Default: return "default value";
+    case StringUse::PropertyValue: return "constant property";
     case StringUse::Other: return "other instruction";
     }
     return "";
@@ -198,8 +201,11 @@ private:
             if (flags & 4) {
                 str(); // auto variable
             } else {
-                if (flags & 1)
+                if (flags & 1) {
+                    getter_ = true; // the read handler: a string it returns is the property's value
                     function();
+                    getter_ = false;
+                }
                 if (flags & 2)
                     function();
             }
@@ -230,6 +236,7 @@ private:
         const uint16_t locals = r_.read<uint16_t>();
         strs(locals * 2);
         const uint16_t instructions = r_.read<uint16_t>();
+        propertyVars_.clear();
         for (uint16_t i = 0; i < instructions; ++i)
             instruction();
     }
@@ -257,6 +264,51 @@ private:
                                      (args[0].type == 1 || args[0].type == 2) && args[1].type == 1 &&
                                      iequals(out_.strings[args[0].string], "Game") &&
                                      iequals(out_.strings[args[1].string], "GetFormFromFile");
+        // A property's value followed through this function: read into a variable (propget), copied
+        // (assign), then used.
+        auto propertyOf = [&](const Value& v) -> const std::string* {
+            if (v.type != 1)
+                return nullptr;
+            auto it = propertyVars_.find(out_.strings[v.string]);
+            return it == propertyVars_.end() ? nullptr : &it->second;
+        };
+        auto readOf = [&](const std::string& property, PropertyRead::Use use) {
+            PropertyRead pr;
+            pr.property = property;
+            pr.use = use;
+            pr.opcode = kOpNames[op];
+            pr.where = where_;
+            return pr;
+        };
+        if (op == 0x1C && args.size() == 3 && args[0].type == 1 && args[2].type == 1) { // propget name, object, dest
+            std::string p = out_.strings[args[0].string];
+            for (auto& ch : p)
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            propertyVars_[out_.strings[args[2].string]] = p;
+        } else if (op == 0x0D && args.size() == 2 && args[0].type == 1) { // assign dest, source
+            if (const auto* p = propertyOf(args[1]))
+                propertyVars_[out_.strings[args[0].string]] = *p;
+            else
+                propertyVars_.erase(out_.strings[args[0].string]);
+        } else if (getFormFromFile) {
+            if (const auto* p = propertyOf(varargs[1])) {
+                auto pr = readOf(*p, PropertyRead::Use::GetFormFromFile);
+                pr.formIdLiteral = varargs[0].type == 3;
+                pr.formId = varargs[0].integer;
+                out_.propertyReads.push_back(std::move(pr));
+            }
+        } else {
+            const bool presence = op == kCallStatic && args.size() == 3 && args[0].type == 1 && args[1].type == 1 &&
+                                  iequals(out_.strings[args[0].string], "Game") &&
+                                  iequals(out_.strings[args[1].string], "IsPluginInstalled") && varargs.size() == 1;
+            for (size_t k = 0; k < args.size() + varargs.size(); ++k) {
+                const Value& v = k < args.size() ? args[k] : varargs[k - args.size()];
+                if (const auto* p = propertyOf(v))
+                    out_.propertyReads.push_back(
+                        readOf(*p, presence && k >= args.size() ? PropertyRead::Use::IsPluginInstalled : PropertyRead::Use::Other));
+            }
+        }
+
         if (getFormFromFile) {
             FormFromFileCall c;
             c.formIdLiteral = varargs[0].type == 3;
@@ -303,6 +355,8 @@ private:
             use = StringUse::Comparison;
         else if (op == 0x1B) // strcat
             use = StringUse::Concatenation;
+        if (getter_ && op == 0x1A) // return: the property's value
+            use = StringUse::PropertyValue;
         for (const auto& a : args)
             markString(a, use == StringUse::IsPluginInstalled ? StringUse::Other : use, function);
         for (const auto& a : varargs)
@@ -313,6 +367,8 @@ private:
     Scan& out_;
     std::string object_, where_;
     const char* opcode_ = "";
+    bool getter_ = false;
+    std::unordered_map<std::string, std::string> propertyVars_; // variable -> property it holds
 };
 
 } // namespace

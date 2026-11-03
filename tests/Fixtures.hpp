@@ -385,6 +385,91 @@ inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugi
     return w.take();
 }
 
+// Two scripts for named constants: "Consts" with a property sPluginModS whose read handler returns
+// `plugin`, and "Reader" whose OnInit reads Consts.sPluginModS and passes it to
+// Game.GetFormFromFile(formId, ...) ("gfff"), Game.IsPluginInstalled(...) ("presence"), or does
+// nothing with it ("none": the property is never read).
+inline std::vector<uint8_t> pexFile(const std::vector<std::string>& strings, const std::string& object,
+                                    const std::vector<uint8_t>& body)
+{
+    using namespace fo4mx;
+    BinaryWriter w;
+    w.write<uint32_t>(0xFA57C0DE);
+    w.write<uint8_t>(3);
+    w.write<uint8_t>(9);
+    w.write<uint16_t>(2);
+    w.write<uint64_t>(0);
+    w.writeWString(object + ".psc");
+    w.writeWString("user");
+    w.writeWString("pc");
+    w.write<uint16_t>(static_cast<uint16_t>(strings.size()));
+    for (const auto& s : strings)
+        w.writeWString(s);
+    w.write<uint8_t>(0);  // no debug info
+    w.write<uint16_t>(0); // user flags
+    w.write<uint16_t>(1); // objects
+    uint16_t name = 0;
+    for (size_t i = 0; i < strings.size(); ++i)
+        if (strings[i] == object)
+            name = static_cast<uint16_t>(i);
+    w.write<uint16_t>(name);
+    w.write<uint32_t>(static_cast<uint32_t>(body.size() + 4));
+    for (uint8_t b : body)
+        w.write<uint8_t>(b);
+    return w.take();
+}
+
+inline std::vector<uint8_t> constantsScript(const std::string& plugin)
+{
+    using namespace fo4mx;
+    const std::vector<std::string> strings = {"Consts", "", "sPluginModS", "String", plugin};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); // structs
+    o.write<uint16_t>(0); // variables
+    o.write<uint16_t>(1); // properties
+    o.write<uint16_t>(2); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0);
+    o.write<uint8_t>(1);  // read handler
+    o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); // params, locals
+    o.write<uint16_t>(1); // instructions
+    o.write<uint8_t>(0x1A); o.write<uint8_t>(2); o.write<uint16_t>(4); // return "Plugin.esp"
+    o.write<uint16_t>(0); // states
+    return pexFile(strings, "Consts", o.take());
+}
+
+inline std::vector<uint8_t> readerScript(const std::string& how, uint32_t formId = 0x812)
+{
+    using namespace fo4mx;
+    const std::vector<std::string> strings = {"Reader", "", "OnInit", "None", "sPluginModS", "kConsts", "::temp0",
+                                              "Form", "::temp1", "String", "Game", "GetFormFromFile",
+                                              "IsPluginInstalled"};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0); // structs, variables, properties
+    o.write<uint16_t>(1); // states
+    o.write<uint16_t>(1); // default state
+    o.write<uint16_t>(1); // functions
+    o.write<uint16_t>(2); // OnInit
+    o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0); // params
+    o.write<uint16_t>(2); o.write<uint16_t>(6); o.write<uint16_t>(7); o.write<uint16_t>(8); o.write<uint16_t>(9);
+    const bool call = how == "gfff" || how == "presence";
+    o.write<uint16_t>(call ? 2 : 0);
+    auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    if (call) {
+        o.write<uint8_t>(0x1C); ident(4); ident(5); ident(8); // propget sPluginModS kConsts ::temp1
+        o.write<uint8_t>(0x19); ident(10); ident(how == "gfff" ? 11 : 12); ident(6);
+        o.write<uint8_t>(3); o.write<int32_t>(how == "gfff" ? 2 : 1);
+        if (how == "gfff") {
+            o.write<uint8_t>(3);
+            o.write<int32_t>(static_cast<int32_t>(formId));
+        }
+        ident(8);
+    }
+    return pexFile(strings, "Reader", o.take());
+}
+
 inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugin, int sizeAdjust = 0)
 {
     ScriptOptions opt;
