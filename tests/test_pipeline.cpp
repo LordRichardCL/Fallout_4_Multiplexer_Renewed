@@ -2980,6 +2980,64 @@ TEST(references_followed_through_variables)
     }
 }
 
+// 6e. Configs written "0x<FormID>:Plugin.esp" (X-Cell) are FormID pairs too; Transfer Settlements
+//     blueprints are rewritable: each item's plugin_name with its FormID in hex and decimal, and the
+//     plugins_required entries. The settlement itself (workshop, worldspace) stays unsafe.
+TEST(references_reverse_pairs_and_settlement_blueprints)
+{
+    auto pairs = ReferenceScanner::inspect(kNames, "f4se\\plugins\\x-cell-exceptions.ini",
+                                           bytesOf("[facegen_exception]\npiper=0x812:ModS.esp\n"));
+    CHECK_EQ(pairs.size(), size_t(1));
+    if (!pairs.empty()) {
+        CHECK_EQ(pairs[0].cls, ReferenceClass::Rewritable);
+        CHECK(pairs[0].hasFormId && pairs[0].formId == 0x812u);
+    }
+
+    const std::string blueprint = R"({
+    "header": { "plugins_required": [ "Fallout4.esm", "ModS.esp" ], "worldspace_plugin": "Fallout4.esm" },
+    "items": [
+        { "FormID": "000812", "FormID_dec": 2066, "name": "Thing", "plugin_name": "ModS.esp", "posX": 1.0 },
+        { "FormID": "0C01C6", "FormID_dec": 786886, "name": "Conduit", "plugin_name": "Fallout4.esm", "posX": 2.0 }
+    ],
+    "workshop": { "id": "066EB6", "id_dec": 421558, "plugin": "Fallout4.esm" }
+})";
+    auto root = referenceInstall("refblueprint");
+    writeFile(root / "Game" / "Data" / "F4SE" / "Plugins" / "TransferSettlements" / "blueprints" / "Test.json", blueprint);
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto refs = referencesOf(p.session(), "ModS.esp");
+    CHECK_EQ(refs.size(), size_t(2));
+    for (const auto* r : refs)
+        CHECK_EQ(r->cls, ReferenceClass::Rewritable);
+    CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+    CHECK(p.compile());
+    auto result = p.exportOutputs();
+    const auto copy = result.directory / "f4se" / "plugins" / "transfersettlements" / "blueprints" / "test.json";
+    CHECK(std::filesystem::exists(copy));
+    if (std::filesystem::exists(copy)) {
+        std::ifstream in(copy);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK(text.find("ModS.esp") == std::string::npos);
+        const auto* m = p.compiledOutput();
+        const FormMapping* moved = nullptr;
+        for (const auto& mp : m->mappings)
+            if (iequals(mp.sourcePlugin, "ModS.esp") && mp.sourceObjectId == 0x812)
+                moved = &mp;
+        CHECK(moved != nullptr);
+        if (moved) {
+            char hex[16];
+            std::snprintf(hex, sizeof(hex), "\"%06X\"", moved->objectId);
+            CHECK(text.find(hex) != std::string::npos);
+            CHECK(text.find("\"FormID_dec\": " + std::to_string(moved->objectId)) != std::string::npos);
+            CHECK(text.find("\"plugin_name\": \"" + moved->outputPlugin + "\"") != std::string::npos);
+        }
+        CHECK(text.find("786886") != std::string::npos); // other plugins' items unchanged
+    }
+}
+
 // 7. Safe and unsafe references together: the most restrictive decides.
 TEST(references_mixed_safe_and_unsafe)
 {

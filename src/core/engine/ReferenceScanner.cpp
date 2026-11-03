@@ -62,7 +62,9 @@ enum class Fact {
     ConfigPair,          // "Plugin.esp|FormID"
     McmRequirement,      // MCM config.json "pluginRequirements"
     ConfigPlain,         // a config naming the plugin without a FormID
-    SettlementBlueprint, // Transfer Settlements blueprint
+    SettlementBlueprint, // Transfer Settlements blueprint: the settlement itself (workshop, worldspace)
+    BlueprintItem,       // Transfer Settlements blueprint item: plugin_name with its FormID (hex and decimal)
+    BlueprintRequired,   // Transfer Settlements blueprint: an entry of plugins_required
     BinaryString,        // F4SE DLL
     EngineFolder,        // FaceGen / face textures / LOD billboards folder named after the plugin
     VoiceFolder,         // sound\voice\<plugin>\: relocated with the plugin's responses at export
@@ -120,6 +122,13 @@ Rule rule(Fact f)
     case Fact::ConfigPlain:
         return {K::Config, C::Unknown, "plugin name",
                 "names the plugin without a FormID: what the tool does with the name is unknown"};
+    case Fact::BlueprintItem:
+        return {K::Config, C::Rewritable, "Transfer Settlements item",
+                "an item of a settlement blueprint: its plugin name and FormID (hex and decimal) are rewritten "
+                "together"};
+    case Fact::BlueprintRequired:
+        return {K::PluginName, C::Rewritable, "Transfer Settlements required plugin",
+                "a plugin the blueprint requires: it can name the output plugin, which is installed"};
     case Fact::SettlementBlueprint:
         return {K::Config, C::Unsafe, "Transfer Settlements blueprint", "saved settlement data: not changed"};
     case Fact::BinaryString:
@@ -358,10 +367,72 @@ std::vector<ReferenceScanner::Mention> ReferenceScanner::mentions(std::string_vi
                 m.formId = static_cast<uint32_t>(std::stoul(std::string(text.substr(q, digits - q)), nullptr, 16));
             }
         }
+        // "0x<FormID>:Plugin.esp" (X-Cell and other configs): the FormID written before the name.
+        if (!m.pair && at >= 4 && text[at - 1] == ':') {
+            size_t digits = at - 1;
+            while (digits > 0 && at - 1 - digits < 8 && std::isxdigit(static_cast<unsigned char>(text[digits - 1])))
+                --digits;
+            if (digits < at - 1 && digits >= 2 && text[digits - 1] != 'x' && text[digits - 1] != 'X')
+                digits = at - 1; // only with the 0x prefix
+            if (digits < at - 1 && digits >= 2 && (text[digits - 1] == 'x' || text[digits - 1] == 'X') &&
+                text[digits - 2] == '0' && (digits < 3 || !std::isalnum(static_cast<unsigned char>(text[digits - 3])))) {
+                m.pair = true;
+                m.idBegin = digits;
+                m.idEnd = at - 1;
+                m.formId = static_cast<uint32_t>(std::stoul(std::string(text.substr(digits, at - 1 - digits)), nullptr, 16));
+            }
+        }
         out.push_back(m);
     }
     return out;
 }
+
+namespace {
+// Transfer Settlements blueprint (JSON): the key whose string value holds the name at `begin`, or
+// "plugins_required" for an entry of that array.
+std::string blueprintKey(std::string_view text, size_t begin)
+{
+    if (begin == 0 || text[begin - 1] != '"')
+        return {};
+    size_t i = begin - 1;
+    while (i > 0 && (text[i - 1] == ' ' || text[i - 1] == '\t' || text[i - 1] == '\r' || text[i - 1] == '\n'))
+        --i;
+    if (i > 0 && text[i - 1] == ':') {
+        size_t k = i - 1;
+        while (k > 0 && text[k - 1] == ' ')
+            --k;
+        if (k == 0 || text[k - 1] != '"')
+            return {};
+        const size_t close = k - 1;
+        const size_t open = text.rfind('"', close - 1);
+        return open == std::string_view::npos ? std::string() : std::string(text.substr(open + 1, close - open - 1));
+    }
+    const size_t array = text.rfind("\"plugins_required\"", begin);
+    if (array != std::string_view::npos && text.find(']', array) > begin)
+        return "plugins_required";
+    return {};
+}
+// The value span of "key": "..." (string) or "key": 123 (number) within [from, to).
+std::pair<size_t, size_t> jsonValue(std::string_view text, size_t from, size_t to, const std::string& key)
+{
+    const size_t k = text.find("\"" + key + "\"", from);
+    if (k == std::string_view::npos || k >= to)
+        return {0, 0};
+    size_t v = text.find(':', k) + 1;
+    while (v < to && (text[v] == ' ' || text[v] == '\t'))
+        ++v;
+    if (v >= to)
+        return {0, 0};
+    if (text[v] == '"') {
+        const size_t e = text.find('"', v + 1);
+        return e < to ? std::make_pair(v + 1, e) : std::make_pair(size_t(0), size_t(0));
+    }
+    size_t e = v;
+    while (e < to && std::isdigit(static_cast<unsigned char>(text[e])))
+        ++e;
+    return {v, e};
+}
+} // namespace
 
 std::vector<uint8_t> ReferenceScanner::readOriginal(const Session& session, const AssetEntry& entry, size_t maxBytes)
 {
@@ -578,8 +649,12 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                     f = Fact::PscSource;
                 else if (commentLine(text, m.begin, format))
                     f = Fact::ConfigComment;
-                else if (blueprint)
-                    f = Fact::SettlementBlueprint;
+                else if (blueprint) {
+                    const std::string key = blueprintKey(text, m.begin);
+                    f = key == "plugin_name"        ? Fact::BlueprintItem
+                        : key == "plugins_required" ? Fact::BlueprintRequired
+                                                    : Fact::SettlementBlueprint;
+                }
                 else if (m.pair)
                     f = Fact::ConfigPair;
                 else if (mcm && inPluginRequirements(lower, m.begin))
@@ -596,6 +671,28 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                     r.formId = m.formId;
                     r.idBegin = m.idBegin;
                     r.idEnd = m.idEnd;
+                }
+                if (f == Fact::BlueprintItem) {
+                    // The item's object: its FormID (6 hex digits) and the same in decimal.
+                    const size_t open = text.rfind('{', m.begin);
+                    const size_t close = text.find('}', m.end);
+                    const auto hex = jsonValue(text, open == std::string_view::npos ? 0 : open, close, "FormID");
+                    const auto dec = jsonValue(text, open == std::string_view::npos ? 0 : open, close, "FormID_dec");
+                    bool ok = hex.second > hex.first && dec.second > dec.first;
+                    for (size_t c = hex.first; ok && c < hex.second; ++c)
+                        ok = std::isxdigit(static_cast<unsigned char>(text[c])) != 0;
+                    if (ok) {
+                        r.hasFormId = true;
+                        r.formId = static_cast<uint32_t>(std::stoul(std::string(text.substr(hex.first, hex.second - hex.first)), nullptr, 16));
+                        r.idBegin = hex.first;
+                        r.idEnd = hex.second;
+                        r.decBegin = dec.first;
+                        r.decEnd = dec.second;
+                        r.text = std::string(text.substr(m.begin, m.end - m.begin)) + "|" + formatFormId(r.formId).substr(2);
+                    } else {
+                        r.cls = ReferenceClass::Unknown;
+                        r.reason = "a blueprint item whose FormID could not be read";
+                    }
                 }
                 out.push_back(std::move(r));
             }

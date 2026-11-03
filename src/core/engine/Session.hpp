@@ -155,6 +155,7 @@ struct PluginReference {
     // Scripts: offset of the string index (and of the FormID for GetFormFromFile).
     size_t nameBegin = 0, nameEnd = 0;
     size_t idBegin = 0, idEnd = 0;
+    size_t decBegin = 0, decEnd = 0; // the same FormID written again in decimal (Transfer Settlements)
     bool hasFormId = false;
     uint32_t formId = 0;
     size_t pexStringOffset = 0, pexFormIdOffset = 0;

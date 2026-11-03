@@ -476,6 +476,8 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                         const std::string id = hexLike(moved->second, r->idEnd - r->idBegin);
                         edits.push_back({r->nameBegin, r->nameEnd, moved->first});
                         edits.push_back({r->idBegin, r->idEnd, id});
+                        if (r->decEnd > r->decBegin) // the same FormID in decimal (Transfer Settlements)
+                            edits.push_back({r->decBegin, r->decEnd, std::to_string(moved->second)});
                         expected.insert({toLower(moved->first), true, moved->second});
                         change(*r, moved->first + "|" + id);
                         ++f.changedPairs;
