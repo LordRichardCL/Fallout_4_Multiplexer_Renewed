@@ -66,6 +66,7 @@ enum class Fact {
     VoiceFolder,         // sound\voice\<plugin>\: relocated with the plugin's responses at export
     OtherFolder,         // any other folder named after the plugin
     RecordPathFolder,    // a folder named after the plugin whose every file its records name by path
+    AssetFolder,         // a folder named after the plugin under meshes, textures, materials, sound or music
     EngineFileName,      // seq\<plugin>.seq (start-game-enabled quests)
     ToolFileName,        // RobCo Patcher INI named after the plugin
     OtherFileName,       // any other file named after the plugin
@@ -131,6 +132,11 @@ Rule rule(Fact f)
         return {K::Directory, C::Safe, "folder of record paths",
                 "every file in this folder is named by its full path in the plugin's records (models, sounds): the "
                 "game loads them by that path, which compiling keeps unchanged"};
+    case Fact::AssetFolder:
+        return {K::Directory, C::Safe, "asset folder",
+                "the game finds files under meshes, textures, materials, sound and music only by the paths records "
+                "and meshes name (apart from the FaceGen, voice, precombine, previs and LOD folders, checked "
+                "separately), never by the plugin's name; compiling keeps those paths"};
     case Fact::OtherFolder:
         return {K::Directory, C::Unknown, "folder",
                 "a folder named after the plugin: something may find these files by the plugin's name"};
@@ -407,7 +413,10 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                                                                           : Fact::PexOtherUse;
                     auto r = make(f, it->second, path, format, scan.strings[i], u.where);
                     if (f == Fact::PexOtherUse)
-                        r.context = std::string(pex::stringUseName(u.use)) + (u.function.empty() ? "" : " (" + u.function + ")");
+                        r.context = std::string(pex::stringUseName(u.use)) +
+                                    (!u.function.empty()                          ? " (" + u.function + ")"
+                                     : u.opcode.empty() || u.use != pex::StringUse::Other ? std::string()
+                                                                                   : " (" + u.opcode + ")");
                     if (f == Fact::PexGetFormFixed) {
                         r.hasFormId = true;
                         r.formId = static_cast<uint32_t>(u.formId);
@@ -575,16 +584,21 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
         // Any other folder: Safe when the plugin's records name every file in it by path (static
         // collection meshes in meshes\scol\<plugin>\, sound files): those are found by path, not by name.
         bool byPath = false;
-        if (!engine) {
+        bool assetRoot = false;
+        if (!engine)
+            for (const char* root : {"meshes\\", "textures\\", "materials\\", "sound\\", "music\\"})
+                assetRoot |= istartsWith(folder, root);
+        if (!engine && !assetRoot) {
             const auto& named = assetPathsOf(session, plugin, pathCache);
             const auto& files = folderFiles[key];
             byPath = !files.empty() && std::all_of(files.begin(), files.end(),
                                                    [&](const std::string& f) { return named.count(f) > 0; });
         }
-        auto r = make(voice    ? Fact::VoiceFolder
-                      : engine ? Fact::EngineFolder
-                      : byPath ? Fact::RecordPathFolder
-                               : Fact::OtherFolder,
+        auto r = make(voice       ? Fact::VoiceFolder
+                      : engine    ? Fact::EngineFolder
+                      : assetRoot ? Fact::AssetFolder
+                      : byPath    ? Fact::RecordPathFolder
+                                  : Fact::OtherFolder,
                       plugin, folder, "Folder", session.plugins[plugin].key, std::to_string(value.first) + " files");
         if (voice) {
             r.context = engine->what;

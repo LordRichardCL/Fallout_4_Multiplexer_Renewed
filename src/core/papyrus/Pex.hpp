@@ -37,6 +37,7 @@ struct StringUsage {
     size_t offset = 0;    // byte offset of the uint16 string index
     std::string function; // called function ("Game.IsPluginInstalled"), for calls
     std::string where;    // "Object.State.Function" containing the instruction
+    std::string opcode;   // the instruction, for uses that are not calls ("array_setelement", "struct_set")
     // GetFormFromFile only:
     bool formIdLiteral = false;
     int32_t formId = 0;

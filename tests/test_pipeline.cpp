@@ -2806,9 +2806,9 @@ TEST(references_folder_and_path)
     CHECK_EQ(s.findPlugin("ModT.esp")->eligibility, Eligibility::Ineligible);
 }
 
-// 6b. A folder named after the plugin whose every file the plugin's records name by path (a static
-//     collection's mesh) is Safe: the game loads those files by path. One more file nobody names keeps
-//     it Unknown.
+// 6b. A folder named after the plugin under the asset roots (meshes, textures, materials, sound, music)
+//     is Safe, other than the engine folders: the game loads those files only by the paths records and
+//     meshes name. Elsewhere a folder is Safe when the plugin's records name every file in it by path.
 TEST(references_folder_of_record_paths)
 {
     auto root = referenceInstall("refrecordpaths");
@@ -2830,9 +2830,10 @@ TEST(references_folder_of_record_paths)
         CHECK_EQ(refs[0]->cls, ReferenceClass::Safe);
     CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
     auto t = referencesOf(s, "ModT.esp");
-    CHECK_EQ(t.size(), size_t(1));
+    CHECK_EQ(t.size(), size_t(1)); // a file nothing names in meshes\scol\ModT.esp\: never loaded either way
     if (!t.empty())
-        CHECK_EQ(t[0]->cls, ReferenceClass::Unknown);
+        CHECK_EQ(t[0]->cls, ReferenceClass::Safe);
+    CHECK_EQ(s.findPlugin("ModT.esp")->eligibility, Eligibility::Eligible);
 }
 
 // 7. Safe and unsafe references together: the most restrictive decides.

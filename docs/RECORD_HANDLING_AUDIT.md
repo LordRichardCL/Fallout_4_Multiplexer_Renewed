@@ -659,3 +659,9 @@ The other keep-outs are by design: new references and cells in precombine or pre
 Build 67: 1,860 plugins compiled (+56), 975,125 new FormIDs, 0 errors; 25 kept out automatically (as planned: precombine/previs data, very large archive packs and records referencing records their plugin does not compile). Every record type compiles; what keeps plugins out is filename references.
 
 The largest group of Unknown references was a folder named after the plugin, most of them `meshes\scol\<plugin>\` (24). A static collection's mesh is named by its full path in the SCOL record's model, so the game loads it by that path, which compiling keeps unchanged. A folder named after the plugin is now Safe when every file in it is named by path in the plugin's own records (models, textures, sounds); a folder with any file nothing names stays Unknown.
+
+## Asset folders and script diagnostics (R2)
+
+Build 68: 1,864 plugins compiled (+4), 0 errors. The record-path check of R1 freed few plugins: the `meshes\scol\<plugin>\` folders hold files the records do not name (combined meshes left from earlier versions of the collections). Those files are never loaded either way: the game finds files under meshes, textures, materials, sound and music only by the paths records and meshes name, never by a plugin's name, apart from the FaceGen, voice, precombine, previs and LOD folders, which keep their own rules. A folder named after the plugin under those roots is now a Safe reference ("asset folder").
+
+Script references: the most common Unknown use is "other instruction" (one script, `scripts\karm\types\tquest.pex`, accounts for 10 plugins). The reason now names the Papyrus opcode (`array_setelement`, `struct_set`, `array_findelement`, ...), so the next report shows what these scripts do with the name; following the name through arrays and variables to `GetFormFromFile` or `IsPluginInstalled` is the next stage (S1).

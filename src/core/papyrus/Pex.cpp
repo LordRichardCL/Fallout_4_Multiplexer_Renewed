@@ -34,6 +34,15 @@ constexpr uint8_t kArgs[] = {0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 3, 3, 
                              1, 3, 3, 3, 2, 2, 3, 3, 4, 4, 3, 1, 3, 3, 5, 5, 3, 3, 1, 3, 1};
 static_assert(sizeof(kArgs) == 0x2F, "opcodes 0x00 .. 0x2E");
 constexpr uint8_t kCallMethod = 0x17, kCallParent = 0x18, kCallStatic = 0x19;
+// Fallout 4 Papyrus opcode names (Champollion / the CK's assembler), for the reports.
+constexpr const char* kOpNames[] = {
+    "nop", "iadd", "fadd", "isub", "fsub", "imul", "fmul", "idiv", "fdiv", "imod", "not", "ineg", "fneg", "assign",
+    "cast", "cmp_eq", "cmp_lt", "cmp_le", "cmp_gt", "cmp_ge", "jmp", "jmpt", "jmpf", "callmethod", "callparent",
+    "callstatic", "return", "strcat", "propget", "propset", "array_create", "array_length", "array_getelement",
+    "array_setelement", "array_findelement", "array_rfindelement", "is", "struct_create", "struct_get", "struct_set",
+    "array_findstruct", "array_rfindstruct", "array_add", "array_insert", "array_removelast", "array_remove",
+    "array_clear"};
+static_assert(sizeof(kOpNames) / sizeof(kOpNames[0]) == 0x2F, "opcodes 0x00 .. 0x2E");
 
 struct Value {
     uint8_t type = 0;
@@ -123,6 +132,7 @@ private:
         u.offset = v.offset;
         u.function = function;
         u.where = where_;
+        u.opcode = opcode_;
         out_.uses.push_back(std::move(u));
     }
 
@@ -229,6 +239,7 @@ private:
         const uint8_t op = r_.read<uint8_t>();
         if (op >= sizeof(kArgs))
             throw FormatError("unknown opcode " + std::to_string(op));
+        opcode_ = kOpNames[op];
         std::vector<Value> args(kArgs[op]);
         for (auto& a : args)
             a = value();
@@ -301,6 +312,7 @@ private:
     BinaryReader r_;
     Scan& out_;
     std::string object_, where_;
+    const char* opcode_ = "";
 };
 
 } // namespace
