@@ -476,6 +476,48 @@ inline std::vector<uint8_t> readerScript(const std::string& how, uint32_t formId
     return pexFile(strings, "Reader", o.take());
 }
 
+// A script keeping a plugin name in a variable, as mods do (AR_ExternalContentControlSystemScript):
+// OnInit assigns "plugin" to a local, looks up formId with it, and passes it to Check(asName), which
+// tests IsPluginInstalled(asName) and writes "Checking " + asName to Debug.Trace. With `leak`, Check
+// also returns the name (an unknown use).
+inline std::vector<uint8_t> flowScript(const std::string& plugin, uint32_t formId, bool leak = false)
+{
+    using namespace fo4mx;
+    const std::vector<std::string> strings = {"Flow", "", "OnInit", "None", "Check", "asName", "String", "sName",
+                                              "::temp0", "Form", "::temp1", "Bool", "::temp2", "self", "::nonevar",
+                                              "Game", "GetFormFromFile", "IsPluginInstalled", "Debug", "Trace",
+                                              "Checking ", plugin};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0); // structs, variables, properties
+    o.write<uint16_t>(1); // states
+    o.write<uint16_t>(1); // default state
+    o.write<uint16_t>(2); // functions
+    auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    auto str = [&](uint16_t i) { o.write<uint8_t>(2); o.write<uint16_t>(i); };
+    auto integer = [&](int32_t v) { o.write<uint8_t>(3); o.write<int32_t>(v); };
+    // OnInit
+    o.write<uint16_t>(2); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0); // params
+    o.write<uint16_t>(2); o.write<uint16_t>(7); o.write<uint16_t>(6); o.write<uint16_t>(8); o.write<uint16_t>(9);
+    o.write<uint16_t>(3);
+    o.write<uint8_t>(0x0D); ident(7); str(21);                                  // sName = "plugin"
+    o.write<uint8_t>(0x19); ident(15); ident(16); ident(8); integer(2); integer(static_cast<int32_t>(formId)); ident(7);
+    o.write<uint8_t>(0x17); ident(4); ident(13); ident(14); integer(1); ident(7); // self.Check(sName)
+    // Check(asName)
+    o.write<uint16_t>(4); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(1); o.write<uint16_t>(5); o.write<uint16_t>(6); // asName : String
+    o.write<uint16_t>(2); o.write<uint16_t>(10); o.write<uint16_t>(11); o.write<uint16_t>(12); o.write<uint16_t>(6);
+    o.write<uint16_t>(leak ? 4 : 3);
+    o.write<uint8_t>(0x19); ident(15); ident(17); ident(10); integer(1); ident(5);  // IsPluginInstalled(asName)
+    o.write<uint8_t>(0x1B); ident(12); str(20); ident(5);                          // ::temp2 = "Checking " + asName
+    o.write<uint8_t>(0x19); ident(18); ident(19); ident(14); integer(1); ident(12); // Debug.Trace(::temp2)
+    if (leak) {
+        o.write<uint8_t>(0x1A); ident(5); // return asName
+    }
+    return pexFile(strings, "Flow", o.take());
+}
+
 inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugin, int sizeAdjust = 0)
 {
     ScriptOptions opt;

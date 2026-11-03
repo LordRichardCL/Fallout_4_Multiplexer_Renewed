@@ -3,8 +3,11 @@
 #include "util/Binary.hpp"
 #include "util/Text.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <map>
+#include <set>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -186,9 +189,12 @@ private:
         }
         const uint16_t variables = r_.read<uint16_t>();
         for (uint16_t i = 0; i < variables; ++i) {
-            strs(2);
+            const std::string name = out_.strings[str()];
+            str(); // type
             r_.read<uint32_t>();
-            markString(value(), StringUse::Default);
+            const Value v = value();
+            markString(v, StringUse::Default);
+            objectVars_[name] = v;
             r_.read<uint8_t>();
         }
         const uint16_t properties = r_.read<uint16_t>();
@@ -199,7 +205,7 @@ private:
             const uint8_t flags = r_.read<uint8_t>();
             where_ = object_ + "." + property;
             if (flags & 4) {
-                str(); // auto variable
+                autoVars_.insert(out_.strings[str()]); // the Auto property's variable: script data may set it
             } else {
                 if (flags & 1) {
                     getter_ = true; // the read handler: a string it returns is the property's value
@@ -217,7 +223,9 @@ private:
             for (uint16_t f = 0; f < functions; ++f) {
                 const std::string fn = out_.strings[str()];
                 where_ = object_ + (state.empty() ? "" : "." + state) + "." + fn;
+                functionName_ = state.empty() ? fn : std::string();
                 function();
+                functionName_.clear();
             }
         }
         // Compilers record the object's size with or without the size field itself.
@@ -232,9 +240,19 @@ private:
         r_.read<uint32_t>();
         r_.read<uint8_t>();
         const uint16_t params = r_.read<uint16_t>();
-        strs(params * 2);
+        Function f;
+        f.name = functionName_;
+        f.where = where_;
+        for (uint16_t i = 0; i < params; ++i) {
+            f.params.push_back(out_.strings[str()]);
+            str(); // type
+        }
         const uint16_t locals = r_.read<uint16_t>();
-        strs(locals * 2);
+        for (uint16_t i = 0; i < locals; ++i) {
+            f.locals.insert(out_.strings[str()]);
+            str();
+        }
+        functions_.push_back(std::move(f));
         const uint16_t instructions = r_.read<uint16_t>();
         propertyVars_.clear();
         for (uint16_t i = 0; i < instructions; ++i)
@@ -259,6 +277,8 @@ private:
             for (auto& a : varargs)
                 a = value();
         }
+        if (!functions_.empty())
+            functions_.back().code.push_back({op, args, varargs});
 
         const bool getFormFromFile = op == kCallStatic && args.size() == 3 && varargs.size() == 2 &&
                                      (args[0].type == 1 || args[0].type == 2) && args[1].type == 1 &&
@@ -377,10 +397,209 @@ private:
             markString(a, use, function);
     }
 
+
+public:
+    // Follows plugin-name constants that enter variables (an assignment, a script variable's default,
+    // an argument to one of the script's own functions) through copies, text joins and the script's
+    // own function parameters, to where they end up. Flow-insensitive and repeated until nothing
+    // changes, so it over-approximates: a value that may reach a use counts as reaching it.
+    void analyse()
+    {
+        auto pluginLike = [&](const Value& v) {
+            if (v.type != 2)
+                return false;
+            const auto& t = out_.strings[v.string];
+            return iendsWith(t, ".esp") || iendsWith(t, ".esm") || iendsWith(t, ".esl");
+        };
+        struct Origin {
+            uint16_t string;
+            size_t offset;
+            bool overridable;
+            std::set<ValueSink> sinks;
+        };
+        std::vector<Origin> origins;
+        std::map<size_t, size_t> originAt;
+        auto originOf = [&](const Value& v, bool overridable) {
+            auto it = originAt.find(v.offset);
+            if (it != originAt.end())
+                return it->second;
+            originAt[v.offset] = origins.size();
+            origins.push_back({v.string, v.offset, overridable, {}});
+            return origins.size() - 1;
+        };
+        std::map<std::string, std::set<size_t>> plain, text; // variable -> origins (text: built from them)
+        for (const auto& [name, v] : objectVars_)
+            if (pluginLike(v))
+                plain[":" + name].insert(originOf(v, autoVars_.count(name) > 0));
+        std::map<std::string, size_t> byName;
+        for (size_t f = 0; f < functions_.size(); ++f)
+            if (!functions_[f].name.empty())
+                byName.emplace(toLower(functions_[f].name), f);
+        auto nodeOf = [&](size_t f, const std::string& n) {
+            const auto& F = functions_[f];
+            if (F.locals.count(n) || std::find(F.params.begin(), F.params.end(), n) != F.params.end())
+                return std::to_string(f) + ":" + n;
+            return ":" + n;
+        };
+        bool changed = true;
+        for (int round = 0; changed && round < 32; ++round) {
+            changed = false;
+            for (size_t f = 0; f < functions_.size(); ++f) {
+                const auto& F = functions_[f];
+                auto of = [&](const Value& v, std::set<size_t>& p, std::set<size_t>& t) {
+                    p.clear();
+                    t.clear();
+                    if (v.type == 1) {
+                        const auto n = nodeOf(f, out_.strings[v.string]);
+                        if (auto it = plain.find(n); it != plain.end())
+                            p = it->second;
+                        if (auto it = text.find(n); it != text.end())
+                            t = it->second;
+                    }
+                };
+                auto add = [&](std::map<std::string, std::set<size_t>>& m, const std::string& n, const std::set<size_t>& o) {
+                    auto& dst = m[n];
+                    for (size_t x : o)
+                        changed |= dst.insert(x).second;
+                };
+                auto sink = [&](const std::set<size_t>& o, ValueSink s) {
+                    s.where = F.where;
+                    for (size_t x : o)
+                        origins[x].sinks.insert(s);
+                };
+                auto other = [&](const std::set<size_t>& o, const std::string& what) {
+                    ValueSink s;
+                    s.kind = ValueSink::Kind::Other;
+                    s.what = what;
+                    sink(o, s);
+                };
+                std::set<size_t> p, t, p2, t2;
+                for (const auto& in : F.code) {
+                    const auto& a = in.args;
+                    const auto& va = in.varargs;
+                    const char* name = kOpNames[in.op];
+                    if ((in.op == 0x0D || in.op == 0x0E) && a.size() == 2 && a[0].type == 1) { // assign, cast
+                        const auto dest = nodeOf(f, out_.strings[a[0].string]);
+                        if (pluginLike(a[1]))
+                            add(plain, dest, {originOf(a[1], false)});
+                        of(a[1], p, t);
+                        add(plain, dest, p);
+                        add(text, dest, t);
+                    } else if (in.op == 0x1B && a.size() == 3 && a[0].type == 1) { // strcat: text built from it
+                        const auto dest = nodeOf(f, out_.strings[a[0].string]);
+                        for (size_t k = 1; k < 3; ++k) {
+                            of(a[k], p, t);
+                            add(text, dest, p);
+                            add(text, dest, t);
+                        }
+                    } else if (in.op == kCallStatic && a.size() == 3 && a[0].type == 1 && a[1].type == 1) {
+                        const std::string type = out_.strings[a[0].string], fn = out_.strings[a[1].string];
+                        const bool gfff = iequals(type, "Game") && iequals(fn, "GetFormFromFile") && va.size() == 2;
+                        const bool presence = iequals(type, "Game") && iequals(fn, "IsPluginInstalled") && va.size() == 1;
+                        // Debug.* and a mod's own Trace function (AR:AR_CommonFunctions.Trace) only write logs.
+                        const bool log = iequals(type, "Debug") || iequals(fn, "Trace");
+                        for (size_t k = 0; k < va.size(); ++k) {
+                            of(va[k], p, t);
+                            if (p.empty() && t.empty())
+                                continue;
+                            if (log) {
+                                ValueSink s;
+                                s.kind = ValueSink::Kind::Log;
+                                sink(p, s);
+                                sink(t, s);
+                            } else if (gfff && k == 1) {
+                                ValueSink s;
+                                s.kind = ValueSink::Kind::GetFormFromFile;
+                                s.formIdLiteral = va[0].type == 3;
+                                s.formId = va[0].integer;
+                                s.formIdOffset = va[0].offset;
+                                sink(p, s);
+                                other(t, "GetFormFromFile with text built from the name");
+                            } else if (presence) {
+                                ValueSink s;
+                                s.kind = ValueSink::Kind::IsPluginInstalled;
+                                sink(p, s);
+                                other(t, "IsPluginInstalled with text built from the name");
+                            } else {
+                                other(p, type + "." + fn);
+                                other(t, type + "." + fn);
+                            }
+                        }
+                    } else if (in.op == kCallMethod && a.size() == 3 && a[0].type == 1) {
+                        const std::string fn = out_.strings[a[0].string];
+                        const bool own = a[1].type == 1 && iequals(out_.strings[a[1].string], "self");
+                        auto callee = own ? byName.find(toLower(fn)) : byName.end();
+                        for (size_t k = 0; k < va.size(); ++k) {
+                            if (callee != byName.end() && k < functions_[callee->second].params.size()) {
+                                const auto param = std::to_string(callee->second) + ":" + functions_[callee->second].params[k];
+                                if (pluginLike(va[k]))
+                                    add(plain, param, {originOf(va[k], false)});
+                                of(va[k], p, t);
+                                add(plain, param, p);
+                                add(text, param, t);
+                                continue;
+                            }
+                            of(va[k], p, t);
+                            other(p, fn);
+                            other(t, fn);
+                        }
+                    } else {
+                        // Any other instruction reading a variable that holds the name: its destination
+                        // operand (written, not read) is skipped.
+                        int dest = -1;
+                        if ((in.op >= 0x01 && in.op <= 0x13 && in.op != 0x0A) || in.op == 0x0A || in.op == 0x1B ||
+                            in.op == 0x1E || in.op == 0x1F || in.op == 0x20 || in.op == 0x24 || in.op == 0x25 ||
+                            in.op == 0x26)
+                            dest = 0;
+                        else if (in.op == 0x1C || in.op == kCallStatic || in.op == kCallMethod)
+                            dest = 2;
+                        else if (in.op == kCallParent || in.op == 0x22 || in.op == 0x23 || in.op == 0x28 || in.op == 0x29)
+                            dest = 1;
+                        if (in.op == 0x14 || in.op == 0x15 || in.op == 0x16)
+                            continue; // jumps
+                        for (size_t k = 0; k < a.size() + va.size(); ++k) {
+                            if (static_cast<int>(k) == dest)
+                                continue;
+                            of(k < a.size() ? a[k] : va[k - a.size()], p, t);
+                            other(p, in.op == 0x1A ? std::string("returned") : std::string(name));
+                            other(t, in.op == 0x1A ? std::string("returned") : std::string(name));
+                        }
+                    }
+                }
+            }
+        }
+        for (auto& o : origins) {
+            ValueFlow vf;
+            vf.string = o.string;
+            vf.offset = o.offset;
+            vf.overridable = o.overridable;
+            vf.sinks.assign(o.sinks.begin(), o.sinks.end());
+            out_.flows.push_back(std::move(vf));
+        }
+    }
+
+private:
     BinaryReader r_;
     Scan& out_;
     std::string object_, where_;
     const char* opcode_ = "";
+    // For the value-flow analysis (flows()): every function's parameters, locals and code, the
+    // script's variables with their defaults, and the variables behind Auto properties.
+    struct Instr {
+        uint8_t op = 0;
+        std::vector<Value> args, varargs;
+    };
+    struct Function {
+        std::string name; // callable name (default state), empty otherwise
+        std::string where;
+        std::vector<std::string> params;
+        std::set<std::string> locals;
+        std::vector<Instr> code;
+    };
+    std::vector<Function> functions_;
+    std::map<std::string, Value> objectVars_;
+    std::set<std::string> autoVars_;
+    std::string functionName_;
     bool getter_ = false;
     std::unordered_map<std::string, std::string> propertyVars_; // variable -> property it holds
 };
@@ -391,7 +610,9 @@ Scan scan(const std::vector<uint8_t>& bytes)
 {
     Scan out;
     try {
-        Walker(bytes, out).run();
+        Walker w(bytes, out);
+        w.run();
+        w.analyse();
         out.ok = true;
     } catch (const std::exception& e) {
         out = Scan{};

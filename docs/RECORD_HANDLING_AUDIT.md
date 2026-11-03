@@ -689,3 +689,18 @@ Build 71: 1,876 plugins compiled, 0 errors.
 **Automatic output count**: the compiler can pick the fewest output plugins whose master lists all fit (254 masters per plugin), trying 1, 2, 4, ... until they fit and then narrowing down between the last count that failed and the first that fit. Only allocation, FormIDs and master lists are repeated per try; merging is done once. `--outputs auto` on the command line.
 
 **Default values in scripts** (uploaded `wanamingo\lobotomitepack\integration.pex`): the plugin name is the default value of `::LAER_PLUGIN_NAME_var`, the variable behind the Auto property `LAER_PLUGIN_NAME`, and also passed directly to GetFormFromFile (rewritable). An Auto property's value can be set in the plugin's own script data (VMAD) in the Creation Kit, which replaces the default at run time, so rewriting the default alone is not reliable: following these needs the plugins' script data checked for the property as well (next stage).
+
+## Plugin names followed through script variables (S2)
+
+Build 72 (Automatic output count): 2 output plugins plus the patch (103,262 records with 115 masters; 1,190,885 records, 218 MB, with 245 masters), 1,876 plugins compiled, 0 errors. Every FormID changed with the output count.
+
+The uploaded `Vlt04ExternalContentScript.pex`, `AR_ExternalContentControlSystemScript.pex` and `Integration.pex` keep plugin names in variables: a script variable's default (`sWattzRifle = "WattzLaserGun.esp"`), a local assigned in one function and passed to another (`sPluginName = "SS2.esm"`, then `ExternalContentCheck(sPluginName, ...)`), or an Auto property's default (`LAER_PLUGIN_NAME`).
+
+Each script's code is now followed: a plugin-name constant that enters a variable (an assignment, a script variable's default, an argument to one of the script's own functions) is traced through copies, casts, text joins and the script's own function parameters (repeated until nothing changes; flow-insensitive, so it over-approximates) to where it ends up:
+- GetFormFromFile with a constant FormID, IsPluginInstalled, and log text (Debug.* or a function named Trace): Rewritable; one reference per lookup, all sharing the one constant. The Advanced Users Auto-Merger rewrites the constant once and each FormID; when the lookups' records are in different outputs, one name cannot point at both and the copy is not made (fail closed).
+- GetFormFromFile with a FormID computed at run time: Unsafe.
+- An Auto property's default: Compatibility Required (the plugin's script data can set the property), or Unknown when the script itself does not use it (other scripts can read it).
+- Stored but never used, or used only in log text: Safe.
+- Anything else (returned, stored in an array, passed to another script's function): Unknown, naming the instruction or function.
+
+On the uploaded scripts: every name in Vlt04ExternalContentScript is rewritable; in AR_ExternalContentControlSystemScript every name except AmericaRising2.esm (stored in an array for Settlement Menu Manager) is; Integration's are all Auto property defaults.

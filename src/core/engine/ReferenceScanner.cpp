@@ -388,6 +388,86 @@ ReferenceScanner::PluginNames ReferenceScanner::pluginNames(const Session& sessi
     return names;
 }
 
+namespace {
+// A plugin name that enters a variable, classified by where the value goes (pex::ValueFlow): only
+// GetFormFromFile with constant FormIDs and presence checks (and log text) is rewritable, one
+// reference per use, all sharing the constant to rewrite.
+void flowReferences(std::vector<PluginReference>& out, const pex::ValueFlow& flow, PluginIndex plugin,
+                    const std::string& path, const std::string& format, const std::string& text,
+                    const pex::StringUsage& use)
+{
+    using K = pex::ValueSink::Kind;
+    const pex::ValueSink* other = nullptr;
+    const pex::ValueSink* runtime = nullptr;
+    std::vector<const pex::ValueSink*> lookups;
+    const pex::ValueSink* presence = nullptr;
+    for (const auto& s : flow.sinks) {
+        if (s.kind == K::Other && !other)
+            other = &s;
+        else if (s.kind == K::GetFormFromFile && !s.formIdLiteral && !runtime)
+            runtime = &s;
+        else if (s.kind == K::GetFormFromFile && s.formIdLiteral)
+            lookups.push_back(&s);
+        else if (s.kind == K::IsPluginInstalled && !presence)
+            presence = &s;
+    }
+    const std::string how = std::string(pex::stringUseName(use.use));
+    if (other) {
+        auto r = make(Fact::PexOtherUse, plugin, path, format, text, other->where);
+        r.context = how + ", then " + other->what;
+        r.pexStringOffset = flow.offset;
+        out.push_back(std::move(r));
+        return;
+    }
+    if (runtime) {
+        auto r = make(Fact::PexGetFormRuntime, plugin, path, format, text, runtime->where);
+        r.pexStringOffset = flow.offset;
+        out.push_back(std::move(r));
+        return;
+    }
+    if (lookups.empty() && !presence && flow.overridable) {
+        // An Auto property: other scripts can read it, and the plugin's script data can set it.
+        auto r = make(Fact::PexOtherUse, plugin, path, format, text, use.where);
+        r.context = "Auto property default";
+        r.pexStringOffset = flow.offset;
+        out.push_back(std::move(r));
+        return;
+    }
+    if (lookups.empty() && !presence) {
+        auto r = make(Fact::PexUnused, plugin, path, format, text, flow.sinks.empty() ? use.where : flow.sinks[0].where);
+        r.context = flow.sinks.empty() ? how + ", never used" : how + ", used only in log text";
+        r.reason = flow.sinks.empty() ? "stored by the script but never used: nothing depends on it"
+                                      : "used only to write log text: nothing in the game depends on it";
+        out.push_back(std::move(r));
+        return;
+    }
+    if (flow.overridable) {
+        auto r = make(Fact::PexOtherUse, plugin, path, format, text, use.where);
+        r.cls = ReferenceClass::CompatibilityRequired;
+        r.context = "Auto property default";
+        r.reason = "the default value of an Auto property, used for GetFormFromFile or IsPluginInstalled; the "
+                   "plugin's script data can set the property to another value, which this app does not check yet";
+        out.push_back(std::move(r));
+        return;
+    }
+    for (const auto* s : lookups) {
+        auto r = make(Fact::PexGetFormFixed, plugin, path, format, text, s->where);
+        r.hasFormId = true;
+        r.formId = static_cast<uint32_t>(s->formId);
+        r.pexFormIdOffset = s->formIdOffset;
+        r.pexStringOffset = flow.offset;
+        r.context = "Game.GetFormFromFile(" + formatFormId(r.formId) + ") via " + how;
+        out.push_back(std::move(r));
+    }
+    if (presence) {
+        auto r = make(Fact::PexPluginInstalled, plugin, path, format, text, presence->where);
+        r.pexStringOffset = flow.offset;
+        r.context = "Game.IsPluginInstalled via " + how;
+        out.push_back(std::move(r));
+    }
+}
+} // namespace
+
 std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names, const std::string& path,
                                                        const std::vector<uint8_t>& bytes, const std::string& source,
                                                        std::vector<pex::PropertyRead>* propertyReads)
@@ -415,6 +495,9 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                     out.push_back(std::move(r));
                 }
         } else {
+            std::map<size_t, const pex::ValueFlow*> flowAt; // constant offset -> where its value goes
+            for (const auto& f : scan.flows)
+                flowAt[f.offset] = &f;
             for (size_t i = 0; i < scan.strings.size(); ++i) {
                 auto it = names.find(toLower(scan.strings[i]));
                 if (it == names.end())
@@ -424,6 +507,12 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                     if (u.string != i)
                         continue;
                     used = true;
+                    if (auto fl = flowAt.find(u.offset);
+                        fl != flowAt.end() && (u.use == pex::StringUse::Default || u.use == pex::StringUse::Assignment ||
+                                               u.use == pex::StringUse::CallArgument)) {
+                        flowReferences(out, *fl->second, it->second, path, format, scan.strings[i], u);
+                        continue;
+                    }
                     Fact f = u.use == pex::StringUse::GetFormFromFile
                                  ? (u.formIdLiteral ? Fact::PexGetFormFixed : Fact::PexGetFormRuntime)
                              : u.use == pex::StringUse::IsPluginInstalled ? Fact::PexPluginInstalled

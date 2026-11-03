@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace fo4mx::pex {
@@ -61,6 +62,30 @@ struct PropertyRead {
     std::string where;    // "Object.State.Function"
 };
 
+// Where a string constant assigned to a variable (or the default value of a script variable, or
+// passed to one of the script's own functions) ends up, following the value through variables,
+// copies and the script's own function parameters.
+struct ValueSink {
+    enum class Kind : uint8_t { GetFormFromFile, IsPluginInstalled, Log, Other };
+    Kind kind = Kind::Other;
+    bool formIdLiteral = false; // GetFormFromFile with a constant FormID
+    int32_t formId = 0;
+    size_t formIdOffset = 0;
+    std::string what;           // the instruction or function, for Other
+    std::string where;
+    bool operator<(const ValueSink& o) const
+    {
+        return std::tie(kind, formIdOffset, formIdLiteral, what, where) <
+               std::tie(o.kind, o.formIdOffset, o.formIdLiteral, o.what, o.where);
+    }
+};
+struct ValueFlow {
+    uint16_t string = 0;
+    size_t offset = 0;         // the constant's string index (as StringUsage::offset)
+    bool overridable = false;  // the default of an Auto property: the plugin's script data may set it
+    std::vector<ValueSink> sinks;
+};
+
 struct Scan {
     bool ok = false;
     std::string error;
@@ -74,6 +99,8 @@ struct Scan {
     std::vector<StringUsage> uses;
     // Every property this script reads into a variable, and where the value goes.
     std::vector<PropertyRead> propertyReads;
+    // Constants followed through variables and the script's own functions.
+    std::vector<ValueFlow> flows;
 };
 
 Scan scan(const std::vector<uint8_t>& bytes);

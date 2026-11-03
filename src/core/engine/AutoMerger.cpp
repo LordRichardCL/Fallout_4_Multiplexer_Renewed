@@ -408,6 +408,20 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                     strings.push_back(s); // a new string: other uses of the plugin name keep theirs
                     return strings.size() - 1;
                 };
+                // A name kept in a variable is shared by every use it reaches (one constant to rewrite):
+                // all of them must point at the same output, or the copy is not made (fail closed).
+                std::map<size_t, std::string> sharedTarget; // constant offset -> output
+                for (const auto* r : todo) {
+                    if (!r->hasFormId)
+                        continue;
+                    if (auto moved = where.find(session, r->plugin, r->formId)) {
+                        auto [it, added] = sharedTarget.emplace(r->pexStringOffset, moved->first);
+                        if (!added && it->second != moved->first)
+                            throw std::runtime_error(r->text + " is shared by lookups of records that are in " + it->second +
+                                                     " and " + moved->first + "; one name cannot point at both");
+                    }
+                }
+                std::set<size_t> stringPatched;
                 for (const auto* r : todo) {
                     if (r->pexStringOffset < scan.stringTableEnd || r->pexStringOffset + 2 > original.size() ||
                         loadLE<uint16_t>(original.data() + r->pexStringOffset) >= scan.strings.size() ||
@@ -429,11 +443,14 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                         change(*r, to + " " + formatFormId(moved->second));
                         ++f.changedCalls;
                     } else {
-                        to = primaryOf(r->plugin);
+                        auto shared = sharedTarget.find(r->pexStringOffset);
+                        to = shared != sharedTarget.end() ? shared->second : primaryOf(r->plugin);
                         expected.insert({toLower(to), false, 0});
                         change(*r, to);
                         ++f.renamed;
                     }
+                    if (!stringPatched.insert(r->pexStringOffset).second)
+                        continue; // the shared constant is already rewritten
                     const size_t index = indexOf(to);
                     if (strings.size() > 0xFFFF)
                         throw std::runtime_error("the script's string table is full (65535 strings)");

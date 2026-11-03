@@ -2775,7 +2775,7 @@ TEST(references_pex_uses)
     ScriptOptions assign;
     assign.assignName = true;
     auto as = ReferenceScanner::inspect(kNames, "scripts\\a.pex", testScript(0x812, "ModS.esp", assign));
-    CHECK(classes(as).count("Unknown:assignment") == 1);
+    CHECK(classes(as).count("Safe:assignment, never used") == 1); // stored, never used: nothing depends on it
     // A script that does not read back exactly: unknown.
     auto bad = ReferenceScanner::inspect(kNames, "scripts\\a.pex", testScript(0x812, "ModS.esp", 1));
     CHECK_EQ(bad.size(), size_t(1));
@@ -2906,6 +2906,54 @@ TEST(references_named_constants_by_their_readers)
             std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
             CHECK(bytes.find(q.compiledOutput()->outputs.front().name) != std::string::npos);
         }
+    }
+}
+
+// 6d. A plugin name kept in a variable is followed to where it goes, through the script's own
+//     functions: GetFormFromFile with a constant FormID, IsPluginInstalled and log text are
+//     rewritable, one shared constant; returned from a function, its meaning is unknown.
+TEST(references_followed_through_variables)
+{
+    auto refs = ReferenceScanner::inspect(kNames, "scripts\\flow.pex", flowScript("ModS.esp", 0x812));
+    std::multiset<std::string> got;
+    size_t offset = 0;
+    for (const auto& r : refs) {
+        got.insert(std::string(referenceClassName(r.cls)) + ":" + r.context);
+        if (offset == 0)
+            offset = r.pexStringOffset;
+        CHECK_EQ(r.pexStringOffset, offset); // one constant, shared
+    }
+    CHECK((got == std::multiset<std::string>{"Rewritable:Game.GetFormFromFile(00000812) via assignment",
+                                             "Rewritable:Game.IsPluginInstalled via assignment"}));
+    // End to end: ModS compiles and the Auto-Merger rewrites the shared constant and the FormID.
+    {
+        auto root = referenceInstall("refflow");
+        const auto script = flowScript("ModS.esp", 0x812);
+        writeFile(root / "Game" / "Data" / "Scripts" / "Flow.pex", std::string(reinterpret_cast<const char*>(script.data()), script.size()));
+        auto cfg = configFor(root);
+        cfg.compile.autoMerge = true;
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+        CHECK(p.compile());
+        auto result = p.exportOutputs();
+        CHECK_EQ(p.validation()->errors, uint64_t(0));
+        const auto copy = result.directory / "scripts" / "flow.pex";
+        CHECK(std::filesystem::exists(copy));
+        if (std::filesystem::exists(copy)) {
+            std::ifstream in(copy, std::ios::binary);
+            std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            const auto after = ReferenceScanner::inspect(kNames, "scripts\\flow.pex", bytes);
+            for (const auto& r : after)
+                CHECK(r.plugin != p.session().findPlugin("ModS.esp")->index); // ModS.esp no longer named
+        }
+    }
+    auto leaked = ReferenceScanner::inspect(kNames, "scripts\\flow.pex", flowScript("ModS.esp", 0x812, true));
+    CHECK_EQ(leaked.size(), size_t(1));
+    if (!leaked.empty()) {
+        CHECK_EQ(leaked[0].cls, ReferenceClass::Unknown);
+        CHECK(leaked[0].context.find("returned") != std::string::npos);
     }
 }
 
