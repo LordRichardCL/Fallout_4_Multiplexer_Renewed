@@ -68,6 +68,7 @@ enum class Fact {
     BinaryString,        // F4SE DLL
     EngineFolder,        // FaceGen / face textures / LOD billboards folder named after the plugin
     VoiceFolder,         // sound\voice\<plugin>\: relocated with the plugin's responses at export
+    CellDataFolder,      // meshes\precombined\<plugin>\, vis\<plugin>\: read only for the plugin's own cells
     OtherFolder,         // any other folder named after the plugin
     RecordPathFolder,    // a folder named after the plugin whose every file its records name by path
     AssetFolder,         // a folder named after the plugin under meshes, textures, materials, sound or music
@@ -138,6 +139,11 @@ Rule rule(Fact f)
         return {K::Directory, C::Safe, "relocated folder",
                 "copied at export into the output's folder, named after the records' new FormIDs, so the game "
                 "finds them as before"};
+    case Fact::CellDataFolder:
+        return {K::Directory, C::Safe, "cell data folder",
+                "read by the game only for new cells of this plugin that carry precombine or previs data (PCMB, "
+                "VISI, XCRI, XPRI, or a previs file named by RVIS); the compiler keeps a plugin with such a cell out "
+                "by itself (Precombined Cell), so when the plugin compiles no cell uses these files, before or after"};
     case Fact::EngineFolder:
         return {K::Directory, C::CompatibilityRequired, "engine folder",
                 "the game finds these files by the defining plugin's name; moving them to the output is not "
@@ -405,7 +411,24 @@ std::string blueprintKey(std::string_view text, size_t begin)
             return {};
         const size_t close = k - 1;
         const size_t open = text.rfind('"', close - 1);
-        return open == std::string_view::npos ? std::string() : std::string(text.substr(open + 1, close - open - 1));
+        if (open == std::string_view::npos)
+            return {};
+        std::string key(text.substr(open + 1, close - open - 1));
+        if (key == "plugin") {
+            // "workshop": { ... "plugin": "<name>" ... }: the settlement's workbench.
+            const size_t brace = text.rfind('{', open);
+            if (brace != std::string_view::npos && text.find('}', brace) > begin) {
+                size_t q = brace;
+                while (q > 0 && (text[q - 1] == ' ' || text[q - 1] == '\t' || text[q - 1] == '\r' || text[q - 1] == '\n'))
+                    --q;
+                if (q > 0 && text[q - 1] == ':') {
+                    const size_t kq = text.rfind('"', q - 1);
+                    if (kq != std::string_view::npos && kq >= 10 && text.substr(kq - 9, 10) == "\"workshop\"")
+                        return "workshop";
+                }
+            }
+        }
+        return key;
     }
     const size_t array = text.rfind("\"plugins_required\"", begin);
     if (array != std::string_view::npos && text.find(']', array) > begin)
@@ -645,15 +668,17 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                 if (longest[m.end] != name.size())
                     continue;
                 Fact f;
+                bool workshop = false;
                 if (format == "PSC")
                     f = Fact::PscSource;
                 else if (commentLine(text, m.begin, format))
                     f = Fact::ConfigComment;
                 else if (blueprint) {
                     const std::string key = blueprintKey(text, m.begin);
-                    f = key == "plugin_name"        ? Fact::BlueprintItem
-                        : key == "plugins_required" ? Fact::BlueprintRequired
-                                                    : Fact::SettlementBlueprint;
+                    f = key == "plugin_name" || key == "workshop" ? Fact::BlueprintItem
+                        : key == "plugins_required"               ? Fact::BlueprintRequired
+                                                                  : Fact::SettlementBlueprint;
+                    workshop = key == "workshop";
                 }
                 else if (m.pair)
                     f = Fact::ConfigPair;
@@ -661,8 +686,13 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                     f = Fact::McmRequirement;
                 else
                     f = Fact::ConfigPlain;
-                auto r = make(f, it->second, path, format,
-                              std::string(text.substr(m.begin, (m.pair ? m.idEnd : m.end) - m.begin)),
+                // A pair reads "Plugin|FormID" whichever order the file writes it in.
+                const std::string found =
+                    !m.pair                ? std::string(text.substr(m.begin, m.end - m.begin))
+                    : m.idBegin > m.begin ? std::string(text.substr(m.begin, m.idEnd - m.begin))
+                                           : std::string(text.substr(m.begin, m.end - m.begin)) + "|" +
+                                                 std::string(text.substr(m.idBegin, m.idEnd - m.idBegin));
+                auto r = make(f, it->second, path, format, found,
                               "line " + std::to_string(lineOf(text, m.begin)));
                 r.nameBegin = m.begin;
                 r.nameEnd = m.end;
@@ -676,9 +706,29 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                     // The item's object: its FormID (6 hex digits) and the same in decimal.
                     const size_t open = text.rfind('{', m.begin);
                     const size_t close = text.find('}', m.end);
-                    const auto hex = jsonValue(text, open == std::string_view::npos ? 0 : open, close, "FormID");
-                    const auto dec = jsonValue(text, open == std::string_view::npos ? 0 : open, close, "FormID_dec");
+                    // The settlement's workbench: "id" and "id_dec" instead.
+                    const size_t from = open == std::string_view::npos ? 0 : open;
+                    const auto hex = jsonValue(text, from, close, workshop ? "id" : "FormID");
+                    const auto dec = jsonValue(text, from, close, workshop ? "id_dec" : "FormID_dec");
                     bool ok = hex.second > hex.first && dec.second > dec.first;
+                    if (ok && workshop) {
+                        // Its base object is stored as a load-order FormID without a plugin name: only
+                        // a base from Fallout4.esm (load-order index 00, never compiled) is certain to be
+                        // unaffected by the move.
+                        const auto base = jsonValue(text, from, close, "baseid_dec");
+                        const std::string digits(text.substr(base.first, base.second - base.first));
+                        if (base.second <= base.first || digits.size() > 10 || std::stoull(digits) >= 0x01000000ull) {
+                            r.cls = ReferenceClass::Unknown;
+                            r.context = "Transfer Settlements workbench";
+                            r.reason = "the settlement's workbench, whose base object (baseid_dec) is a load-order "
+                                       "FormID of a plugin the blueprint does not name: it may change with the move";
+                            out.push_back(std::move(r));
+                            continue;
+                        }
+                        r.context = "Transfer Settlements workbench";
+                        r.reason = "the settlement's workbench: its plugin name and FormID (hex and decimal) are "
+                                   "rewritten together; its base object is from Fallout4.esm";
+                    }
                     for (size_t c = hex.first; ok && c < hex.second; ++c)
                         ok = std::isxdigit(static_cast<unsigned char>(text[c])) != 0;
                     if (ok) {
@@ -798,7 +848,12 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             byPath = !files.empty() && std::all_of(files.begin(), files.end(),
                                                    [&](const std::string& f) { return named.count(f) > 0; });
         }
+        // Precombined meshes and previs files are named after the cell's defining plugin and its
+        // FormID, and only cells with precombine or previs data read them: the compiler refuses such
+        // new cells (Precombined Cell), which decides by the records themselves.
+        const bool cellData = pre == "meshes\\precombined\\" || pre == "vis\\";
         auto r = make(voice       ? Fact::VoiceFolder
+                      : cellData  ? Fact::CellDataFolder
                       : engine    ? Fact::EngineFolder
                       : assetRoot ? Fact::AssetFolder
                       : byPath    ? Fact::RecordPathFolder
@@ -809,7 +864,9 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             r.reason = std::string(engine->what) + ": copied at export into the output's folder, named after the "
                                                    "records' new FormIDs, so the game finds them as before";
         }
-        if (engine && !voice) {
+        if (cellData)
+            r.context = engine->what;
+        if (engine && !voice && !cellData) {
             r.context = engine->what;
             r.reason = std::string(engine->what) + " are found by the plugin's file name; moving them to the output "
                                                    "is not implemented";

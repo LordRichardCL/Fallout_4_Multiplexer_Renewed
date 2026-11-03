@@ -390,10 +390,15 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                                   ", so the game found nothing before either: left as it was");
             };
             auto primaryOf = [&](PluginIndex p) {
+                // Only names without a FormID (presence checks, requirements) are renamed: any
+                // installed output answers them as the plugin did. A plugin whose records all went
+                // into other plugins' records (merged edits) has no output of its own: the first.
                 auto it = where.primaryOutput.find(p);
-                if (it == where.primaryOutput.end())
+                if (it != where.primaryOutput.end())
+                    return it->second;
+                if (outputNames.empty())
                     throw std::runtime_error(session.plugins[p].name + " has no records in the outputs");
-                return it->second;
+                return outputNames.front();
             };
 
             if (isScript(f.path)) {

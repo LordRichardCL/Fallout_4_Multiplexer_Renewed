@@ -2324,8 +2324,11 @@ TEST(new_cells_with_precombines_or_clashing_grids_stay)
         writePlugin(data / name, {"Fallout4.esm", "World.esm"},
                     {record("WRLD", 0x01000800, {zs("EDID", "SharedWorld")}),
                      record("CELL", 0x02000800, {zs("EDID", std::string(name) + "Cell"), raw("XCLC", gridBytes(3, 3))})});
+    // Its precombined meshes: a Safe folder reference, since the cell itself keeps the plugin out.
+    writeFile(data / "Meshes" / "Precombined" / "ModPC.esp" / "00000800_0A1B2C3D_OC.nif", "x");
     writeFile(root / "plugins.txt", "*World.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModPC.esp\n*ModG1.esp\n*ModG2.esp\n");
     auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
     cfg.analysis.excludedPlugins = {"World.esm"};
     Pipeline p(cfg);
     p.scan();
@@ -2335,6 +2338,13 @@ TEST(new_cells_with_precombines_or_clashing_grids_stay)
     const auto& kept = p.session().autoRetained;
     CHECK(kept.count("modpc.esp") == 1);
     CHECK(kept.count("modpc.esp") && kept.at("modpc.esp").find("precombine or previs data") != std::string::npos);
+    size_t folders = 0;
+    for (const auto& r : p.session().nameReferences)
+        if (r.plugin == p.session().findPlugin("ModPC.esp")->index) {
+            ++folders;
+            CHECK_EQ(r.cls, ReferenceClass::Safe);
+        }
+    CHECK_EQ(folders, size_t(1));
     CHECK_EQ(kept.count("modg1.esp") + kept.count("modg2.esp"), size_t(1)); // one of the two stays
     const auto* c = p.compiledOutput();
     CHECK(c->isCompiled(p.session().findPlugin("ModG1.esp")->index) !=
@@ -2810,10 +2820,12 @@ TEST(references_folder_and_path)
     auto refs = referencesOf(s, "ModS.esp");
     CHECK_EQ(refs.size(), size_t(1)); // one folder, not one per file
     CHECK_EQ(refs[0]->kind, ReferenceKind::Directory);
-    CHECK_EQ(refs[0]->cls, ReferenceClass::CompatibilityRequired);
+    // Read only for the plugin's own cells with precombine data, which the compiler refuses by
+    // itself (Precombined Cell): ModS has none, so the folder is used by no cell.
+    CHECK_EQ(refs[0]->cls, ReferenceClass::Safe);
     CHECK_EQ(refs[0]->location, std::string("2 files"));
     CHECK_EQ(refs[0]->context, std::string("precombined meshes"));
-    CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Ineligible);
+    CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
     auto t = referencesOf(s, "ModT.esp");
     CHECK_EQ(t.size(), size_t(3));
     if (t.size() != 3)
@@ -2822,7 +2834,7 @@ TEST(references_folder_and_path)
     for (const auto* r : t)
         byContext[r->kind == ReferenceKind::FilePath ? std::string("file") : r->context] = r->cls;
     CHECK(byContext["file"] == ReferenceClass::Unknown);
-    CHECK(byContext["previs data"] == ReferenceClass::CompatibilityRequired);
+    CHECK(byContext["previs data"] == ReferenceClass::Safe);
     CHECK(byContext["FaceGen meshes"] == ReferenceClass::Safe); // moved with its NPCs (N2)
     CHECK_EQ(s.findPlugin("ModT.esp")->eligibility, Eligibility::Ineligible);
 }
@@ -2982,7 +2994,9 @@ TEST(references_followed_through_variables)
 
 // 6e. Configs written "0x<FormID>:Plugin.esp" (X-Cell) are FormID pairs too; Transfer Settlements
 //     blueprints are rewritable: each item's plugin_name with its FormID in hex and decimal, and the
-//     plugins_required entries. The settlement itself (workshop, worldspace) stays unsafe.
+//     plugins_required entries, and the settlement's workbench ("workshop": plugin, id, id_dec) when
+//     its base object is from Fallout4.esm. A worldspace or a workbench whose base may belong to
+//     another plugin stays out.
 TEST(references_reverse_pairs_and_settlement_blueprints)
 {
     auto pairs = ReferenceScanner::inspect(kNames, "f4se\\plugins\\x-cell-exceptions.ini",
@@ -2999,17 +3013,41 @@ TEST(references_reverse_pairs_and_settlement_blueprints)
         { "FormID": "000812", "FormID_dec": 2066, "name": "Thing", "plugin_name": "ModS.esp", "posX": 1.0 },
         { "FormID": "0C01C6", "FormID_dec": 786886, "name": "Conduit", "plugin_name": "Fallout4.esm", "posX": 2.0 }
     ],
-    "workshop": { "id": "066EB6", "id_dec": 421558, "plugin": "Fallout4.esm" }
+    "workshop": { "baseid_dec": 31374, "id": "000812", "id_dec": 2066, "plugin": "ModS.esp", "posX": 0.0 }
 })";
+    {
+        auto refs = ReferenceScanner::inspect(kNames, "f4se\\plugins\\transfersettlements\\blueprints\\a.json",
+                                              bytesOf(blueprint));
+        size_t workbench = 0;
+        for (const auto& r : refs)
+            if (r.context == "Transfer Settlements workbench") {
+                ++workbench;
+                CHECK_EQ(r.cls, ReferenceClass::Rewritable);
+                CHECK(r.hasFormId && r.formId == 0x812u && r.decEnd > r.decBegin);
+            }
+        CHECK_EQ(workbench, size_t(1));
+        // A base object given with a load-order index other than 00: its plugin is unknown.
+        std::string other = blueprint;
+        other.replace(other.find("31374"), 5, "33585806");
+        refs = ReferenceScanner::inspect(kNames, "f4se\\plugins\\transfersettlements\\blueprints\\a.json",
+                                         bytesOf(other));
+        bool unknown = false;
+        for (const auto& r : refs)
+            unknown |= r.context == "Transfer Settlements workbench" && r.cls == ReferenceClass::Unknown;
+        CHECK(unknown);
+    }
     auto root = referenceInstall("refblueprint");
     writeFile(root / "Game" / "Data" / "F4SE" / "Plugins" / "TransferSettlements" / "blueprints" / "Test.json", blueprint);
+    // A reverse pair with more lines after it (the reference's text stops at the name).
+    writeFile(root / "Game" / "Data" / "F4SE" / "Plugins" / "x-cell-exceptions.ini",
+              "[facegen_exception]\npiper=0x812:ModS.esp\nnick=0x2F1F:Fallout4.esm\n\n[other]\nkey=1\n");
     auto cfg = configFor(root);
     cfg.compile.autoMerge = true;
     Pipeline p(cfg);
     p.scan();
     p.analyse();
     const auto refs = referencesOf(p.session(), "ModS.esp");
-    CHECK_EQ(refs.size(), size_t(2));
+    CHECK_EQ(refs.size(), size_t(4));
     for (const auto* r : refs)
         CHECK_EQ(r->cls, ReferenceClass::Rewritable);
     CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
@@ -3033,9 +3071,26 @@ TEST(references_reverse_pairs_and_settlement_blueprints)
             CHECK(text.find(hex) != std::string::npos);
             CHECK(text.find("\"FormID_dec\": " + std::to_string(moved->objectId)) != std::string::npos);
             CHECK(text.find("\"plugin_name\": \"" + moved->outputPlugin + "\"") != std::string::npos);
+            CHECK(text.find("\"plugin\": \"" + moved->outputPlugin + "\"") != std::string::npos);
+            CHECK(text.find("\"id_dec\": " + std::to_string(moved->objectId)) != std::string::npos);
+            CHECK(text.find("\"baseid_dec\": 31374") != std::string::npos); // the base is not changed
         }
         CHECK(text.find("786886") != std::string::npos); // other plugins' items unchanged
     }
+    const auto xcell = result.directory / "f4se" / "plugins" / "x-cell-exceptions.ini";
+    CHECK(std::filesystem::exists(xcell));
+    if (std::filesystem::exists(xcell)) {
+        const auto text = slurpFile(xcell);
+        CHECK(text.find("ModS.esp") == std::string::npos);
+        CHECK(text.find("nick=0x2F1F:Fallout4.esm") != std::string::npos);
+        for (const auto& mp : p.compiledOutput()->mappings)
+            if (iequals(mp.sourcePlugin, "ModS.esp") && mp.sourceObjectId == 0x812) {
+                char line[96];
+                std::snprintf(line, sizeof(line), "piper=0x%X:", mp.objectId);
+                CHECK(text.find(std::string(line) + mp.outputPlugin + "\n") != std::string::npos);
+            }
+    }
+    CHECK(p.session().findPlugin("ModS.esp")->eligibility == Eligibility::Eligible);
 }
 
 // 7. Safe and unsafe references together: the most restrictive decides.
