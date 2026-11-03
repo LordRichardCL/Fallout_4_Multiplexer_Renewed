@@ -3,7 +3,6 @@
 #include "engine/ValidationEngine.hpp"
 #include "esp/PluginFile.hpp"
 #include "esp/PluginWriter.hpp"
-#include "util/Json.hpp"
 #include "util/Zip.hpp"
 #include "util/Text.hpp"
 
@@ -293,7 +292,7 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
     ExportResult r;
     r.directory = options.outputDirectory.empty() ? defaultOutputDirectory(session) : options.outputDirectory;
     fs::create_directories(r.directory);
-    // Notes for the user (lists, the INI line, the summary, reports) go next to Data, not into it, so the
+    // Notes for the user (lists, the INI line, reports) go next to Data, not into it, so the
     // package installs only what the game uses; the build's own records (FormID map, copy lists) stay
     // in Data, where the next scan finds them even once the package is installed.
     r.packageRoot = packageRoot(r.directory);
@@ -588,35 +587,12 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
     r.pluginsTxt = notes / "Multiplexer_plugins.txt";
     writeText(r.pluginsTxt, proposedPluginsTxt(session, c));
 
-    json::Value summary;
-    summary.set("generator", "Fallout 4 Multiplexer Renewed");
-    summary.set("runtime", session.defs.profileName());
-    summary.set("compiledPlugins", static_cast<uint64_t>(c.compiledPlugins.size()));
-    summary.set("records", static_cast<uint64_t>(c.records.size()));
-    summary.set("newRecords", static_cast<uint64_t>(c.mappings.size()));
-    summary.set("mergedRecords", static_cast<uint64_t>(c.mergedRecords));
-    summary.set("patchedRecords", static_cast<uint64_t>(c.patchedRecords));
-    summary.set("strategy", allocationStrategyName(c.options.strategy));
-    json::Value outputs;
-    for (const auto& op : c.outputs) {
-        if (op.records.empty())
-            continue;
-        json::Value o;
-        o.set("name", op.name);
-        o.set("records", static_cast<uint64_t>(op.records.size()));
-        o.set("newRecords", op.newRecords);
-        o.set("overrides", op.overrides);
-        o.set("light", op.light);
-        o.set("patch", op.patch);
-        json::Value masters;
-        for (const auto& m : op.masterNames)
-            masters.push(m);
-        o.set("masters", masters);
-        outputs.push(o);
+    // A stale summary from an earlier build (no longer written: the Compilation Report has it all).
+    {
+        std::error_code ec;
+        fs::remove(notes / "Multiplexer_Compilation.json", ec);
+        fs::remove(r.directory / "Multiplexer_Compilation.json", ec);
     }
-    summary.set("outputs", outputs);
-    r.summary = notes / "Multiplexer_Compilation.json";
-    writeText(r.summary, summary.dump());
     return r;
 }
 

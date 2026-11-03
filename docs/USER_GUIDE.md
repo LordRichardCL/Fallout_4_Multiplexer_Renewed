@@ -154,7 +154,7 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 <game folder>\Multiplexer Output\
 ├── Data\                      everything the game loads (see below)
 ├── Multiplexer Output.zip      the Data folder, zipped (Data\ at its root): install this
-├── Multiplexer_DisablePlugins.txt, Multiplexer_plugins.txt, Multiplexer_Archives.ini, Multiplexer_Compilation.json
+├── Multiplexer_DisablePlugins.txt, Multiplexer_plugins.txt, Multiplexer_Archives.ini
 └── Multiplexer Reports\
 ```
 
@@ -177,7 +177,7 @@ Files the game reads (they mirror the `Data` folder layout because the game find
 | copies of scripts and configs | the Advanced Users Auto-Merger's relinked copies, which must override the originals | when the Auto-Merger is on |
 | archive loaders (same file name as the compiled plugin) | empty ESL-flagged plugins that keep a compiled mod's archives loading in place | MO2 with the output in the mods folder |
 
-Files for you and for the next build (the game does not read them; nothing needs F4SE or any other runtime component). The build's records (`Multiplexer_FormMap.tsv` and the copy lists) are in `Data`, so they are installed with the package and the next scan finds them even if the `Multiplexer Output` folder was deleted; the notes (lists, INI line, summary, reports) are next to `Data` and are not installed:
+Files for you and for the next build (the game does not read them; nothing needs F4SE or any other runtime component). The build's records (`Multiplexer_FormMap.tsv` and the copy lists) are in `Data`, so they are installed with the package and the next scan finds them even if the `Multiplexer Output` folder was deleted; the notes (lists, INI line, reports) are next to `Data` and are not installed:
 
 | File | Purpose |
 |---|---|
@@ -188,7 +188,6 @@ Files for you and for the next build (the game does not read them; nothing needs
 | `Multiplexer_ArchivePriority.txt` | only when loose copies are off: files whose winning archive would change |
 | `Multiplexer_ArchiveLoaders.txt` | MO2: which compiled plugins have an archive loader |
 | `Multiplexer_DisablePlugins.txt`, `Multiplexer_plugins.txt` | plugins to disable, and a proposed `plugins.txt` (for Vortex and manual installs) |
-| `Multiplexer_Compilation.json` | machine-readable summary |
 | `Multiplexer Reports/` | all reports (HTML + JSON) |
 
 Then:

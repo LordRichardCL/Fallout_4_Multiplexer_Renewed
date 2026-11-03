@@ -452,3 +452,48 @@ TEST(struct_array_with_header)
     CHECK_EQ(layout.formIdSlots[0].offset, uint32_t(8));
     CHECK_EQ(layout.formIdSlots[1].offset, uint32_t(16));
 }
+
+// The fields that kept 42 plugins out on a real load order (build 66), now described from xEdit.
+TEST(perk_sound_shader_projectile_and_effect_fields)
+{
+    const auto& d = RecordDefinitions::get();
+    auto sub = [](const char* sig, std::vector<uint8_t> data) {
+        Subrecord sr;
+        sr.signature = Signature::fromString(sig);
+        sr.data = std::move(data);
+        return sr;
+    };
+    auto slots = [](const DecodedLayout& l) {
+        std::vector<std::pair<uint32_t, uint32_t>> v;
+        for (const auto& s : l.formIdSlots)
+            v.emplace_back(s.sub, s.offset);
+        return v;
+    };
+    using Slots = std::vector<std::pair<uint32_t, uint32_t>>;
+    const std::vector<uint8_t> four(4, 0), eight(8, 0);
+    // PERK entry point: DATA (entry point, function 12, tab count), then EPFT 2 + EPFD = actor value, float.
+    auto perk = [&](uint8_t epft, uint8_t function, const std::vector<uint8_t>& epfd) {
+        return decodeLayout(d, Signature("PERK"),
+                            {sub("PRKE", {2, 0, 0}), sub("DATA", {7, function, 1}), sub("EPFT", {epft}), sub("EPFD", epfd)});
+    };
+    CHECK((slots(perk(2, 12, eight)) == Slots{{3, 0}})); // actor value
+    CHECK(perk(2, 1, eight).formIdSlots.empty() && perk(2, 1, eight).heuristic.empty()); // two floats
+    CHECK((slots(perk(5, 0, four)) == Slots{{3, 0}}));   // spell
+    CHECK((slots(perk(8, 0, eight)) == Slots{{3, 0}}));  // actor value, float
+    CHECK_EQ(perk(7, 0, four).localized.size(), size_t(1));
+    // SNDR BNAM: the base descriptor only in an AutoWeapon descriptor.
+    std::vector<uint8_t> autoWeapon = {0xE3, 0x7A, 0x15, 0xED}, standard = {0x0A, 0x54, 0xEF, 0x1E};
+    CHECK((slots(decodeLayout(d, Signature("SNDR"), {sub("CNAM", autoWeapon), sub("BNAM", four)})) == Slots{{1, 0}}));
+    auto values = decodeLayout(d, Signature("SNDR"), {sub("CNAM", standard), sub("BNAM", {1, 2, 3, 4, 5, 6})});
+    CHECK(values.formIdSlots.empty() && values.heuristic.empty());
+    // EFSH DNAM: the ambient sound at +108 in the current 157-byte layout.
+    CHECK((slots(decodeLayout(d, Signature("EFSH"), {sub("DNAM", std::vector<uint8_t>(157, 0))})) == Slots{{0, 108}}));
+    // PROJ DNAM: the VATS projectile at +89, nothing scanned.
+    auto proj = decodeLayout(d, Signature("PROJ"), {sub("DNAM", std::vector<uint8_t>(93, 0))});
+    CHECK(proj.heuristic.empty());
+    CHECK(std::any_of(proj.formIdSlots.begin(), proj.formIdSlots.end(), [](const auto& s) { return s.offset == 89; }));
+    // MGEF DATA: complete, the flags at +0 are not scanned.
+    auto mgef = decodeLayout(d, Signature("MGEF"), {sub("DATA", std::vector<uint8_t>(152, 0))});
+    CHECK(mgef.heuristic.empty());
+    CHECK_EQ(mgef.formIdSlots.size(), size_t(20));
+}

@@ -233,6 +233,31 @@ private:
                 heuristic(i, 0, static_cast<uint32_t>(size));
             break;
         }
+        case FieldKind::SoundDescriptorData: {
+            // xEdit wbSNDRDataDecider: an AutoWeapon descriptor (CNAM ED157AE3) names its base
+            // descriptor; any other holds frequency, priority and attenuation numbers.
+            bool autoWeapon = false;
+            for (const auto& other : subs_)
+                if (other.signature == Signature("CNAM") && other.data.size() >= 4)
+                    autoWeapon = loadLE<uint32_t>(other.data.data()) == 0xED157AE3u;
+            if (autoWeapon && size == 4)
+                slot(i, 0);
+            else if (autoWeapon)
+                heuristic(i, 0, static_cast<uint32_t>(size));
+            break;
+        }
+        case FieldKind::EffectShaderData:
+            // xEdit: the current layout (form version 106 on, 157 bytes) has the ambient sound at +108; the
+            // old one (a leading byte, 300+ bytes) has addon models at +241 and the ambient sound at +305.
+            if (size == 157) {
+                slot(i, 108);
+            } else if (size >= 309 && size < 400) {
+                slot(i, 241);
+                slot(i, 305);
+            } else {
+                heuristic(i, 0, static_cast<uint32_t>(size));
+            }
+            break;
         case FieldKind::TopicData:
             if (size == 8 && loadLE<uint32_t>(sr.data.data()) == 0)
                 slot(i, 4); // a topic
@@ -574,26 +599,51 @@ private:
                 slot(i, 0);
             break;
         case 2: // entry point: entry point, function, condition tab count
+            if (sr.data.size() >= 2)
+                epFunction_ = sr.data[1];
             break;
         default:
             heuristic(i, 0, static_cast<uint32_t>(sr.data.size()));
         }
     }
 
+    // xEdit FO4 EPFD by EPFT: 1 float; 2 two floats, or an actor value and a float when the entry point
+    // function is 5, 12, 13 or 14; 3 leveled item; 4 and 5 spell; 6 text; 7 localised text; 8 actor
+    // value and a float. 0 (unknown bytes) is scanned.
     void decodePerkEntryData(uint32_t i, const Subrecord& sr)
     {
+        const size_t size = sr.data.size();
         switch (epft_) {
         case 1: // float
+        case 6: // text
+            break;
+        case 2:
+            if (epFunction_ == 5 || epFunction_ == 12 || epFunction_ == 13 || epFunction_ == 14) {
+                if (size == 8)
+                    slot(i, 0); // actor value
+                else
+                    heuristic(i, 0, static_cast<uint32_t>(size));
+            }
             break;
         case 3: // leveled item
         case 4: // spell
-            if (sr.data.size() == 4)
+        case 5: // spell
+            if (size == 4)
                 slot(i, 0);
             else
-                heuristic(i, 0, static_cast<uint32_t>(sr.data.size()));
+                heuristic(i, 0, static_cast<uint32_t>(size));
+            break;
+        case 7:
+            out_.localized.push_back({i, StringFileKind::Strings});
+            break;
+        case 8: // actor value, float
+            if (size == 8)
+                slot(i, 0);
+            else
+                heuristic(i, 0, static_cast<uint32_t>(size));
             break;
         default:
-            heuristic(i, 0, static_cast<uint32_t>(sr.data.size()));
+            heuristic(i, 0, static_cast<uint32_t>(size));
         }
     }
 
@@ -771,6 +821,7 @@ private:
     bool inPerkEffect_ = false;
     uint8_t perkEffectType_ = 0;
     uint8_t epft_ = 0;
+    uint8_t epFunction_ = 0;
 };
 
 } // namespace

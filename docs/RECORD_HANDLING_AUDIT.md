@@ -640,3 +640,16 @@ Missing Assets are now Info, summed up with 50 examples: compiling never changes
 Build 63: 1,769 plugins compiled (+116, mostly from archive winners kept as 7,060 loose copies), 829,809 new FormIDs, 0 errors, 6,651 warnings (half of build 62). Every record type compiles; 39 plugins were kept out automatically (records the compiler could not translate safely). What keeps plugins out now is filename references: FaceGen folders (90 plugins), precombined meshes and previs (23 and 13), Transfer Settlements blueprints (20), and unknown or unsafe references in scripts and configs.
 
 The game finds an NPC's face as `meshes\actors\character\facegendata\facegeom\<defining plugin>\<FormID>.nif` and its face textures as `textures\actors\character\facecustomization\<defining plugin>\<FormID>_<suffix>.dds`. At export they are copied for every compiled new NPC under the output's name and the NPC's new FormID (`Multiplexer_FaceGen.tsv`), like voice files; FaceGen folders are now Safe filename references. The face mesh itself is copied unchanged: it names its textures by their original path, which stays installed with the original mod (its plugin is disabled, its files are not removed).
+
+## Fields that kept plugins out (F1)
+
+Build 66: 1,804 plugins compiled, 0 errors; 42 kept out automatically. Most of those were values in undescribed bytes that looked like FormIDs of compiled records. The fields are now described from xEdit:
+- **PERK EPFD** by EPFT: 5 is a spell; 2 is an actor value and a float when the entry point function is 5, 12, 13 or 14 (two floats otherwise); 8 is an actor value and a float; 7 is localised text; 6 text.
+- **MGEF DATA**: the layout is complete (every FormID was already described; the flags at +0 were scanned and looked like FormIDs).
+- **PROJ DNAM**: the VATS projectile at +89 (not aligned); the layout is complete.
+- **SNDR BNAM**: the base descriptor in an AutoWeapon descriptor (CNAM `ED157AE3`), numbers otherwise; CNAM and LNAM are numbers.
+- **EFSH DNAM**: the ambient sound at +108 in the current 157-byte layout; addon models at +241 and the ambient sound at +305 in the old one.
+
+The other keep-outs are by design: new references and cells in precombine or previs data, five plugins that would need more than 2,000 archive winner copies, and three records that reference a record their plugin does not compile.
+
+`Multiplexer_Compilation.json` is no longer written: everything in it is in the Compilation Report.

@@ -43,6 +43,8 @@ enum class FieldKind : uint8_t {
     PackageTarget,  // PACK PTDA: target type, then a FormID for references, objects, keywords
     ResponseData,   // INFO TRDA: emotion keyword (FFFFFFFF = none, as xEdit), response number, sound
     SceneHeadtracking, // SCEN HTID: a sound in a radio action (type 6), alias IDs in a dialogue action
+    SoundDescriptorData, // SNDR BNAM: the base descriptor (an AutoWeapon descriptor), else numbers
+    EffectShaderData, // EFSH DNAM: ambient sound (and addon models in the old format), by layout size
 };
 
 // How two plugins' edits of a field combine during merging.

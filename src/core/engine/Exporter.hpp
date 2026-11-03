@@ -32,7 +32,6 @@ struct ExportResult {
     std::filesystem::path archiveIni;
     std::filesystem::path disableList;
     std::filesystem::path pluginsTxt;
-    std::filesystem::path summary;
     std::vector<std::filesystem::path> archiveLoaders; // empty ESL plugins keeping compiled plugins' archives loading
     std::vector<std::filesystem::path> seqFiles;       // seq\<output>.seq for start-game-enabled quests
     // Voice files of compiled new responses, copied as sound\voice\<output>\<voice type>\<new FormID>_<n>.*

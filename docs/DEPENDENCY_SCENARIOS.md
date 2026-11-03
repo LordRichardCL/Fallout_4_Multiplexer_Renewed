@@ -301,7 +301,7 @@ The vocabulary used below:
    | Installation fingerprint (mods, plugins, archives, loose files, sizes, hashes, load order, dates) | ✓ snapshots |
    | Per-plugin parse cache and per-chain merge cache keyed by content signatures | ✓ BuildCache |
    | FormMap: original key → output + object ID | ✓ `Multiplexer_FormMap.tsv` |
-   | Compilation settings (outputs, strategy, flags) and the set of compiled plugins | ✓ build snapshot / `Multiplexer_Compilation.json` |
+   | Compilation settings (outputs, strategy, flags) and the set of compiled plugins | ✓ build snapshot / Compilation Report |
    | Which outputs were written, and their hashes | ✓ |
    | Per-output free capacity and the ESL/ESP decision | partly; should be explicit |
    | Pin and redirection decisions, with their cause | recommended |

@@ -553,8 +553,10 @@ void buildOldGen(RecordDefinitions& d)
     // resist values, light, shaders, actor values, projectile, explosion, art, impact data,
     // dual casting, visuals, equip ability, image space, perk).
     b.record("MGEF", "Magic Effect", true)
+        // xEdit's complete layout: every FormID is at these offsets; the rest are flags and numbers (the
+        // flags at +0 used to be scanned and could look like FormIDs).
         .field("DATA", structAt({8, 12, 16, 24, 32, 36, 68, 72, 76, 88, 92, 96, 100, 108, 116, 120, 124, 128, 132, 136},
-                                152, true))
+                                152, false))
         .field("ESCE", formIdArray(MergeMode::Scalar)) // counter effects (count is stored in DATA)
         .field("SNDD", structArray(8, {4}, MergeMode::Scalar)) // sounds: type, sound
         .field("DNAM", lstring())                              // magic item description
@@ -668,8 +670,9 @@ void buildOldGen(RecordDefinitions& d)
     // timer, explosion, sound, muzzle flash duration, fade duration, impact force, countdown sound,
     // disable sound, default weapon source, cone spread, collision radius, lifetime, relaunch
     // interval, decal data, collision layer; later bytes are scanned.
-    FieldDef projectileData = structAt({16, 20, 32, 36, 52, 56, 60, 80, 84}, 0, true);
-    projectileData.plain = {{0, 16}}; // flags, type, gravity, speed, range
+    // xEdit: ... decal data (+80), collision layer (+84), tracer frequency (a byte, +88), VATS projectile
+    // (+89, not aligned). Everything else is flags and numbers: the layout is complete.
+    FieldDef projectileData = structAt({16, 20, 32, 36, 52, 56, 60, 80, 84, 89}, 0, false);
     b.record("PROJ", "Projectile", true)
         .field("DNAM", projectileData)
         .field("NAM1", zstring()) // muzzle flash model
@@ -699,6 +702,9 @@ void buildOldGen(RecordDefinitions& d)
 
     b.record("SNDR", "Sound Descriptor", true)
         .field("DNAM", structAt({0}, 0, true)) // a FormID at +0 in 2,961 of 3,079 vanilla descriptors
+        .field("CNAM", noRefs())  // descriptor type
+        .field("LNAM", noRefs())  // looping, sidechain, rumble
+        .field("BNAM", special(FieldKind::SoundDescriptorData))
         .field("GNAM", formId()) // category
         .field("SNAM", formId()) // alternate sound for
         .field("ANAM", zstring()) // sound file
@@ -733,6 +739,7 @@ void buildOldGen(RecordDefinitions& d)
     b.record("ARTO", "Art Object", true).field("DNAM", noRefs()).modelRegions(); // art type
 
     b.record("EFSH", "Effect Shader", true)
+        .field("DNAM", special(FieldKind::EffectShaderData))
         .field("NAM7", zstring()) // holes texture
         .field("NAM8", zstring()) // membrane palette
         .field("NAM9", zstring()) // particle palette

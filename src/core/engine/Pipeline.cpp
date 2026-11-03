@@ -321,8 +321,10 @@ bool Pipeline::compile(ProgressSink& progress)
     if (!config_.archiveLoaders) {
         loadersOff = "archive loaders are turned off";
     } else if (session_->install.config.kind != InstallKind::ModOrganizer2) {
-        loadersOff = std::string("the install is managed by ") + installKindName(session_->install.config.kind) +
-                     ", where a loader would overwrite the original plugin in Data (Mod Organizer 2 only)";
+        loadersOff = std::string("the output is the installable package, the same for every mod manager (") +
+                     installKindName(session_->install.config.kind) +
+                     " here); archive loaders are only written when the output folder is a mod inside Mod Organizer "
+                     "2's mods folder";
     } else if (session_->install.modsPath.empty()) {
         loadersOff = "Mod Organizer's mods folder is unknown";
     } else {
