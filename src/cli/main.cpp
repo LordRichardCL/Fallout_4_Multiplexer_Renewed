@@ -47,7 +47,7 @@ Install selection:
   --runtime oldgen|nextgen   (default: oldgen = 1.10.163)
 
 Compile options:
-  --outputs N          most output plugins to use, 1-64 (default 20)
+  --outputs N|auto     most output plugins to use, 1-64 (default 20); auto: the fewest that fit
   --prefix NAME        output plugin name prefix (default Dummy_Plugin_)
   --strategy type|balanced|user   allocation strategy (default balanced)
   --rule PATTERN=N     strategy "user": send records whose signature or plugin
@@ -174,7 +174,9 @@ PipelineConfig makeConfig(const Args& a)
         cfg.exportOptions.outputDirectory = utf8ToPath(a.get("--out"));
 
     auto& c = cfg.compile;
-    c.outputCount = std::stoi(a.get("--outputs", "20"));
+    const std::string outputs = a.get("--outputs", "20");
+    c.autoOutputs = iequals(outputs, "auto");
+    c.outputCount = c.autoOutputs ? CompileOptions::kMaxOutputs : std::stoi(outputs);
     if (c.outputCount < CompileOptions::kMinOutputs || c.outputCount > CompileOptions::kMaxOutputs)
         throw std::runtime_error("--outputs must be between " + std::to_string(CompileOptions::kMinOutputs) + " and " +
                                  std::to_string(CompileOptions::kMaxOutputs));

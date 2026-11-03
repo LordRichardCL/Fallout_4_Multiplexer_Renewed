@@ -79,7 +79,16 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     auto* dirRow = new QHBoxLayout;
     dirRow->addWidget(outputDir_, 1);
     dirRow->addWidget(browse);
-    form->addRow("Output plugins", outputs_);
+    autoOutputs_ = new QCheckBox("Automatic");
+    autoOutputs_->setToolTip("Use the fewest output plugins whose master lists all fit (Fallout 4 allows at most 254 "
+                             "masters per plugin), from 1 up to the maximum. Fewer outputs take fewer load order "
+                             "slots; each one is larger. The number used is shown after Compile.");
+    auto* outputsRow = new QHBoxLayout;
+    outputsRow->addWidget(outputs_);
+    outputsRow->addWidget(autoOutputs_);
+    outputsRow->addStretch();
+    connect(autoOutputs_, &QCheckBox::toggled, outputs_, [this](bool on) { outputs_->setEnabled(!on); });
+    form->addRow("Output plugins", outputsRow);
     form->addRow("Name prefix", prefix_);
     form->addRow("Output folder", dirRow);
     outputs_->setToolTip(QString(
@@ -102,15 +111,18 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     outputsNote_->setWordWrap(true);
     form->addRow(outputsNote_);
     auto updateOutputsNote = [this] {
-        outputsNote_->setText(QString(
-            "Compiles eligible plugins into up to %1 output plugins, plus Multiplexer_Patch.esp when the patch is on. "
+        const QString count = autoOutputs_->isChecked()
+                                  ? QString("the fewest output plugins that fit")
+                                  : QString("up to %1 output plugins").arg(outputs_->value());
+        outputsNote_->setText(
+            "Compiles eligible plugins into " + count + ", plus Multiplexer_Patch.esp when the patch is on. "
             "The output folder also receives the files the game finds by plugin name and FormID (voice files, FaceGen, "
             "start-game quest lists in seq\\), loose copies that keep archive winners, and the Auto-Merger's relinked "
             "scripts and configs. The Multiplexer_*.tsv files in Data are the build's records for the next build; the "
-            "lists, INI line, summary and reports next to Data are notes for you. The game reads none of them.")
-                                  .arg(outputs_->value()));
+            "lists, INI line and reports next to Data are notes for you. The game reads none of them.");
     };
     connect(outputs_, &QSpinBox::valueChanged, this, updateOutputsNote);
+    connect(autoOutputs_, &QCheckBox::toggled, this, updateOutputsNote);
     updateOutputsNote();
     installNote_ = new QLabel;
     installNote_->setObjectName("PageSubtitle");
@@ -364,6 +376,8 @@ void CompilationPage::loadOptions()
 {
     const auto& c = app_->config().compile;
     outputs_->setValue(std::clamp(c.outputCount, fo4mx::CompileOptions::kMinOutputs, fo4mx::CompileOptions::kMaxOutputs));
+    autoOutputs_->setChecked(c.autoOutputs);
+    outputs_->setEnabled(!c.autoOutputs);
     prefix_->setText(qs(c.outputPrefix));
     strategy_->setCurrentIndex(strategy_->findData(int(c.strategy)));
     QStringList rules;
@@ -386,6 +400,7 @@ void CompilationPage::storeOptions()
 {
     auto& c = app_->config().compile;
     c.outputCount = outputs_->value();
+    c.autoOutputs = autoOutputs_->isChecked();
     c.outputPrefix = ss(prefix_->text().trimmed().isEmpty() ? "Dummy_Plugin_" : prefix_->text().trimmed());
     c.strategy = static_cast<AllocationStrategy>(strategy_->currentData().toInt());
     c.rules.clear();

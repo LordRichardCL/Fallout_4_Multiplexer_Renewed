@@ -31,6 +31,8 @@ struct AllocationRule {
 
 struct CompileOptions {
     int outputCount = 20;
+    // Automatic: the fewest output plugins whose master lists fit (outputCount is then the result).
+    bool autoOutputs = false;
     std::string outputPrefix = "Dummy_Plugin_";
     AllocationStrategy strategy = AllocationStrategy::Balanced;
     std::vector<AllocationRule> rules;

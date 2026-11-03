@@ -2070,6 +2070,27 @@ TEST(output_count_above_twenty)
              cfg.compile.outputPrefix + std::to_string(CompileOptions::kMaxOutputs) + ".esp");
 }
 
+// Automatic output count: the fewest outputs whose master lists fit (one, for a small load order).
+TEST(automatic_output_count)
+{
+    auto root = buildInstall("autooutputs");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    cfg.compile.autoOutputs = true;
+    cfg.compile.outputCount = 30;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto* c = p.compiledOutput();
+    CHECK_EQ(c->options.outputCount, 1);
+    size_t written = 0;
+    for (const auto& op : c->outputs)
+        written += !op.patch && !op.records.empty();
+    CHECK_EQ(written, size_t(1));
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+}
+
 // Dialogue stage (D2): topics, responses, scenes and branches compile in their quest and topic
 // groups. A response override is written in a copy of its topic and quest when no compiled plugin
 // changes them (here the plugin's own copies are identical, so they are only containers). A plugin

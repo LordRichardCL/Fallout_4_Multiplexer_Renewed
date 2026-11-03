@@ -766,7 +766,18 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
     // ---- Allocation -------------------------------------------------------------
     progress.stage("Compile");
-    const int N = options.outputCount;
+    // Allocation, FormIDs and master lists for N output plugins. Automatic: the fewest outputs whose
+    // master lists all fit (tried from 1 up, doubling, then narrowed down); each try starts over.
+    const size_t issuesBeforeAllocation = out.issues.size();
+    auto allocate = [&](const int N) -> bool {
+    out.issues.resize(issuesBeforeAllocation);
+    out.outputs.clear();
+    out.patchedRecords = 0;
+    for (auto& e : out.records) {
+        e.output = -1;
+        e.objectId = 0;
+        e.formIdChanged = false;
+    }
 
     // Patch records go to as many patch plugins as the master limit requires. Records are
     // taken in load order and a new patch starts when the next record's masters would not fit.
@@ -1199,6 +1210,43 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             addIssue(Severity::Error, "Missing Masters",
                      op.name + " would need " + std::to_string(op.masterNames.size()) + " masters (limit 254)");
     }
+
+    for (size_t i = issuesBeforeAllocation; i < out.issues.size(); ++i)
+        if (out.issues[i].severity == Severity::Error &&
+            (out.issues[i].category == "Missing Masters" || out.issues[i].category == "World Layout"))
+            return false;
+    return true;
+    };
+    int N = options.outputCount;
+    if (options.autoOutputs) {
+        // Fewest outputs: 1, 2, 4, ... until the masters fit, then the smallest count in between.
+        int fits = -1, fails = 0;
+        for (int n = 1; n <= CompileOptions::kMaxOutputs; n = std::min(n * 2, CompileOptions::kMaxOutputs + 1)) {
+            if (allocate(n)) {
+                fits = n;
+                break;
+            }
+            fails = n;
+            if (n == CompileOptions::kMaxOutputs)
+                break;
+        }
+        if (fits < 0) {
+            N = CompileOptions::kMaxOutputs; // nothing fits: report the errors of the largest count
+        } else {
+            int lo = fails + 1, hi = fits;
+            while (lo < hi) {
+                const int mid = (lo + hi) / 2;
+                if (allocate(mid))
+                    hi = mid;
+                else
+                    lo = mid + 1;
+            }
+            N = hi;
+        }
+        options.outputCount = N;
+        spdlog::info("Automatic output count: {} output plugins", N);
+    }
+    allocate(N);
 
     // ---- Materialise records -------------------------------------------------
     for (auto& op : out.outputs) {

@@ -681,3 +681,11 @@ What the name means is what the scripts reading the property do with it, so ever
 Build 70: 1,875 plugins compiled, 0 errors. KARM's TQuest constants are read by no script in the load order (Safe); three `CanarySaveFileMonitor.sPluginCanary` constants (RPTN, MUTA, GHUL) are read only by Game.IsPluginInstalled.
 - A constant read only by presence checks is now Rewritable: the Advanced Users Auto-Merger rewrites the constant in its copy of the script to the output plugin's name, which is installed, so every check stays true. Its check of the copy accepts the rewritten constant (the decision was made across the load order).
 - A constant is no longer taken for unread when a script could read it in a way the scan does not follow: by name at run time (ScriptObject.GetPropertyValue / SetPropertyValue with the property's name), or in a script that does not read back (each of its strings counts as an unknown read). Both make it Unknown.
+
+## Automatic output count; script default values (S1c findings)
+
+Build 71: 1,876 plugins compiled, 0 errors.
+
+**Automatic output count**: the compiler can pick the fewest output plugins whose master lists all fit (254 masters per plugin), trying 1, 2, 4, ... until they fit and then narrowing down between the last count that failed and the first that fit. Only allocation, FormIDs and master lists are repeated per try; merging is done once. `--outputs auto` on the command line.
+
+**Default values in scripts** (uploaded `wanamingo\lobotomitepack\integration.pex`): the plugin name is the default value of `::LAER_PLUGIN_NAME_var`, the variable behind the Auto property `LAER_PLUGIN_NAME`, and also passed directly to GetFormFromFile (rewritable). An Auto property's value can be set in the plugin's own script data (VMAD) in the Creation Kit, which replaces the default at run time, so rewriting the default alone is not reliable: following these needs the plugins' script data checked for the property as well (next stage).

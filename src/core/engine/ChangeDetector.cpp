@@ -523,7 +523,7 @@ std::string definitionsId(const RecordDefinitions& defs)
 uint64_t ChangeDetector::settingsHash(const CompileOptions& c, const std::vector<std::string>& excluded,
                                       const std::string& runtimeName, std::vector<std::string> resolutions)
 {
-    std::string s = std::to_string(c.outputCount) + "|" + c.outputPrefix + "|" + std::to_string(int(c.strategy)) + "|" +
+    std::string s = std::to_string(c.outputCount) + (c.autoOutputs ? "auto" : "") + "|" + c.outputPrefix + "|" + std::to_string(int(c.strategy)) + "|" +
                     std::to_string(c.mergeCompatible) + std::to_string(c.lightOutputsWhenPossible) +
                     std::to_string(c.rewriteHeuristicReferences) + std::to_string(c.buildPatch) + std::to_string(c.patchOnly) +
                     (c.autoMerge ? "|automerge" : "") +

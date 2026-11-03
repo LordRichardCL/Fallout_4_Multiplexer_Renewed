@@ -234,6 +234,7 @@ void AppController::loadSettings()
 
     auto& c = config_.compile;
     c.outputCount = s.value("compile/outputCount", 20).toInt();
+    c.autoOutputs = s.value("compile/autoOutputs", false).toBool();
     c.outputPrefix = ss(s.value("compile/prefix", "Dummy_Plugin_").toString());
     c.strategy = static_cast<AllocationStrategy>(s.value("compile/strategy", int(AllocationStrategy::Balanced)).toInt());
     c.mergeCompatible = s.value("compile/merge", true).toBool();
@@ -278,6 +279,7 @@ void AppController::saveSettings()
 
     const auto& c = config_.compile;
     s.setValue("compile/outputCount", c.outputCount);
+    s.setValue("compile/autoOutputs", c.autoOutputs);
     s.setValue("compile/prefix", qs(c.outputPrefix));
     s.setValue("compile/strategy", int(c.strategy));
     s.setValue("compile/merge", c.mergeCompatible);

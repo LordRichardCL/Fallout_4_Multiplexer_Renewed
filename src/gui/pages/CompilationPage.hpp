@@ -37,6 +37,7 @@ private:
     void showTrace(const QModelIndex& index);
 
     QSpinBox* outputs_;
+    QCheckBox* autoOutputs_ = nullptr;
     QLineEdit* prefix_;
     QComboBox* strategy_;
     QLabel* strategyNote_ = nullptr;
