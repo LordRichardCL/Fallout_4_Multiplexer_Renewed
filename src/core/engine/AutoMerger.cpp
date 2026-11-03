@@ -143,7 +143,9 @@ std::string check(const ReferenceScanner::PluginNames& names, const std::string&
     Expected found;
     for (const auto& r : after)
         if (r.plugin >= kOutputBase) {
-            if (r.cls != ReferenceClass::Rewritable)
+            // A named constant is classified by the scripts reading it across the load order (only
+            // presence checks, when it was planned); in the copy alone it reads as a constant.
+            if (r.cls != ReferenceClass::Rewritable && r.context != "constant property")
                 return "the copy names " + r.text + " in a use that is not rewritable (" + r.context + ")";
             found.insert({toLower(r.text.substr(0, r.text.find('|'))), r.hasFormId, r.hasFormId ? r.formId : 0});
         }
@@ -155,7 +157,8 @@ std::string check(const ReferenceScanner::PluginNames& names, const std::string&
     //    define: the game found nothing before either), or where its name is safe.
     size_t left = 0;
     for (const auto& r : after)
-        if (r.plugin < kOutputBase && compiledHere.count(r.plugin) && r.cls != ReferenceClass::Safe)
+        if (r.plugin < kOutputBase && compiledHere.count(r.plugin) && r.cls != ReferenceClass::Safe &&
+            r.context != "constant property") // left as it was: unread across the load order (Safe there)
             ++left;
     if (left != expectedLeft)
         return "the copy still depends on a compiled plugin's file name (" + std::to_string(left) + " references)";

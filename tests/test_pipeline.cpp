@@ -2841,7 +2841,7 @@ TEST(references_folder_of_record_paths)
 //     GetFormFromFile's file name or for a presence check, the reason says where.
 TEST(references_named_constants_by_their_readers)
 {
-    for (const char* how : {"none", "gfff", "presence"}) {
+    for (const char* how : {"none", "gfff", "presence", "byname"}) {
         auto root = referenceInstall(std::string("refconst_") + how);
         auto data = root / "Game" / "Data";
         writeFile(data / "Scripts" / "Consts.pex", std::string(reinterpret_cast<const char*>(constantsScript("ModS.esp").data()), constantsScript("ModS.esp").size()));
@@ -2863,9 +2863,27 @@ TEST(references_named_constants_by_their_readers)
             CHECK_EQ(r->cls, ReferenceClass::CompatibilityRequired);
             CHECK(r->reason.find("scripts\\reader.pex") != std::string::npos);
             CHECK(r->reason.find("GetFormFromFile with FormID 00000812") != std::string::npos);
+        } else if (std::string(how) == "byname") {
+            CHECK_EQ(r->cls, ReferenceClass::Unknown); // read by name at run time: meaning unknown
+            CHECK(r->reason.find("GetPropertyValue") != std::string::npos);
         } else {
-            CHECK_EQ(r->cls, ReferenceClass::CompatibilityRequired);
+            // Only presence checks: rewritable. With the Auto-Merger the copy of Consts.pex names the
+            // output plugin, and passes its checks.
+            CHECK_EQ(r->cls, ReferenceClass::Rewritable);
             CHECK(r->reason.find("presence checks") != std::string::npos);
+            auto cfg = configFor(root);
+            cfg.compile.autoMerge = true;
+            Pipeline q(cfg);
+            q.scan();
+            q.analyse();
+            CHECK(q.compile());
+            CHECK(q.compiledOutput()->isCompiled(q.session().findPlugin("ModS.esp")->index));
+            auto result = q.exportOutputs();
+            const auto copy = result.directory / "scripts" / "consts.pex";
+            CHECK(std::filesystem::exists(copy));
+            std::ifstream in(copy, std::ios::binary);
+            std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            CHECK(bytes.find(q.compiledOutput()->outputs.front().name) != std::string::npos);
         }
     }
 }

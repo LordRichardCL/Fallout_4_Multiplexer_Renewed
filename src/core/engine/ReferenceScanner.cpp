@@ -399,6 +399,15 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
         auto scan = pex::scan(bytes);
         if (propertyReads && scan.ok)
             *propertyReads = std::move(scan.propertyReads);
+        // A script that does not read back may read any property: each of its strings counts as a read
+        // of unknown meaning, so no constant it could name is taken for unread.
+        if (propertyReads && !scan.ok)
+            for (const auto& str : AssetScanner::pexStrings(bytes)) {
+                pex::PropertyRead pr;
+                pr.property = toLower(str);
+                pr.opcode = "unreadable script";
+                propertyReads->push_back(std::move(pr));
+            }
         if (!scan.ok) {
             for (const auto& s : AssetScanner::pexStrings(bytes))
                 if (auto it = names.find(toLower(s)); it != names.end()) {
@@ -703,11 +712,13 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                            firstOther->read->where + ", " + firstOther->read->opcode + ") in a way whose meaning cannot be "
                            "established (" + counts + ")";
             } else {
-                r.cls = ReferenceClass::CompatibilityRequired;
+                // Only presence checks read it: naming the output plugin, which is installed, keeps every
+                // check true, as the original was. The Auto-Merger rewrites the constant.
+                r.cls = ReferenceClass::Rewritable;
+                r.kind = ReferenceKind::PluginName;
                 r.context = "constant property read by IsPluginInstalled";
                 r.reason = "the value of the constant " + r.location + " is only used for presence checks "
-                           "(Game.IsPluginInstalled, " + counts + "); rewriting a name shared through a constant is "
-                           "not implemented";
+                           "(Game.IsPluginInstalled, " + counts + "): it can name the output plugin, which is installed";
             }
         }
     }

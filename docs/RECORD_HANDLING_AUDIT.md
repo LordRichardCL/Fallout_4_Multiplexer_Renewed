@@ -675,3 +675,9 @@ What the name means is what the scripts reading the property do with it, so ever
 - a reader passes it to Game.GetFormFromFile: Compatibility Required, naming the script, the function and the FormID (rewriting a name shared through a constant, for records that may end up in different outputs, is not implemented);
 - readers only pass it to Game.IsPluginInstalled: Compatibility Required for now, saying so (the rewrite through the constant is the next step);
 - any other use: Unknown, naming the reading script, function and instruction.
+
+## Named constants: presence checks rewritten (S1b)
+
+Build 70: 1,875 plugins compiled, 0 errors. KARM's TQuest constants are read by no script in the load order (Safe); three `CanarySaveFileMonitor.sPluginCanary` constants (RPTN, MUTA, GHUL) are read only by Game.IsPluginInstalled.
+- A constant read only by presence checks is now Rewritable: the Advanced Users Auto-Merger rewrites the constant in its copy of the script to the output plugin's name, which is installed, so every check stays true. Its check of the copy accepts the rewritten constant (the decision was made across the load order).
+- A constant is no longer taken for unread when a script could read it in a way the scan does not follow: by name at run time (ScriptObject.GetPropertyValue / SetPropertyValue with the property's name), or in a script that does not read back (each of its strings counts as an unknown read). Both make it Unknown.

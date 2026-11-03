@@ -298,6 +298,20 @@ private:
                 out_.propertyReads.push_back(std::move(pr));
             }
         } else {
+            // A property read by name at run time (ScriptObject.GetPropertyValue("sName")): the name is
+            // a string constant argument.
+            if ((op == kCallMethod || op == kCallParent) && !args.empty() && args[0].type == 1 &&
+                (iequals(out_.strings[args[0].string], "GetPropertyValue") ||
+                 iequals(out_.strings[args[0].string], "SetPropertyValue")))
+                for (const auto& v : varargs)
+                    if (v.type == 2) {
+                        std::string p = out_.strings[v.string];
+                        for (auto& ch : p)
+                            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                        auto pr = readOf(p, PropertyRead::Use::Other);
+                        pr.opcode = out_.strings[args[0].string];
+                        out_.propertyReads.push_back(std::move(pr));
+                    }
             const bool presence = op == kCallStatic && args.size() == 3 && args[0].type == 1 && args[1].type == 1 &&
                                   iequals(out_.strings[args[0].string], "Game") &&
                                   iequals(out_.strings[args[1].string], "IsPluginInstalled") && varargs.size() == 1;

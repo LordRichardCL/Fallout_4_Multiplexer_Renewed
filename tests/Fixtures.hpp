@@ -388,7 +388,8 @@ inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugi
 // Two scripts for named constants: "Consts" with a property sPluginModS whose read handler returns
 // `plugin`, and "Reader" whose OnInit reads Consts.sPluginModS and passes it to
 // Game.GetFormFromFile(formId, ...) ("gfff"), Game.IsPluginInstalled(...) ("presence"), or does
-// nothing with it ("none": the property is never read).
+// nothing with it ("none": the property is never read), or reads it by name at run time
+// (GetPropertyValue, "byname").
 inline std::vector<uint8_t> pexFile(const std::vector<std::string>& strings, const std::string& object,
                                     const std::vector<uint8_t>& body)
 {
@@ -443,7 +444,7 @@ inline std::vector<uint8_t> readerScript(const std::string& how, uint32_t formId
     using namespace fo4mx;
     const std::vector<std::string> strings = {"Reader", "", "OnInit", "None", "sPluginModS", "kConsts", "::temp0",
                                               "Form", "::temp1", "String", "Game", "GetFormFromFile",
-                                              "IsPluginInstalled"};
+                                              "IsPluginInstalled", "GetPropertyValue", "Var"};
     BinaryWriter o;
     o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
     o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0); // structs, variables, properties
@@ -455,8 +456,13 @@ inline std::vector<uint8_t> readerScript(const std::string& how, uint32_t formId
     o.write<uint16_t>(0); // params
     o.write<uint16_t>(2); o.write<uint16_t>(6); o.write<uint16_t>(7); o.write<uint16_t>(8); o.write<uint16_t>(9);
     const bool call = how == "gfff" || how == "presence";
-    o.write<uint16_t>(call ? 2 : 0);
+    o.write<uint16_t>(call ? 2 : how == "byname" ? 1 : 0);
     auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    if (how == "byname") { // kConsts.GetPropertyValue("sPluginModS") -> ::temp1
+        o.write<uint8_t>(0x17); ident(13); ident(5); ident(8);
+        o.write<uint8_t>(3); o.write<int32_t>(1);
+        o.write<uint8_t>(2); o.write<uint16_t>(4);
+    }
     if (call) {
         o.write<uint8_t>(0x1C); ident(4); ident(5); ident(8); // propget sPluginModS kConsts ::temp1
         o.write<uint8_t>(0x19); ident(10); ident(how == "gfff" ? 11 : 12); ident(6);
