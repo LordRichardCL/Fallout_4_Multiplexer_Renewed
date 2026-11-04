@@ -5,11 +5,19 @@
 #include "models/SqlModel.hpp"
 #include "widgets/Widgets.hpp"
 
+#include "engine/PluginSummary.hpp"
+
+#include <QEvent>
 #include <QFile>
+#include <QFrame>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QFileDialog>
 #include <QHeaderView>
 #include <QStandardPaths>
 #include <QLineEdit>
+#include <QRegularExpression>
 #include <QSet>
 #include <QSplitter>
 #include <QSqlQuery>
@@ -49,6 +57,22 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
     chips_->setToolTip("Blocking Types: record types the compiler does not support yet, and how many plugins "
                        "supporting each one would make compilable");
     l->addWidget(chips_);
+    chips_->setToolTip(chips_->toolTip() + "\nIneligible: every plugin that will not be compiled (ineligible, retained, "
+                                           "inactive or unreadable), so Eligible + Ineligible = all plugins");
+
+    // Plugin analysis summary: every analysed plugin, eligible or not, by file type. Clicking a card
+    // filters the table through the chips above.
+    summary_ = new QWidget;
+    auto* sumRow = new QHBoxLayout(summary_);
+    sumRow->setContentsMargins(0, 0, 0, 0);
+    sumRow->setSpacing(10);
+    total_ = makeSummaryCard("Total Plugins", "All", theme::kText, false);
+    eligible_ = makeSummaryCard("Eligible", "Eligible", theme::kGreen, true);
+    ineligible_ = makeSummaryCard("Ineligible", "Ineligible", theme::kYellow, true);
+    sumRow->addWidget(total_.frame, 2);
+    sumRow->addWidget(eligible_.frame, 3);
+    sumRow->addWidget(ineligible_.frame, 3);
+    l->addWidget(summary_);
 
     auto* split = new QSplitter(Qt::Horizontal);
     table_ = new QTableView;
@@ -87,6 +111,130 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
 void PluginsPage::refresh()
 {
     reload();
+}
+
+PluginsPage::SummaryCard PluginsPage::makeSummaryCard(const QString& title, const QString& chip, const QColor& accent,
+                                                      bool breakdown)
+{
+    SummaryCard c;
+    c.frame = new QFrame;
+    c.frame->setObjectName("Card");
+    c.frame->setProperty("chip", chip);
+    c.frame->setCursor(Qt::PointingHandCursor);
+    c.frame->setToolTip(chip == "All" ? "Show every plugin" : "Show only " + chip.toLower() + " plugins in the table");
+    // A subtle accent: a thin coloured edge and the number in the accent colour.
+    const QString edge = QString("rgba(%1,%2,%3,%4)").arg(accent.red()).arg(accent.green()).arg(accent.blue());
+    c.frame->setStyleSheet(QString("QFrame#Card { border-left: 3px solid %1; }").arg(edge.arg(breakdown ? "0.55" : "0.25")));
+    c.frame->installEventFilter(this);
+
+    auto* outer = new QHBoxLayout(c.frame);
+    outer->setContentsMargins(16, 10, 16, 10);
+    outer->setSpacing(18);
+    auto* head = new QVBoxLayout;
+    head->setSpacing(2);
+    auto* label = new QLabel(title.toUpper());
+    label->setObjectName("CardLabel");
+    c.value = new QLabel(QStringLiteral("—"));
+    c.value->setObjectName("CardValue");
+    c.value->setStyleSheet(QString("color: %1;").arg(accent.name()));
+    c.hint = new QLabel(QStringLiteral(" "));
+    c.hint->setObjectName("CardHint");
+    c.hint->setWordWrap(true);
+    head->addWidget(label);
+    head->addWidget(c.value);
+    head->addWidget(c.hint);
+    head->addStretch();
+    outer->addLayout(head);
+    if (breakdown) {
+        auto* grid = new QGridLayout;
+        grid->setHorizontalSpacing(14);
+        grid->setVerticalSpacing(1);
+        int row = 0;
+        for (auto [name, slot] : {std::pair<const char*, QLabel**>{"ESL", &c.esl},
+                                  {"ESL-flagged ESP", &c.eslFlaggedEsp},
+                                  {"ESP", &c.esp},
+                                  {"ESM", &c.esm}}) {
+            auto* n = new QLabel(name);
+            n->setObjectName("CardHint");
+            *slot = new QLabel(QStringLiteral("—"));
+            (*slot)->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            (*slot)->setStyleSheet("font-weight: 600;");
+            grid->addWidget(n, row, 0);
+            grid->addWidget(*slot, row, 1);
+            ++row;
+        }
+        outer->addSpacing(12);
+        outer->addLayout(grid);
+    }
+    outer->addStretch(1);
+    c.frame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    return c;
+}
+
+bool PluginsPage::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() == QEvent::MouseButtonRelease)
+        for (const auto* c : {&total_, &eligible_, &ineligible_})
+            if (watched == c->frame) {
+                chips_->setCurrent(c->frame->property("chip").toString());
+                return true;
+            }
+    return Page::eventFilter(watched, event);
+}
+
+// Counts from the analysis results the table shows (Plugins.type and Plugins.eligibility), with the
+// rules of fo4mx::PluginSummary.
+void PluginsPage::updateSummary()
+{
+    fo4mx::PluginSummary s;
+    QSqlDatabase db = app_->readDb();
+    if (db.isOpen()) {
+        QSqlQuery q(db);
+        if (q.exec("SELECT type, eligibility, COUNT(*) FROM Plugins GROUP BY type, eligibility"))
+            while (q.next())
+                s.add(q.value(0).toString().toStdString(), q.value(1).toString().toStdString(),
+                      static_cast<size_t>(q.value(2).toLongLong()));
+    }
+    auto n = [&](size_t v) { return s.total ? formatCount(qint64(v)) : QStringLiteral("—"); };
+    total_.value->setText(n(s.total));
+    total_.hint->setText(s.total ? "analysed in this load order" : "Run Scan and Analyse");
+    for (auto [card, counts] : {std::pair<SummaryCard*, const fo4mx::PluginTypeCounts*>{&eligible_, &s.eligible},
+                                {&ineligible_, &s.ineligible}}) {
+        card->value->setText(n(counts->total));
+        card->esl->setText(n(counts->esl));
+        card->eslFlaggedEsp->setText(n(counts->eslFlaggedEsp));
+        card->esp->setText(n(counts->esp));
+        card->esm->setText(n(counts->esm));
+        card->esm->setToolTip(counts->eslFlaggedEsm
+                                  ? QString("including %1 ESM files with the ESL flag").arg(counts->eslFlaggedEsm)
+                                  : QString());
+    }
+    eligible_.hint->setText(s.total ? "will be compiled" : " ");
+    QStringList why;
+    if (s.notEligibleIneligible)
+        why << QString("%1 ineligible").arg(formatCount(qint64(s.notEligibleIneligible)));
+    if (s.retained)
+        why << QString("%1 retained").arg(formatCount(qint64(s.retained)));
+    if (s.inactive)
+        why << QString("%1 inactive").arg(formatCount(qint64(s.inactive)));
+    if (s.error)
+        why << QString("%1 unreadable").arg(formatCount(qint64(s.error)));
+    if (s.otherStatus)
+        why << QString("%1 other").arg(formatCount(qint64(s.otherStatus)));
+    ineligible_.hint->setText(why.isEmpty() ? QStringLiteral(" ") : why.join(" · "));
+    ineligible_.hint->setToolTip("Ineligible: holds something the compiler cannot reproduce. Retained: base game, "
+                                 "Creation Club or excluded. Inactive: not enabled. Unreadable: damaged or missing "
+                                 "masters.");
+    // The card matching the current filter is raised slightly.
+    const QString chip = chips_->current();
+    for (auto* c : {&total_, &eligible_, &ineligible_}) {
+        const bool on = c->frame->property("chip").toString() == chip;
+        QString sheet = c->frame->styleSheet();
+        sheet.remove(QRegularExpression(" background: [^;]*;"));
+        if (on)
+            sheet.replace("QFrame#Card {", "QFrame#Card { background: #1c2420;");
+        c->frame->setStyleSheet(sheet);
+    }
 }
 
 void PluginsPage::reload()
@@ -131,7 +279,7 @@ void PluginsPage::reload()
         else if (chip == "Eligible")
             where += " AND eligibility = 'Eligible'";
         else if (chip == "Ineligible")
-            where += " AND eligibility IN ('Ineligible', 'Error')";
+            where += " AND eligibility <> 'Eligible'"; // as the summary: everything that will not be compiled
         sql = "SELECT load_order_hex AS '#', name AS 'Plugin Name', type AS Type, record_count AS 'Record Count', "
               "conflict_count AS 'Conflict Count', master_count AS 'Master Count', status AS Status, "
               "eligibility AS Eligibility, source_mod AS Mod, support AS Support, id FROM Plugins WHERE " +
@@ -142,6 +290,8 @@ void PluginsPage::reload()
     }
     model_->setMonoColumns({0});
     model_->load(app_->readDb(), sql, binds);
+    summary_->setVisible(!generatedMode_ && !blockersMode_);
+    updateSummary();
     if (!generatedMode_ && !blockersMode_)
         table_->hideColumn(10);
     else

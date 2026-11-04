@@ -773,3 +773,10 @@ Build 80: 2,110 plugins compiled (+4), 0 errors, 677 files relinked with 0 error
 - **Reads through a script extending the owner.** Scripts now record the functions and properties they declare. A read made on a script that extends the owner reaches the owner's member when no script between them declares a member of that name; it is then rewritable like a read on the owner. Otherwise (or when a script in the chain is not in the load order) it is not.
 - **The reason names the blocking read:** the script, function and why (another use, a FormID computed at run time, an unknown type, a type whose member may be another), instead of the first lookup.
 
+## Build 82: export stopped by a reference stored outside its cell; plugin summary (C8)
+
+Build 82 (2,469 plugins, 20 more than before; 270 full plugins, more than the 254 the game loads): 2,112 plugins compiled, validation 0 errors, but the export stopped while writing the output: "REFR 8E14E412 belongs in a cell and cannot be written as a top-level group" (multiplexer.log). A compiled plugin stores that placed reference in a top-level REFR group instead of a cell's group (a malformed plugin); the compiler kept its placement, and the plugin writer refused it, so nothing was written and no file was relinked.
+
+- **Fixed:** a record that belongs in a cell or a dialogue topic but is stored in a top-level group is now an error of the compilation ("World Layout": stored outside any cell), tied to the record, so automatic isolation keeps its plugin in the load order (as the game loads it today) and the export goes ahead.
+- **Plugins tab summary:** Total, Eligible and Ineligible plugins by file type, from the analysis results (`Plugins.type`, `Plugins.eligibility`) with the rules of `PluginSummary` (core, tested): Ineligible is everything that will not be compiled, so Eligible + Ineligible = Total.
+

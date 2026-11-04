@@ -621,6 +621,24 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 out.records[it->second].world = true;
     }
 
+    // ---- Records stored outside their parent ------------------------------------
+    // A placed reference (or another record that belongs in a cell or a dialogue topic) stored in a
+    // top-level group by its plugin (a malformed plugin) cannot be written where it belongs: its
+    // plugin stays in the load order, as the game loads it today.
+    for (const auto& e : out.records) {
+        if (e.placement != Placement::Kind::Top)
+            continue;
+        const auto* c = RecordCatalogue::get().find(e.sig);
+        if (!c || (c->placement != RecordPlacement::CellChild && c->placement != RecordPlacement::TopicChild))
+            continue;
+        addIssue(Severity::Error, "World Layout",
+                 session.formLabel(e.key) + " is stored outside any " +
+                     (c->placement == RecordPlacement::CellChild ? "cell" : "dialogue topic") + " in " +
+                     session.pluginName(e.winner) +
+                     " (a top-level group): it cannot be written where it belongs, so its plugin stays",
+                 e.key, session.pluginName(e.winner));
+    }
+
     // ---- Precombines and previs --------------------------------------------------
     // A new reference listed in a cell's precombine (XCRI) or previs (XPRI) data was combined into
     // meshes made for its FormID; whether those files depend on it cannot be checked, so its plugin

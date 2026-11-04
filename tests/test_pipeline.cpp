@@ -4,6 +4,7 @@
 #include "ba2/Ba2Archive.hpp"
 #include "db/Database.hpp"
 #include "engine/Pipeline.hpp"
+#include "engine/PluginSummary.hpp"
 #include "engine/ReferenceScanner.hpp"
 #include "esp/LayoutCheck.hpp"
 #include "esp/FieldDecoder.hpp"
@@ -1968,6 +1969,35 @@ TEST(world_overrides_compile_with_their_cell)
     }
 }
 
+// A placed reference its plugin stores in a top-level group (a malformed plugin) cannot be written
+// where it belongs: its plugin stays in the load order instead of the export failing (build 82).
+TEST(reference_stored_outside_a_cell_keeps_its_plugin)
+{
+    auto root = buildInstall("toplevelrefr");
+    auto data = root / "Game" / "Data";
+    // Written as a top-level KYWD group, then renamed: a top-level REFR group holding a REFR.
+    writePlugin(data / "ModBad.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000900, {zs("EDID", "LooseRef"), u32("NAME", 0x800)})});
+    {
+        std::ifstream in(data / "ModBad.esp", std::ios::binary);
+        std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        in.close();
+        for (size_t at = bytes.find("KYWD"); at != std::string::npos; at = bytes.find("KYWD", at + 4))
+            bytes.replace(at, 4, "REFR");
+        writeFile(data / "ModBad.esp", bytes);
+    }
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModBad.esp\n");
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto& kept = p.session().autoRetained;
+    CHECK(kept.count("modbad.esp") && kept.at("modbad.esp").find("outside any cell") != std::string::npos);
+    auto result = p.exportOutputs(); // must not throw
+    CHECK(!result.pluginFiles.empty());
+}
+
 // A new reference listed in its cell's precombine data keeps its plugin out: the precombined meshes
 // were made for its FormID.
 TEST(new_reference_in_precombines_keeps_its_plugin)
@@ -3703,4 +3733,42 @@ TEST(references_esp_esm_esl)
         CHECK_EQ(r.cls, ReferenceClass::Rewritable);
     std::string dll = std::string("\0", 1) + "ModL.esl" + std::string("\0", 1) + "ModM.esm" + std::string("\0", 1);
     CHECK_EQ(ReferenceScanner::inspect(kNames, "f4se\\plugins\\x.dll", bytesOf(dll)).size(), size_t(2));
+}
+
+// The Plugins tab summary: every plugin is Eligible or not (Ineligible, Retained, Inactive, Error),
+// counted by file type; an ESL-flagged ESP is its own row, an ESL-flagged ESM counts as an ESM.
+TEST(plugin_summary_counts_every_plugin_once)
+{
+    PluginSummary s;
+    s.add("ESL", "Eligible");
+    s.add("ESL Flagged ESP", "Eligible", 3);
+    s.add("ESP", "Eligible", 2);
+    s.add("ESM", "Retained");
+    s.add("ESL Flagged ESM", "Ineligible");
+    s.add("ESP", "Inactive");
+    s.add("ESP", "Error");
+    CHECK_EQ(s.total, size_t(10));
+    CHECK_EQ(s.eligible.total + s.ineligible.total, s.total);
+    CHECK(s.eligible.esl == 1 && s.eligible.eslFlaggedEsp == 3 && s.eligible.esp == 2 && s.eligible.esm == 0);
+    CHECK(s.ineligible.esm == 2 && s.ineligible.eslFlaggedEsm == 1 && s.ineligible.esp == 2);
+    CHECK(s.retained == 1 && s.notEligibleIneligible == 1 && s.inactive == 1 && s.error == 1);
+    for (const auto* c : {&s.eligible, &s.ineligible}) {
+        CHECK_EQ(c->esl + c->eslFlaggedEsp + c->esp + c->esm + c->other, c->total);
+        CHECK_EQ(c->other, size_t(0));
+    }
+    // From a real analysis: the same names the database stores.
+    auto root = referenceInstall("pluginsummary");
+    writeFile(root / "Game" / "Data" / "F4SE" / "Plugins" / "Helper.dll", std::string("MZ\0\0ModT.esp\0", 14));
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    const auto sum = summarisePlugins(p.session());
+    CHECK_EQ(sum.total, p.session().plugins.size());
+    CHECK_EQ(sum.eligible.total + sum.ineligible.total, sum.total);
+    size_t eligible = 0;
+    for (const auto& pl : p.session().plugins)
+        eligible += pl.eligibility == Eligibility::Eligible;
+    CHECK_EQ(sum.eligible.total, eligible);
+    CHECK(sum.eligible.total > 0 && sum.ineligible.total > 0); // ModT is named by a DLL
+    CHECK_EQ(sum.eligible.other + sum.ineligible.other, size_t(0));
 }

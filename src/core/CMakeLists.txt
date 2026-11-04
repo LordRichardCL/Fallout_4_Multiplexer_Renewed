@@ -44,6 +44,7 @@ add_library(fo4mx_core STATIC
     engine/Normalizer.cpp
     engine/Pipeline.cpp
     engine/PluginScanner.cpp
+    engine/PluginSummary.cpp
     engine/ReferenceScanner.cpp
     engine/Session.cpp
     engine/ValidationEngine.cpp

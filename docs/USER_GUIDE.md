@@ -46,6 +46,8 @@ Optional overrides: a different `plugins.txt`, a different INI folder, and the s
 
 Filter by ESM/ESP/ESL, conflicting, disabled, eligible, ineligible, or **Generated** (the compiled outputs).
 
+**The summary above the table** counts every analysed plugin: **Total**, **Eligible** (will be compiled) and **Ineligible** (everything that will not be: plugins holding something the compiler cannot reproduce, retained ones such as the base game, Creation Club or your exclusions, inactive ones and unreadable ones; the card says how many of each). Eligible + Ineligible is always the total. Each is broken down by file type: ESL, ESL-flagged ESP, ESP and ESM (an ESM with the ESL flag counts as an ESM; its tooltip says how many). Click a card to filter the table to it; the **Ineligible** chip shows the same plugins as the card.
+
 **Blocking Types** lists every record type the compiler does not support yet that appears in your load order:
 
 - **Would Unlock:** plugins that become compilable if only this type were supported. This includes plugins currently kept because something depends on them.
