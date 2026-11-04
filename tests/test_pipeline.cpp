@@ -1219,6 +1219,51 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
         CHECK(std::filesystem::exists(game / "Multiplexer Output" / "Multiplexer Output.zip"));
         CHECK(std::filesystem::exists(game / "Multiplexer Output" / "Multiplexer_DisablePlugins.txt"));
         CHECK(!std::filesystem::exists(result.directory / "Multiplexer_DisablePlugins.txt"));
+        CHECK(result.recorderFolder.empty()); // the Diagnostic Recorder is off by default
+        CHECK(!std::filesystem::exists(game / "Multiplexer Output" / "Diagnostic Recorder"));
+    }
+    {
+        // The Diagnostic Recorder: beside the package, never in its Data folder; removed when turned off.
+        writeFile(root / "app" / "MultiplexerDiagnosticRecorder.dll", "MZ dll");
+        auto recorder = cfg;
+        recorder.databasePath = root / "db1.sqlite";
+        recorder.diagnosticRecorder = true;
+        recorder.diagnosticRecorderDll = root / "app" / "MultiplexerDiagnosticRecorder.dll";
+        const auto folder = game / "Multiplexer Output" / "Diagnostic Recorder";
+        {
+            Pipeline p(recorder);
+            p.scan();
+            p.analyse();
+            CHECK(p.compile());
+            auto result = p.exportOutputs();
+            CHECK(result.recorderFolder == folder);
+            CHECK(result.recorderProblem.empty());
+            CHECK(std::filesystem::exists(folder / "Data" / "F4SE" / "Plugins" / "MultiplexerDiagnosticRecorder.dll"));
+            CHECK(std::filesystem::exists(folder / "Multiplexer Diagnostic Recorder.zip"));
+            CHECK(std::filesystem::exists(folder / "Multiplexer Diagnostic Recorder - Install.txt"));
+            CHECK(!std::filesystem::exists(result.directory / "F4SE"));
+        }
+        {
+            auto missing = recorder;
+            missing.diagnosticRecorderDll = root / "app" / "absent.dll";
+            Pipeline p(missing);
+            p.scan();
+            p.analyse();
+            CHECK(p.compile());
+            auto result = p.exportOutputs();
+            CHECK(result.recorderFolder.empty());
+            CHECK(!result.recorderProblem.empty());
+        }
+        {
+            auto off = recorder;
+            off.diagnosticRecorder = false;
+            Pipeline p(off);
+            p.scan();
+            p.analyse();
+            CHECK(p.compile());
+            p.exportOutputs();
+            CHECK(!std::filesystem::exists(folder));
+        }
     }
     // Archive loaders: only with the output folder set to a mod inside MO2's mods folder.
     cfg.exportOptions.outputDirectory = inst / "mods" / "Fallout 4 Multiplexer Output";

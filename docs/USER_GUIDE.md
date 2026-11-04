@@ -382,6 +382,17 @@ Start a new game when using it, and keep backups of your mod setup.
 
 **Reports** previews each report and exports it as HTML, JSON, TXT or PDF. **Export All** writes every report to a folder in all three file formats (HTML, JSON and TXT). The TXT reports are plain text with aligned columns, for reading in any text editor. The command line's `--reports DIR` writes them too.
 
+## Diagnostics (optional Diagnostic Recorder)
+
+`MultiplexerDiagnosticRecorder.dll` is an optional F4SE plugin that records a small, fixed set of events while you play: the game, F4SE and recorder versions, F4SE's start-up, game data, new game, save loading and saving messages, the active plugins as the game reads them, which F4SE plugins loaded (with F4SE's own reasons for those that did not), and whether the game exited normally. It changes no plugin, save or game data and installs no hooks; it is not a crash logger (keep Buffout 4 for crash logs).
+
+1. **Settings → Diagnostics:** turn on *Prepare the Diagnostic Recorder with each export*.
+2. **Export.** `Multiplexer Output\Diagnostic Recorder\` holds the DLL, *Multiplexer Diagnostic Recorder.zip* and install notes, beside the package, never inside it.
+3. Install the zip as a mod (Vortex or MO2), or copy the DLL into `<game>\Data\F4SE\Plugins`. Start the game through F4SE.
+4. **Diagnostics → Open Newest Log.** Each finding gives a likely cause, its evidence and what to check: the game stopping while loading a save, while saving or while loading the plugins; F4SE plugins that did not load and why; compiled plugins still enabled, output plugins not enabled, or a load order that differs from the one Multiplexer built for.
+
+Logs are in `Documents\My Games\Fallout4\F4SE\MultiplexerDiagnosticRecorder` (the newest 10 sessions). Paths in your user folder are written as `%USERPROFILE%`, and saves by name only, so a log can be shared. `fo4mx diagnose` does the same from the command line. [Diagnostic Recorder](DIAGNOSTIC_RECORDER.md) has the details.
+
 ## Command line
 
 Everything is also available through `fo4mx` (run `fo4mx help`), for example:

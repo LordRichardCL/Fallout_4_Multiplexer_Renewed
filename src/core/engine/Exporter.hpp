@@ -41,6 +41,9 @@ struct ExportResult {
     size_t faceGenFiles = 0; // FaceGen meshes and face textures of compiled new NPCs (Multiplexer_FaceGen.tsv)
     std::filesystem::path voiceManifest;
     size_t archiveWinnerFiles = 0;
+    // The Diagnostic Recorder, when prepared (Pipeline): its folder, or why it was not written.
+    std::filesystem::path recorderFolder;
+    std::string recorderProblem;
 };
 
 // Stage Export: writes the output plugins and everything needed to switch

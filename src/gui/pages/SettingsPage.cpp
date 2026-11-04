@@ -99,6 +99,22 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     al->addWidget(allTypes_);
     l->addWidget(analysisBox);
 
+    auto* diagBox = new QGroupBox("Diagnostics");
+    auto* dl = new QVBoxLayout(diagBox);
+    recorder_ = new QCheckBox("Prepare the Diagnostic Recorder (optional F4SE plugin) with each export");
+    dl->addWidget(recorder_);
+    auto* diagNote = new QLabel(
+        "MultiplexerDiagnosticRecorder.dll records a small, fixed set of events while you play (versions, F4SE's "
+        "start-up, game data, new game, load and save messages, the active plugins, which F4SE plugins loaded, and "
+        "whether the game exited normally) so the Diagnostics page can point to likely causes. It changes no "
+        "plugin, save or game data and installs no hooks. Export puts it, with a zip and install notes, in "
+        "\"Multiplexer Output\\Diagnostic Recorder\" (beside the package, never inside it); install that zip as a mod "
+        "to use it. Its logs: Documents\\My Games\\Fallout4\\F4SE\\MultiplexerDiagnosticRecorder.");
+    diagNote->setWordWrap(true);
+    diagNote->setObjectName("PageSubtitle");
+    dl->addWidget(diagNote);
+    l->addWidget(diagBox);
+
     auto* advBox = new QGroupBox("Advanced");
     auto* af = new QFormLayout(advBox);
     threads_ = new QSpinBox;
@@ -238,6 +254,7 @@ void SettingsPage::load()
     runtime_->setCurrentIndex(runtime_->findData(int(in.runtime)));
     excluded_->setPlainText(app_->excludedPlugins().join("\n"));
     creationClub_->setChecked(c.analysis.compileCreationClub);
+    recorder_->setChecked(c.diagnosticRecorder);
     allTypes_->setChecked(c.conflicts.analyseAllRecordTypes);
     threads_->setValue(static_cast<int>(c.scan.threads));
     database_->setText(toQString(c.databasePath));
@@ -263,6 +280,9 @@ void SettingsPage::save()
         if (!line.trimmed().isEmpty())
             c.analysis.excludedPlugins.push_back(ss(line.trimmed()));
     c.analysis.compileCreationClub = creationClub_->isChecked();
+    c.diagnosticRecorder = recorder_->isChecked();
+    if (app_->pipeline())
+        app_->pipeline()->config().diagnosticRecorder = c.diagnosticRecorder;
     c.conflicts.analyseAllRecordTypes = allTypes_->isChecked();
     c.scan.threads = static_cast<unsigned>(threads_->value());
     if (!database_->text().trimmed().isEmpty())

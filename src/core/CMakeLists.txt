@@ -3,6 +3,8 @@ fo4mx_embed_text(${PROJECT_SOURCE_DIR}/resources/record_catalogue.csv
                  ${CMAKE_CURRENT_BINARY_DIR}/generated/RecordCatalogueData.cpp kRecordCatalogue)
 
 add_library(fo4mx_core STATIC
+    diagnostics/RecorderLog.cpp
+    diagnostics/RecorderPackage.cpp
     util/Compression.cpp
     util/Zip.cpp
     util/IniFile.cpp

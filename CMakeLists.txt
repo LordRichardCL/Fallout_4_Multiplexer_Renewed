@@ -17,6 +17,7 @@ endif()
 option(FO4MX_BUILD_GUI   "Build the Qt 6 desktop application" ON)
 option(FO4MX_BUILD_CLI   "Build the fo4mx command line tool"  ON)
 option(FO4MX_BUILD_TESTS "Build the unit test suite"          ON)
+option(FO4MX_BUILD_RECORDER "Build MultiplexerDiagnosticRecorder.dll (F4SE plugin, Windows only)" ON)
 
 include(cmake/CompilerWarnings.cmake)
 
@@ -32,6 +33,10 @@ endif()
 
 if(FO4MX_BUILD_GUI)
     add_subdirectory(src/gui)
+endif()
+
+if(FO4MX_BUILD_RECORDER AND WIN32)
+    add_subdirectory(src/recorder)
 endif()
 
 if(FO4MX_BUILD_TESTS)

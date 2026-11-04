@@ -1,5 +1,7 @@
 #include "AppController.hpp"
 
+#include "diagnostics/RecorderPackage.hpp"
+
 #include "Format.hpp"
 
 #include "db/Database.hpp"
@@ -11,6 +13,7 @@
 #include "util/Text.hpp"
 
 #include <QMetaObject>
+#include <QCoreApplication>
 #include <QSettings>
 #include <QSqlError>
 #include <QThread>
@@ -255,6 +258,10 @@ void AppController::loadSettings()
     for (const auto& p : s.value("analysis/excluded").toStringList())
         config_.analysis.excludedPlugins.push_back(ss(p));
     config_.analysis.compileCreationClub = s.value("analysis/compileCreationClub", false).toBool();
+    config_.diagnosticRecorder = s.value("diagnostics/recorder", false).toBool();
+    // MultiplexerDiagnosticRecorder.dll ships next to the application.
+    config_.diagnosticRecorderDll =
+        toPath(QCoreApplication::applicationDirPath()) / fo4mx::diagnostics::kRecorderDllName;
     config_.conflicts.analyseAllRecordTypes = s.value("analysis/allTypes", true).toBool();
     config_.scan.threads = s.value("advanced/threads", 0).toUInt();
     config_.conflicts.threads = config_.analysis.threads = config_.compile.threads = config_.scan.threads;
@@ -295,6 +302,7 @@ void AppController::saveSettings()
     s.setValue("compile/outputDirectory", toQString(config_.exportOptions.outputDirectory));
     s.setValue("analysis/excluded", excludedPlugins());
     s.setValue("analysis/compileCreationClub", config_.analysis.compileCreationClub);
+    s.setValue("diagnostics/recorder", config_.diagnosticRecorder);
     s.setValue("analysis/allTypes", config_.conflicts.analyseAllRecordTypes);
     s.setValue("advanced/threads", config_.scan.threads);
     s.setValue("advanced/database", toQString(config_.databasePath));
@@ -476,9 +484,18 @@ void AppController::runExport()
     ensurePipeline(false);
     runTask("Export", [this](ProgressSink& p) {
         auto r = pipeline_->exportOutputs(p);
+        QString recorder;
+        if (!r.recorderFolder.empty())
+            recorder = QString(". Diagnostic Recorder ready to install (optional, see the Install notes): %1")
+                           .arg(toQString(r.recorderFolder));
+        else if (!r.recorderProblem.empty())
+            recorder = QString(". Diagnostic Recorder not prepared: %1").arg(QString::fromStdString(r.recorderProblem));
         if (!r.zipPath.empty())
-            return QString("Wrote %1 plugins; the installable package is %2").arg(r.pluginFiles.size()).arg(toQString(r.zipPath));
-        return QString("Wrote %1 plugins to %2").arg(r.pluginFiles.size()).arg(toQString(r.directory));
+            return QString("Wrote %1 plugins; the installable package is %2%3")
+                .arg(r.pluginFiles.size())
+                .arg(toQString(r.zipPath))
+                .arg(recorder);
+        return QString("Wrote %1 plugins to %2%3").arg(r.pluginFiles.size()).arg(toQString(r.directory)).arg(recorder);
     });
 }
 

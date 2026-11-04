@@ -38,6 +38,7 @@ private:
     QPlainTextEdit* excluded_;
     QCheckBox* creationClub_;
     QCheckBox* allTypes_;
+    QCheckBox* recorder_;
     QSpinBox* threads_;
     QLineEdit* database_;
     QLineEdit* reports_;

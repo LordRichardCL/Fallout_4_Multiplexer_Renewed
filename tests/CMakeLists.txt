@@ -1,6 +1,7 @@
 add_executable(fo4mx_tests
     TestMain.cpp
     test_catalogue.cpp
+    test_diagnostics.cpp
     test_formats.cpp
     test_merge.cpp
     test_pipeline.cpp

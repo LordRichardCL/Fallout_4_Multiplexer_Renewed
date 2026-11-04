@@ -1,5 +1,7 @@
 #include "engine/Pipeline.hpp"
 
+#include "diagnostics/RecorderPackage.hpp"
+
 #include "db/DatabaseWriter.hpp"
 #include "engine/CleaningEngine.hpp"
 #include "report/ReportGenerator.hpp"
@@ -606,6 +608,22 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
             Exporter::writePackageZip(result);
         } catch (const std::exception& e) {
             spdlog::error("Could not write Multiplexer Output.zip: {}", e.what());
+        }
+    }
+    // The optional Diagnostic Recorder, beside the package (installing the package never installs it).
+    {
+        const auto base = result.packageRoot == result.directory ? result.directory.parent_path() : result.packageRoot;
+        if (config_.diagnosticRecorder) {
+            const auto rp = diagnostics::writeRecorderPackage(config_.diagnosticRecorderDll, base);
+            if (rp.written) {
+                result.recorderFolder = rp.folder;
+                spdlog::info("Diagnostic Recorder ready to install: {}", pathToUtf8(rp.zip));
+            } else {
+                result.recorderProblem = rp.problem;
+                spdlog::warn("Diagnostic Recorder not prepared: {}", rp.problem);
+            }
+        } else {
+            diagnostics::removeRecorderPackage(base);
         }
     }
     exported_ = result;

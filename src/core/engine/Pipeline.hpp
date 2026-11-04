@@ -47,6 +47,10 @@ struct PipelineConfig {
     // than the limit is kept out.
     bool archiveWinnerCopies = true;
     size_t archiveWinnerCopyLimit = 2000;
+    // The optional Diagnostic Recorder (F4SE plugin): when on, export puts it, ready to install, in
+    // "Multiplexer Output\Diagnostic Recorder" (never inside the package's Data folder).
+    bool diagnosticRecorder = false;
+    std::filesystem::path diagnosticRecorderDll; // MultiplexerDiagnosticRecorder.dll (next to the application)
     // Record definitions to use instead of the runtime profile's (tests, trial catalogues). Not owned.
     const RecordDefinitions* definitions = nullptr;
 };

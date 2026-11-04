@@ -171,6 +171,7 @@ docs/          specification, architecture, user guide, screenshots
 - [Architecture](docs/ARCHITECTURE.md): how the compiler works and why
 - [Dependency and Compilation Scenarios](docs/DEPENDENCY_SCENARIOS.md): what happens when compiled and retained plugins depend on each other
 - [User Guide](docs/USER_GUIDE.md)
+- [Diagnostic Recorder](docs/DIAGNOSTIC_RECORDER.md): the optional F4SE plugin that records what happens in game, and what Multiplexer recognises in its logs
 
 ## Related
 

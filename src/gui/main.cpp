@@ -73,7 +73,8 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
     }
 
     const QStringList pages = {"Dashboard", "Changes", "Plugins", "Conflicts", "Assets", "Dependencies",
-                               "Compilation", "Validation", "Reports", "Settings", "Advanced Users Auto-Merger"};
+                               "Compilation", "Validation", "Reports", "Settings", "Advanced Users Auto-Merger",
+                               "Diagnostics"};
     for (int i = 0; i < pages.size(); ++i) {
         window.showPage(pages[i]);
         // Select the first row of the main table so detail panes are populated.

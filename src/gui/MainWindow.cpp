@@ -10,6 +10,7 @@
 #include "pages/DependenciesPage.hpp"
 #include "pages/PluginsPage.hpp"
 #include "pages/AutoMergerPage.hpp"
+#include "pages/DiagnosticsPage.hpp"
 #include "pages/ReportsPage.hpp"
 #include "pages/SettingsPage.hpp"
 #include "pages/ValidationPage.hpp"
@@ -77,6 +78,7 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
     addPage("Validation", new ValidationPage(app_));
     addPage("Reports", new ReportsPage(app_));
     addPage("Advanced Users Auto-Merger", new AutoMergerPage(app_));
+    addPage("Diagnostics", new DiagnosticsPage(app_));
     addPage("Settings", new SettingsPage(app_));
 
     connect(nav_, &QListWidget::currentRowChanged, this, [this](int row) {

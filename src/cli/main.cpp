@@ -1,5 +1,7 @@
 // fo4mx - command line front end for Fallout 4 Multiplexer Renewed.
 
+#include "diagnostics/RecorderLog.hpp"
+#include "diagnostics/RecorderPackage.hpp"
 #include "ba2/Ba2Archive.hpp"
 #include "engine/Pipeline.hpp"
 #include "esp/FieldDecoder.hpp"
@@ -19,6 +21,8 @@ using namespace fo4mx;
 
 namespace {
 
+std::filesystem::path g_exeDir; // folder of fo4mx(.exe): MultiplexerDiagnosticRecorder.dll ships beside it
+
 const char* kUsage = R"(Fallout 4 Multiplexer Renewed - load order compiler
 
 Usage:
@@ -35,6 +39,12 @@ Usage:
   fo4mx info     <plugin.esp>
   fo4mx dump     <plugin.esp> [--formid XXXXXXXX] [--limit N]
   fo4mx ba2      <archive.ba2> [--extract PATH --to FILE]
+  fo4mx diagnose [session.jsonl] [--package DIR] [--runtime oldgen|nextgen]
+                 read a Diagnostic Recorder log (default: the newest in
+                 Documents\My Games\Fallout4\F4SE\MultiplexerDiagnosticRecorder) and
+                 list what it recognises: likely causes, evidence, checks.
+                 --package: the "Multiplexer Output" folder, to compare the
+                 game's load order with the one Multiplexer built for
 
 Install selection:
   --mo2 DIR            Mod Organizer 2 instance folder (contains ModOrganizer.ini)
@@ -62,6 +72,8 @@ Compile options:
   --exclude PLUGIN     never compile PLUGIN (repeatable)
   --out DIR            output folder (default: <game>\\Multiplexer Output\\Data, zipped as Multiplexer Output.zip)
   --reports DIR        report folder
+  --diagnostic-recorder  also prepare the optional Diagnostic Recorder (F4SE plugin) beside
+                       the package, in "Multiplexer Output\Diagnostic Recorder"
   --dry-run            compile and validate without writing files
   --no-cache           ignore the build cache (full rescan, analysis and merge)
 
@@ -91,6 +103,7 @@ struct Args {
 Args parseArgs(int argc, char** argv)
 {
     static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
+                                                   "--diagnostic-recorder",
                                                    "--verbose", "-v"};
     Args a;
     for (int i = 1; i < argc; ++i) {
@@ -197,6 +210,8 @@ PipelineConfig makeConfig(const Args& a)
     c.autoMerge = a.has("--auto-merge");
     c.buildPatch = c.patchOnly || a.has("--patch");
     cfg.analysis.excludedPlugins = a.all("--exclude");
+    cfg.diagnosticRecorder = a.has("--diagnostic-recorder");
+    cfg.diagnosticRecorderDll = g_exeDir / diagnostics::kRecorderDllName;
     cfg.useCache = !a.has("--no-cache");
     return cfg;
 }
@@ -488,11 +503,41 @@ int cmdPipeline(const Args& a)
     return p.validation()->critical() ? 2 : 0;
 }
 
+int cmdDiagnose(const Args& a)
+{
+    namespace fs = std::filesystem;
+    fs::path file = a.positional.empty() ? diagnostics::newestSession(diagnostics::defaultRecorderFolder())
+                                         : utf8ToPath(a.positional[0]);
+    if (file.empty() || !fs::exists(file)) {
+        std::fprintf(stderr, "No Diagnostic Recorder log found%s%s\n", file.empty() ? " in " : ": ",
+                     pathToUtf8(file.empty() ? diagnostics::defaultRecorderFolder() : file).c_str());
+        return 1;
+    }
+    const auto session = diagnostics::loadRecorderLog(file);
+    std::optional<diagnostics::PackageContext> package;
+    if (a.has("--package")) {
+        package = diagnostics::loadPackageContext(utf8ToPath(a.get("--package")));
+        if (!package)
+            std::fprintf(stderr, "warning: no Multiplexer_plugins.txt in %s; the build is not compared\n",
+                         a.get("--package").c_str());
+        else if (a.has("--runtime"))
+            package->expectedProfile = a.get("--runtime") == "nextgen" ? "nextgen" : "oldgen";
+    }
+    const auto findings = diagnostics::analyse(session, package ? &*package : nullptr);
+    std::fputs(diagnostics::formatReport(session, findings).c_str(), stdout);
+    for (const auto& f : findings)
+        if (f.severity == diagnostics::FindingSeverity::Error)
+            return 2;
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
     try {
+        if (argc > 0)
+            g_exeDir = std::filesystem::absolute(utf8ToPath(argv[0])).parent_path();
         Args a = parseArgs(argc, argv);
         log::init(platform::applicationDataDir() / "logs" / "fo4mx.log", a.has("--verbose") || a.has("-v"));
         if (a.command.empty() || a.command == "help" || a.has("--help")) {
@@ -507,6 +552,8 @@ int main(int argc, char** argv)
             return cmdDump(a);
         if (a.command == "ba2")
             return cmdBa2(a);
+        if (a.command == "diagnose")
+            return cmdDiagnose(a);
         if (a.command == "scan" || a.command == "analyse" || a.command == "analyze" || a.command == "compile" ||
             a.command == "status" || a.command == "check-definitions")
             return cmdPipeline(a);

@@ -77,6 +77,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item build/windows-msvc/src/gui/Fallout4MultiplexerRenewed.exe $out
           Copy-Item build/windows-msvc/src/cli/fo4mx.exe $out
+          # The optional Diagnostic Recorder (F4SE plugin): Multiplexer copies it into the output on export.
+          Copy-Item build/windows-msvc/src/recorder/MultiplexerDiagnosticRecorder.dll $out
           Copy-Item build/windows-msvc/vcpkg_installed/x64-windows/bin/*.dll $out
           windeployqt --release --no-translations --sql $out/Fallout4MultiplexerRenewed.exe
           Copy-Item README.md, docs -Destination $out -Recurse
