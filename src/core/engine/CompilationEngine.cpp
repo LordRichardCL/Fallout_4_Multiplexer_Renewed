@@ -820,7 +820,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             std::set<PluginIndex> need;
             if (e.key.valid() && !session.plugins[e.key.origin].baseGame)
                 need.insert(e.key.origin);
-            for (const auto& [k, via] : collectRefs(e.fields, options.rewriteHeuristicReferences))
+            for (const auto& [k, via] : collectRefs(e.fields))
                 if (k.valid() && !session.plugins[k.origin].baseGame)
                     need.insert(k.origin);
             std::set<PluginIndex> merged = current;
@@ -1008,7 +1008,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             auto retainedMastersOf = [&](const EmittedRecord& e, std::set<PluginIndex>& m) {
                 if (!e.isNew && e.key.valid())
                     m.insert(e.key.origin);
-                for (const auto& [k, via] : collectRefs(e.fields, options.rewriteHeuristicReferences))
+                for (const auto& [k, via] : collectRefs(e.fields))
                     if (k.valid() && !out.compiledFlag_[k.origin])
                         m.insert(k.origin);
             };
@@ -1201,7 +1201,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             const auto& e = out.records[v];
             if (!e.isNew && e.key.valid())
                 retained.insert(e.key.origin);
-            for (const auto& [k, via] : collectRefs(e.fields, options.rewriteHeuristicReferences)) {
+            for (const auto& [k, via] : collectRefs(e.fields)) {
                 if (!k.valid())
                     continue;
                 if (out.compiledFlag_[k.origin]) {
@@ -1314,13 +1314,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                                  e.key, op.name);
                     storeLE<uint32_t>(sr.data.data() + off, raw);
                 }
-                if (options.rewriteHeuristicReferences)
-                    for (const auto& [off, k] : ns.softRefs) {
-                        bool refOk = true;
-                        uint32_t raw = out.translate(session, k, op.index, &refOk);
-                        if (refOk)
-                            storeLE<uint32_t>(sr.data.data() + off, raw);
-                    }
+                // Undescribed bytes are written exactly as their source wrote them: never rewritten
+                // because a value looks like a FormID (validation proves they mean the same here).
                 rec.subrecords.push_back(std::move(sr));
             }
             Placement placement;

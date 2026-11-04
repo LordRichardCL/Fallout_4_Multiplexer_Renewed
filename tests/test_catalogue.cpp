@@ -267,13 +267,16 @@ TEST(update_layouts_and_guards)
         auto lo = decode("NAVM", "NVNM", o.v);
         CHECK(lo.issues.empty());
         CHECK((offsets(lo) == std::vector<uint32_t>{12}));
-        // Four bytes after the grid: kept, a FormID only if one is there.
+        // Four bytes after the grid (beyond xEdit's layout): kept as they are, undescribed (never
+        // taken for a FormID); validation decides whether they can be moved.
         auto extra = b.v;
         extra.insert(extra.end(), {1, 2, 3, 4});
         auto le = decode("NAVM", "NVNM", extra);
-        CHECK(le.heuristic.empty() && le.issues.size() == 1 && le.issues[0].severity == Severity::Info);
+        CHECK(le.issues.size() == 1 && le.issues[0].severity == Severity::Info);
         CHECK((offsets(le) == std::vector<uint32_t>{12, 65, 82}));
-        CHECK(le.probableSlots.size() == 1 && le.probableSlots[0].offset == uint32_t(b.v.size()));
+        CHECK(le.probableSlots.empty());
+        CHECK(le.heuristic.size() == 1 && le.heuristic[0].begin == uint32_t(b.v.size()) &&
+              le.heuristic[0].end == uint32_t(b.v.size() + 4));
         // A byte too many: reported and scanned, no slots kept.
         auto bad = b.v;
         bad.push_back(0);
@@ -496,4 +499,87 @@ TEST(perk_sound_shader_projectile_and_effect_fields)
     auto mgef = decodeLayout(d, Signature("MGEF"), {sub("DATA", std::vector<uint8_t>(152, 0))});
     CHECK(mgef.heuristic.empty());
     CHECK_EQ(mgef.formIdSlots.size(), size_t(20));
+}
+
+// Context- and position-dependent fields are decoded only in their context (xEdit's deciders):
+// condition parameters by xEdit's table of 479 functions and the condition's flags, BOOK's "teaches"
+// FormID by its flags. Nothing is taken for a FormID because its value looks like one.
+TEST(context_dependent_fields_follow_xedit)
+{
+    const auto& d = RecordDefinitions::get();
+    auto ctda = [](uint8_t flags, uint16_t function, uint32_t p1, uint32_t p2, uint32_t runOn, uint32_t ref) {
+        std::vector<uint8_t> v(32, 0);
+        v[0] = flags;
+        storeLE<float>(v.data() + 4, 1.0f);
+        storeLE<uint16_t>(v.data() + 8, function);
+        storeLE<uint32_t>(v.data() + 12, p1);
+        storeLE<uint32_t>(v.data() + 16, p2);
+        storeLE<uint32_t>(v.data() + 20, runOn);
+        storeLE<uint32_t>(v.data() + 24, ref);
+        storeLE<int32_t>(v.data() + 28, -1);
+        Subrecord sr;
+        sr.signature = Signature("CTDA");
+        sr.data = std::move(v);
+        return sr;
+    };
+    auto offsets = [](const DecodedLayout& l) {
+        std::vector<uint32_t> o;
+        for (const auto& s : l.formIdSlots)
+            o.push_back(s.offset);
+        return o;
+    };
+    const Signature cobj("COBJ");
+    // The table covers every function xEdit knows (it had 18 before).
+    CHECK(d.conditionFunctionKnown(72) && d.conditionFunctionKnown(817) && d.conditionFunctionKnown(0));
+    CHECK(!d.conditionFunctionKnown(9999));
+    // GetIsID (72): parameter 1 is a FormID.
+    CHECK((offsets(decodeLayout(d, cobj, {ctda(0, 72, 0x01000800, 0, 0, 0)})) == std::vector<uint32_t>{12}));
+    // GetDistance (1) takes a reference: a FormID, unless "use aliases" (0x02) makes it an alias index,
+    // or "use packdata" (0x08) a package data index.
+    CHECK((offsets(decodeLayout(d, cobj, {ctda(0, 1, 0x01000800, 0, 0, 0)})) == std::vector<uint32_t>{12}));
+    CHECK(offsets(decodeLayout(d, cobj, {ctda(0x02, 1, 5, 0, 0, 0)})).empty());
+    CHECK(offsets(decodeLayout(d, cobj, {ctda(0x08, 1, 5, 0, 0, 0)})).empty());
+    // GetIsCurrentPackage (161) keeps its package when it runs on a quest alias (5), even with 0x02.
+    CHECK((offsets(decodeLayout(d, cobj, {ctda(0x02, 161, 0x01000800, 0, 5, 0)})) == std::vector<uint32_t>{12}));
+    // Run On "Reference" (2): the reference field is a FormID; "Quest Alias" (5): it is not.
+    CHECK((offsets(decodeLayout(d, cobj, {ctda(0, 0, 0, 0, 2, 0x00000014)})) == std::vector<uint32_t>{24}));
+    CHECK(offsets(decodeLayout(d, cobj, {ctda(0, 0, 0, 0, 5, 3)})).empty());
+    // A function xEdit does not know: its parameters are undescribed (and reported), never a guess.
+    auto unknown = decodeLayout(d, cobj, {ctda(0, 9999, 0x01000800, 0x01000801, 0, 0)});
+    CHECK(offsets(unknown).empty() && unknown.probableSlots.empty());
+    CHECK(unknown.heuristic.size() == 1 && unknown.heuristic[0].begin == 12 && unknown.heuristic[0].end == 20);
+    CHECK(!unknown.issues.empty());
+
+    // BOOK DNAM: "teaches" (+1) is a FormID only when a flag says what it teaches.
+    auto book = [](uint8_t flags) {
+        Subrecord sr;
+        sr.signature = Signature("DNAM");
+        sr.data.assign(13, 0);
+        sr.data[0] = flags;
+        storeLE<uint32_t>(sr.data.data() + 1, 0x01000800);
+        return sr;
+    };
+    const Signature bookSig("BOOK");
+    CHECK(offsets(decodeLayout(d, bookSig, {book(0)})).empty());
+    for (uint8_t f : {uint8_t(0x01), uint8_t(0x04), uint8_t(0x10)}) {
+        auto l = decodeLayout(d, bookSig, {book(f)});
+        CHECK((offsets(l) == std::vector<uint32_t>{1}));
+        CHECK(l.heuristic.empty());
+    }
+    // Layouts completed from xEdit: no undescribed bytes inside the described size.
+    auto weap = [](const char* sig, size_t size) {
+        Subrecord sr;
+        sr.signature = Signature::fromString(sig);
+        sr.data.assign(size, 0x33);
+        return sr;
+    };
+    const Signature weapSig("WEAP");
+    CHECK(decodeLayout(d, weapSig, {weap("DNAM", 132)}).heuristic.empty());
+    CHECK(decodeLayout(d, weapSig, {weap("FNAM", 41)}).heuristic.empty());
+    CHECK(decodeLayout(d, weapSig, {weap("CRDT", 12)}).heuristic.empty());
+    // Bytes past xEdit's layout stay undescribed.
+    auto longer = decodeLayout(d, weapSig, {weap("DNAM", 136)});
+    CHECK(longer.heuristic.size() == 1 && longer.heuristic[0].begin == 132 && longer.heuristic[0].end == 136);
+    // SNDR DNAM is a descriptor FormID (xEdit), not a guess.
+    CHECK((offsets(decodeLayout(d, Signature("SNDR"), {weap("DNAM", 4)})) == std::vector<uint32_t>{0}));
 }

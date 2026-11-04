@@ -75,6 +75,16 @@ private:
         case FieldKind::Unknown:
             heuristic(i, 0, static_cast<uint32_t>(size));
             break;
+        case FieldKind::BookData:
+            // xEdit wbBOOKTeachesDecider: +1 is an actor value (flag 0x01), spell (0x04) or perk (0x10),
+            // else unused; then the text offset (two numbers) to +13.
+            if (size == 0)
+                break;
+            if (size >= 5 && (sr.data[0] & 0x15))
+                slot(i, 1);
+            if (size > 13)
+                heuristic(i, 13, static_cast<uint32_t>(size));
+            break;
         case FieldKind::NoRefs:
         case FieldKind::ZString:
             break;
@@ -111,15 +121,28 @@ private:
                 if (o + 4u <= size)
                     slot(i, o);
             if (def.partial) {
-                // Scan everything except the ranges known to hold numbers and flags.
+                // Undescribed: everything except the ranges known to hold numbers and flags and the
+                // described FormID slots.
+                auto gap = [&](uint32_t from, uint32_t to) {
+                    for (uint32_t at = from; at < to;) {
+                        uint32_t next = to;
+                        for (uint16_t o : def.offsets)
+                            if (o >= at && o < next)
+                                next = o;
+                        heuristic(i, at, next);
+                        if (next >= to)
+                            break;
+                        at = next + 4; // skip the slot
+                    }
+                };
                 uint32_t from = 0;
                 for (auto [b, e] : def.plain) {
                     if (b > from)
-                        heuristic(i, from, std::min<uint32_t>(b, static_cast<uint32_t>(size)));
+                        gap(from, std::min<uint32_t>(b, static_cast<uint32_t>(size)));
                     from = std::max<uint32_t>(from, e);
                 }
                 if (from < size)
-                    heuristic(i, from, static_cast<uint32_t>(size));
+                    gap(from, static_cast<uint32_t>(size));
             }
             break;
         case FieldKind::StructArray: {
@@ -486,19 +509,25 @@ private:
         if (flags & 0x04)
             slot(i, 4); // comparison value is a global
         uint16_t fn = loadLE<uint16_t>(d + 8);
-        if (defs_.conditionFunctionKnown(fn)) {
-            if (defs_.conditionParamIsForm(fn, 1))
-                slot(i, 12);
-            if (defs_.conditionParamIsForm(fn, 2))
-                slot(i, 16);
-        } else {
-            // Parameters of other functions are FormIDs or numbers. A value that names an
-            // existing record is treated as a FormID (numbers rarely do, and values under
-            // master index 1 are written unchanged either way).
-            probable(i, 12);
-            probable(i, 16);
-        }
         uint32_t runOn = loadLE<uint32_t>(d + 20);
+        if (defs_.conditionFunctionKnown(fn)) {
+            // xEdit's parameter deciders: a reference, actor or package parameter is an alias index
+            // when "use aliases" (0x02) is set, and a package data index when "use packdata" (0x08)
+            // is set; GetIsCurrentPackage (161) keeps its package when it runs on a quest alias (5).
+            for (int k = 1; k <= 2; ++k) {
+                uint8_t kind = defs_.conditionParam(fn, k);
+                if (kind == 2) {
+                    const bool alias = (flags & 0x02) && !(k == 1 && fn == 161 && runOn == 5);
+                    kind = alias || (flags & 0x08) ? 0 : 1;
+                }
+                if (kind == 1)
+                    slot(i, k == 1 ? 12 : 16);
+            }
+        } else {
+            // A function index xEdit does not know: what its parameters hold is not described.
+            issue(Severity::Warning, sr.signature, "condition function " + std::to_string(fn) + " is not known");
+            heuristic(i, 12, 20);
+        }
         if (runOn == 2)
             slot(i, 24);
     }
@@ -714,10 +743,10 @@ private:
             throw FormatError("version " + std::to_string(version) + ": " + e.what());
         }
         // Some navmeshes end with 4 more bytes than xEdit describes (10 of 28,517 in a real load
-        // order). They are kept as they are; if they name an existing record they are treated as a
-        // FormID, so the check counts them.
+        // order). They are kept as they are, undescribed: validation proves they mean the same in
+        // the output, or the navmesh is not compiled.
         if (r.remaining() == 4) {
-            probable(i, r.position());
+            heuristic(i, static_cast<uint32_t>(r.position()), static_cast<uint32_t>(r.position() + 4));
             issue(Severity::Info, Signature("NVNM"), "4 bytes after the navmesh grid, beyond the xEdit layout");
             r.skip(4);
         }

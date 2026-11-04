@@ -802,7 +802,12 @@ TEST(undescribed_formid_with_shifted_master_is_isolated)
     CHECK(!p.validation()->critical());
     CHECK_EQ(p.session().findPlugin("ModG.esp")->eligibility, Eligibility::Retained);
     CHECK(p.session().autoRetained.count("modg.esp") == 1);
-    CHECK(p.session().autoRetained.at("modg.esp").find("master index would point elsewhere") != std::string::npos);
+    // The reason names the subrecord, the value, and why it cannot be shown to be safe.
+    const auto& why = p.session().autoRetained.at("modg.esp");
+    CHECK(why.find("UNKN") != std::string::npos);
+    CHECK(why.find("bytes the record definitions do not describe") != std::string::npos);
+    CHECK(why.find("02000800") != std::string::npos);
+    CHECK(why.find("ModC.esp") != std::string::npos);
     CHECK(!p.compiledOutput()->isCompiled(p.session().findPlugin("ModG.esp")->index));
     CHECK(p.compiledOutput()->isCompiled(p.session().findPlugin("ModA.esp")->index));
     bool reported = false;
@@ -870,34 +875,50 @@ Subrecord condition(uint16_t function, uint32_t param1, uint32_t reference)
 
 } // namespace
 
-TEST(conditions_with_unlisted_functions_and_hardcoded_forms)
+// Conditions are decoded from xEdit's table of condition functions: a known function's FormID
+// parameters are rewritten; a function index xEdit does not know leaves its parameters undescribed,
+// so the record is not compiled (no value is taken for a FormID because it looks like one).
+TEST(conditions_decoded_from_the_function_table)
 {
     auto root = buildInstall("conditions");
     auto data = root / "Game" / "Data";
     writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("LVSP", 0x01000800, {zs("EDID", "ModETopic")})});
-    // ModC is master 2 here but will be master 1 in the output; the condition function is not in
-    // the definitions' table, and the condition runs on PlayerRef (hard-coded, not in Fallout4.esm).
+    // ModC is master 2 here but master 1 in the output. GetIsID (72) takes a FormID; the condition
+    // runs on PlayerRef (hard-coded, not in Fallout4.esm).
     writePlugin(data / "ModH.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
                 {record("COBJ", 0x03000800,
-                        {zs("EDID", "ModH_Recipe"), condition(9999, 0x02000800, 0x00000014), u32("CNAM", 0x00001000),
+                        {zs("EDID", "ModH_Recipe"), condition(72, 0x02000800, 0x00000014), u32("CNAM", 0x00001000),
                          u32("BNAM", 0x00000800)})});
-    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModH.esp\n");
+    // ModU uses a function index xEdit does not know (9999).
+    writePlugin(data / "ModU.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
+                {record("COBJ", 0x03000800,
+                        {zs("EDID", "ModU_Recipe"), condition(9999, 0x02000800, 0x00000014), u32("CNAM", 0x00001000),
+                         u32("BNAM", 0x00000800)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModH.esp\n*ModU.esp\n");
     auto cfg = configFor(root);
     cfg.databasePath.clear();
     Pipeline p(cfg);
     p.scan();
     p.analyse();
     CHECK(p.compile());
-    for (const auto& is : p.validation()->issues) {
-        CHECK(is.message.find("probably refers") == std::string::npos);
-        CHECK(is.message.find("00000014") == std::string::npos);
+    const auto& kept = p.session().autoRetained;
+    CHECK(kept.count("modh.esp") == 0);
+    CHECK(kept.count("modu.esp") == 1);
+    if (kept.count("modu.esp")) {
+        const auto& why = kept.at("modu.esp");
+        CHECK(why.find("CTDA") != std::string::npos);
+        CHECK(why.find("COBJ") != std::string::npos);
+        CHECK(why.find("bytes the record definitions do not describe") != std::string::npos);
     }
     auto result = p.exportOutputs();
     OutputSet out(result.pluginFiles);
+    CHECK(out.byEditorId("ModU_Recipe") == nullptr);
     const auto* recipe = out.byEditorId("ModH_Recipe");
     CHECK(recipe != nullptr);
+    if (!recipe)
+        return;
     const auto* ctda = recipe->record.find(Signature("CTDA"));
-    // The parameter was recognised as a FormID and renumbered for the output's masters.
+    // The parameter (described by the table) was renumbered for the output's masters.
     CHECK(out.resolve(*recipe, loadLE<uint32_t>(ctda->data.data() + 12)) == std::make_pair(std::string("ModC.esp"), 0x800u));
     CHECK(out.resolve(*recipe, loadLE<uint32_t>(ctda->data.data() + 24)) == std::make_pair(std::string("Fallout4.esm"), 0x14u));
 }
@@ -3644,19 +3665,34 @@ TEST(references_rollback)
     CHECK(!script.empty());
     CHECK(json.find("ModS.esp") == std::string::npos);
 
-    // Block one temporary file: the export fails as a whole.
-    std::filesystem::create_directories(dir / "scripts" / "modsuser.pex.fo4mx-new" / "blocked");
-    p.exportOutputs();
-    CHECK(p.validation()->errors > 0);
-    CHECK(!p.autoMerge()->errors.empty());
-    CHECK(slurpFile(dir / "scripts" / "modsuser.pex") == script);
-    CHECK(slurpFile(dir / "mcm" / "config" / "mods" / "config.json") == json);
-    CHECK(!std::filesystem::exists(dir / "mcm" / "config" / "mods" / "config.json.fo4mx-new"));
-    std::filesystem::remove_all(dir / "scripts" / "modsuser.pex.fo4mx-new");
-
+    // Rollback removes every copy; a later export writes them again.
     CHECK_EQ(AutoMerger::rollback(dir), size_t(2));
     CHECK(!std::filesystem::exists(dir / "scripts" / "modsuser.pex"));
     CHECK(!std::filesystem::exists(dir / AutoMerger::kManifest));
+    p.exportOutputs();
+    CHECK(slurpFile(dir / "scripts" / "modsuser.pex") == script);
+
+    // Block one temporary file: the relink fails, so the whole build is withdrawn. No half-written
+    // copy is left, the earlier copies (which name this build's outputs) are rolled back, the output
+    // plugins and the zip are removed, and a note says the build failed.
+    std::filesystem::create_directories(dir / "scripts" / "modsuser.pex.fo4mx-new" / "blocked");
+    auto failed = p.exportOutputs();
+    CHECK(p.validation()->errors > 0);
+    CHECK(!p.autoMerge()->errors.empty());
+    CHECK(!std::filesystem::exists(dir / "mcm" / "config" / "mods" / "config.json.fo4mx-new"));
+    CHECK(!std::filesystem::exists(dir / "scripts" / "modsuser.pex"));
+    CHECK(!std::filesystem::exists(dir / "mcm" / "config" / "mods" / "config.json"));
+    for (const auto& f : failed.pluginFiles)
+        CHECK(!std::filesystem::exists(f));
+    CHECK(!std::filesystem::exists(failed.packageRoot / "Multiplexer Output.zip"));
+    CHECK(std::filesystem::exists(failed.packageRoot / Pipeline::kBuildFailedMarker));
+    std::filesystem::remove_all(dir / "scripts" / "modsuser.pex.fo4mx-new");
+    // The next successful build clears the note (a failed export has to be compiled again).
+    CHECK(p.compile());
+    p.exportOutputs();
+    CHECK(!std::filesystem::exists(failed.packageRoot / Pipeline::kBuildFailedMarker));
+    CHECK(slurpFile(dir / "scripts" / "modsuser.pex") == script);
+    AutoMerger::rollback(dir);
 
     // A user's own file where a copy would go: never replaced, the plugin stays.
     writeFile(dir / "scripts" / "modsuser.pex", "user file");
@@ -3771,4 +3807,141 @@ TEST(plugin_summary_counts_every_plugin_once)
     CHECK_EQ(sum.eligible.total, eligible);
     CHECK(sum.eligible.total > 0 && sum.ineligible.total > 0); // ModT is named by a DLL
     CHECK_EQ(sum.eligible.other + sum.ineligible.other, size_t(0));
+}
+
+// ---- Safety: undescribed data, preservation and what was written ----------------------------
+
+// Unknown subrecords (signatures the definitions do not list), repeated and interleaved with
+// described ones, are kept in their order and byte for byte. When their bytes are provably the same
+// in the output (zero, or naming Fallout4.esm at the same master position) the record compiles and
+// nothing in them is rewritten.
+TEST(safety_unknown_subrecords_round_trip_unchanged)
+{
+    auto root = buildInstall("safetyroundtrip");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModZ.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000800,
+                        {zs("EDID", "ModZ_Keyword"), u32("ZZZ1", 0x00000800), raw("ZZZ2", {0, 0, 0, 0, 0, 0, 0, 0}),
+                         zs("FULL", "Kept"), u32("ZZZ1", 0x00000801), raw("ZZZ3", {1, 2, 3})})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModZ.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK(p.session().autoRetained.count("modz.esp") == 0);
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    OutputSet out(result.pluginFiles);
+    const auto* kw = out.byEditorId("ModZ_Keyword");
+    CHECK(kw != nullptr);
+    if (!kw)
+        return;
+    std::vector<std::string> sigs;
+    for (const auto& s : kw->record.subrecords)
+        sigs.push_back(s.signature.str());
+    CHECK((sigs == std::vector<std::string>{"EDID", "ZZZ1", "ZZZ2", "FULL", "ZZZ1", "ZZZ3"}));
+    const auto& subs = kw->record.subrecords;
+    CHECK(loadLE<uint32_t>(subs[1].data.data()) == 0x00000800u); // Fallout4.esm: master 0 in both
+    CHECK(subs[2].data == std::vector<uint8_t>(8, 0));
+    CHECK(loadLE<uint32_t>(subs[4].data.data()) == 0x00000801u);
+    CHECK((subs[5].data == std::vector<uint8_t>{1, 2, 3})); // too short to hold a FormID
+}
+
+// A placed reference is moved whole, but the bytes nobody describes in it are not proof of safety:
+// a value whose load order index would name another plugin in the output keeps its plugin out, with
+// a diagnostic naming the plugin, the record, the subrecord and the value. A described reference
+// (NAME) in another plugin's placed reference is rewritten.
+TEST(safety_whole_placed_reference_with_unprovable_bytes_is_blocked)
+{
+    auto root = buildInstall("safetyrefr");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "World.esm", {"Fallout4.esm"},
+                {record("CELL", 0x01000803, {zs("EDID", "Vault")}),
+                 record("REFR", 0x01000804, {zs("EDID", "Chair"), u32("NAME", 0x800)})},
+                ESM);
+    // ModR overrides the chair; XUNK is not described and holds 02000123, ModR's own index.
+    writePlugin(data / "ModR.esp", {"Fallout4.esm", "World.esm"},
+                {record("CELL", 0x01000803, {zs("EDID", "Vault")}),
+                 record("REFR", 0x01000804, {zs("EDID", "Chair"), u32("NAME", 0x800), u32("XUNK", 0x02000123)})});
+    // ModN adds a static and a new reference placing it: NAME is described and must follow the static.
+    writePlugin(data / "ModN.esp", {"Fallout4.esm", "World.esm"},
+                {record("STAT", 0x02000800, {zs("EDID", "ModN_Statue")}),
+                 record("CELL", 0x01000803, {zs("EDID", "Vault")}),
+                 record("REFR", 0x02000801, {zs("EDID", "ModN_Placed"), u32("NAME", 0x02000800)})});
+    writeFile(root / "plugins.txt", "*World.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModR.esp\n*ModN.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto& kept = p.session().autoRetained;
+    CHECK(kept.count("modr.esp") == 1);
+    if (kept.count("modr.esp")) {
+        const auto& why = kept.at("modr.esp");
+        for (const char* part : {"REFR", "XUNK", "02000123", "ModR.esp", "bytes the record definitions do not describe"})
+            CHECK(why.find(part) != std::string::npos);
+    }
+    CHECK(kept.count("modn.esp") == 0);
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    OutputSet out(result.pluginFiles);
+    CHECK(out.byEditorId("Chair") == nullptr || out.byEditorId("Chair")->record.find(Signature("XUNK")) == nullptr);
+    const auto* placed = out.byEditorId("ModN_Placed");
+    const auto* statue = out.byEditorId("ModN_Statue");
+    CHECK(placed != nullptr && statue != nullptr);
+    if (placed && statue) {
+        CHECK(placed->placement.kind == Placement::Kind::CellChild);
+        CHECK(out.resolve(*placed, loadLE<uint32_t>(placed->record.find(Signature("NAME"))->data.data())) ==
+              out.identity(*statue));
+    }
+    // With automatic isolation off, the same finding blocks export instead.
+    auto strict = configFor(root);
+    strict.databasePath.clear();
+    strict.autoIsolate = false;
+    Pipeline q(strict);
+    q.scan();
+    q.analyse();
+    CHECK(!q.compile());
+    bool found = false;
+    for (const auto& is : q.validation()->issues)
+        found |= is.severity == Severity::Error && is.category == "Undescribed Data";
+    CHECK(found);
+}
+
+// What was written is read back and compared with the plan, payload included: a changed byte in
+// an output plugin is caught.
+TEST(safety_written_output_compared_with_the_plan)
+{
+    auto root = buildInstall("safetywritten");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    auto result = p.exportOutputs();
+    CHECK_EQ(ValidationEngine::validateWrittenFiles(*p.compiledOutput(), result.pluginFiles).errors, uint64_t(0));
+    // Change one character of a compiled record's Editor ID in the file.
+    bool changed = false;
+    for (const auto& f : result.pluginFiles) {
+        std::ifstream in(f, std::ios::binary);
+        std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        in.close();
+        const auto at = bytes.find("ModA_Gun");
+        if (at == std::string::npos)
+            continue;
+        bytes[at + 5] = 'X';
+        writeFile(f, bytes);
+        changed = true;
+    }
+    CHECK(changed);
+    const auto v = ValidationEngine::validateWrittenFiles(*p.compiledOutput(), result.pluginFiles);
+    CHECK(v.errors > 0);
+    bool named = false;
+    for (const auto& is : v.issues)
+        named |= is.message.find("does not match what was compiled") != std::string::npos;
+    CHECK(named);
 }

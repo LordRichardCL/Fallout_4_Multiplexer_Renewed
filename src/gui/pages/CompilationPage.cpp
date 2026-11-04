@@ -166,24 +166,11 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     auto* ml = new QVBoxLayout(mergeBox);
     merge_ = new QCheckBox("Merge compatible edits (keyword lists, leveled lists, form lists, different fields)");
     light_ = new QCheckBox("ESL-flag outputs that fit the light plugin range (≤ 2048 new records)");
-    heuristic_ = new QCheckBox("Advanced users only: rewrite values that look like FormIDs in data the app cannot "
-                               "read field by field");
-    heuristic_->setToolTip(
-        "Most record data is read field by field, so every reference to another record (FormID) is known and moved "
-        "to its new place. A few fields are not described yet (\"undescribed data\"). In them the app looks for "
-        "4-byte values that name a record that exists in your load order: those are probable FormIDs.\n\n"
-        "Off (recommended): undescribed data is copied unchanged. If a probable FormID in it points to a record that "
-        "is being compiled (and so gets a new FormID), the record's plugin is kept out of compilation automatically, "
-        "so nothing can break; it stays in your load order as it is.\n\n"
-        "On: those values are rewritten to the record's new FormID, so such plugins compile too. The risk is a "
-        "number that only looks like a FormID (a float, a count, flags) being changed by mistake, which could "
-        "subtly alter that record in game. Turn it on only if many plugins are kept out for \"probably refers to "
-        "compiled record\" and you will test the result in game.");
     merge_->setToolTip("Where two or more mods change the same record in different ways (a leveled list, keywords, "
                        "different fields), combine their changes instead of keeping only the last mod's version.");
     light_->setToolTip("An output with few enough new records (2,048 or fewer) is ESL-flagged, so it takes no full "
                        "plugin slot. Outputs with new cells or worldspaces are never ESL-flagged.");
-    for (auto* c : {merge_, light_, heuristic_}) {
+    for (auto* c : {merge_, light_}) {
         c->setStyleSheet("QCheckBox { spacing: 8px; }");
         ml->addWidget(c);
     }
@@ -389,7 +376,6 @@ void CompilationPage::loadOptions()
     updateInstallNote();
     merge_->setChecked(c.mergeCompatible);
     light_->setChecked(c.lightOutputsWhenPossible);
-    heuristic_->setChecked(c.rewriteHeuristicReferences);
     patchOnly_->setChecked(c.patchOnly);
     patch_->setChecked(c.buildPatch || c.patchOnly);
     patch_->setEnabled(!c.patchOnly);
@@ -411,7 +397,6 @@ void CompilationPage::storeOptions()
     }
     c.mergeCompatible = merge_->isChecked();
     c.lightOutputsWhenPossible = light_->isChecked();
-    c.rewriteHeuristicReferences = heuristic_->isChecked();
     c.patchOnly = patchOnly_->isChecked();
     c.buildPatch = c.patchOnly || patch_->isChecked();
     app_->config().exportOptions.outputDirectory = toPath(outputDir_->text().trimmed());

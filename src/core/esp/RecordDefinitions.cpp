@@ -83,6 +83,13 @@ FieldDef structAt(std::initializer_list<uint16_t> offsets, uint16_t requiredSize
     f.partial = partial;
     return f;
 }
+// A partial struct whose byte ranges `plain` are known (from xEdit) to hold numbers and flags.
+FieldDef structPlain(std::initializer_list<uint16_t> offsets, std::vector<std::pair<uint16_t, uint16_t>> plain)
+{
+    FieldDef f = structAt(offsets, 0, true);
+    f.plain = std::move(plain);
+    return f;
+}
 FieldDef structArray(uint16_t stride, std::initializer_list<uint16_t> offsets, MergeMode mode = MergeMode::Keyed)
 {
     FieldDef f{FieldKind::StructArray};
@@ -236,30 +243,16 @@ void buildCommon(RecordDefinitions& d)
 
 void buildConditionFunctions(RecordDefinitions& d)
 {
-    // function index -> FormID parameters (bit0 = param 1, bit1 = param 2)
-    const std::pair<uint16_t, uint8_t> table[] = {
-        {14, 1},  // GetValue (actor value form)
-        {47, 1},  // GetItemCount
-        {58, 1},  // GetStage
-        {59, 1},  // GetStageDone
-        {69, 1},  // GetIsRace
-        {71, 1},  // GetInFaction
-        {72, 1},  // GetIsID
-        {73, 1},  // GetFactionRank
-        {74, 1},  // GetGlobalValue
-        {136, 1}, // GetIsReference
-        {182, 1}, // GetEquipped
-        {214, 1}, // HasMagicEffect
-        {277, 1}, // GetBaseValue
-        {448, 1}, // HasPerk
-        {495, 1}, // GetPermanentValue
-        {543, 1}, // GetQuestCompleted
-        {560, 1}, // HasKeyword
-        {682, 1}, // WornHasKeyword
+    // Every Fallout 4 condition function with the kind of its two parameters, from xEdit.
+    struct Fn {
+        uint16_t index;
+        uint8_t param1, param2;
     };
-    // Parameters of functions not listed here are scanned heuristically.
-    for (auto [fn, mask] : table)
-        d.conditionFormParams_[fn] = mask;
+    static const Fn table[] = {
+#include "esp/ConditionFunctions.inc"
+    };
+    for (const auto& f : table)
+        d.conditionFormParams_[f.index] = static_cast<uint8_t>(f.param1 | (f.param2 << 4));
 }
 
 void buildOldGen(RecordDefinitions& d)
@@ -280,11 +273,11 @@ void buildOldGen(RecordDefinitions& d)
     weaponData.plain = {{4, 40}, {48, 73}, {105, 132}};
     // FNAM: animation and rumble timings (+0..+27), projectile count (+28), projectile override
     // (+29, found by the unaligned scan on grenades and custom guns), then pattern and rumble period.
-    FieldDef weaponFiring = structAt({29}, 0, true);
-    weaponFiring.plain = {{0, 29}};
+    // xEdit: timings, # projectiles (+28), override projectile (+29), pattern (+33), rumble period (+37).
+    FieldDef weaponFiring = structPlain({29}, {{0, 29}, {33, 41}});
     b.record("WEAP", "Weapon", true)
         .field("DNAM", weaponData)
-        .field("CRDT", structAt({8}, 0, true)) // critical damage and charge multipliers, critical effect spell
+        .field("CRDT", structPlain({8}, {{0, 8}})) // critical damage and charge multipliers, critical effect spell
         .field("FNAM", weaponFiring)            // firing data: projectile override at +29
         .field("INAM", formId())                // impact data set
         .field("WAMD", formId())                // aim model
@@ -356,7 +349,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("LVLG", formId())
         .field("LLCT", noRefs())
         .field("LVLO", lvlo)
-        .field("COED", structAt({0}, 12, true)) // owner; second field depends on owner type
+        .field("COED", structPlain({0}, {{8, 12}})) // owner; second field depends on owner type
         .field("LLKC", structArray(8, {0}))
         .field("LVSG", formId())
         .field("ONAM", lstring())
@@ -385,8 +378,8 @@ void buildOldGen(RecordDefinitions& d)
 
     // DNAM: flags (+0), then what the book teaches (perk, spell or actor value) at +1; text offsets
     // follow. Found by the unaligned scan on a real load order: magazines' perks at +1.
-    FieldDef bookData = structAt({1}, 0, true);
-    bookData.plain = {{0, 1}};
+    // xEdit: flags, "teaches" (+1: a FormID only when a flag says what it teaches), text offset X, Y.
+    FieldDef bookData{FieldKind::BookData};
     b.record("BOOK", "Book", true)
         .field("DATA", noRefs())
         .field("DNAM", bookData)
@@ -487,7 +480,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("LVLG", formId())
         .field("LLCT", noRefs())
         .field("LVLO", lvlo)
-        .field("COED", structAt({0}, 12, true))
+        .field("COED", structPlain({0}, {{8, 12}}))
         .field("LLKC", structArray(8, {0}))
         .modelRegions();
 
@@ -500,7 +493,7 @@ void buildOldGen(RecordDefinitions& d)
     b.record("CONT", "Container", true)
         .field("COCT", noRefs())
         .field("CNTO", cnto)
-        .field("COED", structAt({0}, 12, true))
+        .field("COED", structPlain({0}, {{8, 12}}))
         .field("DATA", noRefs()) // flags, weight
         .field("SNAM", formId()) // open sound
         .field("QNAM", formId()) // close sound
@@ -577,7 +570,7 @@ void buildOldGen(RecordDefinitions& d)
     b.record("STAT", "Static", true)
         .field("NVNM", embeddedNavmesh)
         .field("FTYP", formId())               // forced location ref type
-        .field("DNAM", structAt({4}, 0, true)) // max angle, directional material, leaf amplitude/frequency
+        .field("DNAM", structPlain({4}, {{0, 4}, {8, 16}})) // max angle, directional material, leaf amplitude/frequency
         .field("MNAM", noRefs())               // distant LOD model names
         .modelRegions();
 
@@ -603,7 +596,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("WNAM", formId())                // water type
         .field("FNAM", noRefs())                // flags
         .field("KNAM", formId())                // interaction keyword
-        .field("RADR", structAt({0}, 0, true))  // radio: sound model, frequency, volume, flags
+        .field("RADR", structPlain({0}, {{4, 14}}))  // radio: sound model, frequency, volume, flags
         .modelRegions()
         .conditionRegion();
 
@@ -621,7 +614,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("XMRK", zstring()) // marker model
         .field("COCT", noRefs())
         .field("CNTO", cnto)     // items (power armour stations)
-        .field("COED", structAt({0}, 12, true))
+        .field("COED", structPlain({0}, {{8, 12}}))
         .field("NAM0", formId())
         .field("NAM1", formId())
         .field("WNAM", formId())
@@ -661,7 +654,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("WNAM", lstring()) // welcome text
         .field("COCT", noRefs())
         .field("CNTO", cnto) // items (holotapes)
-        .field("COED", structAt({0}, 12, true))
+        .field("COED", structPlain({0}, {{8, 12}}))
         .add(region("Body Text", {"BTXT"}, {"BTXT", "CTDA", "CIS1", "CIS2"}))
         .add(region("Menu Items", {"ITXT"}, {"ITXT", "RNAM", "ANAM", "ITID", "TNAM", "CTDA", "CIS1", "CIS2"}))
         .modelRegions();
@@ -680,7 +673,7 @@ void buildOldGen(RecordDefinitions& d)
 
     // DATA: light, sound 1, sound 2, impact data set, placed object, spawn projectile; then numbers.
     b.record("EXPL", "Explosion", true)
-        .field("DATA", structAt({0, 4, 8, 12, 16, 20}, 0, true))
+        .field("DATA", structPlain({0, 4, 8, 12, 16, 20}, {{24, 84}})) // xEdit: then only numbers, to +84
         .field("MNAM", formId()) // image space modifier
         .modelRegions();
 
@@ -696,12 +689,12 @@ void buildOldGen(RecordDefinitions& d)
     // DNAM: limit, radius, lifetime, image space radius, target interval, flags, spell, light,
     // impact data set, sound; later bytes are scanned.
     b.record("HAZD", "Hazard", true)
-        .field("DNAM", structAt({24, 28, 32, 36}, 0, true))
+        .field("DNAM", structPlain({24, 28, 32, 36}, {{0, 24}, {40, 52}}))
         .field("MNAM", formId()) // image space modifier
         .modelRegions();
 
     b.record("SNDR", "Sound Descriptor", true)
-        .field("DNAM", structAt({0}, 0, true)) // a FormID at +0 in 2,961 of 3,079 vanilla descriptors
+        .field("DNAM", formId()) // xEdit: a repeated descriptor FormID
         .field("CNAM", noRefs())  // descriptor type
         .field("LNAM", noRefs())  // looping, sidechain, rumble
         .field("BNAM", special(FieldKind::SoundDescriptorData))
@@ -938,7 +931,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("NTRM", formId())   // native terminal
         .field("COCT", noRefs())
         .field("CNTO", cnto)       // inventory
-        .field("COED", structAt({0}, 12, true))
+        .field("COED", structPlain({0}, {{8, 12}}))
         .field("AIDT", noRefs())   // AI data
         .field("PKID", formIdList(MergeMode::Multiset)) // packages (ordered)
         .field("CNAM", formId())   // class
@@ -1947,12 +1940,12 @@ const char* assetRoot(AssetRole r)
     return "";
 }
 
-bool RecordDefinitions::conditionParamIsForm(uint16_t function, int param) const
+uint8_t RecordDefinitions::conditionParam(uint16_t function, int param) const
 {
     auto it = conditionFormParams_.find(function);
     if (it == conditionFormParams_.end())
-        return false;
-    return (it->second >> (param - 1)) & 1;
+        return 0;
+    return param == 1 ? (it->second & 0x0F) : (it->second >> 4);
 }
 
 bool RecordDefinitions::conditionFunctionKnown(uint16_t function) const

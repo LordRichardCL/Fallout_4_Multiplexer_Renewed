@@ -549,6 +549,27 @@ bool Pipeline::compile(ProgressSink& progress)
     return !validation_->critical();
 }
 
+// A failed export leaves nothing that looks like a result: the plugins it wrote and the package
+// zip are removed, relinked copies are rolled back, and a note says why.
+void Pipeline::markBuildFailed(const std::filesystem::path& directory, const std::filesystem::path& packageRoot,
+                               const std::vector<std::filesystem::path>& written, const std::string& reason)
+{
+    std::error_code ec;
+    for (const auto& f : written)
+        std::filesystem::remove(f, ec);
+    std::filesystem::remove(packageRoot / "Multiplexer Output.zip", ec);
+    AutoMerger::rollback(directory);
+    std::filesystem::create_directories(packageRoot, ec);
+    std::ofstream out(packageRoot / kBuildFailedMarker, std::ios::binary | std::ios::trunc);
+    out << "This build FAILED and must not be installed.\n\n"
+        << "Reason: " << reason << "\n\n"
+        << "The output plugins of this build and the package zip were removed; relinked scripts and configs were "
+           "rolled back. Anything else in this folder is left over and is not a current result. Fix the problem "
+           "named above (the Validation page lists every finding) and build again; a successful export removes "
+           "this file.\n";
+    spdlog::error("Export failed: {}", reason);
+}
+
 ExportResult Pipeline::exportOutputs(ProgressSink& progress)
 {
     if (!compiled_)
@@ -568,7 +589,13 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
             previousOutputs.push_back(o.name);
     auto exportOptions = config_.exportOptions;
     exportOptions.archiveWinnerCopies = config_.archiveWinnerCopies;
-    auto result = Exporter::write(*session_, *compiled_, exportOptions, previousOutputs);
+    ExportResult result;
+    try {
+        result = Exporter::write(*session_, *compiled_, exportOptions, previousOutputs);
+    } catch (const std::exception& e) {
+        markBuildFailed(directory, Exporter::packageRoot(directory), {}, e.what());
+        throw;
+    }
     {
         auto list = result.packageRoot / "Multiplexer_ArchivePriority.txt";
         std::error_code ec;
@@ -585,6 +612,29 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         }
     }
     auto post = ValidationEngine::validateWrittenFiles(*compiled_, result.pluginFiles);
+    if (post.critical()) {
+        // The files on disk are not what was compiled: nothing of this build may look installable,
+        // and no script or config is relinked to it.
+        std::string first;
+        for (const auto& is : post.issues)
+            if (is.severity == Severity::Error) {
+                first = is.message;
+                break;
+            }
+        markBuildFailed(result.directory, result.packageRoot, result.pluginFiles,
+                        "the written plugins failed verification (" + std::to_string(post.errors) + " errors; first: " +
+                            first + ")");
+        validation_->merge(post);
+        if (db_)
+            db::DatabaseWriter(*db_).writeValidation("post-export", post, false);
+        spdlog::error("Written files failed verification ({} errors); the build was marked failed", post.errors);
+        exported_ = result;
+        return result;
+    }
+    {
+        std::error_code ec;
+        std::filesystem::remove(result.packageRoot / kBuildFailedMarker, ec);
+    }
     {
         // Relinked scripts and configs (or removal of an earlier export's copies when it is off).
         AutoMergeReport none;
@@ -602,6 +652,14 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
     validation_->merge(post);
     if (db_)
         db::DatabaseWriter(*db_).writeValidation("post-export", post, false);
+    if (post.critical()) {
+        // A compiled plugin is still named by a file that could not be relinked: not a usable build.
+        markBuildFailed(result.directory, result.packageRoot, result.pluginFiles,
+                        "the Advanced Users Auto-Merger could not relink every file naming a compiled plugin (" +
+                            std::to_string(post.errors) + " errors)");
+        exported_ = result;
+        return result;
+    }
     // Every file is in Data now: zip it into the installable package.
     if (config_.exportOptions.writeZip && !post.critical()) {
         try {

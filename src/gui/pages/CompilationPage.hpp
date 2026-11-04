@@ -48,7 +48,6 @@ private:
     QCheckBox* light_;
     QCheckBox* patch_;
     QCheckBox* patchOnly_;
-    QCheckBox* heuristic_;
     QLineEdit* outputDir_;
     QPushButton* compile_;
     QPushButton* export_;

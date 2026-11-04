@@ -45,6 +45,7 @@ enum class FieldKind : uint8_t {
     SceneHeadtracking, // SCEN HTID: a sound in a radio action (type 6), alias IDs in a dialogue action
     SoundDescriptorData, // SNDR BNAM: the base descriptor (an AutoWeapon descriptor), else numbers
     EffectShaderData, // EFSH DNAM: ambient sound (and addon models in the old format), by layout size
+    BookData,       // BOOK DNAM: flags, "teaches" (a FormID only for actor value, spell or perk), text offset
 };
 
 // How two plugins' edits of a field combine during merging.
@@ -156,7 +157,9 @@ public:
     AssetRole assetRole(Signature record, Signature sub) const;
 
     // Condition functions whose parameters are FormIDs.
-    bool conditionParamIsForm(uint16_t function, int param) const;
+    // Condition function parameters (xEdit's table): 0 = not a FormID, 1 = a FormID, 2 = a FormID
+    // unless the condition's "use aliases" (0x02) or "use packdata" (0x08) flag makes it an index.
+    uint8_t conditionParam(uint16_t function, int param) const;
     bool conditionFunctionKnown(uint16_t function) const;
 
     // Constructed by the profile builders.
@@ -165,7 +168,7 @@ public:
     std::unordered_map<Signature, FieldDef> common_;
     std::unordered_map<Signature, RecordDef> records_;
     std::vector<Signature> compilable_;
-    std::unordered_map<uint16_t, uint8_t> conditionFormParams_; // bit0 = param1, bit1 = param2
+    std::unordered_map<uint16_t, uint8_t> conditionFormParams_; // param1 | param2 << 4 (classes above)
     std::unordered_map<Signature, std::string> names_;
     std::unordered_map<Signature, AssetRole> commonAssets_;
     const RecordCatalogue* catalogue_ = nullptr;

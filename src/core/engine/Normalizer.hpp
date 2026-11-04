@@ -13,8 +13,14 @@ struct NormSub {
     Signature sig;
     std::vector<uint8_t> bytes; // described FormID slots are zeroed
     std::vector<std::pair<uint32_t, FormKey>> refs;     // described FormIDs
-    std::vector<std::pair<uint32_t, FormKey>> softRefs; // probable FormIDs in undescribed bytes (bytes kept raw)
+    std::vector<std::pair<uint32_t, FormKey>> softRefs; // values in undescribed bytes that look like FormIDs:
+                                                        // for diagnostics only, never rewritten
     bool heuristic = false; // contains undescribed bytes
+    // Undescribed bytes ([begin, end) in `bytes`), kept exactly as the source wrote them: what they
+    // mean is not described, so they are never rewritten. They are written with the FormID meaning
+    // they have in `origin`'s master list; whether that holds in an output is proved at validation.
+    std::vector<std::pair<uint32_t, uint32_t>> opaque;
+    PluginIndex origin = kInvalidPlugin; // plugin whose master list the raw bytes use (invalid: mixed)
 
     bool operator==(const NormSub&) const = default;
 };

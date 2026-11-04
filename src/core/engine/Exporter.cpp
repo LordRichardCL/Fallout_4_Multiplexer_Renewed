@@ -298,6 +298,9 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
     r.packageRoot = packageRoot(r.directory);
     const fs::path notes = r.packageRoot;
 
+    // Every output is built in memory first: a record that cannot be written stops the export before
+    // any file changes, instead of leaving some outputs of this build beside others of the last one.
+    std::vector<std::pair<const OutputPlugin*, std::vector<uint8_t>>> images;
     for (const auto& op : c.outputs) {
         if (op.records.empty() && !options.writeEmptyOutputs)
             continue;
@@ -305,8 +308,15 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
         w.setHeader(op.header);
         for (size_t i = 0; i < op.built.size(); ++i)
             w.addRecord(op.built[i], i < op.placements.size() ? op.placements[i] : Placement{});
+        try {
+            images.emplace_back(&op, w.build(options.compressLargeRecords));
+        } catch (const std::exception& e) {
+            throw std::runtime_error(op.name + " cannot be written (nothing was written): " + e.what());
+        }
+    }
+    for (auto& [opPtr, image] : images) {
+        const auto& op = *opPtr;
         auto path = r.directory / utf8ToPath(op.name);
-        auto image = w.build(options.compressLargeRecords);
         r.pluginFiles.push_back(path);
         if (sameContent(path, image)) {
             r.unchangedOutputs.push_back(op.name);

@@ -231,29 +231,70 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
                         else
                             v.pass();
                     }
-                    if (!c.options.rewriteHeuristicReferences)
-                        for (const auto& [off, k] : s.softRefs) {
-                            if (c.isCompiled(k.origin)) {
-                                v.fail(Severity::Error, "Missing References",
-                                       label + " " + s.sig.str() + " +" + std::to_string(off) +
-                                           " probably refers to compiled record " + session.formLabel(k) +
-                                           " in a layout this profile does not describe",
-                                       op.name, fid);
-                                continue;
+                    // Undescribed bytes are written exactly as their source plugin wrote them. They are
+                    // safe to move only when they mean the same in the output whatever they hold: every
+                    // 4-byte window (at any offset) is zero, or its load order index names the same
+                    // plugin, not compiled, in the source's master list and the output's. That is a
+                    // proof, not a guess about which values are FormIDs; anything else is blocking.
+                    for (const auto& [b, en] : s.opaque) {
+                        if (en < b + 4)
+                            continue;
+                        std::string why;
+                        if (s.origin == kInvalidPlugin || s.origin >= session.plugins.size()) {
+                            why = "its elements come from several plugins, whose master lists differ";
+                        } else {
+                            const auto& src = session.plugins[s.origin];
+                            for (uint32_t o = b; o + 4 <= en && o + 4 <= s.bytes.size(); ++o) {
+                                // A described FormID slot inside the span is rewritten as described.
+                                bool described = false;
+                                for (const auto& [ro, rk] : s.refs)
+                                    described |= o < ro + 4 && ro < o + 4;
+                                if (described)
+                                    continue;
+                                const uint32_t v = loadLE<uint32_t>(s.bytes.data() + o);
+                                if (v == 0)
+                                    continue;
+                                const uint32_t mi = masterIndexOf(v);
+                                const PluginIndex from =
+                                    mi < src.masters.size() ? session.resolve(src, v).origin : kInvalidPlugin;
+                                const bool same = from != kInvalidPlugin && !c.isCompiled(from) &&
+                                                  mi < op.retainedMasters.size() && op.retainedMasters[mi] == from;
+                                if (same)
+                                    continue;
+                                char idx[8];
+                                std::snprintf(idx, sizeof(idx), "%02X", mi);
+                                why = std::string("the value ") + formatFormId(v) + " at +" + std::to_string(o) +
+                                      ": as a FormID, load order index " + idx + " means " +
+                                      (mi < src.masters.size()
+                                           ? session.pluginName(from)
+                                           : std::string(mi == src.masters.size() ? "" : "(past its masters) ") +
+                                                 src.name + " itself") +
+                                      " in " + src.name + " but " +
+                                      (mi < op.retainedMasters.size() && op.retainedMasters[mi] != kInvalidPlugin
+                                           ? session.pluginName(op.retainedMasters[mi])
+                                           : mi < op.masterNames.size() ? op.masterNames[mi] : op.name + " itself") +
+                                      " in " + op.name;
+                                break;
                             }
-                            // Undescribed bytes are copied as they are, so the master index they
-                            // carry must name the same plugin in the output's master list.
-                            uint32_t raw = off + 4 <= s.bytes.size() ? loadLE<uint32_t>(s.bytes.data() + off) : 0;
-                            uint32_t mi = masterIndexOf(raw);
-                            if (mi < op.retainedMasters.size() && op.retainedMasters[mi] == k.origin)
-                                v.pass();
-                            else
-                                v.fail(Severity::Error, "Missing References",
-                                       label + " " + s.sig.str() + " +" + std::to_string(off) + " probably refers to " +
-                                           session.formLabel(k) + " in a layout this profile does not describe; in " +
-                                           op.name + " its master index would point elsewhere",
-                                       op.name, fid);
                         }
+                        if (why.empty()) {
+                            v.pass();
+                            continue;
+                        }
+                        v.fail(Severity::Error, "Undescribed Data",
+                               label + " " + s.sig.str() + " +" + std::to_string(b) + ".." + std::to_string(en) +
+                                   ": bytes the record definitions do not describe (kept exactly as " +
+                                   (s.origin < session.plugins.size() ? session.pluginName(s.origin) : std::string("written")) +
+                                   " wrote them, never rewritten); " + why +
+                                   ". Whether they hold a FormID is unknown, so they cannot be shown to be safe to move "
+                                   "and the record is not compiled",
+                               op.name, fid);
+                        v.issues.back().cause =
+                            "Preserved, not safe to move: these bytes are not described by the definitions (an "
+                            "unlisted subrecord, a layout that did not decode, or data past the known layout). The "
+                            "plugin stays in the load order. Describing the subrecord (from xEdit) lets it compile.";
+                        break; // one finding per subrecord
+                    }
                 };
                 for (const auto& s : f.subs)
                     checkSub(s);
@@ -322,13 +363,43 @@ ValidationReport ValidationEngine::validateWrittenFiles(const CompiledOutput& c,
                 v.fail(Severity::Error, "Missing Masters", name + ": master list on disk differs from the plan", name);
 
             std::map<uint32_t, Placement> expected;
-            for (size_t i = 0; i < plan->built.size(); ++i)
+            std::map<uint32_t, size_t> builtAt;
+            for (size_t i = 0; i < plan->built.size(); ++i) {
                 expected[plan->built[i].header.formId] = i < plan->placements.size() ? plan->placements[i] : Placement{};
+                builtAt[plan->built[i].header.formId] = i;
+            }
+            std::set<uint32_t> seen;
             size_t count = 0;
             file.forEachRecord([&](const RecordLocation& loc) {
                 ++count;
                 try {
-                    Record::parse(loc.header, loc.rawData);
+                    const Record onDisk = Record::parse(loc.header, loc.rawData);
+                    if (!seen.insert(loc.header.formId).second)
+                        v.fail(Severity::Error, "Duplicate IDs",
+                               name + ": " + formatFormId(loc.header.formId) + " is written more than once", name);
+                    // The payload as planned: every subrecord, in order, byte for byte.
+                    if (auto b = builtAt.find(loc.header.formId); b != builtAt.end()) {
+                        const auto& plannedSubs = plan->built[b->second].subrecords;
+                        std::string diff;
+                        if (onDisk.signature() != plan->built[b->second].signature())
+                            diff = "its record type differs";
+                        else if (onDisk.subrecords.size() != plannedSubs.size())
+                            diff = std::to_string(onDisk.subrecords.size()) + " subrecords, " +
+                                   std::to_string(plannedSubs.size()) + " planned";
+                        else
+                            for (size_t k = 0; k < plannedSubs.size() && diff.empty(); ++k)
+                                if (onDisk.subrecords[k].signature != plannedSubs[k].signature ||
+                                    onDisk.subrecords[k].data != plannedSubs[k].data)
+                                    diff = "subrecord " + std::to_string(k + 1) + " (" +
+                                           plannedSubs[k].signature.str() + ") differs from the plan";
+                        if (diff.empty())
+                            v.pass();
+                        else
+                            v.fail(Severity::Error, "Export",
+                                   name + ": " + loc.header.signature.str() + " " + formatFormId(loc.header.formId) +
+                                       " on disk does not match what was compiled: " + diff,
+                                   name);
+                    }
                     auto it = expected.find(loc.header.formId);
                     if (it == expected.end())
                         v.fail(Severity::Error, "Broken FormIDs",

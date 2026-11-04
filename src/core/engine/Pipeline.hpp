@@ -72,6 +72,8 @@ public:
     bool compile(ProgressSink& progress = nullProgress());
     // Writes plugins and side files, re-validates them and writes reports.
     ExportResult exportOutputs(ProgressSink& progress = nullProgress());
+    // Written in the package folder when an export fails (removed by the next successful one).
+    static constexpr const char* kBuildFailedMarker = "MULTIPLEXER_BUILD_FAILED.txt";
     std::vector<std::filesystem::path> writeReports(const std::filesystem::path& directory);
     // Decodes every record of the supported types and reports layouts that look wrong.
     DefinitionCheck checkDefinitions(const std::vector<Signature>& types = {}, ProgressSink& progress = nullProgress());
@@ -104,6 +106,9 @@ public:
     void refreshEligibility();
 
 private:
+    void markBuildFailed(const std::filesystem::path& directory, const std::filesystem::path& packageRoot,
+                         const std::vector<std::filesystem::path>& written, const std::string& reason);
+
     void openDatabase();
     void openCache();
     ChangeReport finishChangeReport(const std::optional<InstallSnapshot>& build, InstallSnapshot current,

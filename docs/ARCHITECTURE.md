@@ -191,7 +191,7 @@ Each output gets:
 - object ids from `0x800` (reusing previous ids where possible; `0x800–0xFFF` when ESL-flagged);
 - a master list: the base game ESMs first (keeping master index 00 = `Fallout4.esm`, which also keeps undescribed vanilla references valid), then every retained plugin it references, in load order, then the earlier outputs it references.
 
-`CompiledOutput::translate(FormKey, output)` produces the raw FormID for any key in any output's context. Records are rebuilt from the merged fields (`joinFields`), with every described FormID written through `translate`, and stored uncompressed. If `rewriteHeuristicReferences` is enabled, soft references are rewritten too.
+`CompiledOutput::translate(FormKey, output)` produces the raw FormID for any key in any output's context. Records are rebuilt from the merged fields (`joinFields`), with every described FormID written through `translate`, and stored uncompressed. Undescribed bytes (`NormSub::opaque`, with the plugin whose master list they use, `NormSub::origin`) are written exactly as their source wrote them; values in them that look like FormIDs (`softRefs`) are diagnostics only and are never rewritten. Validation proves each undescribed span safe to move (every 4-byte window at any offset is zero, or its load order index names the same non-compiled plugin in the source's and the output's master lists) or reports an *Undescribed Data* error, which keeps the record's plugin out.
 
 ## Validation
 

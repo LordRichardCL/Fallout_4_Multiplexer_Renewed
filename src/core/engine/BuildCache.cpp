@@ -14,7 +14,7 @@ namespace fo4mx {
 
 namespace {
 
-constexpr uint32_t kFormatVersion = 5; // 2: merges against own masters; 3: Editor IDs of all compressed records;
+constexpr uint32_t kFormatVersion = 6; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
                                        // 4: record-level classification of types that are not merged;
                                        // 5: record placement (cells, worldspaces, topics)
 
@@ -142,6 +142,12 @@ void writeSub(BinaryWriter& w, NameTable& names, const NormSub& s)
         names.key(w, k);
     }
     w.write<uint8_t>(s.heuristic ? 1 : 0);
+    w.write<uint32_t>(static_cast<uint32_t>(s.opaque.size()));
+    for (const auto& [b, e] : s.opaque) {
+        w.write(b);
+        w.write(e);
+    }
+    names.key(w, FormKey{s.origin, 0});
 }
 
 NormSub readSub(BinaryReader& r, const NameResolver& names)
@@ -161,6 +167,12 @@ NormSub readSub(BinaryReader& r, const NameResolver& names)
         s.softRefs.emplace_back(off, names.key(r));
     }
     s.heuristic = r.read<uint8_t>() != 0;
+    n = r.read<uint32_t>();
+    for (uint32_t i = 0; i < n; ++i) {
+        uint32_t b = r.read<uint32_t>();
+        s.opaque.emplace_back(b, r.read<uint32_t>());
+    }
+    s.origin = names.key(r).origin;
     return s;
 }
 

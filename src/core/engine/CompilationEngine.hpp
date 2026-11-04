@@ -38,6 +38,8 @@ struct CompileOptions {
     std::vector<AllocationRule> rules;
     bool mergeCompatible = true;
     bool lightOutputsWhenPossible = false;
+    // No longer used: values in undescribed data are never rewritten because they look like FormIDs
+    // (kept so older settings load). Undescribed data must be proved safe to move, or is not compiled.
     bool rewriteHeuristicReferences = false;
     // Conflict resolution patch: merges override chains made only of retained plugins
     // into one override-only plugin (like a Bashed Patch). patchOnly compiles no plugins.

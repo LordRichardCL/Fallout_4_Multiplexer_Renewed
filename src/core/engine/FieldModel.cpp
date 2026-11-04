@@ -36,7 +36,11 @@ std::vector<ListItem> splitPacked(const NormSub& s, uint16_t stride)
         NormSub el;
         el.sig = s.sig;
         el.heuristic = s.heuristic;
+        el.origin = s.origin;
         el.bytes.assign(s.bytes.begin() + e, s.bytes.begin() + e + stride);
+        for (const auto& [b, en] : s.opaque)
+            if (b < e + stride && en > e)
+                el.opaque.emplace_back(std::max(b, e) - e, std::min(en, e + stride) - e);
         for (const auto& [off, key] : s.refs)
             if (off >= e && off < e + stride)
                 el.refs.emplace_back(off - e, key);
@@ -293,10 +297,19 @@ std::vector<NormSub> joinFields(const FieldSet& set)
                 out.push_back(countSub(f.countSig, f.countWidth, f.items.size()));
             NormSub joined;
             joined.sig = f.sig;
+            bool first = true;
             for (const auto& item : f.items) {
                 for (const auto& el : item.subs) {
                     uint32_t base = static_cast<uint32_t>(joined.bytes.size());
                     joined.heuristic |= el.heuristic;
+                    // Elements of different plugins: their raw bytes use different master lists.
+                    if (first)
+                        joined.origin = el.origin;
+                    else if (joined.origin != el.origin)
+                        joined.origin = kInvalidPlugin;
+                    first = false;
+                    for (const auto& [b, e] : el.opaque)
+                        joined.opaque.emplace_back(base + b, base + e);
                     joined.bytes.insert(joined.bytes.end(), el.bytes.begin(), el.bytes.end());
                     for (const auto& [off, key] : el.refs)
                         joined.refs.emplace_back(base + off, key);
