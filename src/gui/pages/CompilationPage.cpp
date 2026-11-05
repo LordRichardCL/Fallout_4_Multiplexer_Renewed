@@ -10,6 +10,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDesktopServices>
+#include <QDialogButtonBox>
+#include <QDialog>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -259,26 +261,62 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         app_->runExport();
     });
     connect(apply_, &QPushButton::clicked, this, [this] {
-        auto* p = app_->pipeline();
-        bool mo2 = p && p->scanned() && p->session().install.config.kind == fo4mx::InstallKind::ModOrganizer2;
-        QString what = mo2 ? "This rewrites the active MO2 profile's plugins.txt (and loadorder.txt) so compiled "
-                             "plugins are disabled and the output plugins are enabled, and adds the compiled "
-                             "plugins' archives to SResourceArchiveList2 in Fallout4Custom.ini so their textures "
-                             "and meshes keep loading."
-                           : "This adds the compiled plugins' archives to SResourceArchiveList2 in "
-                             "Fallout4Custom.ini so their textures and meshes keep loading.";
-        auto answer = QMessageBox::question(
-            this, "Apply to game",
-            what + "\n\nArchives added by an earlier build that are no longer needed are removed again. A "
-                   "timestamped backup of every file is made first.\n\nContinue?");
-        if (answer != QMessageBox::Yes)
-            return;
+        // First what will happen (nothing changes yet), then the user's confirmation.
+        AppController::ApplyPreview preview;
         QString msg;
-        bool ok = app_->applyToProfile(&msg);
+        if (!app_->previewApply(&preview, &msg)) {
+            QMessageBox::warning(this, "Apply to Game", msg);
+            return;
+        }
+        QDialog dlg(this);
+        dlg.setWindowTitle("Apply to Game");
+        dlg.resize(760, 560);
+        auto* v = new QVBoxLayout(&dlg);
+        auto* intro = new QLabel(preview.ready
+                                     ? "Review what will change. Every file is backed up first, and if any step "
+                                       "fails everything already done is undone."
+                                     : "<b>Something must be fixed before your game can be switched over.</b> "
+                                       "Nothing will be changed.");
+        intro->setWordWrap(true);
+        v->addWidget(intro);
+        auto* text = new QPlainTextEdit(preview.summary);
+        text->setReadOnly(true);
+        v->addWidget(text, 1);
+        QCheckBox* ghost = nullptr;
+        if (preview.offerGhosting) {
+            ghost = new QCheckBox(QString("Also ghost the %1 compiled plugin(s) (rename Example.esp to "
+                                          "Example.esp.ghost)")
+                                      .arg(preview.ghostable));
+            v->addWidget(ghost);
+            auto* help = new QLabel(
+                "Optional. Disabling the plugins in plugins.txt is enough; ghosting also hides them from the game "
+                "and from tools that might enable them again. Undo it by renaming the file back. Multiplexer still "
+                "reads ghosted plugins for the next build.");
+            help->setWordWrap(true);
+            help->setStyleSheet("color: palette(placeholder-text);");
+            v->addWidget(help);
+        }
+        if (preview.ghostRefused > 0 && preview.offerGhosting) {
+            auto* why = new QLabel(QString("%1 plugin(s) will not be ghosted:").arg(preview.ghostRefused));
+            v->addWidget(why);
+            auto* details = new QPlainTextEdit(preview.ghostDetails);
+            details->setReadOnly(true);
+            details->setMaximumHeight(110);
+            v->addWidget(details);
+        }
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
+        auto* go = buttons->addButton("Apply", QDialogButtonBox::AcceptRole);
+        go->setEnabled(preview.ready);
+        v->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        if (dlg.exec() != QDialog::Accepted)
+            return;
+        bool ok = app_->applyToProfile(ghost && ghost->isChecked(), &msg);
         if (ok)
-            QMessageBox::information(this, "Apply to game", msg);
+            QMessageBox::information(this, "Apply to Game", msg);
         else
-            QMessageBox::warning(this, "Apply to game", msg);
+            QMessageBox::warning(this, "Apply to Game", msg);
     });
     connect(openFolder_, &QPushButton::clicked, this, [this] {
         auto* p = app_->pipeline();

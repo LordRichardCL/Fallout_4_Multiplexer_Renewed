@@ -6,6 +6,7 @@
 #include "engine/CompilationResult.hpp"
 #include "engine/Exporter.hpp"
 #include "engine/Pipeline.hpp"
+#include "engine/PostCompilation.hpp"
 #include "engine/PluginSummary.hpp"
 #include "engine/ReferenceScanner.hpp"
 #include "esp/LayoutCheck.hpp"
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <bit>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -4203,4 +4205,267 @@ TEST(ghosted_plugin_not_compiled_before_is_inactive)
     CHECK(c && !c->active); // enabled in plugins.txt, but the game cannot load a ghosted file
     const auto* b = p.session().findPlugin("ModB.esp");
     CHECK(b && !b->ghosted && b->active);
+}
+
+// ---- Stage 2: switching a Standalone install over (summary, plugins.txt, instructions, ghosting) ----
+
+namespace {
+
+struct Built {
+    std::filesystem::path root;
+    PipelineConfig cfg;
+};
+
+// buildInstall() set up to export into "<root>\Multiplexer Output\Data", outside the game's Data
+// folder (installOutputs() then does what installing the zip does).
+Built buildAndExport(const std::string& name, const std::function<void(const std::filesystem::path&)>& extra = {})
+{
+    Built b{buildInstall(name), {}};
+    if (extra)
+        extra(b.root);
+    b.cfg = configFor(b.root);
+    b.cfg.exportOptions.outputDirectory = b.root / "Multiplexer Output" / "Data";
+    return b;
+}
+
+void installOutputs(const Pipeline& p, const std::filesystem::path& root)
+{
+    for (const auto& f : p.exportResult()->pluginFiles)
+        std::filesystem::copy_file(f, root / "Game" / "Data" / f.filename(),
+                                   std::filesystem::copy_options::overwrite_existing);
+}
+
+CompilationResult resultOf(const Pipeline& p)
+{
+    return makeCompilationResult(p.session(), p.compiledOutput(), &*p.exportResult(), p.validation());
+}
+
+bool activeIn(const std::string& pluginsTxt, const std::string& name)
+{
+    for (const auto& e : parsePluginsTxt(pluginsTxt))
+        if (iequals(e.name, name))
+            return e.active;
+    return false;
+}
+
+size_t listed(const std::string& pluginsTxt, const std::string& name)
+{
+    size_t n = 0;
+    for (const auto& e : parsePluginsTxt(pluginsTxt))
+        n += iequals(e.name, name) ? 1 : 0;
+    return n;
+}
+
+} // namespace
+
+TEST(standalone_apply_refuses_until_the_outputs_are_installed)
+{
+    auto b = buildAndExport("deploy_notinstalled");
+    Pipeline p(b.cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    p.exportOutputs();
+    auto r = resultOf(p);
+    CHECK(r.success);
+    // The guide is written beside the package at export.
+    CHECK(std::filesystem::exists(b.root / "Multiplexer Output" / PostCompilation::kInstructionsFile));
+
+    const std::string before = slurp(b.root / "plugins.txt");
+    FileTransaction tx("test");
+    auto plan = PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, p.exportResult()->directory, true);
+    CHECK(!plan.check.missingOutputs.empty());
+    CHECK(!plan.check.blockers.empty());
+    CHECK(tx.empty()); // nothing planned
+    CHECK_EQ(plan.check.stillEnabled.size(), r.included.size()); // plugins.txt not switched yet
+    for (const auto& g : plan.ghosts)
+        CHECK(!g.ok());
+    CHECK_EQ(slurp(b.root / "plugins.txt"), before);
+}
+
+TEST(standalone_apply_switches_plugins_txt_and_ghosts_on_request)
+{
+    auto b = buildAndExport("deploy_apply");
+    std::vector<std::string> compiled;
+    {
+        Pipeline p(b.cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        p.exportOutputs();
+        installOutputs(p, b.root);
+        auto r = resultOf(p);
+        for (const auto& i : r.included)
+            compiled.push_back(i.name);
+        CHECK(!compiled.empty());
+
+        FileTransaction tx("Apply to Game");
+        auto plan =
+            PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, p.exportResult()->directory, true);
+        CHECK(plan.check.blockers.empty());
+        CHECK(plan.check.missingOutputs.empty());
+        CHECK(plan.writesLoadOrder);
+        CHECK_EQ(plan.ghosted, compiled.size());
+        CHECK(plan.check.fullPluginsAfter <= PostCompilation::kMaxFullPlugins);
+        tx.apply();
+
+        const auto txt = slurp(b.root / "plugins.txt");
+        for (const auto& name : compiled) {
+            CHECK(!activeIn(txt, name));
+            CHECK(std::filesystem::exists(b.root / "Game" / "Data" / (name + ".ghost")));
+            CHECK(!std::filesystem::exists(b.root / "Game" / "Data" / name));
+            CHECK(txt.find(".ghost") == std::string::npos); // never written into a load order file
+        }
+        CHECK(activeIn(txt, "ModC.esp")); // kept in the load order
+        for (const auto& f : p.exportResult()->pluginFiles)
+            CHECK(activeIn(txt, pathToUtf8(f.filename())));
+        CHECK_EQ(countBackups(b.root, "plugins.txt"), size_t(1));
+        CHECK(std::filesystem::exists(b.root / "Multiplexer Output" / PostCompilation::kInstructionsFile));
+
+        // A second look finds nothing left to switch.
+        auto again = PostCompilation::check(p.session(), *p.compiledOutput(), r);
+        CHECK(again.stillEnabled.empty());
+    }
+    // The next scan still reads the ghosted plugins as sources of the build.
+    Pipeline p(b.cfg);
+    p.scan();
+    for (const auto& name : compiled) {
+        const auto* pl = p.session().findPlugin(name);
+        CHECK(pl && pl->ghosted && pl->reactivated);
+    }
+    p.analyse();
+    CHECK(p.compile());
+    for (const auto& name : compiled)
+        CHECK(p.compiledOutput()->isCompiled(p.session().findPlugin(name)->index));
+}
+
+TEST(standalone_apply_can_be_undone_as_a_whole)
+{
+    auto b = buildAndExport("deploy_undo");
+    Pipeline p(b.cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    p.exportOutputs();
+    installOutputs(p, b.root);
+    const std::string before = slurp(b.root / "plugins.txt");
+    auto r = resultOf(p);
+    FileTransaction tx("Apply to Game");
+    PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, p.exportResult()->directory, true);
+    tx.apply();
+    tx.rollback();
+    CHECK_EQ(slurp(b.root / "plugins.txt"), before);
+    for (const auto& i : r.included) {
+        CHECK(std::filesystem::exists(b.root / "Game" / "Data" / i.name));
+        CHECK(!std::filesystem::exists(b.root / "Game" / "Data" / (i.name + ".ghost")));
+    }
+}
+
+TEST(ghosting_refuses_unsafe_plugins)
+{
+    // ModD stays in the load order (excluded by the user) and needs ModA: the compiler keeps ModA too.
+    auto b = buildAndExport("deploy_ghostrules", [](const std::filesystem::path& root) {
+        writePlugin(root / "Game" / "Data" / "ModD.esp", {"Fallout4.esm", "ModA.esp"},
+                    {record("KYWD", 0x02000800, {zs("EDID", "ModDKeyword")})});
+        writeFile(root / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModD.esp\n");
+    });
+    b.cfg.analysis.excludedPlugins = {"ModD.esp"};
+    Pipeline p(b.cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    p.exportOutputs();
+    installOutputs(p, b.root);
+    auto r = resultOf(p);
+    CHECK(!r.compiledSuccessfully("ModA.esp"));
+    CHECK(r.compiledSuccessfully("ModB.esp"));
+    // A leftover ghost of ModB from somewhere else.
+    writeFile(b.root / "Game" / "Data" / "ModB.esp.ghost", "old");
+    auto d = PostCompilation::check(p.session(), *p.compiledOutput(), r);
+    CHECK(d.blockers.empty());
+    auto problemOf = [&](const std::string& plugin) {
+        for (const auto& g : PostCompilation::ghostChecks(p.session(), *p.compiledOutput(), r, d))
+            if (g.plugin == plugin)
+                return g.ok() ? std::string("ok") : g.problem;
+        return std::string("not a candidate");
+    };
+    CHECK_EQ(problemOf("ModA.esp"), std::string("not a candidate")); // not compiled
+    CHECK_EQ(problemOf("ModC.esp"), std::string("not a candidate"));
+    CHECK(problemOf("ModB.esp").find("already exists") != std::string::npos);
+    {
+        FileTransaction tx("ghost");
+        PostCompilation::planGhosting(tx, PostCompilation::ghostChecks(p.session(), *p.compiledOutput(), r, d));
+        CHECK(tx.empty()); // nothing unsafe is planned
+    }
+    std::filesystem::remove(b.root / "Game" / "Data" / "ModB.esp.ghost");
+    CHECK_EQ(problemOf("ModB.esp"), std::string("ok"));
+
+    auto& session = p.session();
+    auto* modC = session.findPlugin("ModC.esp");
+    // A plugin that stays in the load order and names ModB as a master keeps ModB loadable.
+    auto savedMasters = modC->header.masters;
+    MasterEntry m;
+    m.name = "ModB.esp";
+    modC->header.masters.push_back(m);
+    CHECK(problemOf("ModB.esp").find("master of ModC.esp") != std::string::npos);
+    modC->header.masters = savedMasters;
+    // A file changed since the scan is refused.
+    {
+        std::ofstream(b.root / "Game" / "Data" / "ModB.esp", std::ios::binary | std::ios::app) << "x";
+        CHECK(problemOf("ModB.esp").find("changed since the scan") != std::string::npos);
+    }
+    // Under Vortex a deployed plugin is refused; under Mod Organizer 2 ghosting is never offered.
+    session.install.config.kind = InstallKind::Vortex;
+    session.install.vortexOwners["modb.esp"] = "Mod B";
+    CHECK(problemOf("ModB.esp").find("deployed by Vortex") != std::string::npos);
+    session.install.config.kind = InstallKind::ModOrganizer2;
+    CHECK(problemOf("ModB.esp").find("Mod Organizer 2") != std::string::npos);
+    session.install.config.kind = InstallKind::Standalone;
+}
+
+TEST(too_many_full_plugins_block_switching_over)
+{
+    auto b = buildAndExport("deploy_toomany");
+    Pipeline p(b.cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    p.exportOutputs();
+    installOutputs(p, b.root);
+    auto r = resultOf(p);
+    // 260 more full plugins that stay in the load order (beyond what a scan accepts, so added here).
+    for (int i = 0; i < 260; ++i) {
+        PluginInfo extra;
+        extra.name = "Keep" + std::to_string(i) + ".esp";
+        extra.key = toLower(extra.name);
+        extra.active = true;
+        extra.kind = PluginKind::ESP;
+        p.session().addPlugin(std::move(extra));
+    }
+    const std::string before = slurp(b.root / "plugins.txt");
+    FileTransaction tx("Apply to Game");
+    auto plan = PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, p.exportResult()->directory, false);
+    CHECK(plan.check.fullPluginsAfter > PostCompilation::kMaxFullPlugins);
+    CHECK(!plan.check.blockers.empty());
+    CHECK(tx.empty());
+    CHECK_EQ(slurp(b.root / "plugins.txt"), before);
+    const auto guide = PostCompilation::instructions(p.session(), r, plan.check);
+    CHECK(guide.find("DO NOT SWITCH OVER YET") != std::string::npos);
+}
+
+TEST(proposed_plugins_txt_lists_each_output_once)
+{
+    auto root = buildInstall("deploy_onceonly");
+    auto cfg = configFor(root);
+    cfg.exportOptions.outputDirectory = root / "Game" / "Data"; // outputs visible to the next scan
+    for (int round = 0; round < 2; ++round) {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        auto result = p.exportOutputs();
+        const auto txt = Exporter::proposedPluginsTxt(p.session(), *p.compiledOutput());
+        for (const auto& f : result.pluginFiles)
+            CHECK_EQ(listed(txt, pathToUtf8(f.filename())), size_t(1));
+    }
 }

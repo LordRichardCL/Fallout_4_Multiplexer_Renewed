@@ -1,5 +1,9 @@
 #include "engine/Pipeline.hpp"
 
+#include "engine/CompilationResult.hpp"
+#include "engine/PostCompilation.hpp"
+#include "util/FileTransaction.hpp"
+
 #include "diagnostics/RecorderPackage.hpp"
 
 #include "db/DatabaseWriter.hpp"
@@ -683,6 +687,19 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         } else {
             diagnostics::removeRecorderPackage(base);
         }
+    }
+    // The guide to switching over to this build, beside the package.
+    try {
+        const auto cr = makeCompilationResult(*session_, &*compiled_, &result, &*validation_);
+        const auto check = PostCompilation::check(*session_, *compiled_, cr);
+        atomicWriteText(result.packageRoot / PostCompilation::kInstructionsFile,
+                        PostCompilation::instructions(*session_, cr, check));
+        for (const auto& b : check.blockers)
+            spdlog::error("Before switching over: {}", b);
+        for (const auto& w : check.warnings)
+            spdlog::warn("Before switching over: {}", w);
+    } catch (const std::exception& e) {
+        spdlog::warn("Could not write {}: {}", PostCompilation::kInstructionsFile, e.what());
     }
     exported_ = result;
     if (db_ && !post.critical()) {

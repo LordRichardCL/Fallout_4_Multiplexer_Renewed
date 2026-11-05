@@ -48,6 +48,18 @@ public:
     void saveResolution(const QString& originPlugin, quint32 objectId, const QString& winnerPlugin);
     void clearResolution(const QString& originPlugin, quint32 objectId);
 
+    // Apply to Game, in two steps: what it will do (nothing changes yet), then doing it.
+    struct ApplyPreview {
+        bool ready = false;         // false: something must be fixed first (see summary)
+        QString summary;            // the planned changes and the checks, in plain language
+        bool offerGhosting = false; // a Standalone install with plugins that may be ghosted
+        int ghostable = 0;
+        int ghostRefused = 0;
+        QString ghostDetails;       // which plugins cannot be ghosted, and why
+    };
+    bool previewApply(ApplyPreview* preview, QString* message);
+    bool applyToProfile(bool ghost, QString* message);
+
     // Last task's outcome, for the status bar.
     QString lastMessage() const { return lastMessage_; }
 
@@ -65,7 +77,6 @@ public slots:
     // On startup: check for changes when a previous build exists.
     void checkOnStartup();
     void cancel();
-    bool applyToProfile(QString* message);
 
 signals:
     void busyChanged(bool busy);

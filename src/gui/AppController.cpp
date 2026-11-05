@@ -8,6 +8,8 @@
 #include "db/DatabaseWriter.hpp"
 #include "engine/BuildCache.hpp"
 #include "engine/Exporter.hpp"
+#include "engine/CompilationResult.hpp"
+#include "engine/PostCompilation.hpp"
 #include "util/FileTransaction.hpp"
 #include "util/Log.hpp"
 #include "util/Platform.hpp"
@@ -552,7 +554,21 @@ void AppController::cancel()
         progress_->requestCancel();
 }
 
-bool AppController::applyToProfile(QString* message)
+namespace {
+
+QString bullet(const std::vector<std::string>& lines, size_t limit = 50)
+{
+    QStringList out;
+    for (size_t i = 0; i < lines.size() && i < limit; ++i)
+        out << "  \u2022 " + qs(lines[i]);
+    if (lines.size() > limit)
+        out << QString("  \u2026 and %1 more").arg(lines.size() - limit);
+    return out.join("\n");
+}
+
+} // namespace
+
+bool AppController::previewApply(ApplyPreview* preview, QString* message)
 {
     if (!pipeline_ || !pipeline_->compiledOutput() || !pipeline_->exportResult()) {
         *message = "Compile and export first.";
@@ -560,29 +576,91 @@ bool AppController::applyToProfile(QString* message)
     }
     const auto& s = pipeline_->session();
     try {
-        // One transaction: the profile's load order and the INI change together or not at all.
-        fo4mx::FileTransaction tx("Apply to Game");
-        // Vortex manages plugins.txt itself; for MO2 the profile's load order is rewritten.
-        if (s.install.config.kind == fo4mx::InstallKind::ModOrganizer2)
-            Exporter::planProfile(tx, s, *pipeline_->compiledOutput(), s.install.pluginsFile);
-        const auto outputDir = pipeline_->exportResult()->directory;
-        Exporter::planArchiveIni(tx, s, *pipeline_->compiledOutput(), outputDir);
-        tx.apply();
-        std::vector<std::filesystem::path> written;
-        for (const auto& f : tx.changedFiles())
-            if (f.parent_path() != outputDir)
-                written.push_back(f);
-        QStringList names;
-        for (const auto& w : written)
-            names << toQString(w);
-        *message = names.isEmpty() ? QString("Nothing needed to change.")
-                                   : "Updated (backups kept next to each file):\n" + names.join("\n");
-        if (s.install.config.kind != fo4mx::InstallKind::ModOrganizer2)
-            *message += "\n\nDisable the plugins listed in Multiplexer_DisablePlugins.txt and enable the generated "
-                        "plugins in your mod manager.";
+        const auto result = fo4mx::makeCompilationResult(s, pipeline_->compiledOutput(), &*pipeline_->exportResult(),
+                                                         pipeline_->validation());
+        fo4mx::FileTransaction tx("Apply to Game (preview)");
+        const auto plan = fo4mx::PostCompilation::planApply(tx, s, *pipeline_->compiledOutput(), result,
+                                                            pipeline_->exportResult()->directory, false);
+        const auto& d = plan.check;
+        *preview = ApplyPreview{};
+        preview->ready = d.blockers.empty();
+        QStringList text;
+        text << QString("Mod manager: %1").arg(fo4mx::installKindName(s.install.config.kind));
+        text << QString("Compiled plugins: %1    Output plugins: %2").arg(result.included.size()).arg(result.outputPlugins.size());
+        text << QString("Active after switching: %1 full plugins (limit %2), %3 light")
+                    .arg(d.fullPluginsAfter)
+                    .arg(fo4mx::PostCompilation::kMaxFullPlugins)
+                    .arg(d.lightPluginsAfter);
+        if (!d.blockers.empty())
+            text << "" << "Nothing will be changed until this is fixed:" << bullet(d.blockers);
+        if (!d.warnings.empty())
+            text << "" << "Check:" << bullet(d.warnings);
+        if (preview->ready) {
+            std::vector<std::string> lines = tx.summary();
+            text << "" << "These files will change (each is backed up first; all or nothing):" << bullet(lines);
+            if (!plan.writesLoadOrder && s.install.config.kind == fo4mx::InstallKind::Vortex)
+                text << "" << "Vortex manages plugins.txt: disable the plugins in Multiplexer_DisablePlugins.txt in "
+                              "Vortex's Plugins page and enable the outputs there.";
+        }
+        for (const auto& g : plan.ghosts)
+            (g.ok() ? preview->ghostable : preview->ghostRefused)++;
+        std::vector<std::string> refused;
+        for (const auto& g : plan.ghosts)
+            if (!g.ok())
+                refused.push_back(g.plugin + ": " + g.problem);
+        preview->ghostDetails = bullet(refused, 200);
+        preview->offerGhosting = preview->ready && s.install.config.kind == fo4mx::InstallKind::Standalone &&
+                                 preview->ghostable > 0;
+        preview->summary = text.join("\n");
         return true;
     } catch (const std::exception& e) {
         *message = QString::fromUtf8(e.what());
+        return false;
+    }
+}
+
+bool AppController::applyToProfile(bool ghost, QString* message)
+{
+    if (!pipeline_ || !pipeline_->compiledOutput() || !pipeline_->exportResult()) {
+        *message = "Compile and export first.";
+        return false;
+    }
+    const auto& s = pipeline_->session();
+    try {
+        const auto result = fo4mx::makeCompilationResult(s, pipeline_->compiledOutput(), &*pipeline_->exportResult(),
+                                                         pipeline_->validation());
+        // One transaction: load order, INI, notes and ghosting change together or not at all.
+        fo4mx::FileTransaction tx("Apply to Game");
+        const auto plan = fo4mx::PostCompilation::planApply(tx, s, *pipeline_->compiledOutput(), result,
+                                                            pipeline_->exportResult()->directory,
+                                                            ghost && s.install.config.kind == fo4mx::InstallKind::Standalone);
+        if (!plan.check.blockers.empty()) {
+            *message = "Nothing was changed:\n" + bullet(plan.check.blockers);
+            return false;
+        }
+        tx.apply();
+        // Report only what was actually done.
+        QStringList done;
+        size_t ghosted = 0;
+        for (const auto& op : tx.operations()) {
+            if (!op.applied || op.skipped)
+                continue;
+            if (op.kind == fo4mx::FileTransaction::Kind::Rename)
+                ++ghosted;
+            else
+                done << "  \u2022 " + toQString(op.target);
+        }
+        if (ghosted)
+            done << QString("  \u2022 %1 compiled plugin(s) ghosted (renamed to .ghost)").arg(ghosted);
+        *message = done.isEmpty() ? QString("Nothing needed to change.")
+                                  : "Done (backups kept next to each changed file):\n" + done.join("\n");
+        if (s.install.config.kind == fo4mx::InstallKind::Vortex)
+            *message += "\n\nIn Vortex's Plugins page, disable the plugins listed in Multiplexer_DisablePlugins.txt "
+                        "and enable the output plugins.";
+        *message += "\n\nStart a new game with this build.";
+        return true;
+    } catch (const std::exception& e) {
+        *message = "Nothing was changed (every completed step was undone): " + QString::fromUtf8(e.what());
         return false;
     }
 }
