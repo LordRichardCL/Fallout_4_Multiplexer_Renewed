@@ -224,6 +224,13 @@ std::shared_ptr<RecordReader::Handle> RecordReader::acquire(const std::filesyste
     return handle;
 }
 
+void RecordReader::closeAll()
+{
+    std::lock_guard lock(mutex_);
+    handles_.clear();
+    lru_.clear();
+}
+
 std::vector<uint8_t> RecordReader::readRaw(const std::filesystem::path& path, uint64_t offset, RecordHeader& headerOut)
 {
     auto handle = acquire(path);

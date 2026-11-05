@@ -242,6 +242,8 @@ public:
     PluginInfo* findPlugin(std::string_view name);
     const PluginInfo* findPlugin(std::string_view name) const;
     PluginIndex addPlugin(PluginInfo info);
+    // Closes the plugin files kept open for reading, so they can be renamed (ghosted) on Windows.
+    void releaseFiles() { reader_.closeAll(); }
     void rebuildPluginIndex();
 
     std::span<const RecordInstance> instances(const FormGroup& g) const

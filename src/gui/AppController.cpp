@@ -625,7 +625,7 @@ bool AppController::applyToProfile(bool ghost, QString* message)
         *message = "Compile and export first.";
         return false;
     }
-    const auto& s = pipeline_->session();
+    auto& s = pipeline_->session();
     try {
         const auto result = fo4mx::makeCompilationResult(s, pipeline_->compiledOutput(), &*pipeline_->exportResult(),
                                                          pipeline_->validation());
@@ -638,6 +638,7 @@ bool AppController::applyToProfile(bool ghost, QString* message)
             *message = "Nothing was changed:\n" + bullet(plan.check.blockers);
             return false;
         }
+        s.releaseFiles(); // Windows cannot rename a plugin this app has open
         tx.apply();
         // Report only what was actually done.
         QStringList done;

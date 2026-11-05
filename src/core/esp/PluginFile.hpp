@@ -72,6 +72,9 @@ public:
 
     Record read(const std::filesystem::path& path, uint64_t offset);
     std::vector<uint8_t> readRaw(const std::filesystem::path& path, uint64_t offset, RecordHeader& headerOut);
+    // Closes every cached file handle (Windows cannot rename or delete a file that is open). Reads
+    // still in progress keep their own handle; later reads open the file again.
+    void closeAll();
 
 private:
     struct Handle;

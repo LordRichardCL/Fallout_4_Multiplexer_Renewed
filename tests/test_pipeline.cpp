@@ -4307,6 +4307,7 @@ TEST(standalone_apply_switches_plugins_txt_and_ghosts_on_request)
         CHECK(plan.writesLoadOrder);
         CHECK_EQ(plan.ghosted, compiled.size());
         CHECK(plan.check.fullPluginsAfter <= PostCompilation::kMaxFullPlugins);
+        p.session().releaseFiles(); // as Apply to Game does: Windows cannot rename an open file
         tx.apply();
 
         const auto txt = slurp(b.root / "plugins.txt");
@@ -4352,6 +4353,7 @@ TEST(standalone_apply_can_be_undone_as_a_whole)
     auto r = resultOf(p);
     FileTransaction tx("Apply to Game");
     PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, p.exportResult()->directory, true);
+    p.session().releaseFiles();
     tx.apply();
     tx.rollback();
     CHECK_EQ(slurp(b.root / "plugins.txt"), before);
