@@ -194,10 +194,11 @@ Files for you and for the next build (the game does not read them; nothing needs
 Then:
 
 1. Install and enable `Multiplexer Output.zip` as above (replace the previous version when you rebuild).
-2. On the **Compilation** page, press **Apply to Game…**. It makes a timestamped backup of every file first, then:
+2. On the **Compilation** page, press **Apply to Game…**. Every change is made together or not at all: each file is backed up first (`<file>.multiplexer-backup-<date>-<time>`, with `-2`, `-3`, … added rather than ever replacing an earlier backup), written whole through a temporary file, and if any step fails the files already changed are restored. Files whose content would not change are left alone. It then:
    - adds the compiled plugins' archives to `SResourceArchiveList2` in `Fallout4Custom.ini`, in the folder the game reads its INIs from (the MO2 profile when it uses profile-local INIs), so their textures and meshes keep loading. Archives an earlier build added but this one no longer needs are taken out again. Every other line of the INI is kept as it was.
    - **Mod Organizer 2:** also rewrites the profile's `plugins.txt`/`loadorder.txt` so compiled plugins are disabled and the generated ones enabled.
    - **Vortex and manual installs:** disable the plugins in `Multiplexer_DisablePlugins.txt` and enable the generated plugins yourself (Vortex manages `plugins.txt`).
+   - **Ghosted plugins** (`Example.esp.ghost`, the name some tools give a plugin to hide it from the game) are recognised: the app reads them as `Example.esp`, not loaded by the game. A plugin the last build compiled stays a source of the next build when it is ghosted, as when it is disabled.
 3. **Keep the compiled mods installed.** Disable only their *plugins*, never the mods themselves: their textures, meshes, archives, voice files and FaceGen are still used.
 4. Open the outputs in FO4Edit and spot-check a few records.
 

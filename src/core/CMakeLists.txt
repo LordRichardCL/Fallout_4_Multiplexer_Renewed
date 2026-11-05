@@ -12,6 +12,7 @@ add_library(fo4mx_core STATIC
     util/Log.cpp
     util/Platform.cpp
     util/Text.cpp
+    util/FileTransaction.cpp
     esp/FieldDecoder.cpp
     esp/GroupLayout.cpp
     esp/LayoutCheck.cpp
@@ -35,6 +36,7 @@ add_library(fo4mx_core STATIC
     engine/ChangeDetector.cpp
     engine/CleaningEngine.cpp
     engine/CompilationEngine.cpp
+    engine/CompilationResult.cpp
     engine/ConflictEngine.cpp
     engine/DependencyEngine.cpp
     engine/Diagnosis.cpp

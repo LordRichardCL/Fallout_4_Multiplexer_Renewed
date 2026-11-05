@@ -9,6 +9,8 @@
 
 namespace fo4mx {
 
+class FileTransaction;
+
 struct ExportOptions {
     std::filesystem::path outputDirectory;
     bool writeEmptyOutputs = false;
@@ -65,9 +67,13 @@ public:
     static std::filesystem::path writePackageZip(ExportResult& result);
 
     // Updates the MO2 profile's plugins.txt / loadorder.txt (with backups):
-    // compiled plugins are disabled and the outputs enabled at the end.
+    // compiled plugins are disabled and the outputs enabled at the end. All or nothing.
     static std::vector<std::filesystem::path> applyToProfile(const Session& session, const CompiledOutput& compiled,
                                                              const std::filesystem::path& pluginsTxt);
+
+    // The same changes added to a transaction, so they apply (or roll back) together with others.
+    static void planProfile(FileTransaction& tx, const Session& session, const CompiledOutput& compiled,
+                            const std::filesystem::path& pluginsTxt);
 
     static std::string proposedPluginsTxt(const Session& session, const CompiledOutput& compiled);
 
@@ -85,6 +91,9 @@ public:
     // line is kept. Returns the files written (empty when nothing needed to change).
     static std::vector<std::filesystem::path> applyArchiveIni(const Session& session, const CompiledOutput& compiled,
                                                               const std::filesystem::path& outputDirectory);
+    // The same changes added to a transaction (the INI and the output folder's record of them).
+    static void planArchiveIni(FileTransaction& tx, const Session& session, const CompiledOutput& compiled,
+                               const std::filesystem::path& outputDirectory);
 
     // Sets [section] key=value in INI text, keeping every other line, comment and line ending.
     static std::string setIniValue(const std::string& text, const std::string& section, const std::string& key,

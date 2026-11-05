@@ -241,6 +241,14 @@ ReferenceScanner ──> detectors ──> PluginReference ──> classifier �
 - **Vortex**: deploys into Data, so the Data folder is the truth; `vortex.deployment.json` attributes files to mods.
 - **Standalone**: Data plus `%LOCALAPPDATA%\Fallout4\plugins.txt`.
 
+A ghosted plugin (`<name>.ghost` in Data) is discovered as `<name>` with `PluginInfo::ghosted`, never active in the game; when the last build compiled it, it is reactivated as a source like a disabled one. When both the plain file and the ghost exist, the plain file wins.
+
+### After compilation
+
+Everything that changes the user's setup after an export goes through `FileTransaction` (`util/FileTransaction.hpp`): a plan of writes, renames and copies that is checked before anything changes (sources present, destinations free), then applied in order with a backup of each replaced file (`uniqueBackupPath`: `.multiplexer-backup-<stamp>`, then `-2`, `-3`, … never overwriting) and atomic writes (temporary file, then rename). A failure undoes the completed steps in reverse order; `rollback()` undoes a whole applied transaction. **Apply to Game** builds one transaction from `Exporter::planProfile` (MO2) and `Exporter::planArchiveIni`.
+
+`CompilationResult` (`engine/CompilationResult.hpp`) is the build as later steps see it: success, the output plugins, package, zip and disable list, and every in-scope plugin in exactly one list (included, excluded by decision, failed/kept out automatically) plus the inactive ones (skipped). `compiledSuccessfully(name)` is the test every step that touches a source plugin must pass.
+
 The implicit plugins (Fallout4.esm, the DLC masters and `Fallout4.ccc` entries) load first, then masters, then everything else, each group in recorded order.
 
 ## Asset layer and traceability

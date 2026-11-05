@@ -3,6 +3,8 @@
 
 #include "ba2/Ba2Archive.hpp"
 #include "db/Database.hpp"
+#include "engine/CompilationResult.hpp"
+#include "engine/Exporter.hpp"
 #include "engine/Pipeline.hpp"
 #include "engine/PluginSummary.hpp"
 #include "engine/ReferenceScanner.hpp"
@@ -10,6 +12,7 @@
 #include "esp/FieldDecoder.hpp"
 #include "esp/PluginFile.hpp"
 #include "papyrus/Pex.hpp"
+#include "util/FileTransaction.hpp"
 #include "util/Text.hpp"
 
 #include <algorithm>
@@ -3944,4 +3947,260 @@ TEST(safety_written_output_compared_with_the_plan)
     for (const auto& is : v.issues)
         named |= is.message.find("does not match what was compiled") != std::string::npos;
     CHECK(named);
+}
+
+// ---- Post-compilation foundation: backups, atomic writes, transactions, ghosted plugins ----
+
+namespace {
+
+std::string slurp(const std::filesystem::path& p)
+{
+    std::ifstream in(p, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+size_t countBackups(const std::filesystem::path& dir, const std::string& prefix)
+{
+    size_t n = 0;
+    for (const auto& e : std::filesystem::directory_iterator(dir))
+        if (pathToUtf8(e.path().filename()).rfind(prefix + ".multiplexer-backup-", 0) == 0)
+            ++n;
+    return n;
+}
+
+} // namespace
+
+TEST(backups_never_overwrite_an_existing_backup)
+{
+    auto dir = tempDir("backupnames");
+    writeFile(dir / "plugins.txt", "*A.esp\n");
+    const std::string stamp = "20261105-120000";
+    auto first = uniqueBackupPath(dir / "plugins.txt", stamp);
+    CHECK_EQ(pathToUtf8(first.filename()), std::string("plugins.txt.multiplexer-backup-20261105-120000"));
+    writeFile(first, "older backup");
+    auto second = uniqueBackupPath(dir / "plugins.txt", stamp);
+    CHECK_EQ(pathToUtf8(second.filename()), std::string("plugins.txt.multiplexer-backup-20261105-120000-2"));
+    writeFile(second, "another");
+    CHECK_EQ(pathToUtf8(uniqueBackupPath(dir / "plugins.txt", stamp).filename()),
+             std::string("plugins.txt.multiplexer-backup-20261105-120000-3"));
+    CHECK_EQ(slurp(first), std::string("older backup"));
+
+    // Two transactions in the same second each keep their own backup.
+    FileTransaction a("first");
+    a.write(dir / "plugins.txt", "*B.esp\n", "test");
+    a.apply();
+    FileTransaction b("second");
+    b.write(dir / "plugins.txt", "*C.esp\n", "test");
+    b.apply();
+    CHECK_EQ(a.backups().size(), size_t(1));
+    CHECK_EQ(b.backups().size(), size_t(1));
+    CHECK(a.backups()[0] != b.backups()[0]);
+    CHECK_EQ(slurp(a.backups()[0]), std::string("*A.esp\n"));
+    CHECK_EQ(slurp(b.backups()[0]), std::string("*B.esp\n"));
+}
+
+TEST(atomic_write_replaces_the_whole_file_and_leaves_no_temporary)
+{
+    auto dir = tempDir("atomicwrite");
+    writeFile(dir / "f.txt", "a much longer original content\n");
+    atomicWriteText(dir / "f.txt", "new\n");
+    CHECK_EQ(slurp(dir / "f.txt"), std::string("new\n"));
+    CHECK(!std::filesystem::exists(dir / "f.txt.multiplexer-tmp"));
+    // A file that cannot be written (its folder is missing) throws and leaves nothing behind.
+    bool threw = false;
+    try {
+        atomicWriteText(dir / "missing" / "f.txt", "x");
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    CHECK(threw);
+    CHECK(!std::filesystem::exists(dir / "missing"));
+}
+
+TEST(file_transaction_applies_and_rolls_back_everything)
+{
+    auto dir = tempDir("transaction");
+    std::filesystem::create_directories(dir / "Data");
+    std::filesystem::create_directories(dir / "Downloads");
+    writeFile(dir / "plugins.txt", "*A.esp\n*B.esp\n");
+    writeFile(dir / "Data" / "B.esp", "plugin B");
+    writeFile(dir / "out.zip", "zip");
+
+    FileTransaction tx("test");
+    tx.write(dir / "plugins.txt", "*A.esp\nB.esp\n", "disable B");
+    tx.write(dir / "new.txt", "created", "a new file");
+    tx.rename(dir / "Data" / "B.esp", dir / "Data" / "B.esp.ghost", "ghost B");
+    tx.copy(dir / "out.zip", dir / "Downloads" / "out.zip", "zip to downloads");
+    CHECK_EQ(tx.summary().size(), size_t(4));
+    CHECK(tx.check().empty());
+    tx.apply();
+    CHECK_EQ(slurp(dir / "plugins.txt"), std::string("*A.esp\nB.esp\n"));
+    CHECK(std::filesystem::exists(dir / "Data" / "B.esp.ghost"));
+    CHECK(!std::filesystem::exists(dir / "Data" / "B.esp"));
+    CHECK_EQ(slurp(dir / "Downloads" / "out.zip"), std::string("zip"));
+    CHECK_EQ(tx.changedFiles().size(), size_t(4));
+    CHECK_EQ(countBackups(dir, "plugins.txt"), size_t(1));
+
+    tx.rollback();
+    CHECK_EQ(slurp(dir / "plugins.txt"), std::string("*A.esp\n*B.esp\n"));
+    CHECK(!std::filesystem::exists(dir / "new.txt"));
+    CHECK_EQ(slurp(dir / "Data" / "B.esp"), std::string("plugin B"));
+    CHECK(!std::filesystem::exists(dir / "Data" / "B.esp.ghost"));
+    CHECK(!std::filesystem::exists(dir / "Downloads" / "out.zip"));
+    CHECK_EQ(countBackups(dir, "plugins.txt"), size_t(1)); // backups stay
+}
+
+TEST(file_transaction_refuses_or_undoes_a_failing_plan)
+{
+    auto dir = tempDir("transactionfail");
+    writeFile(dir / "plugins.txt", "*A.esp\n");
+    writeFile(dir / "A.esp", "a");
+    writeFile(dir / "A.esp.ghost", "an older ghost");
+    writeFile(dir / "dest.zip", "existing");
+
+    // Checked before anything changes: a taken destination, a missing source, a collision.
+    {
+        FileTransaction tx("refused");
+        tx.write(dir / "plugins.txt", "A.esp\n", "disable A");
+        tx.rename(dir / "A.esp", dir / "A.esp.ghost", "ghost A");
+        tx.copy(dir / "missing.zip", dir / "x.zip", "copy");
+        tx.copy(dir / "plugins.txt", dir / "dest.zip", "copy without replacing");
+        CHECK_EQ(tx.check().size(), size_t(3));
+        bool threw = false;
+        try {
+            tx.apply();
+        } catch (const std::exception&) {
+            threw = true;
+        }
+        CHECK(threw);
+        CHECK_EQ(slurp(dir / "plugins.txt"), std::string("*A.esp\n"));
+        CHECK_EQ(countBackups(dir, "plugins.txt"), size_t(0));
+        CHECK_EQ(slurp(dir / "dest.zip"), std::string("existing"));
+    }
+    // A failure part-way (the second step's destination is created by the first) undoes the first.
+    std::filesystem::remove(dir / "A.esp.ghost");
+    {
+        FileTransaction tx("part-way");
+        tx.write(dir / "plugins.txt", "A.esp\n", "disable A");
+        tx.write(dir / "B.esp", "made by step 2", "a file");
+        tx.rename(dir / "A.esp", dir / "B.esp", "collides with step 2");
+        CHECK(tx.check().empty());
+        bool threw = false;
+        try {
+            tx.apply();
+        } catch (const std::exception&) {
+            threw = true;
+        }
+        CHECK(threw);
+        CHECK(!tx.applied());
+        CHECK_EQ(slurp(dir / "plugins.txt"), std::string("*A.esp\n"));
+        CHECK(!std::filesystem::exists(dir / "B.esp"));
+        CHECK_EQ(slurp(dir / "A.esp"), std::string("a"));
+    }
+    // Replacing an existing copy is allowed when asked, with a backup; identical content is skipped.
+    {
+        const size_t pluginsBackups = countBackups(dir, "plugins.txt"); // the undone step 1 kept its backup
+        FileTransaction tx("replace");
+        tx.copy(dir / "A.esp", dir / "dest.zip", "replace", true);
+        tx.write(dir / "plugins.txt", "*A.esp\n", "unchanged");
+        tx.apply();
+        CHECK_EQ(slurp(dir / "dest.zip"), std::string("a"));
+        CHECK_EQ(countBackups(dir, "dest.zip"), size_t(1));
+        CHECK_EQ(countBackups(dir, "plugins.txt"), pluginsBackups);
+        CHECK_EQ(tx.changedFiles().size(), size_t(1));
+        tx.rollback();
+        CHECK_EQ(slurp(dir / "dest.zip"), std::string("existing"));
+    }
+}
+
+TEST(compilation_result_lists_every_plugin_once)
+{
+    auto root = buildInstall("compresult");
+    writePlugin(root / "Game" / "Data" / "ModOff.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000800, {zs("EDID", "OffKeyword")})});
+    auto cfg = configFor(root);
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    p.exportOutputs();
+    auto r = makeCompilationResult(p.session(), p.compiledOutput(), p.exportResult() ? &*p.exportResult() : nullptr,
+                                   p.validation());
+    CHECK(r.success);
+    CHECK(!r.outputPlugins.empty());
+    CHECK(r.compiledSuccessfully("moda.esp"));
+    CHECK(r.compiledSuccessfully("ModB.esp"));
+    CHECK(!r.compiledSuccessfully("ModC.esp")); // a dialogue topic: ineligible
+    CHECK(!r.compiledSuccessfully("ModOff.esp"));
+    CHECK(!r.compiledSuccessfully("Fallout4.esm"));
+    CHECK_EQ(r.selected.size(), r.included.size() + r.excluded.size() + r.failed.size());
+    bool offSkipped = false, cExcluded = false;
+    for (const auto& s : r.skipped)
+        offSkipped |= s.name == "ModOff.esp";
+    for (const auto& e : r.excluded)
+        cExcluded |= e.name == "ModC.esp" && !e.reason.empty();
+    CHECK(offSkipped);
+    CHECK(cExcluded);
+
+    // Without an export nothing counts as compiled successfully.
+    auto none = makeCompilationResult(p.session(), p.compiledOutput(), nullptr, p.validation());
+    CHECK(!none.success);
+    CHECK(!none.compiledSuccessfully("ModA.esp"));
+}
+
+TEST(ghosted_plugins_are_seen_and_stay_sources_after_a_build)
+{
+    auto root = buildInstall("ghosted");
+    auto cfg = configFor(root);
+    cfg.exportOptions.outputDirectory = root / "Game" / "Data";
+    std::vector<std::string> compiled;
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        for (auto pi : p.compiledOutput()->compiledPlugins)
+            compiled.push_back(p.session().plugins[pi].name);
+        auto result = p.exportOutputs();
+        std::filesystem::copy_file(result.pluginsTxt, root / "plugins.txt", std::filesystem::copy_options::overwrite_existing);
+    }
+    CHECK(!compiled.empty());
+    auto data = root / "Game" / "Data";
+    for (const auto& name : compiled)
+        std::filesystem::rename(data / name, data / (name + ".ghost"));
+    Pipeline p(cfg);
+    p.scan();
+    for (const auto& name : compiled) {
+        const auto* pl = p.session().findPlugin(name); // found by its name without ".ghost"
+        CHECK(pl != nullptr);
+        if (!pl)
+            continue;
+        CHECK(pl->ghosted);
+        CHECK(pl->error.empty());
+        CHECK(pl->active); // still a source of the build, in its recorded position
+        CHECK(pl->reactivated);
+        CHECK(p.session().findPlugin(name + ".ghost") == nullptr);
+    }
+    p.analyse();
+    CHECK(p.compile());
+    for (const auto& name : compiled)
+        CHECK(p.compiledOutput()->isCompiled(p.session().findPlugin(name)->index));
+}
+
+TEST(ghosted_plugin_not_compiled_before_is_inactive)
+{
+    auto root = buildInstall("ghostinactive");
+    auto data = root / "Game" / "Data";
+    std::filesystem::rename(data / "ModC.esp", data / "ModC.esp.ghost");
+    // A plain copy beside a ghost wins: the game loads the plain file.
+    std::filesystem::copy_file(data / "ModB.esp", data / "ModB.esp.ghost");
+    auto cfg = configFor(root);
+    Pipeline p(cfg);
+    p.scan();
+    const auto* c = p.session().findPlugin("ModC.esp");
+    CHECK(c != nullptr);
+    CHECK(c && c->ghosted);
+    CHECK(c && !c->active); // enabled in plugins.txt, but the game cannot load a ghosted file
+    const auto* b = p.session().findPlugin("ModB.esp");
+    CHECK(b && !b->ghosted && b->active);
 }

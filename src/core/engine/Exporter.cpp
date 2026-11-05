@@ -3,6 +3,7 @@
 #include "engine/ValidationEngine.hpp"
 #include "esp/PluginFile.hpp"
 #include "esp/PluginWriter.hpp"
+#include "util/FileTransaction.hpp"
 #include "util/Zip.hpp"
 #include "util/Text.hpp"
 
@@ -29,10 +30,7 @@ namespace {
 
 void writeText(const fs::path& path, const std::string& text)
 {
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out)
-        throw std::runtime_error("cannot write " + pathToUtf8(path));
-    out << text;
+    atomicWriteText(path, text);
 }
 
 bool sameContent(const fs::path& path, const std::vector<uint8_t>& image)
@@ -57,20 +55,6 @@ void writeBinary(const fs::path& path, const std::vector<uint8_t>& image)
         out.write(reinterpret_cast<const char*>(image.data()), static_cast<std::streamsize>(image.size()));
     }
     fs::rename(tmp, path);
-}
-
-std::string timestamp()
-{
-    auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    std::tm tm{};
-#ifdef _WIN32
-    localtime_s(&tm, &now);
-#else
-    localtime_r(&now, &tm);
-#endif
-    char buf[32];
-    std::strftime(buf, sizeof(buf), "%Y%m%d-%H%M%S", &tm);
-    return buf;
 }
 
 } // namespace
@@ -193,14 +177,13 @@ std::string Exporter::setIniValue(const std::string& text, const std::string& se
     return out;
 }
 
-std::vector<fs::path> Exporter::applyArchiveIni(const Session& session, const CompiledOutput& c,
-                                                const fs::path& outputDirectory)
+void Exporter::planArchiveIni(FileTransaction& tx, const Session& session, const CompiledOutput& c,
+                              const fs::path& outputDirectory)
 {
-    std::vector<fs::path> written;
     const auto registeredPath = outputDirectory / kRegisteredFile;
     auto previously = readLines(registeredPath);
     if (c.archivesToRegister.empty() && previously.empty())
-        return written; // nothing was ever registered and nothing needs to be
+        return; // nothing was ever registered and nothing needs to be
 
     fs::path dir = session.install.iniDirectory;
     if (dir.empty())
@@ -212,29 +195,32 @@ std::vector<fs::path> Exporter::applyArchiveIni(const Session& session, const Co
             custom = entry.path();
 
     std::string text;
-    auto backup = custom;
-    backup += ".multiplexer-backup-" + timestamp();
     if (fs::exists(custom)) {
         std::ifstream in(custom, std::ios::binary);
         text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-        fs::copy_file(custom, backup, fs::copy_options::overwrite_existing);
-        spdlog::info("Backed up {} to {}", pathToUtf8(custom), pathToUtf8(backup));
-    } else {
-        // An empty backup records that there was no Fallout4Custom.ini: the oldest backup is always
-        // the state before this app's first change (the scan's archive baseline).
-        writeText(backup, "");
     }
-    std::string updated = setIniValue(text, "Archive", "SResourceArchiveList2", join(archiveList(session, c, outputDirectory), ", "));
-    if (updated != text) {
-        writeText(custom, updated);
-        written.push_back(custom);
-    }
+    // backupWhenMissing: an empty backup records that there was no Fallout4Custom.ini, so the
+    // oldest backup is always the state before this app's first change (the scan's archive baseline).
+    tx.write(custom, setIniValue(text, "Archive", "SResourceArchiveList2", join(archiveList(session, c, outputDirectory), ", ")),
+             "the archive list (SResourceArchiveList2) the compiled mods need", true);
 
     std::string record = "# Archives Fallout 4 Multiplexer Renewed added to SResourceArchiveList2\n";
     for (const auto& a : c.archivesToRegister)
         record += a + "\n";
     fs::create_directories(outputDirectory);
-    writeText(registeredPath, record);
+    tx.write(registeredPath, record, "the archives this build added to the INI");
+}
+
+std::vector<fs::path> Exporter::applyArchiveIni(const Session& session, const CompiledOutput& c,
+                                                const fs::path& outputDirectory)
+{
+    FileTransaction tx("Archive INI");
+    planArchiveIni(tx, session, c, outputDirectory);
+    tx.apply();
+    std::vector<fs::path> written;
+    for (const auto& f : tx.changedFiles())
+        if (f.parent_path() != outputDirectory)
+            written.push_back(f);
     return written;
 }
 
@@ -606,35 +592,28 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
     return r;
 }
 
-std::vector<fs::path> Exporter::applyToProfile(const Session& session, const CompiledOutput& c, const fs::path& pluginsTxt)
+void Exporter::planProfile(FileTransaction& tx, const Session& session, const CompiledOutput& c,
+                           const fs::path& pluginsTxt)
 {
-    std::vector<fs::path> written;
-    std::string stamp = timestamp();
-    auto backup = [&](const fs::path& p) {
-        if (fs::exists(p)) {
-            auto b = p;
-            b += ".multiplexer-backup-" + stamp;
-            fs::copy_file(p, b, fs::copy_options::overwrite_existing);
-            spdlog::info("Backed up {} to {}", pathToUtf8(p), pathToUtf8(b));
-        }
-    };
-    backup(pluginsTxt);
-    writeText(pluginsTxt, proposedPluginsTxt(session, c));
-    written.push_back(pluginsTxt);
-
+    tx.write(pluginsTxt, proposedPluginsTxt(session, c), "compiled plugins disabled, outputs enabled at the end");
     auto loadOrder = pluginsTxt.parent_path() / "loadorder.txt";
     if (fs::exists(loadOrder)) {
-        backup(loadOrder);
         std::string lo = "# Generated by Fallout 4 Multiplexer Renewed\n";
         for (const auto& p : session.plugins)
             lo += p.name + "\n";
         for (const auto& op : c.outputs)
             if (!op.records.empty())
                 lo += op.name + "\n";
-        writeText(loadOrder, lo);
-        written.push_back(loadOrder);
+        tx.write(loadOrder, lo, "every plugin in its order, outputs at the end");
     }
-    return written;
+}
+
+std::vector<fs::path> Exporter::applyToProfile(const Session& session, const CompiledOutput& c, const fs::path& pluginsTxt)
+{
+    FileTransaction tx("Profile load order");
+    planProfile(tx, session, c, pluginsTxt);
+    tx.apply();
+    return tx.changedFiles();
 }
 
 } // namespace fo4mx

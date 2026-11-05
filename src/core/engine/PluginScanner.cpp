@@ -73,11 +73,27 @@ void PluginScanner::discoverPlugins(Session& session, ProgressSink& progress)
     session.plugins.clear();
     session.loadOrder.clear();
 
-    // Plugin files visible in the virtual Data folder.
+    // Plugin files visible in the virtual Data folder. A ghosted plugin ("Example.esp.ghost", the
+    // name tools use to hide a plugin from the game) is the plugin "Example.esp", not loaded by the
+    // game: it is still seen, so a build that compiled it keeps it as a source.
     std::unordered_map<std::string, const VirtualFileSystem::File*> files;
-    for (const auto* f : session.vfs.rootFiles())
-        if (isPluginFile(f->relativePath))
-            files[toLower(f->relativePath)] = f;
+    std::unordered_map<std::string, const VirtualFileSystem::File*> ghosts;
+    for (const auto* f : session.vfs.rootFiles()) {
+        const auto& rel = f->relativePath;
+        if (isPluginFile(rel))
+            files[toLower(rel)] = f;
+        else if (iendsWith(rel, kGhostSuffix) && isPluginFile(std::string_view(rel).substr(0, rel.size() - kGhostSuffix.size())))
+            ghosts[toLower(rel.substr(0, rel.size() - kGhostSuffix.size()))] = f;
+    }
+    std::unordered_set<std::string> ghosted;
+    for (const auto& [key, f] : ghosts) {
+        if (files.count(key)) {
+            spdlog::warn("{} exists both as a plugin and ghosted; the ghosted copy is ignored", f->relativePath);
+            continue;
+        }
+        files[key] = f;
+        ghosted.insert(key);
+    }
 
     std::unordered_set<std::string> ccSet;
     for (const auto& c : session.install.creationClub)
@@ -111,12 +127,16 @@ void PluginScanner::discoverPlugins(Session& session, ProgressSink& progress)
         const auto* f = files[key];
         fileOf.push_back(f);
         PluginInfo info;
-        info.name = f->relativePath;
+        info.ghosted = ghosted.count(key) != 0;
+        info.name = info.ghosted ? f->relativePath.substr(0, f->relativePath.size() - kGhostSuffix.size())
+                                 : f->relativePath;
         info.path = session.vfs.winnerPath(*f);
         info.sourceMod = session.vfs.winnerName(*f);
         info.fileSize = f->sizes.back();
         info.modified = f->mtimes.back();
-        info.active = entries[key].active;
+        info.active = entries[key].active && !info.ghosted; // the game cannot load a ghosted file
+        if (info.ghosted)
+            spdlog::info("{} is ghosted ({}): not loaded by the game", info.name, f->relativePath);
         info.implicit = entries[key].implicit;
         info.baseGame = isBaseGamePlugin(info.name);
         info.creationClub = ccSet.count(key) != 0;

@@ -18,6 +18,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -43,6 +44,9 @@ inline constexpr const char* kGeneratorAuthor = "Fallout 4 Multiplexer Renewed";
 // archives keep loading at the same priority.
 inline constexpr const char* kArchiveLoaderTag = "Archive loader";
 
+// The suffix that hides a plugin from the game: "Example.esp.ghost" is the plugin Example.esp, not loaded.
+inline constexpr std::string_view kGhostSuffix = ".ghost";
+
 struct PluginInfo {
     PluginIndex index = kInvalidPlugin;
     std::string name;
@@ -59,6 +63,9 @@ struct PluginInfo {
     bool generated = false;       // a Dummy plugin, patch or loader this app wrote: never a source
     bool behindLoader = false;    // the file is the original underneath this app's archive loader
     bool reactivated = false;     // compiled in the last build and disabled since: still a source
+    // The file is "<name>.ghost" (renamed so the game does not load it): read from there, never
+    // active in the game, still a source when the last build compiled it. `name` has no ".ghost".
+    bool ghosted = false;
     int32_t loadOrder = -1;     // position among active plugins
     std::string loadOrderHex;   // "0A" or "FE 001"
 

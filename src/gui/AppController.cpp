@@ -8,6 +8,7 @@
 #include "db/DatabaseWriter.hpp"
 #include "engine/BuildCache.hpp"
 #include "engine/Exporter.hpp"
+#include "util/FileTransaction.hpp"
 #include "util/Log.hpp"
 #include "util/Platform.hpp"
 #include "util/Text.hpp"
@@ -559,12 +560,18 @@ bool AppController::applyToProfile(QString* message)
     }
     const auto& s = pipeline_->session();
     try {
-        std::vector<std::filesystem::path> written;
+        // One transaction: the profile's load order and the INI change together or not at all.
+        fo4mx::FileTransaction tx("Apply to Game");
         // Vortex manages plugins.txt itself; for MO2 the profile's load order is rewritten.
         if (s.install.config.kind == fo4mx::InstallKind::ModOrganizer2)
-            written = Exporter::applyToProfile(s, *pipeline_->compiledOutput(), s.install.pluginsFile);
-        for (auto& p : Exporter::applyArchiveIni(s, *pipeline_->compiledOutput(), pipeline_->exportResult()->directory))
-            written.push_back(p);
+            Exporter::planProfile(tx, s, *pipeline_->compiledOutput(), s.install.pluginsFile);
+        const auto outputDir = pipeline_->exportResult()->directory;
+        Exporter::planArchiveIni(tx, s, *pipeline_->compiledOutput(), outputDir);
+        tx.apply();
+        std::vector<std::filesystem::path> written;
+        for (const auto& f : tx.changedFiles())
+            if (f.parent_path() != outputDir)
+                written.push_back(f);
         QStringList names;
         for (const auto& w : written)
             names << toQString(w);
