@@ -75,6 +75,23 @@ private:
         case FieldKind::Unknown:
             heuristic(i, 0, static_cast<uint32_t>(size));
             break;
+        case FieldKind::FurnitureMarkers: {
+            // xEdit wbSNAMMarkerParams: offset X, Y, Z, rotation (floats), keyword FormID at +16,
+            // then (form version 125 and later) entry types and 3 unused bytes: 24 bytes a marker,
+            // 20 before. A size both lengths divide leaves the layout undecided: undescribed.
+            const bool by24 = size % 24 == 0, by20 = size % 20 == 0;
+            if (size == 0)
+                break;
+            if (by24 == by20) {
+                issue(Severity::Info, sr.signature, "marker list size " + std::to_string(size) + " fits no single layout");
+                heuristic(i, 0, static_cast<uint32_t>(size));
+                break;
+            }
+            const size_t stride = by24 ? 24 : 20;
+            for (size_t e = 0; e < size; e += stride)
+                slot(i, e + 16);
+            break;
+        }
         case FieldKind::BookData:
             // xEdit wbBOOKTeachesDecider: +1 is an actor value (flag 0x01), spell (0x04) or perk (0x10),
             // else unused; then the text offset (two numbers) to +13.
@@ -466,6 +483,23 @@ private:
             throw FormatError("data after the script fragments");
     }
 
+    // Fallout 4 PERK and TERM (xEdit wbVMADFragmentedPERK, which TERM shares): extra bind data
+    // version, the fragment script, then a uint16 count of fragments, each an index, a byte, script
+    // and function names. It must end exactly at the end of the subrecord.
+    void perkFragments(BinaryReader& r, uint32_t i, int16_t version, int16_t objFormat)
+    {
+        r.skip(1); // extra bind data version
+        vmadScript(r, i, version, objFormat);
+        const uint16_t count = r.read<uint16_t>();
+        for (uint16_t f = 0; f < count; ++f) {
+            r.skip(4 + 1);   // fragment index, unknown
+            r.readWString(); // script name
+            r.readWString(); // fragment (function) name
+        }
+        if (!r.atEnd())
+            throw FormatError("data after the script fragments");
+    }
+
     void decodeVmad(uint32_t i, const Subrecord& sr)
     {
         size_t slotsBefore = out_.formIdSlots.size();
@@ -485,6 +519,8 @@ private:
                     eventFragments(r, i, version, objFormat, 2, false);
                 else if (record_ == Signature("SCEN"))
                     eventFragments(r, i, version, objFormat, 2, true);
+                else if (record_ == Signature("PERK") || record_ == Signature("TERM"))
+                    perkFragments(r, i, version, objFormat);
                 else
                     vmadFragments(r, i, sr, version, objFormat);
             }

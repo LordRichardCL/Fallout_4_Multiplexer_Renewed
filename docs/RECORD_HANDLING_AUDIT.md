@@ -798,3 +798,13 @@ Unchanged and verified: subrecords (unknown ones included) keep their order and 
 
 Not changed (limitations): the proof is strict, so records whose undescribed bytes hold floats or other values with a high byte that is not a stable master index are kept out until their layouts are described; real load orders will show which (the *Undescribed Data* findings group by record type and subrecord). Types without full layouts still compile only as the catalogue allows. Nothing here was checked in game.
 
+## Build 83: what the strict proof refused, described from xEdit (S-2)
+
+Build 83 (the first with the S-1 proof): 1,391 plugins compiled (2,112 before), 0 errors; 536 *Undescribed Data* findings, nearly all in fields xEdit describes but these definitions did not list. Described now, from xEdit's definitions:
+
+- FURN and TERM `SNAM` (wbSNAMMarkerParams): markers of four floats, a keyword FormID at +16, then entry types and 3 unused bytes; 24 bytes each from form version 125, 20 before. A size both divide (120, 240, ...) stays undescribed.
+- PERK and TERM `VMAD` (wbVMADFragmentedPERK): the fragment script, then a counted list of fragments (index, a byte, script and function names); decoded exactly, anything else is reported and undescribed.
+- Numbers and text: FURN `ENAM` (marker index), `NAM0`; TERM `MNAM` (flags), `NAM0` (header text, localised); LCTN `ANAM` (float); LSCR `ZNAM` (floats), `ONAM` (int16); IPCT `DATA`; CSTY `CSRA` (float); ARMA `BSMB` (names); PROJ `NAM2` (model texture hashes); SNDR `FNAM`, `NNAM` (text); WEAP `MASE` (enum).
+
+Still undescribed on purpose: PACK `BNAM` (unknown in xEdit itself), and anything past xEdit's layouts.
+

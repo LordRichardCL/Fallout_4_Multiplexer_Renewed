@@ -583,3 +583,61 @@ TEST(context_dependent_fields_follow_xedit)
     // SNDR DNAM is a descriptor FormID (xEdit), not a guess.
     CHECK((offsets(decodeLayout(d, Signature("SNDR"), {weap("DNAM", 4)})) == std::vector<uint32_t>{0}));
 }
+
+// Fields build 83 refused as undescribed, now described from xEdit: furniture markers (keyword at
+// +16 of each 24- or 20-byte marker), PERK/TERM script fragments, and number or text fields.
+TEST(fields_described_from_xedit_after_build_83)
+{
+    const auto& d = RecordDefinitions::get();
+    auto sub = [](const char* sig, std::vector<uint8_t> data) {
+        Subrecord sr;
+        sr.signature = Signature::fromString(sig);
+        sr.data = std::move(data);
+        return sr;
+    };
+    auto offsets = [](const DecodedLayout& l) {
+        std::vector<uint32_t> o;
+        for (const auto& s : l.formIdSlots)
+            o.push_back(s.offset);
+        return o;
+    };
+    // Markers: one or two of 24 bytes (form version 125+), or 20 bytes (older).
+    CHECK((offsets(decodeLayout(d, Signature("FURN"), {sub("SNAM", std::vector<uint8_t>(24, 0x41))})) ==
+           std::vector<uint32_t>{16}));
+    CHECK((offsets(decodeLayout(d, Signature("FURN"), {sub("SNAM", std::vector<uint8_t>(48, 0x41))})) ==
+           std::vector<uint32_t>{16, 40}));
+    CHECK((offsets(decodeLayout(d, Signature("TERM"), {sub("SNAM", std::vector<uint8_t>(40, 0x41))})) ==
+           std::vector<uint32_t>{16, 36}));
+    CHECK(decodeLayout(d, Signature("FURN"), {sub("SNAM", std::vector<uint8_t>(24, 0x41))}).heuristic.empty());
+    // 120 bytes: five old markers or six new ones; undecided, so undescribed.
+    auto both = decodeLayout(d, Signature("FURN"), {sub("SNAM", std::vector<uint8_t>(120, 0))});
+    CHECK(offsets(both).empty() && both.heuristic.size() == 1);
+
+    // PERK / TERM script fragments: version 6, object format 2, no scripts; then the fragments.
+    std::vector<uint8_t> v;
+    auto u8 = [&](uint8_t x) { v.push_back(x); };
+    auto u16 = [&](uint16_t x) { u8(uint8_t(x)); u8(uint8_t(x >> 8)); };
+    auto u32 = [&](uint32_t x) { u16(uint16_t(x)); u16(uint16_t(x >> 16)); };
+    auto str = [&](const std::string& s) { u16(uint16_t(s.size())); v.insert(v.end(), s.begin(), s.end()); };
+    u16(6); u16(2); u16(0);       // version, object format, scripts
+    u8(3);                         // extra bind data version
+    str("Fragments:Perks:P"); u8(0); u16(0); // fragment script: name, status, no properties
+    u16(1); u32(0); u8(0); str("Fragments:Perks:P"); str("Fragment_Entry_00");
+    for (const char* rec : {"PERK", "TERM"}) {
+        auto l = decodeLayout(d, Signature::fromString(rec), {sub("VMAD", v)});
+        CHECK(l.heuristic.empty() && l.issues.empty());
+    }
+    auto junk = v;
+    junk.push_back(7);
+    auto lj = decodeLayout(d, Signature("TERM"), {sub("VMAD", junk)});
+    CHECK(!lj.heuristic.empty() && !lj.issues.empty()); // not as described: undescribed, reported
+
+    // Numbers and text: nothing undescribed.
+    const std::pair<const char*, const char*> plain[] = {
+        {"FURN", "ENAM"}, {"TERM", "MNAM"}, {"LCTN", "ANAM"}, {"LSCR", "ZNAM"}, {"LSCR", "ONAM"}, {"IPCT", "DATA"},
+        {"CSTY", "CSRA"}, {"ARMA", "BSMB"}, {"PROJ", "NAM2"}, {"SNDR", "FNAM"}, {"SNDR", "NNAM"}, {"WEAP", "MASE"}};
+    for (auto [rec, s] : plain) {
+        auto l = decodeLayout(d, Signature::fromString(rec), {sub(s, std::vector<uint8_t>(24, 0x41))});
+        CHECK(l.heuristic.empty() && l.formIdSlots.empty());
+    }
+}

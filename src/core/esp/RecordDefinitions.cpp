@@ -277,6 +277,7 @@ void buildOldGen(RecordDefinitions& d)
     FieldDef weaponFiring = structPlain({29}, {{0, 29}, {33, 41}});
     b.record("WEAP", "Weapon", true)
         .field("DNAM", weaponData)
+        .field("MASE", noRefs())                // xEdit: melee speed (enum)
         .field("CRDT", structPlain({8}, {{0, 8}})) // critical damage and charge multipliers, critical effect spell
         .field("FNAM", weaponFiring)            // firing data: projectile override at +29
         .field("INAM", formId())                // impact data set
@@ -457,6 +458,7 @@ void buildOldGen(RecordDefinitions& d)
 
     b.record("ARMA", "Armor Addon", true)
         .field("BOD2", noRefs())                    // biped body template
+        .field("BSMB", zstring())                   // xEdit: bone scale modifier set / bone names
         .field("RNAM", formId())                    // race
         .field("DNAM", noRefs())                    // priorities, weight slider, detection sound value, weapon adjust
         .field("MODL", formIdList(MergeMode::Set))  // additional races
@@ -611,6 +613,9 @@ void buildOldGen(RecordDefinitions& d)
         .field("WBDT", noRefs()) // workbench type, skill
         .field("FNMK", formId()) // marker keyword
         .field("FNPR", noRefs()) // entry points
+        .field("SNAM", special(FieldKind::FurnitureMarkers)) // xEdit wbSNAMMarkerParams
+        .field("ENAM", noRefs()) // xEdit: marker index
+        .field("NAM0", noRefs()) // xEdit: disabled entry points
         .field("XMRK", zstring()) // marker model
         .field("COCT", noRefs())
         .field("CNTO", cnto)     // items (power armour stations)
@@ -652,6 +657,9 @@ void buildOldGen(RecordDefinitions& d)
         .field("ITID", noRefs())  // menu item id
         .field("TNAM", formId())  // submenu terminal
         .field("WNAM", lstring()) // welcome text
+        .field("NAM0", lstring()) // xEdit: header text
+        .field("MNAM", noRefs())  // xEdit: active markers / flags
+        .field("SNAM", special(FieldKind::FurnitureMarkers)) // xEdit wbSNAMMarkerParams
         .field("COCT", noRefs())
         .field("CNTO", cnto) // items (holotapes)
         .field("COED", structPlain({0}, {{8, 12}}))
@@ -669,6 +677,7 @@ void buildOldGen(RecordDefinitions& d)
     b.record("PROJ", "Projectile", true)
         .field("DNAM", projectileData)
         .field("NAM1", zstring()) // muzzle flash model
+        .field("NAM2", noRefs())  // xEdit wbModelInfo: the muzzle flash model's texture hashes
         .modelRegions();
 
     // DATA: light, sound 1, sound 2, impact data set, placed object, spawn projectile; then numbers.
@@ -678,6 +687,7 @@ void buildOldGen(RecordDefinitions& d)
         .modelRegions();
 
     b.record("IPCT", "Impact", true)
+        .field("DATA", noRefs()) // xEdit: duration, orientation, angle, radius, sound level, flags, result
         .field("DODT", noRefs()) // decal data
         .field("DNAM", formId()) // texture set
         .field("ENAM", formId()) // secondary texture set
@@ -701,6 +711,8 @@ void buildOldGen(RecordDefinitions& d)
         .field("GNAM", formId()) // category
         .field("SNAM", formId()) // alternate sound for
         .field("ANAM", zstring()) // sound file
+        .field("FNAM", zstring()) // xEdit: rate-of-fire sound file
+        .field("NNAM", zstring()) // xEdit: notes
         .field("ONAM", formId()) // output model
         .conditionRegion();
 
@@ -720,7 +732,8 @@ void buildOldGen(RecordDefinitions& d)
         .field("DESC", lstring()) // the one DESC read from STRINGS, not DLSTRINGS (xEdit's localization rules)
         .field("NNAM", formId()) // loading screen model (static)
         .field("TNAM", formId()) // transform
-        .field("ZNAM", unknown()) // 8 bytes here, not the common put-down sound
+        .field("ZNAM", noRefs()) // xEdit: zoom min, max (floats); not the common put-down sound
+        .field("ONAM", noRefs()) // xEdit: rotation min, max (int16)
         .conditionRegion();
 
     b.record("DMGT", "Damage Type", true).field("DNAM", structArray(8, {0, 4}, MergeMode::Scalar)); // actor value, spell
@@ -1261,6 +1274,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("INAM", formId())   // idle
         .add(region("Package", packageBody, packageBody));
     b.record("LCTN", "Location", true)
+        .field("ANAM", noRefs()) // xEdit: actor fade mult (float)
         .field("ACPR", structArray(12, {0, 4})) // persistent references: ref, world/cell, grid
         .field("LCPR", structArray(12, {0, 4}))
         .field("RCPR", formIdArray())
@@ -1285,6 +1299,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("CNAM", noRefs());
     b.record("CSTY", "Combat Style", true) // numbers and flags only
         .field("CSGD", noRefs())
+        .field("CSRA", noRefs()) // xEdit: ranged accuracy mult (float)
         .field("CSMD", unknown())  // undecoded in xEdit: scanned
         .field("CSME", noRefs())
         .field("CSCR", noRefs())

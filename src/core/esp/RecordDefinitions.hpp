@@ -45,6 +45,7 @@ enum class FieldKind : uint8_t {
     SceneHeadtracking, // SCEN HTID: a sound in a radio action (type 6), alias IDs in a dialogue action
     SoundDescriptorData, // SNDR BNAM: the base descriptor (an AutoWeapon descriptor), else numbers
     EffectShaderData, // EFSH DNAM: ambient sound (and addon models in the old format), by layout size
+    FurnitureMarkers, // FURN/TERM SNAM: markers (offset, rotation, keyword at +16, entry types): 24 or 20 bytes each
     BookData,       // BOOK DNAM: flags, "teaches" (a FormID only for actor value, spell or perk), text offset
 };
 
