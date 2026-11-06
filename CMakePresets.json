@@ -1,34 +1,3 @@
-{
-  "version": 3,
-  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
-  "configurePresets": [
-    {
-      "name": "windows-msvc",
-      "displayName": "Windows x64 (MSVC + vcpkg)",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/${presetName}",
-      "architecture": { "value": "x64", "strategy": "external" },
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        "VCPKG_TARGET_TRIPLET": "x64-windows"
-      },
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
-    },
-    {
-      "name": "linux-dev",
-      "displayName": "Linux (development and tests)",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/${presetName}",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
-    }
-  ],
-  "buildPresets": [
-    { "name": "windows-msvc", "configurePreset": "windows-msvc" },
-    { "name": "linux-dev", "configurePreset": "linux-dev" }
-  ],
-  "testPresets": [
-    { "name": "linux-dev", "configurePreset": "linux-dev", "output": { "outputOnFailure": true } },
-    { "name": "windows-msvc", "configurePreset": "windows-msvc", "output": { "outputOnFailure": true } }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ff1b512741c02449b8dc62b9014a1412c0dbc443c5305813772623ab210752c3
+size 1305
