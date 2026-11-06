@@ -56,12 +56,16 @@ public:
         int ghostable = 0;
         int ghostRefused = 0;
         QString ghostDetails;       // which plugins cannot be ghosted, and why
-        // Vortex
+        // Vortex and Mod Organizer 2
         bool vortex = false;
-        bool vortexRunning = false;
+        bool mo2 = false;
+        bool managerRunning = false; // Vortex.exe / ModOrganizer.exe is running
+        QString outputMod;           // MO2: the output folder is this mod in MO2's mods folder
+        bool outputModEnabled = false;
+        QString ownership;           // MO2: which mods provide the compiled plugins
         bool zipAvailable = false;  // this export wrote Multiplexer Output.zip
         QString zipPath;
-        QString downloadsFolder;    // from Settings; empty when not set
+        QString downloadsFolder;    // Vortex: from Settings; MO2: from ModOrganizer.ini; empty when not set
         QString downloadsProblem;   // why it cannot be used (empty: usable)
         QString downloadsNote;
         bool zipInDownloads = false; // a file of the same name is already there
@@ -70,6 +74,7 @@ public:
         bool ghost = false;
         bool copyZip = false;
         bool replaceZip = false; // the archive is already in the downloads folder: replace it (else keep both)
+        bool enableOutputMod = false; // MO2: enable the output mod in the profile
     };
     bool previewApply(ApplyPreview* preview, QString* message);
     bool applyToProfile(const ApplyChoice& choice, QString* message);

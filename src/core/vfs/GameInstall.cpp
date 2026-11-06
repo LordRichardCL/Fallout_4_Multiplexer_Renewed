@@ -179,6 +179,7 @@ ResolvedInstall resolveMo2(const InstallConfig& config)
 
     out.modsPath = mo2Directory(mo2, base, "mod_directory", "mods");
     out.overwritePath = mo2Directory(mo2, base, "overwrite_directory", "overwrite");
+    out.downloadsPath = mo2Directory(mo2, base, "download_directory", "downloads");
     fs::path profiles = mo2Directory(mo2, base, "profiles_directory", "profiles");
 
     std::string profile = config.mo2Profile;
@@ -272,6 +273,27 @@ ResolvedInstall resolveDirect(const InstallConfig& config)
 }
 
 } // namespace
+
+std::vector<fs::path> findMo2Instances()
+{
+    std::vector<fs::path> out;
+    const auto root = platform::localAppDataDir() / "ModOrganizer";
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(root, ec)) {
+        if (!e.is_directory(ec))
+            continue;
+        const auto ini = findChildCaseInsensitive(e.path(), "ModOrganizer.ini");
+        if (ini.empty())
+            continue;
+        IniFile mo2;
+        mo2.load(ini);
+        const std::string game = toLower(decodeMo2Value(mo2.get("General", "gameName", "")));
+        if (game.empty() || game == "fallout 4") // not "Fallout 4 VR"
+            out.push_back(e.path());
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
 
 std::vector<PluginListEntry> parsePluginsTxt(const std::string& text)
 {

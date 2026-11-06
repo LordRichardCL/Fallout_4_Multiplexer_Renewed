@@ -5,6 +5,7 @@
 #include "widgets/Widgets.hpp"
 
 #include "engine/VortexSupport.hpp"
+#include "vfs/GameInstall.hpp"
 #include "util/Platform.hpp"
 
 #include <QButtonGroup>
@@ -13,6 +14,7 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QInputDialog>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -64,7 +66,33 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     mo2Rows_ = new QWidget;
     auto* mo2Form = new QFormLayout(mo2Rows_);
     mo2Form->setContentsMargins(0, 0, 0, 0);
-    mo2Form->addRow("MO2 instance folder", pathRow(mo2Path_, true, "Folder containing ModOrganizer.ini"));
+    auto* mo2Row = pathRow(mo2Path_, true, "Folder containing ModOrganizer.ini");
+    auto* findMo2 = makeButton("Find Instances");
+    static_cast<QHBoxLayout*>(mo2Row->layout())->addWidget(findMo2);
+    mo2Form->addRow("MO2 instance folder", mo2Row);
+    connect(findMo2, &QPushButton::clicked, this, [this] {
+        const auto found = fo4mx::findMo2Instances();
+        if (found.empty()) {
+            QMessageBox::information(this, "Mod Organizer 2 instances",
+                                     "No global Mod Organizer 2 instance for Fallout 4 was found. A portable instance is "
+                                     "the folder where you installed Mod Organizer 2: browse to the folder that holds "
+                                     "ModOrganizer.ini.");
+            return;
+        }
+        QStringList items;
+        for (const auto& f : found)
+            items << toQString(f);
+        bool ok = false;
+        // Never chosen for the user, even when there is only one.
+        const QString pick = QInputDialog::getItem(this, "Mod Organizer 2 instances",
+                                                   QString("%1 instance(s) for Fallout 4 found. Which one do you use?")
+                                                       .arg(items.size()),
+                                                   items, 0, false, &ok);
+        if (ok && !pick.isEmpty()) {
+            mo2Path_->setText(pick);
+            reloadProfiles();
+        }
+    });
     profile_ = new QComboBox;
     profile_->setEditable(true);
     mo2Form->addRow("Profile", profile_);

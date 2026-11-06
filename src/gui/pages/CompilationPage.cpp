@@ -276,30 +276,52 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                                      ? "Review what will change. Every file is backed up first, and if any step "
                                        "fails everything already done is undone."
                                      : "<b>Your load order cannot be switched over yet</b> (see below)." +
-                                           QString(preview.vortex ? " You can still copy the package to Vortex's "
-                                                                    "downloads folder to install it."
-                                                                  : ""));
+                                           QString(preview.vortex || preview.mo2
+                                                       ? " You can still put the package where your mod manager "
+                                                         "installs it from."
+                                                       : ""));
         intro->setWordWrap(true);
         v->addWidget(intro);
 
-        // Vortex: the package first.
+        // Vortex / Mod Organizer 2: the package first.
         QCheckBox* copyZip = nullptr;
-        if (preview.vortex) {
-            auto* box = new QGroupBox("1. The package in Vortex");
+        QCheckBox* enableMod = nullptr;
+        if (preview.vortex || preview.mo2) {
+            const QString manager = preview.vortex ? "Vortex" : "Mod Organizer 2";
+            auto* box = new QGroupBox("1. The package in " + manager);
             auto* bl = new QVBoxLayout(box);
-            if (!preview.zipAvailable) {
+            if (preview.mo2 && !preview.outputMod.isEmpty()) {
+                // The output folder is itself a mod in MO2's mods folder: no zip needed.
+                if (preview.outputModEnabled) {
+                    bl->addWidget(new QLabel("The output folder is the mod \"" + preview.outputMod +
+                                             "\", enabled in this profile."));
+                } else {
+                    enableMod = new QCheckBox("Enable the mod \"" + preview.outputMod +
+                                              "\" (your output folder) in this profile");
+                    enableMod->setChecked(true);
+                    bl->addWidget(enableMod);
+                    auto* note = new QLabel("A new entry goes to the top of the left pane (highest priority), so it "
+                                            "wins every file conflict. Every other mod keeps its place and state.");
+                    note->setWordWrap(true);
+                    note->setStyleSheet("color: palette(placeholder-text);");
+                    bl->addWidget(note);
+                }
+            } else if (!preview.zipAvailable) {
                 bl->addWidget(new QLabel("This export did not write Multiplexer Output.zip. Export again."));
             } else if (preview.downloadsFolder.isEmpty() || !preview.downloadsProblem.isEmpty()) {
                 auto* how = new QLabel(
                     (preview.downloadsFolder.isEmpty()
-                         ? QString("Your Vortex downloads folder is not set (Settings → Installation). ")
-                         : "Your Vortex downloads folder cannot be used: " + preview.downloadsProblem + ". ") +
-                    "Drag the zip onto Vortex's Mods page instead:\n" + preview.zipPath);
+                         ? (preview.vortex ? QString("Your Vortex downloads folder is not set (Settings → Installation). ")
+                                           : QString("Mod Organizer 2's downloads folder is not known. "))
+                         : manager + "'s downloads folder cannot be used: " + preview.downloadsProblem + ". ") +
+                    (preview.vortex ? "Drag the zip onto Vortex's Mods page instead:\n"
+                                    : "Use Install a new mod from an archive in Mod Organizer 2 instead:\n") +
+                    preview.zipPath);
                 how->setWordWrap(true);
                 how->setTextInteractionFlags(Qt::TextSelectableByMouse);
                 bl->addWidget(how);
             } else {
-                copyZip = new QCheckBox("Copy Multiplexer Output.zip to Vortex's downloads folder");
+                copyZip = new QCheckBox("Copy Multiplexer Output.zip to " + manager + "'s downloads folder");
                 copyZip->setChecked(true);
                 bl->addWidget(copyZip);
                 auto* where = new QLabel(preview.downloadsFolder +
@@ -311,13 +333,19 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                 where->setStyleSheet("color: palette(placeholder-text);");
                 bl->addWidget(where);
             }
-            auto* steps = new QLabel("In Vortex: install and enable the package from the Downloads page (restart Vortex "
-                                     "if it is not listed), let it win every file conflict and Deploy. Then close "
-                                     "Vortex and press Apply to Game again to switch your load order over.");
+            auto* steps = new QLabel(
+                preview.vortex
+                    ? "In Vortex: install and enable the package from the Downloads page (restart Vortex if it is not "
+                      "listed), let it win every file conflict and Deploy. Then close Vortex and press Apply to Game "
+                      "again to switch your load order over."
+                    : "In Mod Organizer 2: install the package from the Downloads tab (or Install a new mod from an "
+                      "archive), enable it and keep it at the bottom of the left pane. Then close Mod Organizer 2 and "
+                      "press Apply to Game again to switch your load order over. Your mods stay enabled.");
             steps->setWordWrap(true);
             bl->addWidget(steps);
-            if (preview.vortexRunning) {
-                auto* running = new QLabel("<b>Vortex is running.</b> Close it before switching your load order over.");
+            if (preview.managerRunning) {
+                auto* running = new QLabel("<b>" + manager + " is running.</b> Close it before switching your load "
+                                           "order over.");
                 running->setWordWrap(true);
                 bl->addWidget(running);
             }
@@ -353,6 +381,8 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
         auto* go = buttons->addButton("Apply", QDialogButtonBox::AcceptRole);
         auto updateGo = [&] { go->setEnabled(preview.ready || (copyZip && copyZip->isChecked())); };
+        if (enableMod)
+            connect(enableMod, &QCheckBox::toggled, &dlg, updateGo);
         updateGo();
         if (copyZip)
             connect(copyZip, &QCheckBox::toggled, &dlg, updateGo);
@@ -365,9 +395,10 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         AppController::ApplyChoice choice;
         choice.ghost = ghost && ghost->isChecked();
         choice.copyZip = copyZip && copyZip->isChecked();
+        choice.enableOutputMod = enableMod && enableMod->isChecked();
         if (choice.copyZip && preview.zipInDownloads) {
             QMessageBox ask(QMessageBox::Question, "Multiplexer Output.zip is already there",
-                            "An archive named Multiplexer Output.zip is already in Vortex's downloads folder.\n\n"
+                            "An archive named Multiplexer Output.zip is already in the downloads folder.\n\n"
                             "Replace it (the old one is backed up first), or keep both (the new one gets a "
                             "numbered name)?",
                             QMessageBox::NoButton, this);

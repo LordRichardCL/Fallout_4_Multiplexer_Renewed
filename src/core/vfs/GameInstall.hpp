@@ -48,6 +48,7 @@ struct ResolvedInstall {
     std::filesystem::path profilePath;   // MO2 profile folder
     std::filesystem::path modsPath;      // MO2 mods folder
     std::filesystem::path overwritePath; // MO2 overwrite folder
+    std::filesystem::path downloadsPath; // MO2 downloads folder (download_directory)
     std::filesystem::path pluginsFile;   // plugins.txt actually used
     std::filesystem::path iniDirectory;  // folder whose Fallout4*.ini were read
     std::vector<ModInfo> mods;           // enabled + disabled, ascending priority
@@ -72,6 +73,11 @@ ResolvedInstall resolveInstall(const InstallConfig& config);
 
 // Adds the Data folder and (for MO2) all enabled mods + overwrite to the VFS, then scans.
 void populateVfs(const ResolvedInstall& install, VirtualFileSystem& vfs, ProgressSink& progress = nullProgress());
+
+// Mod Organizer 2 instances for Fallout 4 on this PC: global instances in
+// %LOCALAPPDATA%\ModOrganizer\<name>, whose ModOrganizer.ini names Fallout 4. A portable instance
+// is wherever the user installed MO2 and cannot be found this way. Never chosen between: the user picks.
+std::vector<std::filesystem::path> findMo2Instances();
 
 // Parses a plugins.txt (asterisk format). Lines without '*' are inactive.
 std::vector<PluginListEntry> parsePluginsTxt(const std::string& text);

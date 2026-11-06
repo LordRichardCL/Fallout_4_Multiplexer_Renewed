@@ -2,6 +2,7 @@
 
 #include "engine/CompilationEngine.hpp"
 #include "engine/Exporter.hpp"
+#include "engine/Mo2Support.hpp"
 #include "engine/Session.hpp"
 #include "util/FileTransaction.hpp"
 #include "util/Text.hpp"
@@ -55,7 +56,8 @@ bool staysActive(const PluginInfo& p, const CompiledOutput& c)
 
 } // namespace
 
-DeploymentCheck PostCompilation::check(const Session& session, const CompiledOutput& c, const CompilationResult& result)
+DeploymentCheck PostCompilation::check(const Session& session, const CompiledOutput& c, const CompilationResult& result,
+                                       const std::string& assumeEnabledMod)
 {
     DeploymentCheck d;
     const auto kind = session.install.config.kind;
@@ -85,7 +87,9 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
         d.blockers.push_back(std::to_string(d.lightPluginsAfter) + " light plugins would be active; Fallout 4 has " +
                              std::to_string(kMaxLightPlugins) + " light slots");
 
-    // Outputs the game can see. Under MO2 the virtual Data folder decides, which only a scan knows.
+    // Outputs the game can see. Under MO2: through the profile's enabled mods (read fresh).
+    if (kind == InstallKind::ModOrganizer2 && !session.install.profilePath.empty())
+        d.missingOutputs = mo2::outputsNotVisible(session, result.outputPlugins, assumeEnabledMod);
     if (kind != InstallKind::ModOrganizer2 && !session.install.dataPath.empty()) {
         const bool writtenIntoData = norm(result.dataFolder) == norm(session.install.dataPath);
         for (const auto& f : result.outputPlugins) {
@@ -94,11 +98,15 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
             if (!sameFile(f, session.install.dataPath / f.filename()))
                 d.missingOutputs.push_back(pathToUtf8(f.filename()));
         }
+    }
+    {
         if (!d.missingOutputs.empty()) {
             const std::string what = std::to_string(d.missingOutputs.size()) +
                                      " output plugin(s) are not installed in the game's Data folder yet (or differ "
-                                     "from this build, first: " + d.missingOutputs.front() +
-                                     "): install Multiplexer Output.zip first";
+                                     "from this build, first: " + d.missingOutputs.front() + "): install " +
+                                     (kind == InstallKind::ModOrganizer2 ? "Multiplexer Output.zip as a mod and enable it"
+                                                                         : "Multiplexer Output.zip") +
+                                     " first";
             // Apply to Game switches plugins.txt itself, which must never disable the compiled
             // plugins while the game cannot see their replacement.
             d.blockers.push_back(what);
@@ -154,11 +162,14 @@ std::string PostCompilation::instructions(const Session& session, const Compilat
     t += "Steps\n-----\n";
     switch (kind) {
     case InstallKind::ModOrganizer2:
-        t += "1. In Mod Organizer 2: Install a new mod from an archive, pick \"Multiplexer Output.zip\", enable it and\n"
-             "   keep it at the bottom of the left pane so it wins every file conflict.\n"
-             "2. Close Mod Organizer 2 (it rewrites the profile's plugins.txt when it closes).\n"
+        t += "1. Install the package as a mod: in Mod Organizer 2, Install a new mod from an archive and pick\n"
+             "   \"Multiplexer Output.zip\" (Apply to Game can copy it into MO2's downloads folder first). Keep it at\n"
+             "   the bottom of the left pane so it wins every file conflict. If your output folder is itself a\n"
+             "   folder in MO2's mods folder, Apply to Game can enable that mod for you instead.\n"
+             "2. Close Mod Organizer 2 (it rewrites the profile's plugins.txt and modlist.txt when it closes).\n"
              "3. In Multiplexer, Compilation page: Apply to Game. It disables the compiled plugins in the profile,\n"
-             "   enables the outputs at the end and keeps the compiled mods' archives loading (backups first).\n";
+             "   enables the outputs at the end and keeps the compiled mods' archives loading (backups first).\n"
+             "   The mods themselves stay enabled: their meshes, textures and scripts are still used.\n";
         break;
     case InstallKind::Vortex:
         t += "1. In Multiplexer, Compilation page: Apply to Game. With your Vortex downloads folder set (Settings),\n"
@@ -274,10 +285,14 @@ ApplyPlan PostCompilation::planApply(FileTransaction& tx, const Session& session
 {
     ApplyPlan plan;
     const auto kind = session.install.config.kind;
-    plan.check = check(session, c, result);
+    const bool enableMod = kind == InstallKind::ModOrganizer2 && !o.enableOutputMod.empty();
+    plan.check = check(session, c, result, enableMod ? o.enableOutputMod : std::string());
     if (kind == InstallKind::Vortex && o.switchLoadOrder && o.managerRunning)
         plan.check.blockers.push_back("Vortex is running: close it first. Vortex keeps plugins.txt in step with its "
                                       "Plugins page and would overwrite the change");
+    if (kind == InstallKind::ModOrganizer2 && o.switchLoadOrder && o.managerRunning)
+        plan.check.blockers.push_back("Mod Organizer 2 is running: close it first. It writes the profile's plugins.txt "
+                                      "and modlist.txt when it closes and would overwrite the change");
     plan.ghosts = ghostChecks(session, c, result, plan.check);
 
     // The package into Vortex's downloads folder: the step that makes the outputs installable.
@@ -299,6 +314,10 @@ ApplyPlan PostCompilation::planApply(FileTransaction& tx, const Session& session
 
     // The load order: the MO2 profile, or the plugins.txt the game reads (Standalone, and Vortex
     // while it is closed: Vortex reads plugins.txt back when it starts).
+    if (enableMod) {
+        mo2::planEnableMod(tx, session.install.profilePath, o.enableOutputMod);
+        plan.enablesMod = true;
+    }
     if (o.switchLoadOrder && !session.install.pluginsFile.empty()) {
         Exporter::planProfile(tx, session, c, session.install.pluginsFile);
         plan.writesLoadOrder = true;
