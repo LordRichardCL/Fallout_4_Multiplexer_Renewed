@@ -57,6 +57,7 @@ add_library(fo4mx_core STATIC
     db/DatabaseWriter.cpp
     papyrus/Pex.cpp
     report/ReportGenerator.cpp
+    reference/FormIdReference.cpp
 )
 
 target_include_directories(fo4mx_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

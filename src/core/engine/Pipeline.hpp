@@ -51,6 +51,9 @@ struct PipelineConfig {
     // "Multiplexer Output\Diagnostic Recorder" (never inside the package's Data folder).
     bool diagnosticRecorder = false;
     std::filesystem::path diagnosticRecorderDll; // MultiplexerDiagnosticRecorder.dll (next to the application)
+    // Editor IDs of the base-game masters from an independent tool (next to the application): the
+    // Definition Check compares this app's reading of those plugins with it. Optional.
+    std::filesystem::path formIdReference;
     // Record definitions to use instead of the runtime profile's (tests, trial catalogues). Not owned.
     const RecordDefinitions* definitions = nullptr;
 };

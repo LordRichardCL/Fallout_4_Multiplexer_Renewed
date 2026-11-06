@@ -2,6 +2,7 @@
 
 #include "engine/CompilationResult.hpp"
 #include "engine/PostCompilation.hpp"
+#include "reference/FormIdReference.hpp"
 #include "util/FileTransaction.hpp"
 
 #include "diagnostics/RecorderPackage.hpp"
@@ -218,6 +219,18 @@ DefinitionCheck Pipeline::checkDefinitions(const std::vector<Signature>& types, 
     if (!session_->scanned)
         scan(progress);
     auto check = ValidationEngine::checkDefinitions(*session_, types, progress, config_.scan.threads);
+    // Cross-check with the independent reference of the base-game masters, when it is installed.
+    try {
+        if (auto ref = FormIdReference::tryLoad(config_.formIdReference)) {
+            progress.stage("Comparing with the FormID reference");
+            const auto cmp = compareWithReference(*ref, *session_);
+            reportReferenceComparison(cmp, check.report);
+            spdlog::info("FormID reference: {} plugin(s) compared, {}", cmp.plugins.size(),
+                         cmp.agrees() ? "all agree" : "differences found (see Reference Check)");
+        }
+    } catch (const std::exception& e) {
+        check.report.fail(Severity::Warning, "Reference Check", std::string("The FormID reference could not be read: ") + e.what());
+    }
     openDatabase();
     if (db_)
         db::DatabaseWriter(*db_).writeValidation("definitions", check.report, false);

@@ -10,6 +10,7 @@
 #include "engine/Exporter.hpp"
 #include "engine/CompilationResult.hpp"
 #include "engine/PostCompilation.hpp"
+#include "reference/FormIdReference.hpp"
 #include "engine/VortexSupport.hpp"
 #include "engine/Mo2Support.hpp"
 #include "util/FileTransaction.hpp"
@@ -268,6 +269,7 @@ void AppController::loadSettings()
     // MultiplexerDiagnosticRecorder.dll ships next to the application.
     config_.diagnosticRecorderDll =
         toPath(QCoreApplication::applicationDirPath()) / fo4mx::diagnostics::kRecorderDllName;
+    config_.formIdReference = toPath(QCoreApplication::applicationDirPath()) / fo4mx::FormIdReference::kFileName;
     config_.conflicts.analyseAllRecordTypes = s.value("analysis/allTypes", true).toBool();
     config_.scan.threads = s.value("advanced/threads", 0).toUInt();
     config_.conflicts.threads = config_.analysis.threads = config_.compile.threads = config_.scan.threads;

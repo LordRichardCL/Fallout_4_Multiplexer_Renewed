@@ -79,6 +79,8 @@ jobs:
           Copy-Item build/windows-msvc/src/cli/fo4mx.exe $out
           # The optional Diagnostic Recorder (F4SE plugin): Multiplexer copies it into the output on export.
           Copy-Item build/windows-msvc/src/recorder/MultiplexerDiagnosticRecorder.dll $out
+          # Editor IDs of the base-game masters, for the Definition Check's cross-check (optional).
+          Copy-Item resources/Fallout4_reference_editorids.bin $out
           Copy-Item build/windows-msvc/vcpkg_installed/x64-windows/bin/*.dll $out
           windeployqt --release --no-translations --sql $out/Fallout4MultiplexerRenewed.exe
           Copy-Item README.md, docs -Destination $out -Recurse

@@ -306,6 +306,15 @@ The report lists every change, the record types the changed plugins contain (aff
 
 Cached values store FormKeys by plugin **name**, so they survive load order changes and new plugin numbering. Conflict cell text stores form references as tokens, rendered against the current load order (so labels show current FormIDs). Allocation, FormID translation and validation always run in full: they are fast, and they guarantee a consistent output. The exporter compares each output image with the file on disk and leaves identical files untouched. It removes generated plugins that the new build no longer produces.
 
+## FormID reference
+
+`reference/FormIdReference` reads `Fallout4_reference_editorids.bin` (Editor IDs of the base-game
+masters from an independent export, see `docs/FORMID_REFERENCE.md`): loaded whole (1.4 MB compressed,
+about 5 MB in memory) only when asked, looked up by binary search on a sorted 32-bit key (plugin << 24 |
+object id). `compareWithReference` walks one plugin's rows against the records the scan found defined by
+that plugin; `Pipeline::checkDefinitions` adds the result as Reference Check findings. Nothing in the
+scan, compiler, validation or cache depends on it.
+
 ## Technology choices
 
 - **C++20, Qt 6 Widgets, SQLite, zlib, spdlog**, as specified.

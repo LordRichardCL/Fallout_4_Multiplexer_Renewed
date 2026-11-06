@@ -4,6 +4,7 @@
 #include "diagnostics/RecorderPackage.hpp"
 #include "ba2/Ba2Archive.hpp"
 #include "engine/Pipeline.hpp"
+#include "reference/FormIdReference.hpp"
 #include "esp/FieldDecoder.hpp"
 #include "esp/PluginFile.hpp"
 #include "util/Log.hpp"
@@ -39,6 +40,10 @@ Usage:
   fo4mx info     <plugin.esp>
   fo4mx dump     <plugin.esp> [--formid XXXXXXXX] [--limit N]
   fo4mx ba2      <archive.ba2> [--extract PATH --to FILE]
+  fo4mx formid   <plugin> <formid>
+                 look up a base-game record (Fallout4.esm, the DLC masters) in
+                 the bundled reference: its Editor ID, without scanning anything.
+                 <formid>: hex, the master index is ignored (01000800 = 000800)
   fo4mx diagnose [session.jsonl] [--package DIR] [--runtime oldgen|nextgen]
                  read a Diagnostic Recorder log (default: the newest in
                  Documents\My Games\Fallout4\F4SE\MultiplexerDiagnosticRecorder) and
@@ -212,6 +217,7 @@ PipelineConfig makeConfig(const Args& a)
     cfg.analysis.excludedPlugins = a.all("--exclude");
     cfg.diagnosticRecorder = a.has("--diagnostic-recorder");
     cfg.diagnosticRecorderDll = g_exeDir / diagnostics::kRecorderDllName;
+    cfg.formIdReference = g_exeDir / FormIdReference::kFileName;
     cfg.useCache = !a.has("--no-cache");
     return cfg;
 }
@@ -407,6 +413,27 @@ void printChanges(const ChangeReport& r)
         std::printf("  (*) requires recompilation. Run: fo4mx compile ...\n");
 }
 
+int cmdFormId(const Args& a)
+{
+    if (a.positional.size() < 2)
+        throw std::runtime_error("formid: plugin and FormID required (e.g. fo4mx formid Fallout4.esm 0C38F9)");
+    const auto file = g_exeDir / FormIdReference::kFileName;
+    auto ref = FormIdReference::tryLoad(file);
+    if (!ref)
+        throw std::runtime_error("the FormID reference is not installed: " + pathToUtf8(file));
+    const uint32_t id = static_cast<uint32_t>(std::stoul(a.positional[1], nullptr, 16)) & 0xFFFFFF;
+    const auto found = ref->find(a.positional[0], id);
+    if (found.empty()) {
+        std::printf("%s %06X: no Editor ID in the reference (the record has none, or it is not in this plugin)\n",
+                    a.positional[0].c_str(), id);
+        return 1;
+    }
+    for (const auto& e : found)
+        std::printf("%s %06X  %.*s%s\n", a.positional[0].c_str(), id, static_cast<int>(e.editorId.size()),
+                    e.editorId.data(), e.baseGameOverride ? "  (override of the Fallout4.esm record)" : "");
+    return 0;
+}
+
 int cmdPipeline(const Args& a)
 {
     auto cfg = makeConfig(a);
@@ -554,6 +581,8 @@ int main(int argc, char** argv)
             return cmdBa2(a);
         if (a.command == "diagnose")
             return cmdDiagnose(a);
+        if (a.command == "formid")
+            return cmdFormId(a);
         if (a.command == "scan" || a.command == "analyse" || a.command == "analyze" || a.command == "compile" ||
             a.command == "status" || a.command == "check-definitions")
             return cmdPipeline(a);

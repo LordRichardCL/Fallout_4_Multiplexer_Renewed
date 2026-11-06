@@ -9,6 +9,8 @@
 #include "engine/PostCompilation.hpp"
 #include "engine/VortexSupport.hpp"
 #include "engine/Mo2Support.hpp"
+#include "reference/FormIdReference.hpp"
+#include "util/Compression.hpp"
 #include "engine/PluginSummary.hpp"
 #include "engine/ReferenceScanner.hpp"
 #include "esp/LayoutCheck.hpp"
@@ -4816,4 +4818,154 @@ TEST(mo2_instances_are_listed_never_chosen)
         const auto name = pathToUtf8(f.filename());
         CHECK(name == "Fallout 4" || name == "Second FO4");
     }
+}
+
+// ---- The FormID reference (Editor IDs of the base-game masters) ----
+
+namespace {
+
+// The same format tools/build_formid_reference.py writes.
+void writeReference(const std::filesystem::path& file,
+                    const std::vector<std::pair<std::string, std::vector<std::tuple<uint32_t, std::string, bool>>>>& plugins)
+{
+    BinaryWriter payload;
+    payload.write<uint32_t>(static_cast<uint32_t>(plugins.size()));
+    for (const auto& [name, rows] : plugins) {
+        payload.write<uint16_t>(static_cast<uint16_t>(name.size()));
+        for (char ch : name)
+            payload.write<uint8_t>(static_cast<uint8_t>(ch));
+        payload.write<uint32_t>(static_cast<uint32_t>(rows.size()));
+        uint32_t maxId = 0;
+        for (const auto& r : rows)
+            maxId = std::max(maxId, std::get<0>(r));
+        payload.write<uint32_t>(maxId);
+    }
+    std::vector<std::tuple<uint32_t, std::string, bool>> all;
+    for (size_t p = 0; p < plugins.size(); ++p)
+        for (const auto& [id, edid, over] : plugins[p].second)
+            all.emplace_back(uint32_t(p) << 24 | id, edid, over);
+    std::sort(all.begin(), all.end());
+    std::string text;
+    payload.write<uint32_t>(static_cast<uint32_t>(all.size()));
+    for (const auto& [key, edid, over] : all) {
+        payload.write<uint32_t>(key);
+        payload.write<uint32_t>(static_cast<uint32_t>(text.size()) | (over ? 0x80000000u : 0u));
+        text += edid;
+        text += '\0';
+    }
+    payload.write<uint32_t>(static_cast<uint32_t>(text.size()));
+    for (char ch : text)
+        payload.write<uint8_t>(static_cast<uint8_t>(ch));
+    auto body = payload.take();
+    auto packed = zlibDeflate(body);
+    BinaryWriter out;
+    for (char ch : std::string("FO4XREF", 8))
+        out.write<uint8_t>(static_cast<uint8_t>(ch));
+    out.write<uint32_t>(1);
+    out.write<uint32_t>(static_cast<uint32_t>(body.size()));
+    out.write<uint32_t>(static_cast<uint32_t>(packed.size()));
+    for (int i = 0; i < 32; ++i)
+        out.write<uint8_t>(0);
+    auto bytes = out.take();
+    bytes.insert(bytes.end(), packed.begin(), packed.end());
+    writeBytes(file, bytes);
+}
+
+} // namespace
+
+TEST(formid_reference_shipped_file_reads_and_looks_up)
+{
+    const auto file = std::filesystem::path(FO4MX_SOURCE_DIR) / "resources" / FormIdReference::kFileName;
+    auto ref = FormIdReference::load(file);
+    CHECK_EQ(ref.plugins().size(), size_t(7));
+    CHECK_EQ(ref.plugins()[0].name, std::string("Fallout4.esm"));
+    CHECK_EQ(ref.plugins()[0].sourceRows, uint32_t(1549265));
+    CHECK_EQ(ref.size(), size_t(141537));
+    CHECK_EQ(ref.sourceSha256().size(), size_t(64));
+    auto a = ref.find("fallout4.esm", 0x0C38F9); // plugin names in any letter case
+    CHECK_EQ(a.size(), size_t(1));
+    CHECK(a.size() == 1 && a[0].editorId == "MinDefendCastleWallsBreached" && !a[0].baseGameOverride);
+    CHECK(ref.find("Fallout4.esm", 0x24A003).size() == 1 &&
+          ref.find("Fallout4.esm", 0x24A003)[0].editorId == "sWorkshopMenuLogicText");
+    // A DLC row is either its own record or its override of the Fallout4.esm record with that id.
+    auto dlc = ref.find("DLCRobot.esm", 0x00DBC3);
+    CHECK_EQ(dlc.size(), size_t(2));
+    bool own = false, over = false;
+    for (const auto& e : dlc) {
+        own |= e.editorId == "DLC01Scrappable_EatOTronic01Dirty" && !e.baseGameOverride;
+        over |= e.editorId == "CambridgeConstructionSiteExt02" && e.baseGameOverride;
+    }
+    CHECK(own && over);
+    CHECK(ref.find("Fallout4.esm", 0x0E9610).empty()); // a placed reference without an Editor ID
+    CHECK(ref.find("NotAMaster.esp", 0x000800).empty());
+    CHECK(!ref.entries("DLCworkshop01.esm").empty());
+}
+
+TEST(formid_reference_rejects_damaged_files)
+{
+    auto dir = tempDir("formidref_bad");
+    CHECK(!FormIdReference::tryLoad(dir / "missing.bin").has_value());
+    writeFile(dir / "bad.bin", "not a reference file at all, just text that is long enough to have a header");
+    bool threw = false;
+    try {
+        FormIdReference::load(dir / "bad.bin");
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    CHECK(threw);
+    // A valid file cut short.
+    writeReference(dir / "ok.bin", {{"Fallout4.esm", {{0x800, "A", false}}}});
+    auto bytes = slurp(dir / "ok.bin");
+    writeFile(dir / "short.bin", bytes.substr(0, bytes.size() - 3));
+    threw = false;
+    try {
+        FormIdReference::load(dir / "short.bin");
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    CHECK(threw);
+    CHECK_EQ(FormIdReference::load(dir / "ok.bin").size(), size_t(1));
+}
+
+TEST(definition_check_compares_the_base_game_with_the_reference)
+{
+    auto root = buildInstall("formidref_compare");
+    // buildInstall's Fallout4.esm defines 0x800 BaseKeyword, 0x801 BaseKeyword2, 0x900 Ammo10mm, ...
+    writeReference(root / "ref.bin", {{"Fallout4.esm",
+                                       {{0x800, "BaseKeyword", false},
+                                        {0x801, "SomethingElse", false},
+                                        {0x999, "NotThere", false}}},
+                                      {"DLCRobot.esm", {{0x800, "Robot", false}}}});
+    auto cfg = configFor(root);
+    cfg.formIdReference = root / "ref.bin";
+    Pipeline p(cfg);
+    p.scan();
+    auto ref = FormIdReference::load(cfg.formIdReference);
+    auto cmp = compareWithReference(ref, p.session());
+    CHECK_EQ(cmp.plugins.size(), size_t(1)); // DLCRobot.esm is not in this load order
+    const auto& f4 = cmp.plugins[0];
+    CHECK_EQ(f4.compared, size_t(3));
+    CHECK_EQ(f4.matched, size_t(1));
+    CHECK_EQ(f4.different, size_t(1));
+    CHECK_EQ(f4.missing, size_t(1));
+    CHECK(f4.extra >= 1); // Ammo10mm and others the reference does not list
+    CHECK(!cmp.agrees());
+
+    auto check = p.checkDefinitions();
+    bool warned = false;
+    for (const auto& is : check.report.issues)
+        if (is.category == "Reference Check" && is.severity == Severity::Warning)
+            warned |= is.message.find("SomethingElse") != std::string::npos &&
+                      is.message.find("NotThere") != std::string::npos;
+    CHECK(warned);
+
+    // A reference that agrees gives one Info line, no warning.
+    writeReference(root / "ref.bin", {{"Fallout4.esm", {{0x800, "BaseKeyword", false}, {0x801, "basekeyword2", false}}}});
+    auto again = p.checkDefinitions();
+    size_t infos = 0, warnings = 0;
+    for (const auto& is : again.report.issues)
+        if (is.category == "Reference Check")
+            (is.severity == Severity::Info ? infos : warnings)++;
+    CHECK_EQ(infos, size_t(1));
+    CHECK_EQ(warnings, size_t(0));
 }
