@@ -626,10 +626,32 @@ namespace fo4mx {
 
 std::filesystem::path Exporter::writePackageZip(ExportResult& r)
 {
-    if (r.packageRoot == r.directory)
-        return {}; // not a package layout (an output folder chosen by hand that is not ...\Data)
     const auto zip = r.packageRoot / "Multiplexer Output.zip";
-    const auto stats = writeZip(zip, r.directory, "Data/");
+    ZipStats stats;
+    if (r.packageRoot != r.directory) {
+        stats = writeZip(zip, r.directory, "Data/");
+    } else {
+        // An output folder chosen by hand (not named Data) holds the notes and reports too: the zip
+        // gets only what belongs in the game's Data folder, and never itself.
+        static const char* const kNotes[] = {"multiplexer output.zip",          "multiplexer_archives.ini",
+                                             "multiplexer_disableplugins.txt",  "multiplexer_plugins.txt",
+                                             "multiplexer_instructions.txt",    "multiplexer_archivepriority.txt",
+                                             "multiplexer_build_failed.txt",    "multiplexer_compilation.json"};
+        static const char* const kFolders[] = {"multiplexer reports", "diagnostic recorder"};
+        stats = writeZip(zip, r.directory, "Data/", [](const fs::path& rel) {
+            const std::string first = toLower(pathToUtf8(*rel.begin()));
+            for (const char* f : kFolders)
+                if (first == f)
+                    return true;
+            if (std::distance(rel.begin(), rel.end()) != 1)
+                return false;
+            const std::string name = toLower(pathToUtf8(rel.filename()));
+            for (const char* n : kNotes)
+                if (name == n)
+                    return true;
+            return iendsWith(name, ".zip") || iendsWith(name, ".multiplexer-tmp");
+        });
+    }
     r.zipPath = zip;
     spdlog::info("Wrote {} ({} files, {} bytes before compression)", pathToUtf8(zip), stats.files, stats.bytes);
     return zip;

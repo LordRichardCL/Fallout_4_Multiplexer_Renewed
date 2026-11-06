@@ -23,6 +23,9 @@ struct InstallConfig {
     std::filesystem::path iniDirectory; // optional "My Games/Fallout4" override
     std::string language = "en";
     RuntimeProfile runtime = RuntimeProfile::OldGen_1_10_163;
+    // Vortex: its downloads folder for this game ("...\downloads\fallout4"), where Apply to Game
+    // can copy the package for Vortex to install. Empty: not set.
+    std::filesystem::path vortexDownloads;
 };
 
 struct ModInfo {

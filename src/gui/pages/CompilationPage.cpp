@@ -270,49 +270,117 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         }
         QDialog dlg(this);
         dlg.setWindowTitle("Apply to Game");
-        dlg.resize(760, 560);
+        dlg.resize(780, 600);
         auto* v = new QVBoxLayout(&dlg);
         auto* intro = new QLabel(preview.ready
                                      ? "Review what will change. Every file is backed up first, and if any step "
                                        "fails everything already done is undone."
-                                     : "<b>Something must be fixed before your game can be switched over.</b> "
-                                       "Nothing will be changed.");
+                                     : "<b>Your load order cannot be switched over yet</b> (see below)." +
+                                           QString(preview.vortex ? " You can still copy the package to Vortex's "
+                                                                    "downloads folder to install it."
+                                                                  : ""));
         intro->setWordWrap(true);
         v->addWidget(intro);
+
+        // Vortex: the package first.
+        QCheckBox* copyZip = nullptr;
+        if (preview.vortex) {
+            auto* box = new QGroupBox("1. The package in Vortex");
+            auto* bl = new QVBoxLayout(box);
+            if (!preview.zipAvailable) {
+                bl->addWidget(new QLabel("This export did not write Multiplexer Output.zip. Export again."));
+            } else if (preview.downloadsFolder.isEmpty() || !preview.downloadsProblem.isEmpty()) {
+                auto* how = new QLabel(
+                    (preview.downloadsFolder.isEmpty()
+                         ? QString("Your Vortex downloads folder is not set (Settings → Installation). ")
+                         : "Your Vortex downloads folder cannot be used: " + preview.downloadsProblem + ". ") +
+                    "Drag the zip onto Vortex's Mods page instead:\n" + preview.zipPath);
+                how->setWordWrap(true);
+                how->setTextInteractionFlags(Qt::TextSelectableByMouse);
+                bl->addWidget(how);
+            } else {
+                copyZip = new QCheckBox("Copy Multiplexer Output.zip to Vortex's downloads folder");
+                copyZip->setChecked(true);
+                bl->addWidget(copyZip);
+                auto* where = new QLabel(preview.downloadsFolder +
+                                         (preview.zipInDownloads ? "\nAn archive of that name is already there: you will "
+                                                                   "be asked whether to replace it or keep both."
+                                                                 : QString()) +
+                                         (preview.downloadsNote.isEmpty() ? QString() : "\nNote: " + preview.downloadsNote));
+                where->setWordWrap(true);
+                where->setStyleSheet("color: palette(placeholder-text);");
+                bl->addWidget(where);
+            }
+            auto* steps = new QLabel("In Vortex: install and enable the package from the Downloads page (restart Vortex "
+                                     "if it is not listed), let it win every file conflict and Deploy. Then close "
+                                     "Vortex and press Apply to Game again to switch your load order over.");
+            steps->setWordWrap(true);
+            bl->addWidget(steps);
+            if (preview.vortexRunning) {
+                auto* running = new QLabel("<b>Vortex is running.</b> Close it before switching your load order over.");
+                running->setWordWrap(true);
+                bl->addWidget(running);
+            }
+            v->addWidget(box);
+            v->addWidget(new QLabel("<b>2. Switching your load order over</b>"));
+        }
+
         auto* text = new QPlainTextEdit(preview.summary);
         text->setReadOnly(true);
         v->addWidget(text, 1);
         QCheckBox* ghost = nullptr;
         if (preview.offerGhosting) {
-            ghost = new QCheckBox(QString("Also ghost the %1 compiled plugin(s) (rename Example.esp to "
+            ghost = new QCheckBox(QString("Also ghost the %1 compiled plugin(s) that can be (rename Example.esp to "
                                           "Example.esp.ghost)")
                                       .arg(preview.ghostable));
             v->addWidget(ghost);
             auto* help = new QLabel(
                 "Optional. Disabling the plugins in plugins.txt is enough; ghosting also hides them from the game "
                 "and from tools that might enable them again. Undo it by renaming the file back. Multiplexer still "
-                "reads ghosted plugins for the next build.");
+                "reads ghosted plugins for the next build." +
+                QString(preview.vortex ? " Plugins Vortex deployed are never ghosted (Vortex would restore them)." : ""));
             help->setWordWrap(true);
             help->setStyleSheet("color: palette(placeholder-text);");
             v->addWidget(help);
-        }
-        if (preview.ghostRefused > 0 && preview.offerGhosting) {
-            auto* why = new QLabel(QString("%1 plugin(s) will not be ghosted:").arg(preview.ghostRefused));
-            v->addWidget(why);
-            auto* details = new QPlainTextEdit(preview.ghostDetails);
-            details->setReadOnly(true);
-            details->setMaximumHeight(110);
-            v->addWidget(details);
+            if (preview.ghostRefused > 0) {
+                v->addWidget(new QLabel(QString("%1 plugin(s) will not be ghosted:").arg(preview.ghostRefused)));
+                auto* details = new QPlainTextEdit(preview.ghostDetails);
+                details->setReadOnly(true);
+                details->setMaximumHeight(110);
+                v->addWidget(details);
+            }
         }
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
         auto* go = buttons->addButton("Apply", QDialogButtonBox::AcceptRole);
-        go->setEnabled(preview.ready);
+        auto updateGo = [&] { go->setEnabled(preview.ready || (copyZip && copyZip->isChecked())); };
+        updateGo();
+        if (copyZip)
+            connect(copyZip, &QCheckBox::toggled, &dlg, updateGo);
         v->addWidget(buttons);
         connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
         if (dlg.exec() != QDialog::Accepted)
             return;
-        bool ok = app_->applyToProfile(ghost && ghost->isChecked(), &msg);
+
+        AppController::ApplyChoice choice;
+        choice.ghost = ghost && ghost->isChecked();
+        choice.copyZip = copyZip && copyZip->isChecked();
+        if (choice.copyZip && preview.zipInDownloads) {
+            QMessageBox ask(QMessageBox::Question, "Multiplexer Output.zip is already there",
+                            "An archive named Multiplexer Output.zip is already in Vortex's downloads folder.\n\n"
+                            "Replace it (the old one is backed up first), or keep both (the new one gets a "
+                            "numbered name)?",
+                            QMessageBox::NoButton, this);
+            auto* replace = ask.addButton("Replace", QMessageBox::AcceptRole);
+            auto* both = ask.addButton("Keep Both", QMessageBox::AcceptRole);
+            ask.addButton(QMessageBox::Cancel);
+            ask.exec();
+            if (ask.clickedButton() == replace)
+                choice.replaceZip = true;
+            else if (ask.clickedButton() != both)
+                return;
+        }
+        bool ok = app_->applyToProfile(choice, &msg);
         if (ok)
             QMessageBox::information(this, "Apply to Game", msg);
         else
@@ -380,10 +448,11 @@ void CompilationPage::updateInstallNote()
     const auto kind = app_->config().install.kind;
     QString how;
     if (kind == InstallKind::Vortex)
-        how = "<b>Vortex:</b> after Export, drag <b>Multiplexer Output.zip</b> onto Vortex's Mods page, install and "
-              "enable it, and let it win every file conflict (load after all other mods). In Vortex's Plugins page "
-              "disable the plugins listed in Multiplexer_DisablePlugins.txt and enable the output plugins. Then press "
-              "<b>Apply to Game</b> so the compiled mods' archives keep loading.";
+        how = "<b>Vortex:</b> after Export, press <b>Apply to Game</b>: with your Vortex downloads folder set in "
+              "Settings it copies <b>Multiplexer Output.zip</b> there (or drag the zip onto Vortex's Mods page). In "
+              "Vortex install and enable it, let it win every file conflict and Deploy. Then <b>close Vortex</b> and "
+              "press <b>Apply to Game</b> again: it disables the compiled plugins in plugins.txt, enables the outputs "
+              "and keeps the compiled mods' archives loading. Vortex reads plugins.txt back when it starts.";
     else if (kind == InstallKind::ModOrganizer2)
         how = "<b>Mod Organizer 2:</b> after Export, install <b>Multiplexer Output.zip</b> (Install a new mod from an "
               "archive), enable it and keep it at the bottom of the left pane so it wins over the original mods. Then "

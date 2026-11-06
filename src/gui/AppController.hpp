@@ -50,15 +50,29 @@ public:
 
     // Apply to Game, in two steps: what it will do (nothing changes yet), then doing it.
     struct ApplyPreview {
-        bool ready = false;         // false: something must be fixed first (see summary)
+        bool ready = false;         // false: switching over must wait (see summary)
         QString summary;            // the planned changes and the checks, in plain language
-        bool offerGhosting = false; // a Standalone install with plugins that may be ghosted
+        bool offerGhosting = false; // plugins that may be ghosted (manual install, or not deployed by Vortex)
         int ghostable = 0;
         int ghostRefused = 0;
         QString ghostDetails;       // which plugins cannot be ghosted, and why
+        // Vortex
+        bool vortex = false;
+        bool vortexRunning = false;
+        bool zipAvailable = false;  // this export wrote Multiplexer Output.zip
+        QString zipPath;
+        QString downloadsFolder;    // from Settings; empty when not set
+        QString downloadsProblem;   // why it cannot be used (empty: usable)
+        QString downloadsNote;
+        bool zipInDownloads = false; // a file of the same name is already there
+    };
+    struct ApplyChoice {
+        bool ghost = false;
+        bool copyZip = false;
+        bool replaceZip = false; // the archive is already in the downloads folder: replace it (else keep both)
     };
     bool previewApply(ApplyPreview* preview, QString* message);
-    bool applyToProfile(bool ghost, QString* message);
+    bool applyToProfile(const ApplyChoice& choice, QString* message);
 
     // Last task's outcome, for the status bar.
     QString lastMessage() const { return lastMessage_; }

@@ -4,11 +4,13 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <shlobj.h>
 #include <knownfolders.h>
+#include <tlhelp32.h>
 #pragma comment(lib, "version.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")
@@ -64,6 +66,41 @@ std::filesystem::path fallout4LocalAppDataDir()
 {
     auto base = localAppDataDir();
     return base.empty() ? base : base / "Fallout4";
+}
+
+std::filesystem::path roamingAppDataDir()
+{
+    auto p = envPath("APPDATA");
+    if (!p.empty())
+        return p;
+    auto home = envPath("HOME");
+    return home.empty() ? std::filesystem::path() : home / ".config";
+}
+
+bool isProcessRunning(const std::string& exeName)
+{
+#ifdef _WIN32
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE)
+        return false;
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    bool found = false;
+    const std::wstring wanted(exeName.begin(), exeName.end()); // executable names here are ASCII
+    for (BOOL ok = Process32FirstW(snap, &entry); ok && !found; ok = Process32NextW(snap, &entry))
+        found = _wcsicmp(entry.szExeFile, wanted.c_str()) == 0;
+    CloseHandle(snap);
+    return found;
+#else
+    std::error_code ec;
+    for (const auto& e : std::filesystem::directory_iterator("/proc", ec)) {
+        std::ifstream in(e.path() / "comm");
+        std::string comm;
+        if (in && std::getline(in, comm) && iequals(comm, exeName))
+            return true;
+    }
+    return false;
+#endif
 }
 
 std::filesystem::path applicationDataDir()

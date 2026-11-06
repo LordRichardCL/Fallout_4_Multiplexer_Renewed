@@ -10,6 +10,7 @@
 #include "engine/Exporter.hpp"
 #include "engine/CompilationResult.hpp"
 #include "engine/PostCompilation.hpp"
+#include "engine/VortexSupport.hpp"
 #include "util/FileTransaction.hpp"
 #include "util/Log.hpp"
 #include "util/Platform.hpp"
@@ -237,6 +238,7 @@ void AppController::loadSettings()
     in.iniDirectory = toPath(s.value("install/iniDirectory").toString());
     in.language = ss(s.value("install/language", "en").toString());
     in.runtime = static_cast<RuntimeProfile>(s.value("install/runtime", 0).toInt());
+    in.vortexDownloads = toPath(s.value("vortex/downloadsFolder").toString());
 
     auto& c = config_.compile;
     c.outputCount = s.value("compile/outputCount", 20).toInt();
@@ -286,6 +288,7 @@ void AppController::saveSettings()
     s.setValue("install/iniDirectory", toQString(in.iniDirectory));
     s.setValue("install/language", qs(in.language));
     s.setValue("install/runtime", int(in.runtime));
+    s.setValue("vortex/downloadsFolder", toQString(in.vortexDownloads));
 
     const auto& c = config_.compile;
     s.setValue("compile/outputCount", c.outputCount);
@@ -568,6 +571,31 @@ QString bullet(const std::vector<std::string>& lines, size_t limit = 50)
 
 } // namespace
 
+namespace {
+
+fo4mx::ApplyOptions applyOptions(const fo4mx::Session& s, const AppController::ApplyChoice& choice,
+                                 const fo4mx::CompilationResult& result, bool vortexRunning)
+{
+    fo4mx::ApplyOptions o;
+    o.ghost = choice.ghost;
+    o.managerRunning = vortexRunning;
+    if (choice.copyZip && !s.install.config.vortexDownloads.empty() && !result.zipPath.empty()) {
+        const auto folder = s.install.config.vortexDownloads;
+        const auto name = fo4mx::pathToUtf8(result.zipPath.filename());
+        std::error_code ec;
+        const bool exists = std::filesystem::exists(folder / result.zipPath.filename(), ec);
+        if (exists && choice.replaceZip) {
+            o.zipTo = folder / result.zipPath.filename();
+            o.replaceZip = true;
+        } else {
+            o.zipTo = fo4mx::vortex::uniqueName(folder, name);
+        }
+    }
+    return o;
+}
+
+} // namespace
+
 bool AppController::previewApply(ApplyPreview* preview, QString* message)
 {
     if (!pipeline_ || !pipeline_->compiledOutput() || !pipeline_->exportResult()) {
@@ -578,11 +606,32 @@ bool AppController::previewApply(ApplyPreview* preview, QString* message)
     try {
         const auto result = fo4mx::makeCompilationResult(s, pipeline_->compiledOutput(), &*pipeline_->exportResult(),
                                                          pipeline_->validation());
+        const bool isVortex = s.install.config.kind == fo4mx::InstallKind::Vortex;
+        *preview = ApplyPreview{};
+        preview->vortex = isVortex;
+        preview->vortexRunning = isVortex && fo4mx::platform::isProcessRunning(fo4mx::vortex::kProcessName);
+        std::error_code ec;
+        preview->zipAvailable = !result.zipPath.empty() && std::filesystem::is_regular_file(result.zipPath, ec);
+        preview->zipPath = toQString(result.zipPath);
+        if (isVortex) {
+            const auto& folder = s.install.config.vortexDownloads;
+            preview->downloadsFolder = toQString(folder);
+            if (!folder.empty()) {
+                const auto fc = fo4mx::vortex::checkDownloadsFolder(folder);
+                if (!fc.ok())
+                    preview->downloadsProblem = qs(fo4mx::join(fc.problems, "; "));
+                if (!fc.notes.empty())
+                    preview->downloadsNote = qs(fo4mx::join(fc.notes, "; "));
+                preview->zipInDownloads = preview->zipAvailable &&
+                                          std::filesystem::exists(folder / result.zipPath.filename(), ec);
+            }
+        }
+
         fo4mx::FileTransaction tx("Apply to Game (preview)");
         const auto plan = fo4mx::PostCompilation::planApply(tx, s, *pipeline_->compiledOutput(), result,
-                                                            pipeline_->exportResult()->directory, false);
+                                                            pipeline_->exportResult()->directory,
+                                                            applyOptions(s, ApplyChoice{}, result, preview->vortexRunning));
         const auto& d = plan.check;
-        *preview = ApplyPreview{};
         preview->ready = d.blockers.empty();
         QStringList text;
         text << QString("Mod manager: %1").arg(fo4mx::installKindName(s.install.config.kind));
@@ -592,15 +641,15 @@ bool AppController::previewApply(ApplyPreview* preview, QString* message)
                     .arg(fo4mx::PostCompilation::kMaxFullPlugins)
                     .arg(d.lightPluginsAfter);
         if (!d.blockers.empty())
-            text << "" << "Nothing will be changed until this is fixed:" << bullet(d.blockers);
+            text << "" << "Your load order will not be switched over until this is fixed:" << bullet(d.blockers);
         if (!d.warnings.empty())
             text << "" << "Check:" << bullet(d.warnings);
         if (preview->ready) {
             std::vector<std::string> lines = tx.summary();
             text << "" << "These files will change (each is backed up first; all or nothing):" << bullet(lines);
-            if (!plan.writesLoadOrder && s.install.config.kind == fo4mx::InstallKind::Vortex)
-                text << "" << "Vortex manages plugins.txt: disable the plugins in Multiplexer_DisablePlugins.txt in "
-                              "Vortex's Plugins page and enable the outputs there.";
+            if (isVortex)
+                text << "" << "After this, start Vortex and check its Plugins page: the compiled plugins are disabled "
+                              "and the outputs enabled.";
         }
         for (const auto& g : plan.ghosts)
             (g.ok() ? preview->ghostable : preview->ghostRefused)++;
@@ -609,7 +658,7 @@ bool AppController::previewApply(ApplyPreview* preview, QString* message)
             if (!g.ok())
                 refused.push_back(g.plugin + ": " + g.problem);
         preview->ghostDetails = bullet(refused, 200);
-        preview->offerGhosting = preview->ready && s.install.config.kind == fo4mx::InstallKind::Standalone &&
+        preview->offerGhosting = preview->ready && s.install.config.kind != fo4mx::InstallKind::ModOrganizer2 &&
                                  preview->ghostable > 0;
         preview->summary = text.join("\n");
         return true;
@@ -619,7 +668,7 @@ bool AppController::previewApply(ApplyPreview* preview, QString* message)
     }
 }
 
-bool AppController::applyToProfile(bool ghost, QString* message)
+bool AppController::applyToProfile(const ApplyChoice& choice, QString* message)
 {
     if (!pipeline_ || !pipeline_->compiledOutput() || !pipeline_->exportResult()) {
         *message = "Compile and export first.";
@@ -629,13 +678,19 @@ bool AppController::applyToProfile(bool ghost, QString* message)
     try {
         const auto result = fo4mx::makeCompilationResult(s, pipeline_->compiledOutput(), &*pipeline_->exportResult(),
                                                          pipeline_->validation());
-        // One transaction: load order, INI, notes and ghosting change together or not at all.
+        const bool isVortex = s.install.config.kind == fo4mx::InstallKind::Vortex;
+        const bool running = isVortex && fo4mx::platform::isProcessRunning(fo4mx::vortex::kProcessName);
+        // One transaction: zip copy, load order, INI, notes and ghosting change together or not at all.
         fo4mx::FileTransaction tx("Apply to Game");
         const auto plan = fo4mx::PostCompilation::planApply(tx, s, *pipeline_->compiledOutput(), result,
                                                             pipeline_->exportResult()->directory,
-                                                            ghost && s.install.config.kind == fo4mx::InstallKind::Standalone);
-        if (!plan.check.blockers.empty()) {
-            *message = "Nothing was changed:\n" + bullet(plan.check.blockers);
+                                                            applyOptions(s, choice, result, running));
+        if (tx.empty()) {
+            QStringList why;
+            if (!plan.zipProblem.empty())
+                why << "  \u2022 " + qs(plan.zipProblem);
+            why << bullet(plan.check.blockers);
+            *message = "Nothing was changed:\n" + why.join("\n");
             return false;
         }
         s.releaseFiles(); // Windows cannot rename a plugin this app has open
@@ -648,6 +703,8 @@ bool AppController::applyToProfile(bool ghost, QString* message)
                 continue;
             if (op.kind == fo4mx::FileTransaction::Kind::Rename)
                 ++ghosted;
+            else if (op.kind == fo4mx::FileTransaction::Kind::Copy)
+                done << "  \u2022 copied the package to " + toQString(op.target);
             else
                 done << "  \u2022 " + toQString(op.target);
         }
@@ -655,10 +712,20 @@ bool AppController::applyToProfile(bool ghost, QString* message)
             done << QString("  \u2022 %1 compiled plugin(s) ghosted (renamed to .ghost)").arg(ghosted);
         *message = done.isEmpty() ? QString("Nothing needed to change.")
                                   : "Done (backups kept next to each changed file):\n" + done.join("\n");
-        if (s.install.config.kind == fo4mx::InstallKind::Vortex)
-            *message += "\n\nIn Vortex's Plugins page, disable the plugins listed in Multiplexer_DisablePlugins.txt "
-                        "and enable the output plugins.";
-        *message += "\n\nStart a new game with this build.";
+        if (!plan.check.blockers.empty()) {
+            // Only the package was copied: switching over is the next step.
+            *message += QString(plan.copiesZip ? "\n\nNext, in Vortex: install and enable the package from the Downloads "
+                                                 "page (restart Vortex if it is not listed), "
+                                               : "\n\nNext, in Vortex: install and enable Multiplexer Output.zip, ") +
+                        "let it win every file conflict and Deploy. Then close Vortex and press Apply to Game again to "
+                        "switch your load order over. Still to do:\n" +
+                        bullet(plan.check.blockers);
+        } else if (isVortex) {
+            *message += "\n\nStart Vortex and check its Plugins page: the plugins in Multiplexer_DisablePlugins.txt "
+                        "are disabled and the outputs enabled.";
+        }
+        if (plan.check.blockers.empty())
+            *message += "\n\nStart a new game with this build.";
         return true;
     } catch (const std::exception& e) {
         *message = "Nothing was changed (every completed step was undone): " + QString::fromUtf8(e.what());

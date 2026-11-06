@@ -51,6 +51,7 @@ add_library(fo4mx_core STATIC
     engine/ReferenceScanner.cpp
     engine/Session.cpp
     engine/ValidationEngine.cpp
+    engine/VortexSupport.cpp
     db/Database.cpp
     db/DatabaseWriter.cpp
     papyrus/Pex.cpp

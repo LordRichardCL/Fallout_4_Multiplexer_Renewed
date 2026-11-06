@@ -44,6 +44,8 @@ private:
     QLineEdit* reports_;
     QLabel* status_;
     QWidget* mo2Rows_;
+    QWidget* vortexRows_;
+    QLineEdit* vortexDownloads_;
 };
 
 } // namespace gui

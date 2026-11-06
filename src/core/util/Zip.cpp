@@ -58,10 +58,17 @@ void put64(std::vector<uint8_t>& b, uint64_t v) { put32(b, uint32_t(v)); put32(b
 
 ZipStats writeZip(const std::filesystem::path& zip, const std::filesystem::path& folder, const std::string& prefix)
 {
+    return writeZip(zip, folder, prefix, {});
+}
+
+ZipStats writeZip(const std::filesystem::path& zip, const std::filesystem::path& folder, const std::string& prefix,
+                  const std::function<bool(const std::filesystem::path&)>& skip)
+{
     namespace fs = std::filesystem;
     std::vector<fs::path> files;
     for (auto it = fs::recursive_directory_iterator(folder); it != fs::recursive_directory_iterator(); ++it)
-        if (it->is_regular_file() && it->path().extension() != ".tmp")
+        if (it->is_regular_file() && it->path().extension() != ".tmp" &&
+            !(skip && skip(it->path().lexically_relative(folder))))
             files.push_back(it->path());
     std::sort(files.begin(), files.end());
 

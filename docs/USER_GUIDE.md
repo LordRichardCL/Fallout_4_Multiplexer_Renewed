@@ -159,8 +159,10 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 └── Multiplexer Reports\
 ```
 
+With an output folder you picked yourself that is not named `Data`, the plugins and notes share that folder; the zip is written there too and holds only what belongs in the game's `Data` folder (not the notes, the reports or itself).
+
 Install `Multiplexer Output.zip` like any other mod, and make it win over every other mod (install it last):
-- **Vortex:** drag the zip onto the Mods page, install and enable it, and let it win every file conflict (load after all other mods).
+- **Vortex:** let **Apply to Game** copy it to Vortex's downloads folder (see below), or drag the zip onto the Mods page; install and enable it, and let it win every file conflict (load after all other mods).
 - **Mod Organizer 2:** *Install a new mod from an archive*, enable it, and keep it at the bottom of the left pane.
 - **Manual:** extract the zip into the game folder (its Data folder merges with the game's).
 
@@ -202,9 +204,11 @@ Then:
    - adds the compiled plugins' archives to `SResourceArchiveList2` in `Fallout4Custom.ini`, in the folder the game reads its INIs from (the MO2 profile when it uses profile-local INIs), so their textures and meshes keep loading. Archives an earlier build added but this one no longer needs are taken out again. Every other line of the INI is kept as it was.
    - **Mod Organizer 2:** also rewrites the profile's `plugins.txt`/`loadorder.txt` so compiled plugins are disabled and the generated ones enabled.
    - **Manual install:** also rewrites `plugins.txt` (and `loadorder.txt` when there is one) the same way.
-   - **Vortex:** disable the plugins in `Multiplexer_DisablePlugins.txt` and enable the generated plugins in Vortex's Plugins page (Vortex manages `plugins.txt` and would undo a change made by another program).
+   - **Vortex:** in two passes.
+     1. With your Vortex downloads folder set (Settings → Installation → *Vortex downloads folder*: Vortex's `downloads\fallout4` folder; *Use Vortex's Default* fills in `%APPDATA%\Vortex\downloads\fallout4` when it exists, *Check* tests it), Apply to Game offers to copy `Multiplexer Output.zip` there, so it appears on Vortex's Downloads page (restart Vortex if it does not). If an archive of that name is already there you choose **Replace** (the old one is backed up first), **Keep Both** (`Multiplexer Output (2).zip`) or **Cancel**. Without the setting, drag the zip onto Vortex's Mods page. Install and enable it in Vortex, let it win every file conflict, and Deploy.
+     2. **Close Vortex** and press Apply to Game again. Once the outputs are deployed into `Data` and Vortex is not running, it rewrites `plugins.txt` (compiled plugins disabled, outputs enabled at the end) together with the INI. Vortex keeps its Plugins page in step with `plugins.txt` and reads it back when it starts; check that page afterwards. While Vortex is running, or before the outputs are deployed, the load order is not touched.
    - writes `Multiplexer_Instructions.txt` beside the package (also written at every export): the steps for your mod manager, the checks above, and how to undo everything.
-   - **Manual install, optional:** ghosts the compiled plugins (renames `Example.esp` to `Example.esp.ghost`) when you tick the box. Only a plugin this build compiled successfully, directly in the game's `Data` folder, unchanged since the scan, not needed as a master by any plugin that stays, and without an existing `.ghost` file is ghosted; the dialog lists every other plugin with the reason. `.ghost` names are never written into `plugins.txt` or `loadorder.txt`. Undo by renaming the file back. Ghosting is not offered under Mod Organizer 2 (it keeps disabled plugins off) and is not done to plugins Vortex deployed.
+   - **Optional (manual installs, and plugins Vortex did not deploy):** ghosts the compiled plugins (renames `Example.esp` to `Example.esp.ghost`) when you tick the box. Only a plugin this build compiled successfully, directly in the game's `Data` folder, unchanged since the scan, not needed as a master by any plugin that stays, and without an existing `.ghost` file is ghosted; the dialog lists every other plugin with the reason. `.ghost` names are never written into `plugins.txt` or `loadorder.txt`. Undo by renaming the file back. Ghosting is not offered under Mod Organizer 2 (it keeps disabled plugins off) and is never done to plugins Vortex deployed (Vortex would restore them).
    - **Ghosted plugins** (`Example.esp.ghost`, the name some tools give a plugin to hide it from the game) are recognised: the app reads them as `Example.esp`, not loaded by the game. A plugin the last build compiled stays a source of the next build when it is ghosted, as when it is disabled.
 3. **Keep the compiled mods installed.** Disable only their *plugins*, never the mods themselves: their textures, meshes, archives, voice files and FaceGen are still used.
 4. Open the outputs in FO4Edit and spot-check a few records.

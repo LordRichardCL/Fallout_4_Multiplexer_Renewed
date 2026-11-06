@@ -35,9 +35,20 @@ struct GhostCheck {
     bool ok() const { return problem.empty(); }
 };
 
+// What the user chose for Apply to Game.
+struct ApplyOptions {
+    bool switchLoadOrder = true; // disable the compiled plugins and enable the outputs in plugins.txt
+    bool ghost = false;          // also ghost the compiled plugins that pass every check
+    bool managerRunning = false; // the mod manager (Vortex) is running right now (the caller checks)
+    std::filesystem::path zipTo; // copy the package zip here (a full file path); empty: no copy
+    bool replaceZip = false;     // zipTo exists and the user chose to replace it (it is backed up)
+};
+
 // What Apply to Game will do, planned (not yet applied) into a transaction.
 struct ApplyPlan {
     DeploymentCheck check;
+    bool copiesZip = false;
+    std::string zipProblem; // why the zip is not copied although it was asked for
     std::vector<GhostCheck> ghosts; // every compiled plugin, whether or not ghosting was asked for
     bool writesLoadOrder = false;   // plugins.txt (MO2 profile or Standalone) is part of the plan
     size_t ghosted = 0;             // plugins the plan renames to .ghost
@@ -63,6 +74,11 @@ public:
     // Plans Apply to Game: the load order (MO2 profile, or plugins.txt for a Standalone install), the
     // archive INI, the instructions file and, when asked, ghosting. Plans nothing when check() finds
     // a blocker.
+    // The zip copy (Vortex downloads) is planned even when switching over is blocked: installing the
+    // package is the step that unblocks it.
+    static ApplyPlan planApply(FileTransaction& tx, const Session& session, const CompiledOutput& compiled,
+                               const CompilationResult& result, const std::filesystem::path& outputDirectory,
+                               const ApplyOptions& options);
     static ApplyPlan planApply(FileTransaction& tx, const Session& session, const CompiledOutput& compiled,
                                const CompilationResult& result, const std::filesystem::path& outputDirectory,
                                bool ghost);

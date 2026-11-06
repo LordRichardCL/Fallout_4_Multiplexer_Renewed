@@ -7,6 +7,7 @@
 #include "engine/Exporter.hpp"
 #include "engine/Pipeline.hpp"
 #include "engine/PostCompilation.hpp"
+#include "engine/VortexSupport.hpp"
 #include "engine/PluginSummary.hpp"
 #include "engine/ReferenceScanner.hpp"
 #include "esp/LayoutCheck.hpp"
@@ -4469,5 +4470,141 @@ TEST(proposed_plugins_txt_lists_each_output_once)
         const auto txt = Exporter::proposedPluginsTxt(p.session(), *p.compiledOutput());
         for (const auto& f : result.pluginFiles)
             CHECK_EQ(listed(txt, pathToUtf8(f.filename())), size_t(1));
+    }
+}
+
+// ---- Stage 4: the package zip for any output folder; Vortex downloads and switch-over ----
+
+TEST(zip_is_written_for_an_output_folder_not_named_data)
+{
+    auto root = buildInstall("zip_customfolder");
+    auto cfg = configFor(root);
+    cfg.exportOptions.outputDirectory = root / "My Outputs";
+    cfg.reportDirectory.clear(); // reports next to the outputs, as by default
+    for (int round = 0; round < 2; ++round) {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        auto result = p.exportOutputs();
+        p.writeReports(result.packageRoot / "Multiplexer Reports");
+        CHECK_EQ(result.packageRoot, result.directory);
+        CHECK(!result.zipPath.empty());
+        CHECK(std::filesystem::exists(root / "My Outputs" / "Multiplexer Output.zip"));
+    }
+    const std::string zip = slurp(root / "My Outputs" / "Multiplexer Output.zip");
+    CHECK(zip.find("Data/Dummy_Plugin_01.esp") != std::string::npos);
+    CHECK(zip.find("Data/Multiplexer_FormMap.tsv") != std::string::npos); // the build's own records travel along
+    // Notes and reports for the user stay out, and the zip never contains itself.
+    CHECK(std::filesystem::exists(root / "My Outputs" / "Multiplexer_DisablePlugins.txt"));
+    CHECK(zip.find("Multiplexer_DisablePlugins.txt") == std::string::npos);
+    CHECK(zip.find("Multiplexer_Instructions.txt") == std::string::npos);
+    CHECK(std::filesystem::exists(root / "My Outputs" / "Multiplexer Reports"));
+    CHECK(zip.find("Multiplexer Reports/") == std::string::npos);
+    CHECK(zip.find("Multiplexer Output.zip") == std::string::npos);
+}
+
+TEST(vortex_downloads_folder_is_checked)
+{
+    auto dir = tempDir("vortexdl");
+    CHECK(!vortex::checkDownloadsFolder({}).ok());
+    CHECK(!vortex::checkDownloadsFolder(dir / "missing").ok());
+    writeFile(dir / "afile", "x");
+    CHECK(!vortex::checkDownloadsFolder(dir / "afile").ok());
+    std::filesystem::create_directories(dir / "downloads" / "fallout4");
+    auto good = vortex::checkDownloadsFolder(dir / "downloads" / "fallout4");
+    CHECK(good.ok());
+    CHECK(good.notes.empty());
+    CHECK(!std::filesystem::exists(dir / "downloads" / "fallout4" / ".multiplexer-write-test"));
+    auto other = vortex::checkDownloadsFolder(dir / "downloads");
+    CHECK(other.ok());
+    CHECK(!other.notes.empty()); // not the per-game folder
+    // Unique names never overwrite.
+    const auto folder = dir / "downloads" / "fallout4";
+    CHECK_EQ(pathToUtf8(vortex::uniqueName(folder, "Multiplexer Output.zip").filename()),
+             std::string("Multiplexer Output.zip"));
+    writeFile(folder / "Multiplexer Output.zip", "old");
+    CHECK_EQ(pathToUtf8(vortex::uniqueName(folder, "Multiplexer Output.zip").filename()),
+             std::string("Multiplexer Output (2).zip"));
+    writeFile(folder / "Multiplexer Output (2).zip", "old");
+    CHECK_EQ(pathToUtf8(vortex::uniqueName(folder, "Multiplexer Output.zip").filename()),
+             std::string("Multiplexer Output (3).zip"));
+}
+
+TEST(vortex_apply_copies_the_package_then_switches_once_deployed_and_closed)
+{
+    auto b = buildAndExport("vortex_apply");
+    b.cfg.install.kind = InstallKind::Vortex;
+    const auto downloads = b.root / "Vortex" / "downloads" / "fallout4";
+    std::filesystem::create_directories(downloads);
+    b.cfg.install.vortexDownloads = downloads;
+    Pipeline p(b.cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    p.exportOutputs();
+    auto r = resultOf(p);
+    CHECK(!r.zipPath.empty());
+    const std::string before = slurp(b.root / "plugins.txt");
+
+    // 1. Not deployed yet: only the package is copied; the load order is left alone.
+    {
+        ApplyOptions o;
+        o.zipTo = vortex::uniqueName(downloads, "Multiplexer Output.zip");
+        FileTransaction tx("Apply to Game");
+        auto plan = PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, p.exportResult()->directory, o);
+        CHECK(!plan.check.blockers.empty());
+        CHECK(plan.copiesZip);
+        CHECK(!plan.writesLoadOrder);
+        CHECK_EQ(tx.operations().size(), size_t(1));
+        tx.apply();
+        CHECK_EQ(slurp(downloads / "Multiplexer Output.zip"), slurp(r.zipPath));
+        CHECK_EQ(slurp(b.root / "plugins.txt"), before);
+    }
+    // The same name again is refused unless replacing was chosen; replacing backs the old one up.
+    {
+        ApplyOptions o;
+        o.zipTo = downloads / "Multiplexer Output.zip";
+        FileTransaction tx("Apply to Game");
+        auto plan = PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, p.exportResult()->directory, o);
+        CHECK(!plan.copiesZip);
+        CHECK(plan.zipProblem.find("already") != std::string::npos);
+        o.replaceZip = true;
+        FileTransaction tx2("Apply to Game");
+        plan = PostCompilation::planApply(tx2, p.session(), *p.compiledOutput(), r, p.exportResult()->directory, o);
+        CHECK(plan.copiesZip);
+        tx2.apply();
+        CHECK_EQ(countBackups(downloads, "Multiplexer Output.zip"), size_t(1));
+    }
+    // 2. Deployed (the outputs are in Data), but Vortex is running: nothing is switched.
+    installOutputs(p, b.root);
+    {
+        ApplyOptions o;
+        o.managerRunning = true;
+        FileTransaction tx("Apply to Game");
+        auto plan = PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, p.exportResult()->directory, o);
+        bool mentionsVortex = false;
+        for (const auto& bl : plan.check.blockers)
+            mentionsVortex |= bl.find("Vortex is running") != std::string::npos;
+        CHECK(mentionsVortex);
+        CHECK(tx.empty());
+    }
+    // 3. Deployed and Vortex closed: plugins.txt is switched over (backed up), Vortex reads it back.
+    {
+        ApplyOptions o;
+        FileTransaction tx("Apply to Game");
+        auto plan = PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, p.exportResult()->directory, o);
+        CHECK(plan.check.blockers.empty());
+        CHECK(plan.writesLoadOrder);
+        tx.apply();
+        const auto txt = slurp(b.root / "plugins.txt");
+        for (const auto& i : r.included)
+            CHECK(!activeIn(txt, i.name));
+        for (const auto& f : r.outputPlugins)
+            CHECK(activeIn(txt, pathToUtf8(f.filename())));
+        CHECK(activeIn(txt, "ModC.esp"));
+        CHECK_EQ(countBackups(b.root, "plugins.txt"), size_t(1));
+        auto after = PostCompilation::check(p.session(), *p.compiledOutput(), r);
+        CHECK(after.stillEnabled.empty());
     }
 }

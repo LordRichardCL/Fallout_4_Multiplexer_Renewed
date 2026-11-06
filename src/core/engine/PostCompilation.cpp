@@ -99,9 +99,9 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
                                      " output plugin(s) are not installed in the game's Data folder yet (or differ "
                                      "from this build, first: " + d.missingOutputs.front() +
                                      "): install Multiplexer Output.zip first";
-            // Standalone: Apply to Game switches plugins.txt itself, which must never disable the
-            // compiled plugins while the game cannot see their replacement.
-            (kind == InstallKind::Standalone ? d.blockers : d.warnings).push_back(what);
+            // Apply to Game switches plugins.txt itself, which must never disable the compiled
+            // plugins while the game cannot see their replacement.
+            d.blockers.push_back(what);
         }
     }
 
@@ -161,11 +161,17 @@ std::string PostCompilation::instructions(const Session& session, const Compilat
              "   enables the outputs at the end and keeps the compiled mods' archives loading (backups first).\n";
         break;
     case InstallKind::Vortex:
-        t += "1. In Vortex: drag \"Multiplexer Output.zip\" onto the Mods page, install and enable it, and let it win\n"
-             "   every file conflict (load after all other mods). Deploy.\n"
-             "2. In Vortex's Plugins page: disable every plugin listed in Multiplexer_DisablePlugins.txt and enable\n"
-             "   the output plugins. Do not disable the mods themselves: their files are still used.\n"
-             "3. In Multiplexer, Compilation page: Apply to Game, so the compiled mods' archives keep loading.\n";
+        t += "1. In Multiplexer, Compilation page: Apply to Game. With your Vortex downloads folder set (Settings),\n"
+             "   it copies \"Multiplexer Output.zip\" there; or drag the zip onto Vortex's Mods page yourself.\n"
+             "2. In Vortex: install and enable the package, let it win every file conflict (load after all other\n"
+             "   mods) and Deploy. Do not disable the original mods: their files are still used.\n"
+             "3. Close Vortex.\n"
+             "4. In Multiplexer: Apply to Game again. Once the outputs are deployed and Vortex is closed, it disables\n"
+             "   the compiled plugins in plugins.txt, enables the outputs at the end and keeps the compiled mods'\n"
+             "   archives loading (every file backed up first).\n"
+             "5. Start Vortex and check its Plugins page: the plugins in Multiplexer_DisablePlugins.txt are disabled\n"
+             "   and the outputs enabled. Do not enable the compiled plugins again.\n"
+             "   (Without Multiplexer: disable the listed plugins and enable the outputs in Vortex's Plugins page.)\n";
         break;
     case InstallKind::Standalone:
         t += "1. Extract \"Multiplexer Output.zip\" into the game folder (its Data folder merges with the game's),\n"
@@ -257,15 +263,43 @@ std::vector<GhostCheck> PostCompilation::ghostChecks(const Session& session, con
 ApplyPlan PostCompilation::planApply(FileTransaction& tx, const Session& session, const CompiledOutput& c,
                                      const CompilationResult& result, const fs::path& outputDirectory, bool ghost)
 {
+    ApplyOptions o;
+    o.ghost = ghost;
+    return planApply(tx, session, c, result, outputDirectory, o);
+}
+
+ApplyPlan PostCompilation::planApply(FileTransaction& tx, const Session& session, const CompiledOutput& c,
+                                     const CompilationResult& result, const fs::path& outputDirectory,
+                                     const ApplyOptions& o)
+{
     ApplyPlan plan;
-    plan.check = check(session, c, result);
-    plan.ghosts = ghostChecks(session, c, result, plan.check);
-    if (!plan.check.blockers.empty())
-        return plan; // nothing is planned: the caller shows the blockers
     const auto kind = session.install.config.kind;
-    // The load order: the MO2 profile, or the plugins.txt the game reads when no manager owns it.
-    // Vortex owns plugins.txt and would undo the change, so it is left to Vortex.
-    if (kind != InstallKind::Vortex && !session.install.pluginsFile.empty()) {
+    plan.check = check(session, c, result);
+    if (kind == InstallKind::Vortex && o.switchLoadOrder && o.managerRunning)
+        plan.check.blockers.push_back("Vortex is running: close it first. Vortex keeps plugins.txt in step with its "
+                                      "Plugins page and would overwrite the change");
+    plan.ghosts = ghostChecks(session, c, result, plan.check);
+
+    // The package into Vortex's downloads folder: the step that makes the outputs installable.
+    if (!o.zipTo.empty()) {
+        std::error_code ec;
+        if (!result.success)
+            plan.zipProblem = "the build did not finish successfully";
+        else if (result.zipPath.empty() || !fs::is_regular_file(result.zipPath, ec))
+            plan.zipProblem = "Multiplexer Output.zip was not written by this export";
+        else if (fs::exists(o.zipTo, ec) && !o.replaceZip)
+            plan.zipProblem = pathToUtf8(o.zipTo.filename()) + " is already in the downloads folder";
+        else {
+            tx.copy(result.zipPath, o.zipTo, "the package, for Vortex to install", o.replaceZip);
+            plan.copiesZip = true;
+        }
+    }
+    if (!plan.check.blockers.empty())
+        return plan; // nothing else is planned: the caller shows the blockers
+
+    // The load order: the MO2 profile, or the plugins.txt the game reads (Standalone, and Vortex
+    // while it is closed: Vortex reads plugins.txt back when it starts).
+    if (o.switchLoadOrder && !session.install.pluginsFile.empty()) {
         Exporter::planProfile(tx, session, c, session.install.pluginsFile);
         plan.writesLoadOrder = true;
     }
@@ -273,7 +307,7 @@ ApplyPlan PostCompilation::planApply(FileTransaction& tx, const Session& session
     if (!result.packageRoot.empty() && fs::is_directory(result.packageRoot))
         tx.write(result.packageRoot / kInstructionsFile, instructions(session, result, plan.check),
                  "how to switch over to this build, and how to undo it");
-    if (ghost) {
+    if (o.ghost && kind != InstallKind::ModOrganizer2) {
         planGhosting(tx, plan.ghosts);
         for (const auto& g : plan.ghosts)
             plan.ghosted += g.ok() ? 1 : 0;

@@ -16,6 +16,10 @@ std::filesystem::path localAppDataDir();
 std::optional<std::filesystem::path> detectGamePath();
 // File version of Fallout4.exe ("1.10.163.0"), or a best guess.
 std::string detectGameVersion(const std::filesystem::path& gamePath);
+// "%APPDATA%" (roaming), or ~/.config elsewhere; empty when unknown.
+std::filesystem::path roamingAppDataDir();
+// Whether a process with this executable name (e.g. "Vortex.exe", any letter case) is running.
+bool isProcessRunning(const std::string& exeName);
 // Per-user application data directory for our own settings and logs.
 std::filesystem::path applicationDataDir();
 

@@ -4,6 +4,7 @@
 #include "SetupDialog.hpp"
 #include "widgets/Widgets.hpp"
 
+#include "engine/VortexSupport.hpp"
 #include "util/Platform.hpp"
 
 #include <QButtonGroup>
@@ -18,6 +19,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
 #include <QSpinBox>
@@ -67,6 +69,53 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     profile_->setEditable(true);
     mo2Form->addRow("Profile", profile_);
     il->addWidget(mo2Rows_);
+
+    // Vortex: where Apply to Game copies the package for Vortex to install.
+    vortexRows_ = new QWidget;
+    auto* vortexForm = new QVBoxLayout(vortexRows_);
+    vortexForm->setContentsMargins(0, 0, 0, 0);
+    auto* vf = new QFormLayout;
+    vf->setContentsMargins(0, 0, 0, 0);
+    auto* dlRow = pathRow(vortexDownloads_, true, "Vortex downloads folder for Fallout 4 (…\\downloads\\fallout4)");
+    auto* suggest = makeButton("Use Vortex's Default");
+    auto* checkDl = makeButton("Check");
+    auto* clearDl = makeButton("Clear");
+    for (auto* b : {suggest, checkDl, clearDl})
+        static_cast<QHBoxLayout*>(dlRow->layout())->addWidget(b);
+    vf->addRow("Vortex downloads folder", dlRow);
+    vortexForm->addLayout(vf);
+    auto* dlHelp = new QLabel(
+        "Optional. When set, Apply to Game can copy Multiplexer Output.zip here, so it appears on Vortex's "
+        "Downloads page ready to install (restart Vortex if it does not show). In Vortex: Settings → Downloads shows "
+        "the folder; use its \"fallout4\" subfolder. Without it, drag the zip onto Vortex's Mods page instead.");
+    dlHelp->setWordWrap(true);
+    dlHelp->setStyleSheet("color: palette(placeholder-text);");
+    vortexForm->addWidget(dlHelp);
+    il->addWidget(vortexRows_);
+    connect(suggest, &QPushButton::clicked, this, [this] {
+        const auto folder = fo4mx::vortex::suggestedDownloadsFolder();
+        if (folder.empty())
+            QMessageBox::information(this, "Vortex downloads folder",
+                                     "Vortex's default downloads folder for Fallout 4 was not found on this PC. Look "
+                                     "it up in Vortex (Settings → Downloads) and browse to its \"fallout4\" folder.");
+        else
+            vortexDownloads_->setText(toQString(folder));
+    });
+    connect(clearDl, &QPushButton::clicked, this, [this] { vortexDownloads_->clear(); });
+    connect(checkDl, &QPushButton::clicked, this, [this] {
+        const auto c = fo4mx::vortex::checkDownloadsFolder(toPath(vortexDownloads_->text().trimmed()));
+        QStringList lines;
+        for (const auto& p : c.problems)
+            lines << "\u2022 " + qs(p);
+        for (const auto& n : c.notes)
+            lines << "\u2022 " + qs(n);
+        if (c.ok())
+            QMessageBox::information(this, "Vortex downloads folder",
+                                     lines.isEmpty() ? QString("The folder can be used.")
+                                                     : "The folder can be used. Note:\n" + lines.join("\n"));
+        else
+            QMessageBox::warning(this, "Vortex downloads folder", "This folder cannot be used:\n" + lines.join("\n"));
+    });
 
     auto* form = new QFormLayout;
     auto* gameRow = pathRow(gamePath_, true, "Fallout 4 folder (contains Fallout4.exe)");
@@ -228,6 +277,7 @@ void SettingsPage::reloadProfiles()
 void SettingsPage::updateVisibility()
 {
     mo2Rows_->setVisible(mo2_->isChecked());
+    vortexRows_->setVisible(vortex_->isChecked());
 }
 
 void SettingsPage::refresh() {}
@@ -250,6 +300,7 @@ void SettingsPage::load()
     gamePath_->setText(toQString(in.gamePath));
     pluginsFile_->setText(toQString(in.pluginsFile));
     iniDir_->setText(toQString(in.iniDirectory));
+    vortexDownloads_->setText(toQString(in.vortexDownloads));
     language_->setCurrentText(qs(in.language));
     runtime_->setCurrentIndex(runtime_->findData(int(in.runtime)));
     excluded_->setPlainText(app_->excludedPlugins().join("\n"));
@@ -273,6 +324,7 @@ void SettingsPage::save()
     in.gamePath = toPath(gamePath_->text().trimmed());
     in.pluginsFile = toPath(pluginsFile_->text().trimmed());
     in.iniDirectory = toPath(iniDir_->text().trimmed());
+    in.vortexDownloads = toPath(vortexDownloads_->text().trimmed());
     in.language = ss(language_->currentText().trimmed());
     in.runtime = static_cast<fo4mx::RuntimeProfile>(runtime_->currentData().toInt());
     c.analysis.excludedPlugins.clear();
