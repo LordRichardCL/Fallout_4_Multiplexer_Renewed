@@ -3,6 +3,7 @@
 #include "util/Binary.hpp"
 
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
 #include <unordered_map>
 
@@ -133,9 +134,38 @@ std::vector<FieldValue> decodeValues(const RecordDefinitions& defs, Signature re
             base += "#" + std::to_string(n);
         const auto& def = defs.field(record, sr.signature);
         const auto& d = sr.data;
+        if (!def.values.empty() && def.valueStride) {
+            // An array: the members repeat for each element; bytes after the last whole element shown as bytes.
+            const size_t count = d.size() / def.valueStride;
+            for (size_t e = 0; e < count; ++e) {
+                const std::vector<uint8_t> element(d.begin() + e * def.valueStride, d.begin() + (e + 1) * def.valueStride);
+                for (const auto& m : def.values)
+                    out.push_back(member(base + "[" + std::to_string(e) + "]", def, m, element));
+            }
+            if (d.size() % def.valueStride) {
+                FieldValue rest;
+                rest.path = base + "[rest]";
+                rest.field = def.label;
+                rest.described = false;
+                rest.text = hexBytes(d.data() + count * def.valueStride, d.size() % def.valueStride);
+                out.push_back(std::move(rest));
+            }
+            continue;
+        }
         if (!def.values.empty()) {
-            for (const auto& m : def.values)
+            uint16_t covered = 0;
+            for (const auto& m : def.values) {
                 out.push_back(member(base, def, m, d));
+                covered = std::max<uint16_t>(covered, static_cast<uint16_t>(m.offset + typeSize(m)));
+            }
+            if (d.size() > covered) { // bytes the layout does not name (xEdit's are not fixed there)
+                FieldValue rest;
+                rest.path = base + "\\(rest)";
+                rest.field = def.label;
+                rest.described = false;
+                rest.text = hexBytes(d.data() + covered, d.size() - covered);
+                out.push_back(std::move(rest));
+            }
             continue;
         }
         FieldValue v;

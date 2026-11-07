@@ -117,6 +117,29 @@ RegionDef region(const char* name, std::initializer_list<const char*> start, std
     return r;
 }
 
+uint16_t memberSize(const ValueMember& m)
+{
+    switch (m.type) {
+    case ValueType::Bytes: return m.size;
+    case ValueType::U8:
+    case ValueType::I8:
+    case ValueType::Flags8:
+    case ValueType::Enum8: return 1;
+    case ValueType::U16:
+    case ValueType::I16:
+    case ValueType::Flags16: return 2;
+    default: return 4;
+    }
+}
+
+uint16_t coveredSize(const std::vector<ValueMember>& members)
+{
+    uint16_t covered = 0;
+    for (const auto& m : members)
+        covered = std::max<uint16_t>(covered, static_cast<uint16_t>(m.offset + memberSize(m)));
+    return covered;
+}
+
 class Builder {
 public:
     explicit Builder(RecordDefinitions& defs) : defs_(defs) {}
@@ -163,6 +186,8 @@ public:
         if (it == fields.end())
             it = fields.emplace(S(sub), defs_.field(current_, S(sub))).first; // the common definition
         it->second.label = label;
+        it->second.valueSize = coveredSize(members);
+        it->second.valuesComplete = true; // hand-written layouts are whole
         it->second.values = std::move(members);
         return *this;
     }
@@ -1781,6 +1806,59 @@ ValueMember Bytes(const char* name, uint16_t offset, uint16_t size)
     return m;
 }
 
+// Applies one generated layout (esp/ValueDefinitions.inc) where it is safe: on a field this app reads
+// as numbers, a struct or an array (not text, scripts or the special layouts), not already described
+// by hand, and only when its FormIDs sit exactly where this app's own definition puts them.
+void applyGenerated(RecordDefinitions& d, const char* rec, const char* sub, const char* label, uint16_t stride,
+                    bool complete, std::vector<ValueMember> members)
+{
+    const Signature r = S(rec), s = S(sub);
+    if (!d.record(r))
+        return;
+    FieldDef def = d.field(r, s);
+    if (!def.values.empty())
+        return;
+    switch (def.kind) {
+    case FieldKind::NoRefs:
+    case FieldKind::Unknown:
+    case FieldKind::Struct:
+    case FieldKind::StructArray: break;
+    default: return;
+    }
+    std::vector<uint16_t> generated;
+    const uint16_t covered = coveredSize(members);
+    for (const auto& m : members)
+        if (m.type == ValueType::FormId)
+            generated.push_back(m.offset);
+    std::sort(generated.begin(), generated.end());
+    std::string problem;
+    if (def.kind == FieldKind::StructArray) {
+        if (stride != def.stride || def.arrayStart != 0 || def.skipCountAt != 0xFFFF)
+            problem = "array element size differs";
+    } else if (stride && def.kind != FieldKind::NoRefs && def.kind != FieldKind::Unknown) {
+        problem = "array where this app has a single value";
+    }
+    if (problem.empty() && def.kind != FieldKind::Unknown) {
+        std::vector<uint16_t> own;
+        for (auto o : def.offsets)
+            if (def.kind == FieldKind::StructArray || o + 4 <= covered)
+                own.push_back(o);
+        std::sort(own.begin(), own.end());
+        if (own != generated)
+            problem = "FormIDs at other offsets";
+    }
+    if (!problem.empty()) {
+        d.valueConflicts_.push_back(std::string(rec) + " " + sub + ": " + problem);
+        return;
+    }
+    def.label = label;
+    def.valueSize = stride ? stride : covered;
+    def.valuesComplete = complete;
+    def.values = std::move(members);
+    def.valueStride = stride;
+    d.records_[r].fields[s] = std::move(def);
+}
+
 // The value layer: member names, types and offsets from xEdit's wbDefinitionsFO4.pas and
 // wbDefinitionsCommon.pas. Extend type by type; nothing in compiling depends on it.
 void buildValues(RecordDefinitions& d)
@@ -1793,6 +1871,8 @@ void buildValues(RecordDefinitions& d)
         obnd.label = "Object Bounds";
         obnd.values = {V("Min X", T::I16, 0), V("Min Y", T::I16, 2), V("Min Z", T::I16, 4),
                        V("Max X", T::I16, 6), V("Max Y", T::I16, 8), V("Max Z", T::I16, 10)};
+        obnd.valueSize = 12;
+        obnd.valuesComplete = true;
     }
     b.edit("WEAP")
         .values("DNAM", "Data",
@@ -1870,6 +1950,13 @@ void buildValues(RecordDefinitions& d)
     b.edit("ASTP").values("DATA", "Flags", {V("Flags", T::Flags32, 0, {"Family Association"})});
     b.edit("EYES").values("DATA", "Flags",
                           {V("Flags", T::Flags8, 0, {"Playable", "Not Male", "Not Female"})});
+
+    // Every other fixed layout xEdit describes (tools/gen_value_defs.py); the hand-written ones above
+    // take precedence.
+    auto gen = [&](const char* rec, const char* sub, const char* label, uint16_t stride, bool complete,
+                   std::vector<ValueMember> m) { applyGenerated(d, rec, sub, label, stride, complete, std::move(m)); };
+    const auto& B = Bytes;
+#include "esp/ValueDefinitions.inc"
 }
 
 } // namespace

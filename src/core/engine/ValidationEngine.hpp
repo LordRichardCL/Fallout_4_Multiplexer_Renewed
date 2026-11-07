@@ -56,6 +56,8 @@ struct DefinitionStat {
     std::string failureExample;
     std::map<uint32_t, uint64_t> softOffsets;       // byte offset -> values there that look like FormIDs
     std::map<uint32_t, uint64_t> unresolvedOffsets; // byte offset -> described FormIDs there that name nothing
+    uint64_t valueSizeOther = 0;             // occurrences whose size differs from the named-value layout
+    std::map<uint32_t, uint64_t> valueSizes; // their sizes
 };
 
 struct DefinitionCheck {

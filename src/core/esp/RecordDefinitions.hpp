@@ -87,6 +87,9 @@ struct FieldDef {
     Signature companion;           // subrecord that belongs to each list item (COED after LVLO)
     std::string label;             // display name (xEdit's), when known
     std::vector<ValueMember> values; // value layer: named members (empty: not described value by value)
+    uint16_t valueStride = 0;        // value layer: the members repeat every `valueStride` bytes (arrays)
+    uint16_t valueSize = 0;          // value layer: bytes the members cover (one element for arrays)
+    bool valuesComplete = false;     // value layer: the members are the whole layout (sizes can be checked)
 
     bool isLocalized() const
     {
@@ -189,6 +192,8 @@ public:
     const RecordCatalogue* catalogue_ = nullptr;
     std::vector<Signature> strategyWithoutLayout_;
     uint64_t fingerprint_ = 0;
+    // Generated value layouts not applied because they disagree with the FormID positions above.
+    std::vector<std::string> valueConflicts_;
 
     // Compiling a type needs both a layout here and Specialised or Winner in the catalogue.
     void applyCatalogue(const RecordCatalogue& catalogue);

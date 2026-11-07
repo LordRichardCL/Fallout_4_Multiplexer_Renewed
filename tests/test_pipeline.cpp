@@ -5128,3 +5128,89 @@ TEST(values_are_named_where_defined_and_bytes_elsewhere)
         missing |= v.path == "DATA\\Weight" && !v.described;
     CHECK(missing);
 }
+
+TEST(generated_value_layouts_agree_with_the_formid_definitions)
+{
+    const auto& defs = RecordDefinitions::get();
+    size_t fields = 0, types = 0;
+    for (const auto& [sig, rd] : defs.records_) {
+        size_t here = 0;
+        for (const auto& [sub, f] : rd.fields)
+            here += !f.values.empty();
+        fields += here;
+        types += here ? 1 : 0;
+    }
+    std::printf("  value layouts: %zu fields in %zu record types; %zu generated layouts not applied\n", fields, types,
+                defs.valueConflicts_.size());
+    for (const auto& c : defs.valueConflicts_)
+        std::printf("    %s\n", c.c_str());
+    CHECK(types >= 100);
+    CHECK(defs.valueConflicts_.size() <= 25);
+}
+
+TEST(generated_values_name_structs_and_arrays)
+{
+    const auto& defs = RecordDefinitions::get();
+    auto named = [&](const Record& r) {
+        std::map<std::string, FieldValue> m;
+        for (auto& v : decodeValues(defs, r.signature(), r.subrecords))
+            m[v.path] = v;
+        return m;
+    };
+    // A struct: ACTI RADR (radio receiver).
+    BinaryWriter radr;
+    radr.write<uint32_t>(0x01000900);
+    radr.write<float>(88.5f);
+    radr.write<float>(1.0f);
+    radr.write<uint8_t>(1);
+    radr.write<uint8_t>(0);
+    auto acti = named(record("ACTI", 0x01000800, {Subrecord(Signature("RADR"), radr.take())}));
+    CHECK(acti.count("RADR\\Sound Model") && acti["RADR\\Sound Model"].formId == 0x01000900);
+    CHECK(acti.count("RADR\\Frequency") && acti["RADR\\Frequency"].number == 88.5);
+    CHECK(acti.count("RADR\\Starts Active") && acti["RADR\\Starts Active"].number == 1);
+    // An array: LCTN ACEP, 12 bytes per element (reference, enable parent, flags, unused).
+    BinaryWriter acep;
+    for (uint32_t i = 0; i < 2; ++i) {
+        acep.write<uint32_t>(0x01000A00 + i);
+        acep.write<uint32_t>(0x01000B00 + i);
+        acep.write<uint8_t>(1);
+        acep.write<uint8_t>(0);
+        acep.write<uint16_t>(0);
+    }
+    auto lctn = named(record("LCTN", 0x01000801, {Subrecord(Signature("ACEP"), acep.take())}));
+    CHECK(lctn.count("ACEP[1]\\Reference - Enable Parent") &&
+          lctn["ACEP[1]\\Reference - Enable Parent"].formId == 0x01000B01);
+    CHECK(lctn.count("ACEP[0]\\Reference - Flags") && lctn["ACEP[0]\\Reference - Flags"].text.find("0x1 (") == 0);
+    // An array of floats (MUST FNAM cue points), and bytes past the last whole element.
+    BinaryWriter cues;
+    cues.write<float>(1.5f);
+    cues.write<float>(3.0f);
+    cues.write<uint8_t>(7);
+    auto must = named(record("MUST", 0x01000802, {Subrecord(Signature("FNAM"), cues.take())}));
+    CHECK(must.count("FNAM[1]\\Point") && must["FNAM[1]\\Point"].number == 3.0);
+    CHECK(must.count("FNAM[rest]") && !must["FNAM[rest]"].described);
+    // A struct longer than its layout says shows the extra bytes.
+    auto refr = named(record("REFR", 0x01000803, {raw("XESP", {0, 8, 0, 1, 1, 0, 0, 0, 9, 9})}));
+    CHECK(refr.count("XESP\\Reference") && refr["XESP\\Reference"].formId == 0x01000800);
+    CHECK(refr.count("XESP\\(rest)") && refr["XESP\\(rest)"].text == "09 09");
+}
+
+TEST(definition_check_reports_value_layout_sizes)
+{
+    auto root = buildInstall("valuelayout");
+    // AMMO DATA is 8 bytes (value, weight); an old-style one has only the value.
+    writePlugin(root / "Game" / "Data" / "ModV.esp", {"Fallout4.esm"},
+                {record("AMMO", 0x01000800, {zs("EDID", "ShortAmmo"), raw("DATA", {5, 0, 0, 0})}),
+                 record("AMMO", 0x01000801, {zs("EDID", "FullAmmo"), raw("DATA", {5, 0, 0, 0, 0, 0, 128, 63})})});
+    writeFile(root / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModV.esp\n");
+    auto cfg = configFor(root);
+    Pipeline p(cfg);
+    p.scan();
+    auto check = p.checkDefinitions();
+    bool reported = false;
+    for (const auto& is : check.report.issues)
+        if (is.category == "Value Layout" && is.severity == Severity::Info)
+            reported |= is.message.find("AMMO DATA") == 0 && is.message.find("1 of 2") != std::string::npos &&
+                        is.message.find("4 bytes (1)") != std::string::npos;
+    CHECK(reported);
+}

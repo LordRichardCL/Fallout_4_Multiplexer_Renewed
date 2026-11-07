@@ -504,8 +504,19 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                     auto& st = local[{nr.sig, sub.sig}];
                     st.record = nr.sig;
                     st.sub = sub.sig;
-                    st.described = session.defs.field(nr.sig, sub.sig).kind != FieldKind::Unknown;
+                    const auto& fieldDef = session.defs.field(nr.sig, sub.sig);
+                    st.described = fieldDef.kind != FieldKind::Unknown;
                     st.occurrences++;
+                    // The value layer (named members) checked against the sizes the load order uses.
+                    if (!fieldDef.values.empty() && fieldDef.valuesComplete && fieldDef.valueSize) {
+                        const size_t size = sub.bytes.size();
+                        const bool fits = fieldDef.valueStride ? size % fieldDef.valueStride == 0
+                                                               : size == fieldDef.valueSize;
+                        if (!fits) {
+                            st.valueSizeOther++;
+                            st.valueSizes[static_cast<uint32_t>(size)]++;
+                        }
+                    }
                     for (const auto& [off, k] : sub.refs) {
                         if (!k.valid() && k.objectId == 0)
                             continue; // null
@@ -561,6 +572,9 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                 t.formIds += v.formIds;
                 t.resolved += v.resolved;
                 t.softRefs += v.softRefs;
+                t.valueSizeOther += v.valueSizeOther;
+                for (auto [o, n] : v.valueSizes)
+                    t.valueSizes[o] += n;
                 for (auto [o, n] : v.softOffsets)
                     t.softOffsets[o] += n;
                 for (auto [o, n] : v.unresolvedOffsets)
@@ -607,6 +621,25 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                                    std::to_string(st.softRefs) + " values that look like FormIDs");
         }
         out.stats.push_back(st);
+        if (st.valueSizeOther) {
+            // Descriptive only (named values for display): never affects compiling.
+            const auto& fd = session.defs.field(st.record, st.sub);
+            std::string sizes;
+            size_t shown = 0;
+            for (auto [size, n] : st.valueSizes) {
+                if (shown++ == 6) {
+                    sizes += ", ...";
+                    break;
+                }
+                sizes += (sizes.empty() ? "" : ", ") + std::to_string(size) + " bytes (" + std::to_string(n) + ")";
+            }
+            v.fail(Severity::Info, "Value Layout",
+                   st.record.str() + " " + st.sub.str() + ": the named-value layout is " +
+                       std::to_string(fd.valueSize) + (fd.valueStride ? " bytes per element" : " bytes") + ", but " +
+                       std::to_string(st.valueSizeOther) + " of " + std::to_string(st.occurrences) +
+                       " have another size: " + sizes +
+                       ". Values past the end show as not present, extra bytes as (rest).");
+        }
         perType[st.record].first += st.resolved;
         perType[st.record].second += st.formIds;
         std::string label = st.record.str() + " " + st.sub.str();
