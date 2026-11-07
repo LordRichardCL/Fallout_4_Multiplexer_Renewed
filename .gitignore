@@ -26,3 +26,4 @@ qrc_*.cpp
 *.sqlite
 *.db
 Dummy_Plugin_*.esp
+__pycache__/
