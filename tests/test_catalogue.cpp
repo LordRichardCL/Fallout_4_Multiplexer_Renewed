@@ -64,7 +64,7 @@ TEST(catalogue_strategy_matches_the_layouts)
         winner += e.strategy == MergeStrategy::Winner;
     }
     CHECK_EQ(specialised, size_t(61));
-    CHECK_EQ(winner, size_t(73)); // stages 4 and 5, world, stage 7a, quest types, LCTN, GMST, navmeshes, packages, WTHR, PKIN and dialogue, confirmed by a real load order
+    CHECK_EQ(winner, size_t(79)); // stages 4 and 5, world, stage 7a, quest types, LCTN, GMST, navmeshes, packages, WTHR, PKIN and dialogue, confirmed by a real load order; ASTP DLVW DUAL EYES LVSP TREE from xEdit
     CHECK_EQ(specialised + winner, defs.compilableTypes().size());
     CHECK_EQ(defs.recordName(Signature("MISC")), std::string("Misc. Item"));
     CHECK_EQ(defs.recordName(Signature("XYZW")), std::string("XYZW"));
@@ -84,13 +84,13 @@ TEST(catalogue_strategy_matches_the_layouts)
 
     // Marking a type without a layout Specialised does not make it compilable; it is reported.
     std::string promoted = readText("resources/record_catalogue.csv");
-    pos = promoted.find("\nLVSP,");
+    pos = promoted.find("\nNOCM,");
     auto pres = promoted.find("Preserve", pos);
     promoted.replace(pres, std::string("Preserve").size(), "Specialised");
     auto promotedCat = RecordCatalogue::parse(promoted);
     RecordDefinitions d2 = defs;
     d2.applyCatalogue(promotedCat);
-    CHECK(!d2.isCompilable(Signature("LVSP")));
+    CHECK(!d2.isCompilable(Signature("NOCM")));
     CHECK_EQ(d2.strategyWithoutLayout().size(), size_t(1));
 }
 

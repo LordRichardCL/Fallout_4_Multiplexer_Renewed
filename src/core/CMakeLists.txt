@@ -14,6 +14,7 @@ add_library(fo4mx_core STATIC
     util/Text.cpp
     util/FileTransaction.cpp
     esp/FieldDecoder.cpp
+    esp/FieldValues.cpp
     esp/GroupLayout.cpp
     esp/LayoutCheck.cpp
     esp/PluginFile.cpp
@@ -49,6 +50,7 @@ add_library(fo4mx_core STATIC
     engine/PluginScanner.cpp
     engine/PluginSummary.cpp
     engine/PostCompilation.cpp
+    engine/ReferenceIndex.cpp
     engine/ReferenceScanner.cpp
     engine/Session.cpp
     engine/ValidationEngine.cpp

@@ -2,6 +2,7 @@
 
 #include "util/Text.hpp"
 
+#include <algorithm>
 #include <fstream>
 
 namespace fo4mx {
@@ -142,6 +143,46 @@ void PluginFile::forEachGroup(const std::function<void(const GroupHeader&, uint3
         auto h = RecordHeader::read(r);
         r.skip(h.dataSize);
     }
+}
+
+namespace {
+
+void readNodes(BinaryReader& r, size_t end, size_t fileSize, std::vector<PluginNode>& out, int depth)
+{
+    if (depth > 64)
+        throw FormatError("groups nested too deeply");
+    while (r.position() < end) {
+        const uint64_t offset = r.position();
+        if (end - offset < RecordHeader::kSize)
+            throw FormatError("truncated data at offset " + std::to_string(offset));
+        PluginNode n;
+        n.offset = offset;
+        if (Signature(r.peek<uint32_t>()) == sig::GRUP) {
+            r.skip(4);
+            n.kind = PluginNode::Kind::Group;
+            n.group = GroupHeader::read(r);
+            if (n.group.groupSize < GroupHeader::kSize || offset + n.group.groupSize > std::min<uint64_t>(end, fileSize))
+                throw FormatError("invalid group size at offset " + std::to_string(offset));
+            readNodes(r, static_cast<size_t>(offset + n.group.groupSize), fileSize, n.children, depth + 1);
+        } else {
+            n.kind = PluginNode::Kind::Record;
+            n.record = RecordHeader::read(r);
+            if (n.record.dataSize > end - r.position())
+                throw FormatError("record runs past its group at offset " + std::to_string(offset));
+            r.skip(n.record.dataSize);
+        }
+        out.push_back(std::move(n));
+    }
+}
+
+} // namespace
+
+std::vector<PluginNode> PluginFile::tree() const
+{
+    std::vector<PluginNode> out;
+    BinaryReader r(bytes_);
+    readNodes(r, bytes_.size(), bytes_.size(), out, 0);
+    return out;
 }
 
 Placement RecordLocation::placement() const

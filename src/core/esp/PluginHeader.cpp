@@ -31,6 +31,9 @@ PluginHeader PluginHeader::fromRecord(const Record& rec)
             }
             h.masters.push_back(std::move(m));
         } else {
+            if (sr.signature == Signature::fromString("ONAM"))
+                for (size_t o = 0; o + 4 <= sr.data.size(); o += 4)
+                    h.overriddenForms.push_back(loadLE<uint32_t>(sr.data.data() + o));
             h.extra.push_back(sr);
         }
     }

@@ -306,6 +306,14 @@ The report lists every change, the record types the changed plugins contain (aff
 
 Cached values store FormKeys by plugin **name**, so they survive load order changes and new plugin numbering. Conflict cell text stores form references as tokens, rendered against the current load order (so labels show current FormIDs). Allocation, FormID translation and validation always run in full: they are fast, and they guarantee a consistent output. The exporter compares each output image with the file on disk and leaves identical files untouched. It removes generated plugins that the new build no longer produces.
 
+## Record access
+
+`docs/RECORD_ACCESS.md` compares what the backend sees with xEdit. In short: `PluginFile::tree()` gives the
+whole group/record tree, `decodeValues` names a record's values where the definitions describe them
+(`FieldDef::values`, added by `buildValues` after the fingerprint), and `refs::referencedBy` finds every
+version of every record that refers to a given one, decoding only records whose bytes contain the
+target's object id.
+
 ## FormID reference
 
 `reference/FormIdReference` reads `Fallout4_reference_editorids.bin` (Editor IDs of the base-game

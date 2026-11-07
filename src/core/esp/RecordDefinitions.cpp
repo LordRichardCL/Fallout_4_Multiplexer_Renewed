@@ -155,6 +155,17 @@ public:
         defs_.records_[current_].fields[S(sub)] = std::move(def);
         return *this;
     }
+    // Value layer: names and types of a field's members (keeps its FormID description).
+    Builder& values(const char* sub, const char* label, std::vector<ValueMember> members)
+    {
+        auto& fields = defs_.records_[current_].fields;
+        auto it = fields.find(S(sub));
+        if (it == fields.end())
+            it = fields.emplace(S(sub), defs_.field(current_, S(sub))).first; // the common definition
+        it->second.label = label;
+        it->second.values = std::move(members);
+        return *this;
+    }
     Builder& add(RegionDef r)
     {
         defs_.records_[current_].regions.push_back(std::move(r));
@@ -484,6 +495,36 @@ void buildOldGen(RecordDefinitions& d)
         .field("LVLO", lvlo)
         .field("COED", structPlain({0}, {{8, 12}}))
         .field("LLKC", structArray(8, {0}))
+        .modelRegions();
+
+    // Seven rarely edited types, ported from xEdit's wbDefinitionsFO4.pas (NOCM stays undescribed:
+    // xEdit itself only knows its DATA/INTV blocks as unknown bytes).
+    b.record("LVSP", "Leveled Spell", true)
+        .field("LVLD", noRefs())
+        .field("LVLM", noRefs())
+        .field("LVLF", noRefs())
+        .field("LLCT", noRefs())
+        .field("LVLO", lvlo); // spell or leveled spell at +4
+    b.record("ASTP", "Association Type", true)
+        .field("MPRT", zstring()) // male / female parent and child titles
+        .field("FPRT", zstring())
+        .field("MCHT", zstring())
+        .field("FCHT", zstring())
+        .field("DATA", noRefs()); // flags
+    b.record("DLVW", "Dialog View", true)
+        .field("QNAM", formId()) // quest
+        .field("BNAM", formId()) // branch (repeated)
+        .field("ENAM", noRefs()) // unused
+        .field("DNAM", noRefs()); // unused
+    b.record("DUAL", "Dual Cast Data", true)
+        .field("DATA", structAt({0, 4, 8, 12, 16}, 24)); // projectile, explosion, effect shader, hit art, impact set, flags
+    b.record("EYES", "Eyes", true)
+        .field("DATA", noRefs()); // flags; ICON is common
+    b.record("TREE", "Tree", true)
+        .field("PFIG", formId()) // ingredient
+        .field("SNAM", formId()) // harvest sound
+        .field("PFPC", noRefs()) // seasonal production
+        .field("CNAM", noRefs()) // trunk, branch and leaf flexibility, amplitudes, frequencies (12 floats)
         .modelRegions();
 
     // Container item: item, count.
@@ -1724,6 +1765,113 @@ void buildOldGen(RecordDefinitions& d)
     b.edit("AMMO").asset("NAM1", AssetRole::Mesh); // shell casing model
 }
 
+ValueMember V(const char* name, ValueType type, uint16_t offset, std::vector<std::string> labels = {})
+{
+    ValueMember m;
+    m.name = name;
+    m.type = type;
+    m.offset = offset;
+    m.labels = std::move(labels);
+    return m;
+}
+ValueMember Bytes(const char* name, uint16_t offset, uint16_t size)
+{
+    ValueMember m = V(name, ValueType::Bytes, offset);
+    m.size = size;
+    return m;
+}
+
+// The value layer: member names, types and offsets from xEdit's wbDefinitionsFO4.pas and
+// wbDefinitionsCommon.pas. Extend type by type; nothing in compiling depends on it.
+void buildValues(RecordDefinitions& d)
+{
+    using T = ValueType;
+    Builder b(d);
+    // Common: object bounds (wbObjectBounds: two Vec3Int of int16).
+    {
+        auto& obnd = d.common_[S("OBND")];
+        obnd.label = "Object Bounds";
+        obnd.values = {V("Min X", T::I16, 0), V("Min Y", T::I16, 2), V("Min Z", T::I16, 4),
+                       V("Max X", T::I16, 6), V("Max Y", T::I16, 8), V("Max Z", T::I16, 10)};
+    }
+    b.edit("WEAP")
+        .values("DNAM", "Data",
+                {V("Ammo", T::FormId, 0), V("Speed", T::Float, 4), V("Reload Speed", T::Float, 8),
+                 V("Reach", T::Float, 12), V("Min Range", T::Float, 16), V("Max Range", T::Float, 20),
+                 V("Attack Delay", T::Float, 24), V("Unused", T::Float, 28),
+                 V("Damage - OutOfRange Mult", T::Float, 32), V("On Hit", T::U32, 36), V("Skill", T::FormId, 40),
+                 V("Resist", T::FormId, 44), V("Flags", T::Flags32, 48), V("Capacity", T::U16, 52),
+                 V("Animation Type", T::U8, 54), V("Damage - Secondary", T::Float, 55), V("Weight", T::Float, 59),
+                 V("Value", T::U32, 63), V("Damage - Base", T::U16, 67), V("Sound Level", T::U32, 69),
+                 V("Sound - Attack", T::FormId, 73), V("Sound - Attack 2D", T::FormId, 77),
+                 V("Sound - Attack Loop", T::FormId, 81), V("Sound - Attack Fail", T::FormId, 85),
+                 V("Sound - Idle", T::FormId, 89), V("Sound - Equip Sound", T::FormId, 93),
+                 V("Sound - UnEquip Sound", T::FormId, 97), V("Sound - Fast Equip Sound", T::FormId, 101),
+                 V("Accuracy Bonus", T::U8, 105), V("Animation Attack Seconds", T::Float, 106), Bytes("Unknown", 110, 2),
+                 V("Action Point Cost", T::Float, 112), V("Full Power Seconds", T::Float, 116),
+                 V("Min Power Per Shot", T::Float, 120), V("Stagger", T::U32, 124), Bytes("Unknown", 128, 4)})
+        .values("FNAM", "Firing",
+                {V("Animation Fire Seconds", T::Float, 0), V("Rumble - Left Motor Strength", T::Float, 4),
+                 V("Rumble - Right Motor Strength", T::Float, 8), V("Rumble - Duration", T::Float, 12),
+                 V("Animation Reload Seconds", T::Float, 16), Bytes("Bolt Anim Seconds", 20, 4),
+                 V("Sighted Transition Seconds", T::Float, 24), V("# Projectiles", T::U8, 28),
+                 V("Override Projectile", T::FormId, 29), V("Pattern", T::U32, 33), V("Rumble - Period (ms)", T::U32, 37)})
+        .values("CRDT", "Critical Data",
+                {V("Crit Damage Mult", T::Float, 0), V("Crit Charge Bonus", T::Float, 4), V("Crit Effect", T::FormId, 8)});
+    b.edit("ARMO")
+        .values("DATA", "Data", {V("Value", T::I32, 0), V("Weight", T::Float, 4), V("Health", T::U32, 8)})
+        .values("FNAM", "Armor", {V("Armor Rating", T::U16, 0), V("Base Addon Index", T::U16, 2),
+                                  V("Stagger Rating", T::U8, 4), Bytes("Unused", 5, 3)});
+    b.edit("AMMO")
+        .values("DATA", "Data", {V("Value", T::U32, 0), V("Weight", T::Float, 4)})
+        .values("DNAM", "Ammo Data", {V("Projectile", T::FormId, 0),
+                                      V("Flags", T::Flags8, 4, {"Ignores Normal Weapon Resistance", "Non-Playable", "Has Count Based 3D"}),
+                                      Bytes("Unused", 5, 3), V("Damage", T::Float, 8), V("Health", T::U32, 12)});
+    b.edit("MISC").values("DATA", "Data", {V("Value", T::I32, 0), V("Weight", T::Float, 4)});
+    b.edit("BOOK").values("DATA", "Data", {V("Value", T::U32, 0), V("Weight", T::Float, 4)});
+    b.edit("KEYM").values("DATA", "Data", {V("Value", T::I32, 0), V("Weight", T::Float, 4)});
+    b.edit("ALCH").values("ENIT", "Effect Data",
+                          {V("Value", T::I32, 0), V("Flags", T::Flags32, 4), V("Addiction", T::FormId, 8),
+                           V("Addiction Chance", T::Float, 12), V("Sound - Consume", T::FormId, 16)});
+    b.edit("GLOB")
+        .values("FNAM", "Type", {V("Type", T::U8, 0)}) // 's' short, 'l' long, 'f' float
+        .values("FLTV", "Value", {V("Value", T::Float, 0)});
+    // Leveled lists (wbLeveledListEntry for Fallout 4: level, unused, reference, count, chance none, unused).
+    const std::vector<ValueMember> lvlo = {V("Level", T::U16, 0), Bytes("Unused", 2, 2), V("Reference", T::FormId, 4),
+                                           V("Count", T::U16, 8), V("Chance None", T::U8, 10), Bytes("Unused", 11, 1)};
+    const std::vector<std::string> lvlFlags = {"Calculate from all levels <= player's level",
+                                               "Calculate for each item in count", "Use All", "Special Loot"};
+    for (const char* list : {"LVLI", "LVLN", "LVSP"})
+        b.edit(list)
+            .values("LVLD", "Chance None", {V("Chance None", T::U8, 0)})
+            .values("LVLM", "Max Count", {V("Max Count", T::U8, 0)})
+            .values("LVLF", "Flags", {V("Flags", T::Flags8, 0, lvlFlags)})
+            .values("LLCT", "Count", {V("Count", T::U8, 0)})
+            .values("LVLO", "Leveled List Entry", lvlo);
+    b.edit("NPC_").values("ACBS", "Configuration",
+                          {V("Flags", T::Flags32, 0), V("XP Value Offset", T::I16, 4), V("Level", T::U16, 6),
+                           V("Calc min level", T::U16, 8), V("Calc max level", T::U16, 10),
+                           V("Disposition Base", T::I16, 12), V("Template Flags", T::Flags16, 14),
+                           V("Bleedout Override", T::U16, 16), Bytes("Unused", 18, 2)});
+    b.edit("TREE")
+        .values("PFPC", "Ingredient Production",
+                {V("Spring", T::U8, 0), V("Summer", T::U8, 1), V("Fall", T::U8, 2), V("Winter", T::U8, 3)})
+        .values("CNAM", "Tree Data",
+                {V("Trunk Flexibility", T::Float, 0), V("Branch Flexibility", T::Float, 4),
+                 V("Trunk Amplitude", T::Float, 8), V("Front Amplitude", T::Float, 12),
+                 V("Back Amplitude", T::Float, 16), V("Side Amplitude", T::Float, 20),
+                 V("Front Frequency", T::Float, 24), V("Back Frequency", T::Float, 28),
+                 V("Side Frequency", T::Float, 32), V("Leaf Flexibility", T::Float, 36),
+                 V("Leaf Amplitude", T::Float, 40), V("Leaf Frequency", T::Float, 44)});
+    b.edit("DUAL").values("DATA", "Data",
+                          {V("Projectile", T::FormId, 0), V("Explosion", T::FormId, 4), V("Effect Shader", T::FormId, 8),
+                           V("Hit Effect Art", T::FormId, 12), V("Impact Data Set", T::FormId, 16),
+                           V("Inherit Scale", T::Flags32, 20, {"Hit Effect Art", "Projectile", "Explosion"})});
+    b.edit("ASTP").values("DATA", "Flags", {V("Flags", T::Flags32, 0, {"Family Association"})});
+    b.edit("EYES").values("DATA", "Flags",
+                          {V("Flags", T::Flags8, 0, {"Playable", "Not Male", "Not Female"})});
+}
+
 } // namespace
 
 const RecordDefinitions& RecordDefinitions::get(RuntimeProfile profile)
@@ -1733,6 +1881,7 @@ const RecordDefinitions& RecordDefinitions::get(RuntimeProfile profile)
         buildOldGen(d);
         d.applyCatalogue(RecordCatalogue::get());
         d.computeFingerprint();
+        buildValues(d); // descriptive only: after the fingerprint, so it never invalidates cached work
         return d;
     }();
     static const RecordDefinitions nextGen = [] {
@@ -1744,6 +1893,7 @@ const RecordDefinitions& RecordDefinitions::get(RuntimeProfile profile)
         d.profileName_ = "Fallout 4 Next Gen (experimental, Old Gen layouts)";
         d.applyCatalogue(RecordCatalogue::get());
         d.computeFingerprint();
+        buildValues(d);
         return d;
     }();
     return profile == RuntimeProfile::NextGen ? nextGen : oldGen;

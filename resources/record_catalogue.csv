@@ -22,7 +22,7 @@ ARMA,Armor Addon,Item Components,top,Specialised,82,,
 ARMO,Armor,Items,top,Specialised,22,7,
 ARTO,Art Object,Visual Effects,top,Specialised,103,,
 ASPC,Acoustic Space,Audio,top,Winner,15,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
-ASTP,Association Type,Actors,top,Preserve,101,,
+ASTP,Association Type,Actors,top,Winner,101,,Layout from xEdit wbDefinitionsFO4.pas.
 AVIF,Actor Value Information,Game Data,top,Specialised,75,,
 BNDS,Bendable Spline,Base Objects,top,Winner,47,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 BOOK,Book,Items,top,Specialised,23,10,
@@ -42,17 +42,17 @@ DEBR,Debris,Visual Effects,top,Winner,68,,Layout from xEdit wbDefinitionsFO4.pas
 DFOB,Default Object,Game Data,top,Specialised,87,,
 DIAL,Dialog Topic,Quests and Dialogue,top with children,Winner,,,"Has a child group per topic holding its INFO records. Layout from xEdit wbDefinitionsFO4.pas. Confirmed by a real load order (DIAL 144,595, INFO 289,355, SCEN 13,166, DLBR 442 records): compiled in their quest and topic groups; a plugin whose voice files are found by its name stays in the load order (voice relocation is not implemented)."
 DLBR,Dialog Branch,Quests and Dialogue,quest child,Winner,95,,"Stored in its quest's child group (Fallout 4). Layout from xEdit wbDefinitionsFO4.pas. Confirmed by a real load order (DIAL 144,595, INFO 289,355, SCEN 13,166, DLBR 442 records): compiled in their quest and topic groups; a plugin whose voice files are found by its name stays in the load order (voice relocation is not implemented).",
-DLVW,Dialog View,Quests and Dialogue,top,Preserve,97,,
+DLVW,Dialog View,Quests and Dialogue,top,Winner,97,,Layout from xEdit wbDefinitionsFO4.pas.
 DMGT,Damage Type,Combat,top,Specialised,8,,
 DOBJ,Default Object Manager,Game Data,top,Winner,86,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 DOOR,Door,Base Objects,top,Specialised,25,,
-DUAL,Dual Cast Data,Magic,top,Preserve,107,,
+DUAL,Dual Cast Data,Magic,top,Winner,107,,Layout from xEdit wbDefinitionsFO4.pas.
 ECZN,Encounter Zone,World,top,Winner,83,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 EFSH,Effect Shader,Visual Effects,top,Specialised,66,,
 ENCH,Enchantment,Magic,top,Specialised,18,,
 EQUP,Equip Type,Game Data,top,Specialised,98,,
 EXPL,Explosion,Combat,top,Specialised,67,,
-EYES,Eyes,Actors,top,Preserve,12,,
+EYES,Eyes,Actors,top,Winner,12,,Layout from xEdit wbDefinitionsFO4.pas.
 FACT,Faction,Actors,top,Specialised,10,2,
 FLOR,Flora,Base Objects,top,Specialised,34,,
 FLST,FormID List,Lists,top,Specialised,71,16,
@@ -88,7 +88,7 @@ LSCR,Load Screen,Interface,top,Specialised,62,,
 LTEX,Landscape Texture,World,top,Winner,17,,Layout from xEdit wbDefinitionsFO4.pas; confirmed by the definition check on a real load order (100% of FormIDs resolve).
 LVLI,Leveled Item,Lists,top,Specialised,49,15,
 LVLN,Leveled NPC,Lists,top,Specialised,40,,
-LVSP,Leveled Spell,Lists,top,Preserve,63,,
+LVSP,Leveled Spell,Lists,top,Winner,63,,Layout from xEdit wbDefinitionsFO4.pas.
 MATO,Material Object,Visual Effects,top,Specialised,104,,
 MATT,Material Type,Game Data,top,Winner,79,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 MESG,Message,Interface,top,Specialised,85,1,
@@ -146,7 +146,7 @@ STAT,Static,Base Objects,top,Specialised,29,,
 TACT,Talking Activator,Base Objects,top,Winner,21,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,
 TERM,Terminal,Base Objects,top,Specialised,48,,
 TES4,Main File Header,Header,header,Preserve,,,File header; written by the app for every output.
-TREE,Tree,Base Objects,top,Preserve,33,,
+TREE,Tree,Base Objects,top,Winner,33,,Layout from xEdit wbDefinitionsFO4.pas.
 TRNS,Transform,Game Data,top,Specialised,4,,
 TXST,Texture Set,Visual Effects,top,Specialised,6,,
 VTYP,Voice Type,Actors,top,Winner,78,,Layout from xEdit wbDefinitionsFO4.pas. Compiled once the definition check confirms it. Confirmed by a real load order (definition check).,

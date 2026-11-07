@@ -5,6 +5,8 @@
 #include "ba2/Ba2Archive.hpp"
 #include "engine/Pipeline.hpp"
 #include "reference/FormIdReference.hpp"
+#include "engine/ReferenceIndex.hpp"
+#include "esp/FieldValues.hpp"
 #include "esp/FieldDecoder.hpp"
 #include "esp/PluginFile.hpp"
 #include "util/Log.hpp"
@@ -14,6 +16,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -38,7 +41,12 @@ Usage:
                  list every Fallout 4 record type with its category, placement
                  and how the compiler handles it (tab separated)
   fo4mx info     <plugin.esp>
-  fo4mx dump     <plugin.esp> [--formid XXXXXXXX] [--limit N]
+  fo4mx dump     <plugin.esp> [--formid XXXXXXXX] [--limit N] [--values] [--tree]
+                 --values: every field by name and value (where defined), else bytes
+                 --tree: the group / record tree, as xEdit shows it
+  fo4mx references <install> <plugin> <formid>
+                 every version of every record in the load order that refers to
+                 the record (xEdit's "Referenced By")
   fo4mx ba2      <archive.ba2> [--extract PATH --to FILE]
   fo4mx formid   <plugin> <formid>
                  look up a base-game record (Fallout4.esm, the DLC masters) in
@@ -341,6 +349,25 @@ int cmdDump(const Args& a)
     size_t limit = std::stoul(a.get("--limit", "50"));
     size_t shown = 0;
     const auto& defs = RecordDefinitions::get();
+    if (a.has("--tree")) {
+        const std::function<void(const std::vector<PluginNode>&, int)> print = [&](const std::vector<PluginNode>& nodes,
+                                                                                   int depth) {
+            for (const auto& n : nodes) {
+                if (shown >= limit)
+                    return;
+                ++shown;
+                if (n.kind == PluginNode::Kind::Group)
+                    std::printf("%*sGRUP type %d label %08X (%zu entries)\n", depth * 2, "", n.group.groupType,
+                                n.group.label, n.children.size());
+                else
+                    std::printf("%*s%s %s\n", depth * 2, "", n.record.signature.str().c_str(),
+                                formatFormId(n.record.formId).c_str());
+                print(n.children, depth + 1);
+            }
+        };
+        print(file.tree(), 0);
+        return 0;
+    }
     file.forEachRecord([&](const RecordLocation& loc) {
         if (only && loc.header.formId != only)
             return true;
@@ -359,6 +386,9 @@ int cmdDump(const Args& a)
         }
         for (const auto& is : layout.issues)
             std::printf("   ! %s %s\n", is.sub.str().c_str(), is.message.c_str());
+        if (a.has("--values"))
+            for (const auto& v : decodeValues(defs, rec.signature(), rec.subrecords, file.header().isLocalized()))
+                std::printf("     %-40s %s%s\n", v.path.c_str(), v.text.c_str(), v.described ? "" : "  (undescribed)");
         return ++shown < limit;
     });
     return 0;
@@ -447,6 +477,23 @@ int cmdPipeline(const Args& a)
         return p.changes().status == BuildStatus::RequiresRebuild ? 3 : 0;
     }
     p.scan(progress);
+    if (a.command == "references") {
+        if (a.positional.size() < 2)
+            throw std::runtime_error("references: <plugin> <formid> required (with the install options)");
+        auto& session = p.session();
+        const auto* plugin = session.findPlugin(a.positional[0]);
+        if (!plugin)
+            throw std::runtime_error(a.positional[0] + " is not in the load order");
+        FormKey target{plugin->index, static_cast<uint32_t>(std::stoul(a.positional[1], nullptr, 16)) & 0xFFFFFF};
+        const auto found = refs::referencedBy(session, target, progress);
+        std::printf("\n%s is referenced by %zu record version(s):\n", session.formLabel(target).c_str(), found.size());
+        for (const auto& r : found) {
+            const auto& inst = session.records[r.record];
+            std::printf("  %-40s %s  %s  (in %s)\n", session.formLabel(inst.key).c_str(), inst.signature.str().c_str(),
+                        r.via.str().c_str(), session.pluginName(inst.plugin).c_str());
+        }
+        return 0;
+    }
     if (a.command == "check-definitions") {
         std::vector<Signature> types;
         for (const auto& t : split(a.get("--types", ""), ','))
@@ -584,7 +631,7 @@ int main(int argc, char** argv)
         if (a.command == "formid")
             return cmdFormId(a);
         if (a.command == "scan" || a.command == "analyse" || a.command == "analyze" || a.command == "compile" ||
-            a.command == "status" || a.command == "check-definitions")
+            a.command == "status" || a.command == "check-definitions" || a.command == "references")
             return cmdPipeline(a);
         std::fprintf(stderr, "Unknown command '%s'\n\n%s", a.command.c_str(), kUsage);
         return 1;

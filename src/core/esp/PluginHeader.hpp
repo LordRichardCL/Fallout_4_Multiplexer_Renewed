@@ -22,6 +22,9 @@ struct PluginHeader {
     std::string description;
     std::vector<MasterEntry> masters;
     std::vector<Subrecord> extra; // ONAM, INTV, INCC and anything unknown, preserved
+    // ONAM: the records of its masters an ESM-flagged plugin overrides (as stored: file FormIDs),
+    // which the game loads up front. Read from `extra`, which keeps the bytes for writing.
+    std::vector<uint32_t> overriddenForms;
 
     static constexpr uint32_t kDefaultNextObjectId = 0x800;
 

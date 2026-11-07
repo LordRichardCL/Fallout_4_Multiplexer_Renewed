@@ -9,6 +9,8 @@
 #include "engine/PostCompilation.hpp"
 #include "engine/VortexSupport.hpp"
 #include "engine/Mo2Support.hpp"
+#include "engine/ReferenceIndex.hpp"
+#include "esp/FieldValues.hpp"
 #include "reference/FormIdReference.hpp"
 #include "util/Compression.hpp"
 #include "engine/PluginSummary.hpp"
@@ -95,7 +97,7 @@ std::filesystem::path buildInstall(const std::string& name)
                     record("WEAP", 0x00001000,
                            {zs("EDID", "Pistol10mm"), zs("FULL", "Pistol (Mod C)"), u32("KSIZ", 2),
                             formIds("KWDA", {0x800, 0x801}), weaponData(0x900, 0x11)}),
-                    record("LVSP", 0x01000800, {zs("EDID", "ModCTopic")}),
+                    record("NOCM", 0x01000800, {zs("EDID", "ModCTopic")}),
                 });
 
     writeFile(root / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
@@ -597,11 +599,11 @@ TEST(conflict_resolution_patch_merges_retained_chains)
                                              raw("DNAM", std::vector<uint8_t>(16, 0))}),
                  record("LVLI", 0x00001200,
                         {zs("EDID", "LootPistols"), raw("LLCT", {2}), lvlo(1, 0x1000, 1), lvlo(2, 0x900, 10)}),
-                 record("LVSP", 0x01000800, {zs("EDID", "ModETopic")})});
+                 record("NOCM", 0x01000800, {zs("EDID", "ModETopic")})});
     writePlugin(data / "ModF.esp", {"Fallout4.esm"},
                 {record("AMMO", 0x00000900, {zs("EDID", "Ammo10mm"), zs("FULL", "10mm Round"),
                                              raw("DNAM", std::vector<uint8_t>(16, 7))}),
-                 record("LVSP", 0x01000800, {zs("EDID", "ModFTopic")})});
+                 record("NOCM", 0x01000800, {zs("EDID", "ModFTopic")})});
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModE.esp\n*ModF.esp\n");
 
     // Alongside compilation: chains with a compiled plugin go to the Dummy outputs,
@@ -784,7 +786,7 @@ TEST(undescribed_formid_with_shifted_master_is_isolated)
 {
     auto root = buildInstall("softref");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("LVSP", 0x01000800, {zs("EDID", "ModETopic")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("NOCM", 0x01000800, {zs("EDID", "ModETopic")})});
     // ModG keeps ModE and ModC (both retained) as masters 1 and 2, and refers to ModC's cell
     // from a subrecord the definitions do not describe.
     writePlugin(data / "ModG.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
@@ -797,10 +799,10 @@ TEST(undescribed_formid_with_shifted_master_is_isolated)
     p.scan();
     CHECK_EQ(p.session().findPlugin("ModG.esp")->eligibility, Eligibility::Eligible);
     p.analyse();
-    // Blocker report: LVSP is the only thing keeping ModC and ModE out.
+    // Blocker report: NOCM is the only thing keeping ModC and ModE out.
     const auto& blockers = p.dependencies()->blockers;
     CHECK(!blockers.empty());
-    CHECK_EQ(blockers.front().sig.str(), std::string("LVSP"));
+    CHECK_EQ(blockers.front().sig.str(), std::string("NOCM"));
     CHECK_EQ(blockers.front().plugins, size_t(2));
     CHECK_EQ(blockers.front().soleBlocker, size_t(2));
     CHECK_EQ(blockers.front().unlocks, size_t(2));
@@ -891,7 +893,7 @@ TEST(conditions_decoded_from_the_function_table)
 {
     auto root = buildInstall("conditions");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("LVSP", 0x01000800, {zs("EDID", "ModETopic")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("NOCM", 0x01000800, {zs("EDID", "ModETopic")})});
     // ModC is master 2 here but master 1 in the output. GetIsID (72) takes a FormID; the condition
     // runs on PlayerRef (hard-coded, not in Fallout4.esm).
     writePlugin(data / "ModH.esp", {"Fallout4.esm", "ModE.esp", "ModC.esp"},
@@ -1054,7 +1056,7 @@ TEST(archive_priority_change_is_reported)
     auto root = buildInstall("archprio");
     auto data = root / "Game" / "Data";
     // ModE stays in the load order (it has a dialogue topic), loads before ModA and ships the same mesh.
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("LVSP", 0x01000800, {zs("EDID", "ModETopic")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("NOCM", 0x01000800, {zs("EDID", "ModETopic")})});
     writeGeneralBa2(data / "ModE - Main.ba2", {{"meshes\\moda\\gun.nif", std::vector<uint8_t>(64, 9)}}, true);
     writeFile(root / "plugins.txt", "*ModE.esp\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
     auto cfg = configFor(root);
@@ -1184,7 +1186,7 @@ TEST(unaligned_undescribed_formid_is_caught)
 {
     auto root = buildInstall("unaligned");
     auto data = root / "Game" / "Data";
-    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("LVSP", 0x01000800, {zs("EDID", "ModETopic")})});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm"}, {record("NOCM", 0x01000800, {zs("EDID", "ModETopic")})});
     // ModC's cell at an odd offset of a subrecord the definitions do not describe.
     std::vector<uint8_t> bytes(10, 0);
     storeLE<uint32_t>(bytes.data() + 3, 0x02000800);
@@ -1219,7 +1221,7 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
     writeFile(inst / "profiles" / "Default" / "modlist.txt", "+ModWeap\n+ModStay\n");
     writeFile(inst / "profiles" / "Default" / "plugins.txt", "*ModStay.esp\n*ModWeap.esp\n");
     writePlugin(inst / "mods" / "ModStay" / "ModStay.esp", {"Fallout4.esm"},
-                {record("LVSP", 0x01000800, {zs("EDID", "StayTopic")})});
+                {record("NOCM", 0x01000800, {zs("EDID", "StayTopic")})});
     writeGeneralBa2(inst / "mods" / "ModStay" / "ModStay - Main.ba2", {{"textures\\gun.dds", std::vector<uint8_t>(32, 1)}},
                     false);
     writePlugin(inst / "mods" / "ModWeap" / "ModWeap.esp", {"Fallout4.esm"},
@@ -1489,7 +1491,7 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
     writePlugin(data / "ModL.esp", {"Fallout4.esm"},
                 {record("CELL", 0x01000802, {zs("EDID", "ModLCell")}),
                  record("LAND", 0x01000800, {raw("DATA", std::vector<uint8_t>(20000, 1))}),
-                 record("LVSP", 0x01000801, {zs("EDID", "ModLeveledSpell"), raw("LVLD", std::vector<uint8_t>(20000, 2))})},
+                 record("NOCM", 0x01000801, {zs("EDID", "ModLeveledSpell"), raw("LVLD", std::vector<uint8_t>(20000, 2))})},
                 0, true);
     // A record type that does not exist in Fallout 4 (an Oblivion creature).
     writePlugin(data / "ModU.esp", {"Fallout4.esm"}, {record("CREA", 0x01000800, {zs("EDID", "OldCreature")})});
@@ -1502,7 +1504,7 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
 
     bool compressedEdid = false;
     for (const auto& r : s.records)
-        if (r.plugin == s.findPlugin("ModL.esp")->index && r.signature == Signature("LVSP"))
+        if (r.plugin == s.findPlugin("ModL.esp")->index && r.signature == Signature("NOCM"))
             compressedEdid = r.editorId && s.strings.get(r.editorId) == "ModLeveledSpell";
     CHECK(compressedEdid);
 
@@ -1518,8 +1520,8 @@ TEST(catalogue_types_editor_ids_and_unknown_signatures)
     for (const auto& b : p.dependencies()->blockers) {
         if (b.sig == Signature("CREA"))
             crea = !b.known && b.category == "Unknown" && b.support.find("Unknown record type") == 0;
-        if (b.sig == Signature("LVSP"))
-            pack = b.known && b.name == "Leveled Spell" && b.category == "Lists";
+        if (b.sig == Signature("NOCM"))
+            pack = b.known && b.name == "Navmesh Obstacle Manager" && b.category == "World";
     }
     CHECK(crea);
     CHECK(pack);
@@ -1531,7 +1533,7 @@ TEST(types_that_are_not_merged_are_classified_record_by_record)
     auto root = buildInstall("notmerged");
     auto data = root / "Game" / "Data";
     auto gmst = [](uint32_t id, const char* edid, uint8_t v) { // leveled spells: not compiled
-        return record("LVSP", id, {zs("EDID", edid), raw("LVLD", {v, 0, 0, 0})});
+        return record("NOCM", id, {zs("EDID", edid), raw("LVLD", {v, 0, 0, 0})});
     };
     writePlugin(data / "ModG.esm", {"Fallout4.esm"},
                 {gmst(0x01000800, "fA", 1), gmst(0x01000801, "fB", 1), gmst(0x01000802, "fC", 1)}, ESM);
@@ -4968,4 +4970,161 @@ TEST(definition_check_compares_the_base_game_with_the_reference)
             (is.severity == Severity::Info ? infos : warnings)++;
     CHECK_EQ(infos, size_t(1));
     CHECK_EQ(warnings, size_t(0));
+}
+
+// ---- Record access: the gaps against xEdit closed ----
+
+TEST(new_record_definitions_locate_their_formids)
+{
+    const auto& defs = RecordDefinitions::get();
+    for (const char* t : {"ASTP", "DLVW", "DUAL", "EYES", "LVSP", "TREE"})
+        CHECK(defs.isCompilable(Signature::fromString(t)));
+    CHECK(!defs.isCompilable(Signature::fromString("NOCM"))); // even xEdit only knows its data as bytes
+    std::vector<uint8_t> dual(24, 0);
+    for (uint32_t i = 0; i < 5; ++i)
+        storeLE<uint32_t>(dual.data() + i * 4, 0x01000800 + i);
+    auto dl = decodeLayout(defs, Signature("DUAL"), {Subrecord(Signature("DATA"), dual)});
+    CHECK_EQ(dl.formIdSlots.size(), size_t(5));
+    CHECK(dl.heuristic.empty());
+    auto lv = decodeLayout(defs, Signature("LVSP"), {lvlo(1, 0x01000900, 1)});
+    CHECK_EQ(lv.formIdSlots.size(), size_t(1));
+    CHECK(lv.formIdSlots.size() == 1 && lv.formIdSlots[0].offset == 4);
+    auto tr = decodeLayout(defs, Signature("TREE"),
+                           {u32("PFIG", 0x01000800), u32("SNAM", 0x01000801), raw("PFPC", {1, 2, 3, 4}),
+                            raw("CNAM", std::vector<uint8_t>(48, 0))});
+    CHECK_EQ(tr.formIdSlots.size(), size_t(2));
+    CHECK(tr.heuristic.empty());
+    auto dv = decodeLayout(defs, Signature("DLVW"), {u32("QNAM", 0x01000800), u32("BNAM", 0x01000801), u32("BNAM", 0x01000802)});
+    CHECK_EQ(dv.formIdSlots.size(), size_t(3));
+}
+
+TEST(plugin_header_reads_onam_and_the_tree_matches_the_traversal)
+{
+    auto dir = tempDir("recordtree");
+    // A worldspace with an exterior cell holding a placed reference, plus a plain record.
+    writePlugin(dir / "Tree.esm", {"Fallout4.esm"},
+                {record("KYWD", 0x01000800, {zs("EDID", "K")}),
+                 record("WRLD", 0x01000801, {zs("EDID", "World")}),
+                 record("CELL", 0x01000802, {zs("EDID", "Cell"), raw("XCLC", std::vector<uint8_t>(12, 0))}),
+                 record("REFR", 0x01000803, {u32("NAME", 0x01000800)})},
+                RecordFlags::Master);
+    auto file = PluginFile::load(dir / "Tree.esm");
+    size_t records = 0, groups = 0;
+    file.forEachRecord([&](const RecordLocation&) {
+        ++records;
+        return true;
+    });
+    file.forEachGroup([&](const GroupHeader&, uint32_t) { ++groups; });
+    size_t treeRecords = 0, treeGroups = 0, maxDepth = 0;
+    std::function<void(const std::vector<PluginNode>&, size_t)> walk = [&](const std::vector<PluginNode>& nodes, size_t depth) {
+        maxDepth = std::max(maxDepth, depth);
+        for (const auto& n : nodes) {
+            (n.kind == PluginNode::Kind::Group ? treeGroups : treeRecords)++;
+            walk(n.children, depth + 1);
+        }
+    };
+    auto tree = file.tree();
+    walk(tree, 0);
+    CHECK(!tree.empty() && tree[0].kind == PluginNode::Kind::Record && tree[0].record.signature == sig::TES4);
+    CHECK_EQ(treeRecords, records + 1); // + the TES4 header
+    CHECK_EQ(treeGroups, groups);
+    CHECK(maxDepth >= 4); // WRLD group > world children > block > sub-block > cell children ...
+    bool refrFound = false;
+    std::function<void(const std::vector<PluginNode>&)> find = [&](const std::vector<PluginNode>& nodes) {
+        for (const auto& n : nodes) {
+            refrFound |= n.kind == PluginNode::Kind::Record && n.record.signature == Signature("REFR");
+            find(n.children);
+        }
+    };
+    find(tree);
+    CHECK(refrFound);
+
+    // ONAM: the master records an ESM overrides, read into the header (and still kept for writing).
+    Record tes4 = file.recordAt(0);
+    BinaryWriter onam;
+    onam.write<uint32_t>(0x00012345);
+    onam.write<uint32_t>(0x0000ABCD);
+    tes4.subrecords.emplace_back(Signature("ONAM"), onam.take());
+    auto h = PluginHeader::fromRecord(tes4);
+    CHECK_EQ(h.overriddenForms.size(), size_t(2));
+    CHECK(h.overriddenForms.size() == 2 && h.overriddenForms[1] == 0x0000ABCD);
+    bool kept = false;
+    for (const auto& sr : h.toRecord().subrecords)
+        kept |= sr.signature == Signature("ONAM");
+    CHECK(kept);
+}
+
+TEST(referenced_by_covers_every_version_of_every_record)
+{
+    auto root = buildInstall("referencedby");
+    auto cfg = configFor(root);
+    Pipeline p(cfg);
+    p.scan();
+    auto& s = p.session();
+    const auto* modA = s.findPlugin("ModA.esp");
+    const auto* f4 = s.findPlugin("Fallout4.esm");
+    // ModA_Gun is used by ModA's recipe, ModB's form list and ModB's leveled list.
+    auto gun = refs::referencedBy(s, FormKey{modA->index, 0x000801});
+    std::set<std::string> who;
+    for (const auto& r : gun)
+        who.insert(s.records[r.record].signature.str() + "@" + s.pluginName(s.records[r.record].plugin) + ":" +
+                   r.via.str());
+    CHECK(who.count("COBJ@ModA.esp:CNAM"));
+    CHECK(who.count("FLST@ModB.esp:LNAM"));
+    CHECK(who.count("LVLI@ModB.esp:LVLO"));
+    // The base game pistol: every version of the list and leveled list that holds it, base game included.
+    auto pistol = refs::referencedBy(s, FormKey{f4->index, 0x001000});
+    size_t flstVersions = 0, lvliVersions = 0;
+    for (const auto& r : pistol) {
+        flstVersions += s.records[r.record].signature == Signature("FLST");
+        lvliVersions += s.records[r.record].signature == Signature("LVLI");
+    }
+    CHECK_EQ(flstVersions, size_t(2)); // Fallout4.esm and ModB.esp
+    CHECK_EQ(lvliVersions, size_t(2));
+    // What one version refers to.
+    for (const auto& r : s.records)
+        if (r.signature == Signature("COBJ") && r.plugin == modA->index) {
+            auto out = refs::referencesOf(s, r);
+            bool hasGun = false;
+            for (const auto& [to, via] : out)
+                hasGun |= to == FormKey{modA->index, 0x000801} && via == Signature("CNAM");
+            CHECK(hasGun);
+        }
+}
+
+TEST(values_are_named_where_defined_and_bytes_elsewhere)
+{
+    const auto& defs = RecordDefinitions::get();
+    auto weapon = record("WEAP", 0x01000801,
+                         {zs("EDID", "Gun"), u32("FULL", 7), weaponData(0x00000900, 0x11), raw("XYZW", {1, 2, 3})});
+    auto values = decodeValues(defs, weapon.signature(), weapon.subrecords, true);
+    std::map<std::string, const FieldValue*> by;
+    for (const auto& v : values)
+        by[v.path] = &v;
+    CHECK(by.count("EDID") && by["EDID"]->text == "Gun");
+    CHECK(by.count("FULL") && by["FULL"]->text.find("string id") == 0); // localised plugin
+    CHECK(by.count("DNAM\\Ammo") && by["DNAM\\Ammo"]->formId == 0x00000900);
+    CHECK(by.count("DNAM\\Speed") && by["DNAM\\Speed"]->type == ValueType::Float);
+    CHECK(by.count("DNAM\\Damage - Base"));
+    CHECK(by.count("DNAM\\Stagger"));
+    CHECK(by.count("DNAM\\Speed") && by["DNAM\\Speed"]->field == "Data");
+    CHECK(by.count("XYZW") && !by["XYZW"]->described && by["XYZW"]->text == "01 02 03"); // unknown: bytes kept
+    // Repeated subrecords and flags.
+    auto list = record("LVLI", 0x01000802,
+                       {raw("LVLD", {25}), raw("LVLF", {0x05}), raw("LLCT", {2}), lvlo(1, 0x00000900, 3),
+                        lvlo(5, 0x01000801, 1)});
+    auto lv = decodeValues(defs, list.signature(), list.subrecords);
+    std::map<std::string, const FieldValue*> l;
+    for (const auto& v : lv)
+        l[v.path] = &v;
+    CHECK(l.count("LVLD\\Chance None") && l["LVLD\\Chance None"]->number == 25);
+    CHECK(l.count("LVLF\\Flags") && l["LVLF\\Flags"]->text.find("Use All") != std::string::npos);
+    CHECK(l.count("LVLO#1\\Reference") && l["LVLO#1\\Reference"]->formId == 0x01000801);
+    CHECK(l.count("LVLO#0\\Count") && l["LVLO#0\\Count"]->number == 3);
+    // A field shorter than its layout says what is missing instead of reading past it.
+    auto ammo = record("AMMO", 0x01000803, {raw("DATA", {10, 0, 0, 0})});
+    bool missing = false;
+    for (const auto& v : decodeValues(defs, ammo.signature(), ammo.subrecords))
+        missing |= v.path == "DATA\\Weight" && !v.described;
+    CHECK(missing);
 }

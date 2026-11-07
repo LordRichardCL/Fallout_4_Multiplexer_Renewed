@@ -36,6 +36,16 @@ struct RecordLocation {
     Placement placement() const;
 };
 
+// One node of a plugin's record tree: a group with its children, or a record.
+struct PluginNode {
+    enum class Kind : uint8_t { Group, Record };
+    Kind kind = Kind::Record;
+    uint64_t offset = 0;          // of the group or record header in the file
+    GroupHeader group;            // Kind::Group
+    RecordHeader record;          // Kind::Record (payload: PluginFile::recordAt(offset))
+    std::vector<PluginNode> children;
+};
+
 // A plugin loaded fully into memory for scanning.
 class PluginFile {
 public:
@@ -49,6 +59,10 @@ public:
     void forEachRecord(const std::function<bool(const RecordLocation&)>& visitor) const;
 
     Record recordAt(uint64_t offset) const;
+
+    // The whole file as a tree, as xEdit shows it: the TES4 header record, then every top-level
+    // group with its nested groups and records (headers only; read a record with recordAt).
+    std::vector<PluginNode> tree() const;
 
     // Visits every group header depth-first in file order (depth 0 = top-level group).
     void forEachGroup(const std::function<void(const GroupHeader&, uint32_t depth)>& visitor) const;

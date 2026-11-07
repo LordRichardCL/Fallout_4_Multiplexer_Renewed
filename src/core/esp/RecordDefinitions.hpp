@@ -57,6 +57,18 @@ enum class MergeMode : uint8_t {
     Keyed,    // list keyed by the first FormID; values per key merge
 };
 
+// Value layer: what the bytes of a field mean, member by member (names and types from xEdit's
+// definitions). Optional and descriptive only: FormID positions above stay the source of truth for
+// compiling, and a field without members is still read whole (shown as bytes).
+enum class ValueType : uint8_t { U8, U16, U32, I8, I16, I32, Float, FormId, Flags8, Flags16, Flags32, Enum8, Enum32, Bytes };
+struct ValueMember {
+    std::string name;
+    ValueType type = ValueType::U32;
+    uint16_t offset = 0;
+    uint16_t size = 0;               // Bytes: length
+    std::vector<std::string> labels; // Flags: bit names (bit 0 first); Enum: value names (0 first)
+};
+
 struct FieldDef {
     FieldKind kind = FieldKind::Unknown;
     std::vector<uint16_t> offsets; // Struct / StructArray FormID offsets
@@ -73,6 +85,8 @@ struct FieldDef {
     Signature countSig;            // count subrecord written before this list (KSIZ, LLCT)
     uint8_t countWidth = 0;        // byte width of the count subrecord
     Signature companion;           // subrecord that belongs to each list item (COED after LVLO)
+    std::string label;             // display name (xEdit's), when known
+    std::vector<ValueMember> values; // value layer: named members (empty: not described value by value)
 
     bool isLocalized() const
     {
