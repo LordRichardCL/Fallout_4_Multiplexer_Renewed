@@ -137,6 +137,34 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
                 if (installed.empty() || !sameFile(f, installed))
                     d.relinkedNotLoaded.push_back(rel);
             }
+        // The F4SE archive loader and its list: without them the compiled plugins' archives past the 1,023
+        // characters the game reads would never load.
+        if (c.f4seArchiveLoader) {
+            std::vector<fs::path> loader;
+            for (const char* name : {Exporter::kArchiveLoaderDll, Exporter::kArchiveManifest})
+                if (auto p = findPathCaseInsensitive(result.dataFolder, std::string("F4SE\\Plugins\\") + name); !p.empty())
+                    loader.push_back(p);
+            if (loader.size() < 2) {
+                d.archiveLoaderNotLoaded.push_back("F4SE\\Plugins (missing from the build)");
+            } else if (kind == InstallKind::ModOrganizer2 && !session.install.profilePath.empty()) {
+                d.archiveLoaderNotLoaded = mo2::outputsNotVisible(session, loader, assumeEnabledMod, result.dataFolder);
+            } else if (kind != InstallKind::ModOrganizer2 && !session.install.dataPath.empty() &&
+                       norm(result.dataFolder) != norm(session.install.dataPath)) {
+                for (const auto& f : loader) {
+                    const auto rel = pathToUtf8(f.lexically_relative(result.dataFolder));
+                    const auto installed = findPathCaseInsensitive(session.install.dataPath, rel);
+                    if (installed.empty() || !sameFile(f, installed))
+                        d.archiveLoaderNotLoaded.push_back(rel);
+                }
+            }
+            if (!d.archiveLoaderNotLoaded.empty())
+                d.blockers.push_back("the F4SE archive loader of this build is not installed in the game's Data folder yet "
+                                     "(first: " + d.archiveLoaderNotLoaded.front() + "): install the package first, or "
+                                     "the compiled plugins' archives past the first 1,023 characters of the list would "
+                                     "never load");
+            d.warnings.push_back("this build loads compiled plugins' archives through the F4SE archive loader: always "
+                                 "start the game through F4SE (f4se_loader.exe, or your mod manager's F4SE entry)");
+        }
         if (!d.relinkedNotLoaded.empty()) {
             std::string how;
             if (kind == InstallKind::Vortex)

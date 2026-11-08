@@ -1,4 +1,4 @@
-// MultiplexerArchiveLoader: PROOF OF CONCEPT. An F4SE plugin that gives Fallout 4 its archive list in
+// MultiplexerArchiveLoader: an F4SE plugin that gives Fallout 4 its archive list in
 // full. The game reads SResourceArchiveList2 with GetPrivateProfileStringA into a 1,024-byte buffer and
 // keeps only the first 1,023 characters (seen by the Diagnostic Recorder); the archives after that never
 // load. This plugin waits until the game has read all its INI files (the moment it opens its first BA2
@@ -39,8 +39,8 @@
 
 namespace {
 
-constexpr std::uint32_t kVersion = f4se_abi::packVersion(0, 2, 0);
-constexpr const char* kVersionText = "0.2.0";
+constexpr std::uint32_t kVersion = f4se_abi::packVersion(1, 0, 0);
+constexpr const char* kVersionText = "1.0.0";
 constexpr const char* kKey = "sResourceArchiveList2";
 
 std::mutex g_lock;
@@ -203,8 +203,9 @@ bool readable(const void* p, size_t n)
     const DWORD bad = PAGE_NOACCESS | PAGE_GUARD;
     if (mbi.Protect & bad)
         return false;
-    const auto end = static_cast<const std::uint8_t*>(mbi.BaseAddress) + mbi.RegionSize;
-    return static_cast<const std::uint8_t*>(p) + n <= end;
+    const auto at = reinterpret_cast<std::uintptr_t>(p);
+    const auto end = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+    return at < end && n <= end - at; // no overflow for addresses near the top
 }
 
 // Memory regions worth scanning: committed, readable, not guard pages; the executable and private memory
@@ -244,6 +245,84 @@ bool nameLike(const char* p)
     return p[want.size()] == 0 || p[want.size()] == ':';
 }
 
+int nameBeside(const std::uint8_t* base, size_t size, size_t k)
+{
+    for (int off : {8, -8, 16, -16, 24, -24}) {
+        const auto at = static_cast<std::ptrdiff_t>(k) + off;
+        if (at < 0 || static_cast<size_t>(at) + 8 > size)
+            continue;
+        if (nameLike(*reinterpret_cast<const char* const*>(base + at)))
+            return off;
+    }
+    return 0;
+}
+
+// The quick way: the setting lives in the executable's writable data (where it was found in Fallout 4
+// 1.10.163) and points at the text the game received. Each pointer-sized value there is checked against
+// the committed memory map before it is read.
+std::vector<char**> findInExecutable()
+{
+    std::vector<std::pair<std::uintptr_t, std::uintptr_t>> regions; // [begin, end), readable
+    forEachRegion(false, [&](std::uint8_t* base, size_t size) {
+        regions.emplace_back(reinterpret_cast<std::uintptr_t>(base), reinterpret_cast<std::uintptr_t>(base) + size);
+    });
+    auto inside = [&](std::uintptr_t v, size_t n) {
+        auto it = std::upper_bound(regions.begin(), regions.end(), v,
+                                   [](std::uintptr_t x, const auto& r) { return x < r.first; });
+        if (it == regions.begin())
+            return false;
+        --it;
+        return v >= it->first && v < it->second && n <= it->second - v; // no overflow for values near the top
+    };
+    std::vector<char**> found;
+    auto* image = reinterpret_cast<std::uint8_t*>(GetModuleHandleW(nullptr));
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(image + reinterpret_cast<IMAGE_DOS_HEADER*>(image)->e_lfanew);
+    auto* sections = IMAGE_FIRST_SECTION(nt);
+    const size_t want = g_received.size() + 1;
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+        const auto& sec = sections[i];
+        if (!(sec.Characteristics & IMAGE_SCN_MEM_WRITE))
+            continue;
+        auto* base = image + sec.VirtualAddress;
+        const size_t size = std::min<size_t>(sec.Misc.VirtualSize, nt->OptionalHeader.SizeOfImage - sec.VirtualAddress);
+        if (!inside(reinterpret_cast<std::uintptr_t>(base), size))
+            continue;
+        for (size_t k = 0; k + 8 <= size; k += 8) {
+            const auto v = *reinterpret_cast<const std::uintptr_t*>(base + k);
+            if (v < 0x10000 || !inside(v, want))
+                continue;
+            const auto* text = reinterpret_cast<const char*>(v);
+            if (text == g_received.data() || std::memcmp(text, g_received.data(), g_received.size()) != 0 ||
+                text[g_received.size()] != 0)
+                continue;
+            if (nameBeside(base, size, k))
+                found.push_back(reinterpret_cast<char**>(base + k));
+        }
+    }
+    if (found.size() > 4)
+        found.clear();
+    return found;
+}
+
+// Points the settings at the full list; the originals come back at game data ready.
+void supplyTo(const std::vector<char**>& slots)
+{
+    if (slots.empty() || slots.size() > 4) {
+        log("Not changed: the setting could not be identified with certainty");
+        return;
+    }
+    // The supplied value stays allocated for the whole session (the game may keep using it).
+    char* full = new char[g_full.size() + 1];
+    std::memcpy(full, g_full.c_str(), g_full.size() + 1);
+    for (auto* slot : slots) {
+        g_slots.emplace_back(slot, *slot);
+        InterlockedExchangePointer(reinterpret_cast<PVOID*>(slot), full);
+    }
+    log("Supplied the full list to " + std::to_string(slots.size()) + " setting(s): " + std::to_string(g_full.size()) +
+        " characters (the game held " + std::to_string(g_received.size()) + "), " + std::to_string(g_wanted.size()) +
+        " archives");
+}
+
 // Finds the game's SResourceArchiveList2 setting and points it at the full list. It looks for what is
 // certain rather than for a layout: the text the game received (in its heap), the places that point at
 // that text, and, next to such a place, a pointer to the setting's name.
@@ -257,7 +336,26 @@ void supplyList()
         log("Not changed: the value the game read was not seen (another plugin may read the INI for the game)");
         return;
     }
+    // The list to supply must continue what the game read: a manifest from another build, or an INI
+    // changed since, and nothing is changed.
+    if (g_full.compare(0, g_received.size(), g_received) != 0) {
+        log("Not changed: what the game read is not the start of the list to supply (the list is from another "
+            "build, or the INI was changed after it was written)");
+        return;
+    }
+    if (g_received.size() >= g_full.size()) {
+        log("Not changed: the game read the whole list (" + std::to_string(g_received.size()) + " characters)");
+        return;
+    }
     const DWORD started = GetTickCount();
+    std::vector<char**> chosen = findInExecutable();
+    if (!chosen.empty()) {
+        log("Found in the game's own data: " + std::to_string(chosen.size()) + " setting(s) (" +
+            std::to_string(GetTickCount() - started) + " ms)");
+        supplyTo(chosen);
+        return;
+    }
+    log("Not found in the game's own data; searching all of its memory");
     // 1. Where the received text is in memory.
     std::vector<const char*> copies;
     const std::string head = g_received.substr(0, 32);
@@ -293,20 +391,10 @@ void supplyList()
             const auto v = *reinterpret_cast<const char* const*>(base + k);
             if (std::find(copies.begin(), copies.end(), v) == copies.end())
                 continue;
-            int nameAt = 0;
-            for (int off : {8, -8, 16, -16, 24, -24}) {
-                const auto at = static_cast<std::ptrdiff_t>(k) + off;
-                if (at < 0 || static_cast<size_t>(at) + 8 > size)
-                    continue;
-                if (nameLike(*reinterpret_cast<const char* const*>(base + at))) {
-                    nameAt = off;
-                    break;
-                }
-            }
-            pointers.push_back({reinterpret_cast<char**>(base + k), nameAt});
+            pointers.push_back({reinterpret_cast<char**>(base + k), nameBeside(base, size, k)});
         }
     });
-    std::vector<char**> chosen;
+    chosen.clear();
     for (const auto& p : pointers) {
         char where[64];
         std::snprintf(where, sizeof(where), "%p", static_cast<void*>(p.slot));
@@ -317,20 +405,7 @@ void supplyList()
     }
     log(std::to_string(pointers.size()) + " pointer(s) to the value, " + std::to_string(chosen.size()) +
         " with the setting's name beside them (" + std::to_string(GetTickCount() - started) + " ms)");
-    if (chosen.empty() || chosen.size() > 4) {
-        log("Not changed: the setting could not be identified with certainty");
-        return;
-    }
-    // The supplied value stays allocated for the whole session (the game may keep using it).
-    char* full = new char[g_full.size() + 1];
-    std::memcpy(full, g_full.c_str(), g_full.size() + 1);
-    for (auto* slot : chosen) {
-        g_slots.emplace_back(slot, *slot);
-        InterlockedExchangePointer(reinterpret_cast<PVOID*>(slot), full);
-    }
-    log("Supplied the full list to " + std::to_string(chosen.size()) + " setting(s): " + std::to_string(g_full.size()) +
-        " characters (the game held " + std::to_string(g_received.size()) + "), " + std::to_string(g_wanted.size()) +
-        " archives");
+    supplyTo(chosen);
 }
 
 std::string fileNameLower(const std::wstring& path)
@@ -533,7 +608,16 @@ __declspec(dllexport) bool F4SEPlugin_Load(const f4se_abi::F4SEInterface* f4se)
             g_log = CreateFileW((g_myGames + L"F4SE\\MultiplexerArchiveLoader.log").c_str(), GENERIC_WRITE,
                                 FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         }
-        log(std::string("MultiplexerArchiveLoader ") + kVersionText + " (proof of concept) loaded");
+        log(std::string("MultiplexerArchiveLoader ") + kVersionText + " loaded");
+        // Only on the game version it was tested on: anywhere else it changes nothing.
+        if (f4se->runtimeVersion != f4se_abi::packVersion(1, 10, 163)) {
+            char v[32];
+            std::snprintf(v, sizeof(v), "%u.%u.%u", (f4se->runtimeVersion >> 24) & 0xFF,
+                          (f4se->runtimeVersion >> 16) & 0xFF, (f4se->runtimeVersion >> 4) & 0xFFF);
+            log(std::string("Not active: tested on Fallout 4 1.10.163 only, this is ") + v +
+                ". The archive list is read as the game reads it (cut at 1,023 characters)");
+            return true;
+        }
         loadList();
         const bool r = wrapImport("GetPrivateProfileStringA", &onRead, g_prevRead);
         const bool w = wrapImport("CreateFileW", &onOpenW, g_prevOpenW);

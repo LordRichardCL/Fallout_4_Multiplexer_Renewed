@@ -321,3 +321,23 @@ TEST(diagnostics_cut_list_supplied_by_the_loader)
     CHECK(find(f, "The archive list was supplied in full") != nullptr);
     CHECK(find(f, "The game read only part of the archive list") == nullptr);
 }
+
+// A build that relies on the archive loader, and a session where the list arrived cut anyway.
+TEST(diagnostics_archive_loader_did_not_supply)
+{
+    auto line = [](const std::string& json) { return json + "\n"; };
+    const std::string value = "Fallout4 - Animations.ba2, ModA - Main.ba2, ModB - Main.ba2";
+    std::string log = kStart +
+        line(R"({"schema":1,"seq":1,"event":"archive_ini","file":"Fallout4Custom.ini","key":"SResourceArchiveList2","length":1,"value":")" + value + R"("})") +
+        line(R"({"schema":1,"seq":2,"event":"archive_presence","checked":3,"absent":0,"missing":[]})") +
+        line(R"({"schema":1,"seq":3,"event":"archive_ini_read","section":"Archive","key":"sResourceArchiveList2","file":"Fallout4Custom.ini","buffer":31,"returned":30,"truncated":true,"value":")" + value.substr(0, 30) + R"("})") +
+        line(R"({"schema":1,"seq":5,"event":"archive_open","path":"D:\\Data\\Fallout4 - Animations.ba2","ok":true,"write":false})") + kEnd;
+    PackageContext pkg;
+    pkg.usesArchiveLoader = true;
+    const auto f = analyse(parseRecorderLog(log), &pkg);
+    const auto* x = find(f, "The archive loader did not supply the archive list");
+    CHECK(x != nullptr);
+    CHECK(x && x->cause.find("was not loaded") != std::string::npos);
+    PackageContext plain;
+    CHECK(find(analyse(parseRecorderLog(log), &plain), "The archive loader did not supply") == nullptr);
+}

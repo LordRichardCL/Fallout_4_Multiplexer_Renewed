@@ -244,6 +244,7 @@ std::optional<PackageContext> loadPackageContext(const fs::path& given)
             splitArchiveList(l.substr(eq + 1), c.archiveList, offsets);
         }
     }
+    c.usesArchiveLoader = fs::exists(data / "F4SE" / "Plugins" / "MultiplexerArchives.txt", ec);
     for (const auto& dir : {packageRoot, packageRoot.parent_path()})
         for (const auto& l : textLines(readAll(dir / "Multiplexer_RegisteredArchives.txt"))) {
             const std::string name = trim(l);
@@ -511,6 +512,19 @@ std::vector<Finding> analyse(const RecorderSession& s, const PackageContext* pac
                     (c.loader ? std::string(" (MultiplexerArchiveLoader was loaded)") : std::string()),
                 "High", {std::to_string(c.loaded.size()) + " of " + std::to_string(c.requested.size()) + " requested archives loaded"},
                 {});
+        if (package && package->usesArchiveLoader && c.truncated && !c.cutCompensated && !c.missing.empty())
+            add(out, FindingSeverity::Error, "The archive loader did not supply the archive list",
+                "this build loads compiled plugins' archives through MultiplexerArchiveLoader.dll, but the game read "
+                "only " + std::to_string(c.received) + " characters of " + c.key + " and the archives after them did "
+                "not load" + (c.loader ? std::string(" (the loader was loaded: its log says why it changed nothing)")
+                                       : std::string(" (the loader was not loaded)")),
+                "High", {std::to_string(c.missing.size()) + " archives in Data not loaded, first: " + c.firstMissing},
+                {"Start the game through F4SE (f4se_loader.exe, or your mod manager's F4SE entry).",
+                 "Check that Data\\F4SE\\Plugins holds MultiplexerArchiveLoader.dll and MultiplexerArchives.txt "
+                 "from this build (install the package, let it win file conflicts).",
+                 "Read Documents\\My Games\\Fallout4\\F4SE\\MultiplexerArchiveLoader.log.",
+                 "Run Apply to Game after installing the build: the loader supplies the list only when the INI holds "
+                 "the start of it."});
         if (c.truncated && !c.cutCompensated && c.missing.empty() && c.pastCutWithPlugin)
             add(out, FindingSeverity::Warning, "The archive list was cut, but its archives loaded with their plugins",
                 "the game read only " + std::to_string(c.received) + " characters of " + c.key + "; the " +

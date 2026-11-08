@@ -1,4 +1,4 @@
-# MultiplexerArchiveLoader.dll: proof of concept (Windows only). Supplies the full SResourceArchiveList2
+# MultiplexerArchiveLoader.dll (Windows only). Supplies the full SResourceArchiveList2
 # to the game, which reads INI values into a 1,024-byte buffer and cuts longer lists. Independent of the
 # rest of the project, static C runtime, like the Diagnostic Recorder.
 add_library(MultiplexerArchiveLoader SHARED

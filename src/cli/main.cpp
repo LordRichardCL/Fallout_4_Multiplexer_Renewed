@@ -2,6 +2,7 @@
 
 #include "diagnostics/RecorderLog.hpp"
 #include "diagnostics/RecorderPackage.hpp"
+#include "engine/Exporter.hpp"
 #include "ba2/Ba2Archive.hpp"
 #include "engine/Pipeline.hpp"
 #include "reference/FormIdReference.hpp"
@@ -95,6 +96,8 @@ Compile options:
   --out DIR            folder holding the exports (default: <game>\\Multiplexer Output); every export
                        goes into "Multiplexer Output DDMMYY HHMMSS" in it, with Multiplexer Output.zip
   --reports DIR        report folder
+  --archive-loader  load compiled plugins' archives with the F4SE archive loader (shipped in
+                 the package; no 1,023-character limit; the game must start through F4SE)
   --diagnostic-recorder  also prepare the optional Diagnostic Recorder (F4SE plugin) beside
                        the package, in "Multiplexer Output\Diagnostic Recorder"
   --dry-run            compile and validate without writing files
@@ -126,7 +129,7 @@ struct Args {
 Args parseArgs(int argc, char** argv)
 {
     static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
-                                                   "--diagnostic-recorder", "--install",
+                                                   "--diagnostic-recorder", "--install", "--archive-loader",
                                                    "--verbose", "-v"};
     Args a;
     for (int i = 1; i < argc; ++i) {
@@ -235,6 +238,8 @@ PipelineConfig makeConfig(const Args& a)
     cfg.analysis.excludedPlugins = a.all("--exclude");
     cfg.diagnosticRecorder = a.has("--diagnostic-recorder");
     cfg.diagnosticRecorderDll = g_exeDir / diagnostics::kRecorderDllName;
+    cfg.f4seArchiveLoader = a.has("--archive-loader");
+    cfg.archiveLoaderDll = g_exeDir / Exporter::kArchiveLoaderDll;
     cfg.formIdReference = g_exeDir / FormIdReference::kFileName;
     cfg.useCache = !a.has("--no-cache");
     return cfg;

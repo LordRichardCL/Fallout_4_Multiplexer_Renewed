@@ -39,6 +39,7 @@ private:
     QCheckBox* creationClub_;
     QCheckBox* allTypes_;
     QCheckBox* recorder_;
+    QCheckBox* archiveLoader_;
     QSpinBox* threads_;
     QLineEdit* database_;
     QLineEdit* reports_;

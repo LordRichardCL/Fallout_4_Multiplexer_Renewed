@@ -5632,3 +5632,93 @@ TEST(references_plugin_ini_keeps_the_plugin)
         CHECK(!p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
     }
 }
+
+// The F4SE archive loader: the archive list is no longer limited to the 1,023 characters the game reads.
+// Export ships the DLL and the full list in the package; Apply writes the whole list; switching over waits
+// until the loader is installed. Without the DLL, or on another game version, the limit applies as before.
+TEST(archive_loader_lifts_the_list_limit)
+{
+    auto root = buildInstall("archiveloader");
+    std::string longList;
+    for (int i = 0; i < 48; ++i)
+        longList += (longList.empty() ? "" : ", ") + std::string("UserArchive") + std::to_string(1000 + i) + ".ba2";
+    longList += ", X.ba2"; // 1,013 characters of the user's own archives
+    writeFile(root / "ini" / "Fallout4Custom.ini", "[Archive]\nSResourceArchiveList2=" + longList + "\n");
+    for (int i = 0; i < 48; ++i)
+        writeGeneralBa2(root / "Game" / "Data" / ("UserArchive" + std::to_string(1000 + i) + ".ba2"),
+                        {{"meshes\\user\\a" + std::to_string(i) + ".nif", std::vector<uint8_t>(8, 1)}}, true);
+    writeGeneralBa2(root / "Game" / "Data" / "X.ba2", {{"meshes\\user\\x.nif", std::vector<uint8_t>(8, 1)}}, true);
+    const auto dll = root / "app" / Exporter::kArchiveLoaderDll;
+    writeFile(dll, "MZ stand-in for the loader");
+
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    cfg.f4seArchiveLoader = true;
+    {
+        // The DLL is not next to the application: the limit applies, and the report says why.
+        auto off = cfg;
+        off.archiveLoaderDll = root / "app" / "missing.dll";
+        Pipeline p(off);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        CHECK(!p.compiledOutput()->f4seArchiveLoader);
+        CHECK(!p.compiledOutput()->isCompiled(p.session().findPlugin("ModA.esp")->index));
+        bool said = false;
+        for (const auto& is : p.validation()->issues)
+            said |= is.category == "Archive Loader" && is.message.find("not used") != std::string::npos;
+        CHECK(said);
+    }
+    {
+        // Another game version: not used either.
+        auto ng = cfg;
+        ng.archiveLoaderDll = dll;
+        ng.install.runtime = RuntimeProfile::NextGen;
+        Pipeline p(ng);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        CHECK(!p.compiledOutput()->f4seArchiveLoader);
+    }
+    cfg.archiveLoaderDll = dll;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto* modA = p.session().findPlugin("ModA.esp");
+    CHECK(p.compiledOutput()->isCompiled(modA->index)); // no "Archive list full"
+    CHECK(p.compiledOutput()->f4seArchiveLoader);
+    auto result = p.exportOutputs();
+    const auto plugins = result.directory / "F4SE" / "Plugins";
+    CHECK(std::filesystem::exists(plugins / Exporter::kArchiveLoaderDll));
+    const auto manifest = slurpFile(plugins / Exporter::kArchiveManifest);
+    CHECK(manifest.find("UserArchive1000.ba2\n") != std::string::npos);
+    CHECK(manifest.find("ModA - Main.ba2\n") != std::string::npos);
+    CHECK(manifest.find("UserArchive1000.ba2\n") < manifest.find("ModA - Main.ba2\n")); // INI order, ours last
+
+    // Apply writes the whole list, longer than the game reads: the loader supplies the rest.
+    Exporter::applyArchiveIni(p.session(), *p.compiledOutput(), result.directory);
+    const auto ini = slurpFile(root / "ini" / "Fallout4Custom.ini");
+    CHECK(ini.find(longList + ", ModA - Main.ba2") != std::string::npos);
+
+    // Switching over waits until the loader of this build is in the game's Data folder.
+    installOutputs(p, root);
+    auto r = resultOf(p);
+    auto d = PostCompilation::check(p.session(), *p.compiledOutput(), r);
+    CHECK(d.archiveLoaderNotLoaded.size() == 2);
+    bool blocked = false, f4se = false;
+    for (const auto& b : d.blockers)
+        blocked |= b.find("archive loader") != std::string::npos;
+    for (const auto& w : d.warnings)
+        f4se |= w.find("through F4SE") != std::string::npos;
+    CHECK(blocked);
+    CHECK(f4se);
+    std::filesystem::create_directories(root / "Game" / "Data" / "F4SE" / "Plugins");
+    for (const char* name : {Exporter::kArchiveLoaderDll, Exporter::kArchiveManifest})
+        std::filesystem::copy_file(plugins / name, root / "Game" / "Data" / "F4SE" / "Plugins" / name,
+                                   std::filesystem::copy_options::overwrite_existing);
+    d = PostCompilation::check(p.session(), *p.compiledOutput(), r);
+    CHECK(d.archiveLoaderNotLoaded.empty());
+    for (const auto& b : d.blockers)
+        CHECK(b.find("archive loader") == std::string::npos);
+}

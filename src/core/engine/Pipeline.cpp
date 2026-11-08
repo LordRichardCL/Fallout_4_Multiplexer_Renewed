@@ -375,6 +375,17 @@ bool Pipeline::compile(ProgressSink& progress)
                          "is a mod inside Mod Organizer's mods folder (" + pathToUtf8(session_->install.modsPath) + ")";
         }
     }
+    // The F4SE archive loader: the archive list is not limited to what the game reads of the INI.
+    std::string archiveLoaderOff;
+    if (config_.f4seArchiveLoader) {
+        std::error_code ec;
+        if (session_->install.config.runtime != RuntimeProfile::OldGen_1_10_163)
+            archiveLoaderOff = "it has been tested on Fallout 4 1.10.163 only";
+        else if (config_.archiveLoaderDll.empty() || !std::filesystem::is_regular_file(config_.archiveLoaderDll, ec))
+            archiveLoaderOff = std::string(Exporter::kArchiveLoaderDll) + " was not found next to the application (" +
+                               pathToUtf8(config_.archiveLoaderDll) + ")";
+    }
+    const bool archiveLoaderOn = config_.f4seArchiveLoader && archiveLoaderOff.empty();
     std::map<std::string, std::string> isolatedPatchRecords; // record label -> finding
     if (autoMerge_)
         autoMerge_->keptOut.clear();
@@ -410,7 +421,7 @@ bool Pipeline::compile(ProgressSink& progress)
         // The INI archive list must fit the 1,024-byte buffer the game reads it into: past it, archives
         // never load. Full plugins first (compiling them frees the slots that matter), then light ones,
         // each in load order; a plugin whose archives no longer fit stays in the load order.
-        if (!compiled_->archivesToRegister.empty()) {
+        if (!compiled_->archivesToRegister.empty() && !archiveLoaderOn) {
             const auto list = Exporter::archiveList(*session_, *compiled_, outputDir);
             if (join(list, ", ").size() > Exporter::kArchiveListLimit) {
                 std::unordered_set<std::string> ours, present;
@@ -564,6 +575,17 @@ bool Pipeline::compile(ProgressSink& progress)
                           "earlier build (" + std::to_string(session_->registeredArchives.size()) +
                           " listed in Multiplexer_RegisteredArchives.txt); they are compared as their plugin's own "
                           "archives, where the game loaded them before");
+    compiled_->f4seArchiveLoader = archiveLoaderOn && !compiled_->archivesToRegister.empty();
+    if (compiled_->f4seArchiveLoader)
+        validation_->fail(Severity::Info, "Archive Loader",
+                          std::to_string(compiled_->archivesToRegister.size()) +
+                              " archives of compiled plugins load through the F4SE archive loader (" +
+                              Exporter::kArchiveLoaderDll + ", shipped in the package): the archive list is not limited "
+                              "to the 1,023 characters the game reads. Start the game through F4SE");
+    else if (!archiveLoaderOff.empty())
+        validation_->fail(Severity::Warning, "Archive Loader",
+                          std::string("The F4SE archive loader is turned on but not used: ") + archiveLoaderOff +
+                              ". The archive list is kept within the 1,023 characters the game reads");
     archiveChanges_ = ValidationEngine::checkArchivePriority(*session_, *compiled_);
     if (!loadersOff.empty() && !compiled_->archivesToRegister.empty())
         validation_->fail(Severity::Info, "Archive Loaders",
@@ -825,6 +847,33 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
                         "the Advanced Users Auto-Merger could not relink every file naming a compiled plugin (" +
                             std::to_string(post.errors) + " errors)");
         return result;
+    }
+    // The F4SE archive loader and the full archive list, in the package's Data\F4SE\Plugins. Where an earlier
+    // build wrote into the game's Data folder itself, a list of ours no longer needed is removed.
+    {
+        const auto plugins = result.directory / "F4SE" / "Plugins";
+        const auto manifest = plugins / Exporter::kArchiveManifest;
+        const std::string header = "# Written by Fallout 4 Multiplexer Renewed";
+        std::error_code ec;
+        if (compiled_->f4seArchiveLoader) {
+            std::string text = header + ": the archive list MultiplexerArchiveLoader.dll supplies\n"
+                                        "# to the game in full (SResourceArchiveList2, in this order). It changes nothing\n"
+                                        "# unless what the game read from the INI is the start of this list.\n";
+            for (const auto& a : Exporter::archiveList(*session_, *compiled_, result.directory))
+                text += a + "\n";
+            std::filesystem::create_directories(plugins, ec);
+            atomicWriteText(manifest, text);
+            std::filesystem::copy_file(config_.archiveLoaderDll, plugins / Exporter::kArchiveLoaderDll,
+                                       std::filesystem::copy_options::overwrite_existing);
+            result.archiveLoaderFiles = {plugins / Exporter::kArchiveLoaderDll, manifest};
+        } else if (std::filesystem::exists(manifest, ec)) {
+            std::ifstream in(manifest, std::ios::binary);
+            std::string first;
+            std::getline(in, first);
+            in.close();
+            if (first.rfind(header, 0) == 0)
+                std::filesystem::remove(manifest, ec);
+        }
     }
     // Every file is in Data now: zip it into the installable package. Not when the output folder is the
     // game's own Data folder: a package of it would hold the whole game.

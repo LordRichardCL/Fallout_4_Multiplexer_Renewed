@@ -146,6 +146,9 @@ struct CompiledOutput {
     std::vector<FormMapping> mappings;
     std::vector<std::string> archivesToRegister; // archives that must be listed in the INI
     std::vector<PluginIndex> archiveLoaders;      // compiled plugins replaced by an archive loader
+    // The F4SE archive loader supplies the archive list in full (no 1,023-character limit): export
+    // ships it with the list, and Apply writes the whole list into the INI.
+    bool f4seArchiveLoader = false;
     std::vector<CompileIssue> issues;
     std::unordered_map<FormKey, uint32_t> indexByKey;
     size_t sourceRecords = 0;      // instances in compiled plugins

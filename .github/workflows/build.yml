@@ -79,9 +79,8 @@ jobs:
           Copy-Item build/windows-msvc/src/cli/fo4mx.exe $out
           # The optional Diagnostic Recorder (F4SE plugin): Multiplexer copies it into the output on export.
           Copy-Item build/windows-msvc/src/recorder/MultiplexerDiagnosticRecorder.dll $out
-          # Proof of concept (not installed by Multiplexer): docs/ARCHIVE_LOADER_POC.md says how to test it.
-          New-Item -ItemType Directory -Force -Path "$out/ArchiveLoaderPoC" | Out-Null
-          Copy-Item build/windows-msvc/src/archiveloader/MultiplexerArchiveLoader.dll "$out/ArchiveLoaderPoC"
+          # The F4SE archive loader: Multiplexer ships it in the package when the setting is on.
+          Copy-Item build/windows-msvc/src/archiveloader/MultiplexerArchiveLoader.dll $out
           # Editor IDs of the base-game masters, for the Definition Check's cross-check (optional).
           Copy-Item resources/Fallout4_reference_editorids.bin $out
           Copy-Item build/windows-msvc/vcpkg_installed/x64-windows/bin/*.dll $out

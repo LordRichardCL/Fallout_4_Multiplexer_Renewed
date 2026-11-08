@@ -192,6 +192,21 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     dl->addWidget(diagNote);
     l->addWidget(diagBox);
 
+    auto* loaderBox = new QGroupBox("Archives");
+    auto* ll = new QVBoxLayout(loaderBox);
+    archiveLoader_ = new QCheckBox("Load compiled plugins' archives with the F4SE archive loader (requires F4SE)");
+    ll->addWidget(archiveLoader_);
+    auto* loaderNote = new QLabel(
+        "Fallout 4 reads only the first 1,023 characters of the archive list in Fallout4Custom.ini, so without this "
+        "plugins whose archives do not fit stay in the load order. With it, export ships MultiplexerArchiveLoader.dll "
+        "and the full list in the package (Data\\F4SE\\Plugins); the loader gives the game the whole list when it "
+        "starts. The game must then always be started through F4SE. Fallout 4 1.10.163 only. Its log: "
+        "Documents\\My Games\\Fallout4\\F4SE\\MultiplexerArchiveLoader.log.");
+    loaderNote->setWordWrap(true);
+    loaderNote->setObjectName("PageSubtitle");
+    ll->addWidget(loaderNote);
+    l->addWidget(loaderBox);
+
     auto* advBox = new QGroupBox("Advanced");
     auto* af = new QFormLayout(advBox);
     threads_ = new QSpinBox;
@@ -334,6 +349,7 @@ void SettingsPage::load()
     excluded_->setPlainText(app_->excludedPlugins().join("\n"));
     creationClub_->setChecked(c.analysis.compileCreationClub);
     recorder_->setChecked(c.diagnosticRecorder);
+    archiveLoader_->setChecked(c.f4seArchiveLoader);
     allTypes_->setChecked(c.conflicts.analyseAllRecordTypes);
     threads_->setValue(static_cast<int>(c.scan.threads));
     database_->setText(toQString(c.databasePath));
@@ -361,8 +377,11 @@ void SettingsPage::save()
             c.analysis.excludedPlugins.push_back(ss(line.trimmed()));
     c.analysis.compileCreationClub = creationClub_->isChecked();
     c.diagnosticRecorder = recorder_->isChecked();
-    if (app_->pipeline())
+    c.f4seArchiveLoader = archiveLoader_->isChecked();
+    if (app_->pipeline()) {
         app_->pipeline()->config().diagnosticRecorder = c.diagnosticRecorder;
+        app_->pipeline()->config().f4seArchiveLoader = c.f4seArchiveLoader;
+    }
     c.conflicts.analyseAllRecordTypes = allTypes_->isChecked();
     c.scan.threads = static_cast<unsigned>(threads_->value());
     if (!database_->text().trimmed().isEmpty())

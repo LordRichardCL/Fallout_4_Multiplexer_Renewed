@@ -73,6 +73,7 @@ struct PackageContext {
     // Multiplexer_Archives.ini: the SResourceArchiveList2 value the build asked for, in order.
     std::vector<std::string> archiveList;
     std::set<std::string> registeredArchives; // the archives the build added to it (lower case)
+    bool usesArchiveLoader = false;           // the build ships the F4SE archive loader and its list
 };
 std::optional<PackageContext> loadPackageContext(const std::filesystem::path& packageRoot);
 

@@ -217,7 +217,7 @@ void Exporter::planArchiveIni(FileTransaction& tx, const Session& session, const
     // backupWhenMissing: an empty backup records that there was no Fallout4Custom.ini, so the
     // oldest backup is always the state before this app's first change (the scan's archive baseline).
     const std::string value = join(archiveList(session, c, outputDirectory), ", ");
-    if (value.size() > kArchiveListLimit)
+    if (value.size() > kArchiveListLimit && !c.f4seArchiveLoader)
         throw std::runtime_error("the archive list (SResourceArchiveList2) would be " + std::to_string(value.size()) +
                                  " characters; Fallout 4 reads only the first " + std::to_string(kArchiveListLimit) +
                                  " and every archive after that would not load. Compile again: plugins whose "

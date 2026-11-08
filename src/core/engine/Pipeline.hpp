@@ -53,6 +53,12 @@ struct PipelineConfig {
     // "Multiplexer Output\Diagnostic Recorder" (never inside the package's Data folder).
     bool diagnosticRecorder = false;
     std::filesystem::path diagnosticRecorderDll; // MultiplexerDiagnosticRecorder.dll (next to the application)
+    // The F4SE archive loader (MultiplexerArchiveLoader.dll, next to the application): when on, compiled
+    // plugins' archives are not limited by the 1,023 characters the game reads of SResourceArchiveList2.
+    // Export ships the DLL and the full list (Data\F4SE\Plugins\MultiplexerArchives.txt) in the package;
+    // the game must be started through F4SE. Only on Fallout 4 1.10.163, where it was tested.
+    bool f4seArchiveLoader = false;
+    std::filesystem::path archiveLoaderDll;
     // Editor IDs of the base-game masters from an independent tool (next to the application): the
     // Definition Check compares this app's reading of those plugins with it. Optional.
     std::filesystem::path formIdReference;

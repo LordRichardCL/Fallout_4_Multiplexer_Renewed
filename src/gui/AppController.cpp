@@ -269,6 +269,8 @@ void AppController::loadSettings()
     // MultiplexerDiagnosticRecorder.dll ships next to the application.
     config_.diagnosticRecorderDll =
         toPath(QCoreApplication::applicationDirPath()) / fo4mx::diagnostics::kRecorderDllName;
+    config_.f4seArchiveLoader = s.value("archives/f4seLoader", false).toBool();
+    config_.archiveLoaderDll = toPath(QCoreApplication::applicationDirPath()) / fo4mx::Exporter::kArchiveLoaderDll;
     config_.formIdReference = toPath(QCoreApplication::applicationDirPath()) / fo4mx::FormIdReference::kFileName;
     config_.conflicts.analyseAllRecordTypes = s.value("analysis/allTypes", true).toBool();
     config_.scan.threads = s.value("advanced/threads", 0).toUInt();
@@ -311,6 +313,7 @@ void AppController::saveSettings()
     s.setValue("analysis/excluded", excludedPlugins());
     s.setValue("analysis/compileCreationClub", config_.analysis.compileCreationClub);
     s.setValue("diagnostics/recorder", config_.diagnosticRecorder);
+    s.setValue("archives/f4seLoader", config_.f4seArchiveLoader);
     s.setValue("analysis/allTypes", config_.conflicts.analyseAllRecordTypes);
     s.setValue("advanced/threads", config_.scan.threads);
     s.setValue("advanced/database", toQString(config_.databasePath));

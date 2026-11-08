@@ -35,6 +35,7 @@ struct ExportResult {
     std::filesystem::path disableList;
     std::filesystem::path pluginsTxt;
     std::vector<std::filesystem::path> archiveLoaders; // empty ESL plugins keeping compiled plugins' archives loading
+    std::vector<std::filesystem::path> archiveLoaderFiles; // the F4SE archive loader and its list, when used
     std::vector<std::filesystem::path> seqFiles;       // seq\<output>.seq for start-game-enabled quests
     // Voice files of compiled new responses, copied as sound\voice\<output>\<voice type>\<new FormID>_<n>.*
     // (Multiplexer_Voices.tsv lists them; copies a later build no longer needs are removed).
@@ -94,6 +95,9 @@ public:
     // longer value is cut there and every archive past the cut silently never loads (scripts, meshes
     // and textures of compiled plugins go missing). The value this app writes stays within it.
     static constexpr size_t kArchiveListLimit = 1023;
+    // The F4SE archive loader and the list it supplies, in the package's Data\F4SE\Plugins.
+    static constexpr const char* kArchiveLoaderDll = "MultiplexerArchiveLoader.dll";
+    static constexpr const char* kArchiveManifest = "MultiplexerArchives.txt";
     static std::vector<std::string> archiveList(const Session& session, const CompiledOutput& compiled,
                                                 const std::filesystem::path& outputDirectory);
 
