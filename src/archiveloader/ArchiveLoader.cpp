@@ -39,8 +39,8 @@
 
 namespace {
 
-constexpr std::uint32_t kVersion = f4se_abi::packVersion(1, 0, 0);
-constexpr const char* kVersionText = "1.0.0";
+constexpr std::uint32_t kVersion = f4se_abi::packVersion(1, 0, 1);
+constexpr const char* kVersionText = "1.0.1";
 constexpr const char* kKey = "sResourceArchiveList2";
 
 std::mutex g_lock;
@@ -279,24 +279,35 @@ std::vector<char**> findInExecutable()
     auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(image + reinterpret_cast<IMAGE_DOS_HEADER*>(image)->e_lfanew);
     auto* sections = IMAGE_FIRST_SECTION(nt);
     const size_t want = g_received.size() + 1;
+    auto nameNear = [&](std::uintptr_t at) {
+        for (int off : {8, -8, 16, -16, 24, -24}) {
+            const auto p = at + static_cast<std::uintptr_t>(static_cast<std::intptr_t>(off));
+            if (inside(p, 8) && nameLike(*reinterpret_cast<const char* const*>(p)))
+                return true;
+        }
+        return false;
+    };
     for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
         const auto& sec = sections[i];
         if (!(sec.Characteristics & IMAGE_SCN_MEM_WRITE))
             continue;
-        auto* base = image + sec.VirtualAddress;
-        const size_t size = std::min<size_t>(sec.Misc.VirtualSize, nt->OptionalHeader.SizeOfImage - sec.VirtualAddress);
-        if (!inside(reinterpret_cast<std::uintptr_t>(base), size))
-            continue;
-        for (size_t k = 0; k + 8 <= size; k += 8) {
-            const auto v = *reinterpret_cast<const std::uintptr_t*>(base + k);
-            if (v < 0x10000 || !inside(v, want))
-                continue;
-            const auto* text = reinterpret_cast<const char*>(v);
-            if (text == g_received.data() || std::memcmp(text, g_received.data(), g_received.size()) != 0 ||
-                text[g_received.size()] != 0)
-                continue;
-            if (nameBeside(base, size, k))
-                found.push_back(reinterpret_cast<char**>(base + k));
+        const auto secBegin = reinterpret_cast<std::uintptr_t>(image + sec.VirtualAddress);
+        const auto secEnd =
+            secBegin + std::min<size_t>(sec.Misc.VirtualSize, nt->OptionalHeader.SizeOfImage - sec.VirtualAddress);
+        // A section spans several memory regions (protections differ within it): each readable part is scanned.
+        for (const auto& [rb, re] : regions) {
+            const auto from = std::max(rb, secBegin), to = std::min(re, secEnd);
+            for (auto at = (from + 7) & ~std::uintptr_t(7); at + 8 <= to; at += 8) {
+                const auto v = *reinterpret_cast<const std::uintptr_t*>(at);
+                if (v < 0x10000 || !inside(v, want))
+                    continue;
+                const auto* text = reinterpret_cast<const char*>(v);
+                if (text == g_received.data() || std::memcmp(text, g_received.data(), g_received.size()) != 0 ||
+                    text[g_received.size()] != 0)
+                    continue;
+                if (nameNear(at))
+                    found.push_back(reinterpret_cast<char**>(at));
+            }
         }
     }
     if (found.size() > 4)

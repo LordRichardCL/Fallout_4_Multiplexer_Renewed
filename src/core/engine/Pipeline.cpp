@@ -468,9 +468,10 @@ bool Pipeline::compile(ProgressSink& progress)
                                                        std::to_string(Exporter::kArchiveListLimit) +
                                                        " characters of SResourceArchiveList2, and its archives (" +
                                                        join(archives, ", ") +
-                                                       ") no longer fit, so they would never load. On Mod "
-                                                       "Organizer 2, with the output inside the mods folder, "
-                                                       "archive loaders need no INI list")
+                                                       ") no longer fit, so they would never load. Turn on the F4SE "
+                                                       "archive loader (Settings > Archives, or --archive-loader) "
+                                                       "to compile it; on Mod Organizer 2, with the output inside "
+                                                       "the mods folder, archive loaders need no INI list either")
                                    .second) {
                         ++isolated;
                     }
