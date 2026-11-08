@@ -5428,13 +5428,15 @@ TEST(runs_cleanup_is_separate_safe_and_skips_what_it_cannot_move)
 TEST(runs_layouts_mods_folder_game_data_and_earlier_versions)
 {
     // The earlier package setting "...\Multiplexer Output\Data": the exports go into "...\Multiplexer Output".
-    auto l1 = output::locate("/x/Game/Multiplexer Output/Data", "/x/Game", "/x/Game/Data", {});
-    CHECK(l1.layout == output::Layout::Package && l1.root == std::filesystem::path("/x/Game/Multiplexer Output"));
-    auto l2 = output::locate({}, "/x/Game", "/x/Game/Data", {});
-    CHECK(l2.root == std::filesystem::path("/x/Game/Multiplexer Output"));
-    auto l3 = output::locate("/x/MO2/mods/Fallout 4 Multiplexer Output", "/x/Game", "/x/Game/Data", "/x/MO2/mods");
-    CHECK(l3.layout == output::Layout::ModFolder && l3.root == std::filesystem::path("/x/MO2/mods"));
-    auto l4 = output::locate("/x/Game/Data", "/x/Game", "/x/Game/Data", {});
+    const auto x = tempDir("runs_layouts");
+    const auto game = x / "Game";
+    auto l1 = output::locate(game / "Multiplexer Output" / "Data", game, game / "Data", {});
+    CHECK(l1.layout == output::Layout::Package && l1.root == game / "Multiplexer Output");
+    auto l2 = output::locate({}, game, game / "Data", {});
+    CHECK(l2.root == game / "Multiplexer Output");
+    auto l3 = output::locate(x / "MO2" / "mods" / "Fallout 4 Multiplexer Output", game, game / "Data", x / "MO2" / "mods");
+    CHECK(l3.layout == output::Layout::ModFolder && l3.root == x / "MO2" / "mods");
+    auto l4 = output::locate(game / "Data", game, game / "Data", {});
     CHECK(l4.layout == output::Layout::GameData);
 
     // An export written by an earlier version into a single folder: its FormID map is still read.
