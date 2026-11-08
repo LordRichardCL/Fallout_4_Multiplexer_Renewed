@@ -100,7 +100,7 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
             return;
         QFile out(f);
         if (out.open(QIODevice::WriteOnly | QIODevice::Truncate))
-            out.write(QByteArray::fromStdString(dg::formatReport(session_, results_)));
+            out.write(QByteArray::fromStdString(dg::formatReport(session_, results_, package_ ? &*package_ : nullptr)));
     });
 }
 
@@ -132,6 +132,8 @@ void DiagnosticsPage::open(const QString& file)
         package->expectedProfile =
             app_->config().install.runtime == fo4mx::RuntimeProfile::NextGen ? "nextgen" : "oldgen";
     results_ = dg::analyse(session_, package ? &*package : nullptr);
+    package_ = package;
+    const auto archives = dg::checkArchives(session_, package ? &*package : nullptr);
 
     size_t active = 0;
     for (const auto& p : session_.plugins)
@@ -145,8 +147,17 @@ void DiagnosticsPage::open(const QString& file)
                           .arg(QString::fromStdString(session_.recorderVersion))
                           .arg(active)
                           .arg(session_.ended ? "ended normally" : "<b>no normal exit recorded</b>")
-                          .arg(package ? "Compared with the build in " + toQString(package->root).toHtmlEscaped()
-                                       : QString("No Multiplexer build found to compare with.")));
+                          .arg((package ? "Compared with the build in " + toQString(package->root).toHtmlEscaped()
+                                        : QString("No Multiplexer build found to compare with.")) +
+                               (archives.available
+                                    ? QString("<br><b>Archives:</b> %1 of %2 requested loaded%3 · %4")
+                                          .arg(archives.loaded.size())
+                                          .arg(archives.requested.size())
+                                          .arg(archives.truncated
+                                                   ? QString(" · list cut at %1 characters").arg(archives.received)
+                                                   : QString())
+                                          .arg(QString::fromStdString(archives.verdict).toHtmlEscaped())
+                                    : QString())));
 
     findings_->clear();
     for (const auto& f : results_) {

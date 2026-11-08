@@ -4,6 +4,8 @@
 
 #include "diagnostics/RecorderLog.hpp"
 
+#include <optional>
+
 class QLabel;
 class QTreeWidget;
 
@@ -29,6 +31,7 @@ private:
     QString file_;
     fo4mx::diagnostics::RecorderSession session_;
     std::vector<fo4mx::diagnostics::Finding> results_;
+    std::optional<fo4mx::diagnostics::PackageContext> package_;
 };
 
 } // namespace gui

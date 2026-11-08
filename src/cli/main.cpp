@@ -631,7 +631,7 @@ int cmdDiagnose(const Args& a)
             package->expectedProfile = a.get("--runtime") == "nextgen" ? "nextgen" : "oldgen";
     }
     const auto findings = diagnostics::analyse(session, package ? &*package : nullptr);
-    std::fputs(diagnostics::formatReport(session, findings).c_str(), stdout);
+    std::fputs(diagnostics::formatReport(session, findings, package ? &*package : nullptr).c_str(), stdout);
     for (const auto& f : findings)
         if (f.severity == diagnostics::FindingSeverity::Error)
             return 2;

@@ -6,9 +6,14 @@
 // loaded, game data ready, new game, save loading and saving), the active plugins listed in
 // plugins.txt and Fallout4.ccc as the game process reads them, the F4SE plugin DLLs present and
 // which of them are loaded, F4SE's own plugin load results (f4se.log), and its own errors.
+// Archive diagnostics (1.2.0): the archive lists in Fallout4.ini and Fallout4Custom.ini as written,
+// what the game receives when it reads them, which BA2 files it opens, and which it holds open.
 //
-// What it does not do: it uses no game addresses, reads no game structures, installs no hooks,
-// changes no game data, save or file other than its own log. Every entry point catches every
+// What it does not do: it uses no game addresses and reads no game structures. To see the game's INI
+// reads and file opens it replaces three entries of Fallout4.exe's import table
+// (GetPrivateProfileStringA, CreateFileA, CreateFileW) with wrappers that call the previous entry with
+// the same arguments, return its result unchanged and restore its error code: they only observe.
+// It changes no game data, save or file other than its own log. Every entry point catches every
 // exception, so a failure of the recorder is written to the log instead of reaching the game.
 
 #include "F4SEPluginAbi.hpp"
@@ -24,6 +29,8 @@
 #include <shlobj.h>
 
 #include <algorithm>
+#include <cctype>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <cwctype>
@@ -33,8 +40,8 @@
 
 namespace {
 
-constexpr std::uint32_t kRecorderVersion = f4se_abi::packVersion(1, 1, 0);
-constexpr const char* kRecorderVersionText = "1.1.0";
+constexpr std::uint32_t kRecorderVersion = f4se_abi::packVersion(1, 2, 0);
+constexpr const char* kRecorderVersionText = "1.2.0";
 constexpr int kSchema = 1;
 constexpr size_t kKeepSessions = 10;   // older session logs are deleted
 constexpr size_t kMaxF4seLines = 400;  // plugin lines copied from f4se.log
@@ -465,6 +472,282 @@ void recordModules()
     Event("f4se_log").str("path", pathText(f4seLog)).raw("plugin_lines", found).write();
 }
 
+// ---- Archive diagnostics -------------------------------------------------------------------
+// Where does an archive list stop working? The four layers, side by side in the log:
+//   archive_ini       the [Archive] lists as written in the INI files (read here as plain text)
+//   archive_ini_read  what the game receives when it reads one (its buffer size, the length returned)
+//   archive_open      each BA2 file the game opens (path, success)
+//   archive_handles   the BA2 files the process holds open at game data ready and at the main menu
+
+using GetPrivateProfileStringA_t = DWORD(WINAPI*)(LPCSTR, LPCSTR, LPCSTR, LPSTR, DWORD, LPCSTR);
+using CreateFileA_t = HANDLE(WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+using CreateFileW_t = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+GetPrivateProfileStringA_t g_prevGetProfileString = nullptr;
+CreateFileA_t g_prevCreateFileA = nullptr;
+CreateFileW_t g_prevCreateFileW = nullptr;
+std::atomic<unsigned> g_iniReadsSeen{0};
+std::atomic<unsigned> g_archiveOpensSeen{0};
+
+bool startsWithNoCase(const char* s, const char* prefix)
+{
+    if (!s)
+        return false;
+    for (; *prefix; ++s, ++prefix)
+        if (!*s || std::tolower(static_cast<unsigned char>(*s)) != std::tolower(static_cast<unsigned char>(*prefix)))
+            return false;
+    return true;
+}
+
+bool isArchivePath(const std::wstring& p)
+{
+    return p.size() >= 4 && lower(p.substr(p.size() - 4)) == L".ba2";
+}
+
+std::string fileNameOnly(const std::string& p)
+{
+    const size_t slash = p.find_last_of("\\/");
+    return slash == std::string::npos ? p : p.substr(slash + 1);
+}
+
+DWORD WINAPI observeGetPrivateProfileStringA(LPCSTR app, LPCSTR key, LPCSTR def, LPSTR out, DWORD size, LPCSTR file)
+{
+    const DWORD result = g_prevGetProfileString(app, key, def, out, size, file);
+    const DWORD error = GetLastError();
+    try {
+        if (app && key && startsWithNoCase(key, "sResource")) {
+            ++g_iniReadsSeen;
+            const size_t got = out && size ? std::min<size_t>(result, size - 1) : 0;
+            Event("archive_ini_read")
+                .str("section", app)
+                .str("key", key)
+                .str("file", file ? fileNameOnly(file) : std::string())
+                .num("buffer", size)
+                .num("returned", result)
+                // The documented sign of a value cut to fit: the result is the buffer size minus one.
+                .flag("truncated", size >= 2 && result == size - 1)
+                .str("value", out ? std::string(out, got) : std::string())
+                .write();
+        }
+    } catch (...) {
+    }
+    SetLastError(error);
+    return result;
+}
+
+void recordArchiveOpen(const std::wstring& path, DWORD access, HANDLE h, DWORD error)
+{
+    try {
+        if (!isArchivePath(path))
+            return;
+        ++g_archiveOpensSeen;
+        Event e("archive_open");
+        e.str("path", pathText(path))
+            .flag("ok", h != INVALID_HANDLE_VALUE)
+            .flag("write", (access & (GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA | FILE_APPEND_DATA)) != 0);
+        if (h == INVALID_HANDLE_VALUE)
+            e.num("error", error);
+        e.write();
+    } catch (...) {
+    }
+}
+
+HANDLE WINAPI observeCreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disp,
+                                 DWORD flags, HANDLE templ)
+{
+    const HANDLE h = g_prevCreateFileW(name, access, share, sa, disp, flags, templ);
+    const DWORD error = GetLastError();
+    if (name)
+        recordArchiveOpen(name, access, h, error);
+    SetLastError(error);
+    return h;
+}
+
+HANDLE WINAPI observeCreateFileA(LPCSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disp,
+                                 DWORD flags, HANDLE templ)
+{
+    const HANDLE h = g_prevCreateFileA(name, access, share, sa, disp, flags, templ);
+    const DWORD error = GetLastError();
+    if (name) {
+        const int n = MultiByteToWideChar(CP_ACP, 0, name, -1, nullptr, 0);
+        if (n > 1) {
+            std::wstring w(static_cast<size_t>(n - 1), L'\0');
+            MultiByteToWideChar(CP_ACP, 0, name, -1, w.data(), n);
+            recordArchiveOpen(w, access, h, error);
+        }
+    }
+    SetLastError(error);
+    return h;
+}
+
+// The import-table entry of `function` (from kernel32) in the game's executable.
+void** importSlot(const char* function)
+{
+    auto* base = reinterpret_cast<std::uint8_t*>(GetModuleHandleW(nullptr));
+    if (!base)
+        return nullptr;
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+        return nullptr;
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE)
+        return nullptr;
+    const auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (!dir.VirtualAddress)
+        return nullptr;
+    for (auto* imp = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress); imp->Name; ++imp) {
+        if (_stricmp(reinterpret_cast<const char*>(base + imp->Name), "kernel32.dll") != 0)
+            continue;
+        auto* names = reinterpret_cast<IMAGE_THUNK_DATA*>(base + (imp->OriginalFirstThunk ? imp->OriginalFirstThunk : imp->FirstThunk));
+        auto* slots = reinterpret_cast<IMAGE_THUNK_DATA*>(base + imp->FirstThunk);
+        for (; names->u1.AddressOfData; ++names, ++slots) {
+            if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal))
+                continue;
+            auto* byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
+            if (std::strcmp(reinterpret_cast<const char*>(byName->Name), function) == 0)
+                return reinterpret_cast<void**>(&slots->u1.Function);
+        }
+    }
+    return nullptr;
+}
+
+template <class F>
+bool observeImport(const char* function, F wrapper, F& previous)
+{
+    void** slot = importSlot(function);
+    if (!slot)
+        return false;
+    DWORD old = 0;
+    if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old))
+        return false;
+    previous = reinterpret_cast<F>(*slot); // the entry as it is now: Windows, or another plugin's wrapper
+    *slot = reinterpret_cast<void*>(wrapper);
+    VirtualProtect(slot, sizeof(void*), old, &old);
+    return true;
+}
+
+void installArchiveObservers()
+{
+    const bool ini = observeImport("GetPrivateProfileStringA", &observeGetPrivateProfileStringA, g_prevGetProfileString);
+    const bool openA = observeImport("CreateFileA", &observeCreateFileA, g_prevCreateFileA);
+    const bool openW = observeImport("CreateFileW", &observeCreateFileW, g_prevCreateFileW);
+    Event("archive_observers")
+        .flag("ini_reads", ini)
+        .flag("open_a", openA)
+        .flag("open_w", openW)
+        .write();
+}
+
+// [Archive] keys starting with "sResource" in one INI file, as written (no profile API, so no buffer).
+void recordArchiveIni(const std::wstring& file)
+{
+    std::string text;
+    if (!readShared(file, text))
+        return;
+    bool inArchive = false;
+    for (const auto& l : lines(text)) {
+        size_t i = 0;
+        while (i < l.size() && (l[i] == ' ' || l[i] == '\t'))
+            ++i;
+        if (i < l.size() && l[i] == '[') {
+            const size_t end = l.find(']', i);
+            inArchive = end != std::string::npos && _stricmp(l.substr(i + 1, end - i - 1).c_str(), "Archive") == 0;
+            continue;
+        }
+        if (!inArchive || i >= l.size() || l[i] == ';' || l[i] == '#')
+            continue;
+        const size_t eq = l.find('=', i);
+        if (eq == std::string::npos)
+            continue;
+        std::string key = l.substr(i, eq - i);
+        while (!key.empty() && (key.back() == ' ' || key.back() == '\t'))
+            key.pop_back();
+        if (!startsWithNoCase(key.c_str(), "sResource"))
+            continue;
+        const std::string value = l.substr(eq + 1);
+        Event("archive_ini")
+            .str("file", fileNameOnly(utf8(file)))
+            .str("key", key)
+            .num("length", value.size())
+            .str("value", value)
+            .write();
+    }
+}
+
+// The BA2 files this process holds open (NtQueryInformationProcess, ProcessHandleInformation).
+void recordArchiveHandles(const char* stage)
+{
+    using NtQueryInformationProcess_t = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+    struct HandleEntry {
+        HANDLE handle;
+        ULONG_PTR handleCount;
+        ULONG_PTR pointerCount;
+        ULONG grantedAccess;
+        ULONG objectTypeIndex;
+        ULONG handleAttributes;
+        ULONG reserved;
+    };
+    struct HandleSnapshot {
+        ULONG_PTR count;
+        ULONG_PTR reserved;
+        HandleEntry handles[1];
+    };
+    constexpr ULONG kProcessHandleInformation = 51;
+    constexpr LONG kInfoLengthMismatch = static_cast<LONG>(0xC0000004);
+    auto query = reinterpret_cast<NtQueryInformationProcess_t>(
+        GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationProcess"));
+    // Every handle value of the process: from Windows' snapshot (Windows 8 and later), else by trying
+    // each possible value (handles are multiples of 4).
+    std::vector<HANDLE> handles;
+    const char* method = "snapshot";
+    std::vector<std::uint8_t> buffer(64 * 1024);
+    LONG status = -1;
+    for (int tries = 0; query && tries < 8; ++tries) {
+        ULONG needed = 0;
+        status = query(GetCurrentProcess(), kProcessHandleInformation, buffer.data(), static_cast<ULONG>(buffer.size()), &needed);
+        if (status != kInfoLengthMismatch)
+            break;
+        buffer.resize(std::max<size_t>(buffer.size() * 2, needed + 4096));
+    }
+    if (status >= 0) {
+        const auto* snap = reinterpret_cast<const HandleSnapshot*>(buffer.data());
+        for (ULONG_PTR i = 0; i < snap->count; ++i)
+            handles.push_back(snap->handles[i].handle);
+    } else {
+        method = "scan";
+        for (ULONG_PTR v = 4; v < 0x100000; v += 4)
+            handles.push_back(reinterpret_cast<HANDLE>(v));
+    }
+    std::string list = "[";
+    size_t found = 0;
+    std::vector<wchar_t> path(32768);
+    for (const HANDLE h : handles) {
+        // Only files on disk: asking a pipe or another kind of handle for its name can block.
+        if (GetFileType(h) != FILE_TYPE_DISK)
+            continue;
+        const DWORD n = GetFinalPathNameByHandleW(h, path.data(), static_cast<DWORD>(path.size()), FILE_NAME_NORMALIZED);
+        if (n == 0 || n >= path.size())
+            continue;
+        std::wstring p(path.data(), n);
+        if (p.rfind(L"\\\\?\\", 0) == 0)
+            p = p.substr(4);
+        if (!isArchivePath(p))
+            continue;
+        if (found++)
+            list += ",";
+        list += jsonString(pathText(p));
+    }
+    list += "]";
+    Event("archive_handles")
+        .str("stage", stage)
+        .str("method", method)
+        .num("handles", handles.size())
+        .num("count", found)
+        .num("ini_reads_seen", g_iniReadsSeen.load())
+        .num("opens_seen", g_archiveOpensSeen.load())
+        .raw("archives", list)
+        .write();
+}
+
 // ---- F4SE messages -------------------------------------------------------------------------
 
 std::string fileNameOf(const char* data, std::uint32_t len)
@@ -516,6 +799,22 @@ void onMessage(f4se_abi::F4SEMessagingInterface::Message* msg)
             statusLine("New game started");
         else if (msg->type == M::kPostLoadGame)
             statusLine(std::string("Save loaded") + (msg->data != nullptr ? "" : " (failed)"));
+        // On a thread of its own: listing handles can take seconds where Windows' snapshot is missing
+        // (Wine, Proton), and the game must not wait for it.
+        if ((msg->type == M::kGameDataReady && msg->data != nullptr) || msg->type == M::kGameLoaded) {
+            const char* stage = msg->type == M::kGameLoaded ? "main_menu" : "game_data_ready";
+            HANDLE t = CreateThread(nullptr, 0, [](LPVOID p) -> DWORD {
+                try {
+                    recordArchiveHandles(static_cast<const char*>(p));
+                } catch (...) {
+                }
+                return 0;
+            }, const_cast<char*>(stage), 0, nullptr);
+            if (t)
+                CloseHandle(t);
+            else
+                recordArchiveHandles(stage);
+        }
         if (msg->type == M::kPostLoad && !g_loadRecorded) {
             g_loadRecorded = true;
             recordLoadOrder();
@@ -606,6 +905,14 @@ __declspec(dllexport) bool F4SEPlugin_Load(const f4se_abi::F4SEInterface* f4se)
             .str("game_exe_version", fileVersion(exePath))
             .num("process_id", GetCurrentProcessId())
             .write();
+
+        // Archive diagnostics: the lists as written, then observe the game reading them (it reads its INIs
+        // after F4SE has loaded the plugins) and opening the archives.
+        if (!g_myGames.empty()) {
+            recordArchiveIni(g_myGames + L"Fallout4.ini");
+            recordArchiveIni(g_myGames + L"Fallout4Custom.ini");
+        }
+        installArchiveObservers();
 
         g_handle = f4se->GetPluginHandle ? f4se->GetPluginHandle() : f4se_abi::kPluginHandleInvalid;
         auto* messaging = f4se->QueryInterface

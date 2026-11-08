@@ -64,6 +64,33 @@ std::vector<std::pair<std::string, bool>> pluginsTxt(const std::string& text)
     return out;
 }
 
+std::string fileNameOf(const std::string& path)
+{
+    const size_t slash = path.find_last_of("\\/");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+// "a.ba2, b.ba2" -> entries and the character position where each starts.
+void splitArchiveList(const std::string& value, std::vector<std::string>& names, std::vector<size_t>& offsets)
+{
+    size_t start = 0;
+    while (start <= value.size()) {
+        size_t comma = value.find(',', start);
+        if (comma == std::string::npos)
+            comma = value.size();
+        size_t b = start, e = comma;
+        while (b < e && (value[b] == ' ' || value[b] == '\t'))
+            ++b;
+        while (e > b && (value[e - 1] == ' ' || value[e - 1] == '\t'))
+            --e;
+        if (e > b) {
+            names.push_back(value.substr(b, e - b));
+            offsets.push_back(b);
+        }
+        start = comma + 1;
+    }
+}
+
 std::vector<std::pair<std::string, bool>> namedFlags(const json::Value& array, const char* flag)
 {
     std::vector<std::pair<std::string, bool>> out;
@@ -133,6 +160,34 @@ RecorderSession parseRecorderLog(std::string_view text, std::string file)
             if (e["plugin_lines"].isArray())
                 for (const auto& l : e["plugin_lines"].asArray())
                     s.f4seLines.push_back(l.asString());
+        } else if (event == "archive_ini") {
+            s.archiveIni.push_back({e["file"].asString(), e["key"].asString(), e["value"].asString()});
+        } else if (event == "archive_ini_read") {
+            RecorderSession::ArchiveIniRead r;
+            r.section = e["section"].asString();
+            r.key = e["key"].asString();
+            r.file = e["file"].asString();
+            r.value = e["value"].asString();
+            r.buffer = static_cast<uint64_t>(e["buffer"].asNumber());
+            r.returned = static_cast<uint64_t>(e["returned"].asNumber());
+            r.truncated = e["truncated"].asBool();
+            s.archiveIniReads.push_back(std::move(r));
+        } else if (event == "archive_observers") {
+            s.observesIniReads = e["ini_reads"].asBool();
+            s.observesOpens = e["open_a"].asBool() || e["open_w"].asBool();
+        } else if (event == "archive_open") {
+            const std::string path = e["path"].asString();
+            if (e["write"].asBool())
+                ; // written, not loaded (an installer or tool): not evidence of the game loading it
+            else if (e["ok"].asBool())
+                s.archivesOpened.insert(toLower(fileNameOf(path)));
+            else
+                s.archivesFailed.push_back(path);
+        } else if (event == "archive_handles") {
+            s.hasArchiveHandles = true;
+            if (e["archives"].isArray())
+                for (const auto& a : e["archives"].asArray())
+                    s.archivesHeld.insert(toLower(fileNameOf(a.asString())));
         } else if (event == "recorder_error") {
             s.errors.emplace_back(e["where"].asString(), e["message"].asString());
         } else if (event == "recorder_warning") {
@@ -175,6 +230,20 @@ std::optional<PackageContext> loadPackageContext(const fs::path& given)
             c.outputs.push_back(name);
     }
     std::sort(c.outputs.begin(), c.outputs.end());
+    // The archive list the build asked for, and the archives it added (kept beside the exports).
+    for (const auto& l : textLines(readAll(packageRoot / "Multiplexer_Archives.ini"))) {
+        const auto eq = l.find('=');
+        if (eq != std::string::npos && iequals(trim(l.substr(0, eq)), "SResourceArchiveList2")) {
+            std::vector<size_t> offsets;
+            splitArchiveList(l.substr(eq + 1), c.archiveList, offsets);
+        }
+    }
+    for (const auto& dir : {packageRoot, packageRoot.parent_path()})
+        for (const auto& l : textLines(readAll(dir / "Multiplexer_RegisteredArchives.txt"))) {
+            const std::string name = trim(l);
+            if (!name.empty() && name[0] != '#')
+                c.registeredArchives.insert(toLower(name));
+        }
     return c;
 }
 
@@ -427,6 +496,56 @@ std::vector<Finding> analyse(const RecorderSession& s, const PackageContext* pac
                 {"Choose the matching game version in Settings and build again."});
     }
 
+    if (s.hasArchiveDiagnostics()) {
+        const auto c = checkArchives(s, package);
+        if (c.truncated) {
+            std::vector<std::string> ev = {
+                "the game read " + c.key + " (" + c.iniFile + ") with a " + std::to_string(c.buffer) +
+                "-byte buffer and received " + std::to_string(c.received) + " of " + std::to_string(c.iniValue.size()) +
+                " characters"};
+            for (size_t i = 0; i < c.iniEntries.size(); ++i)
+                if (c.iniOffsets[i] + c.iniEntries[i].size() > c.received) {
+                    ev.push_back("first archive past the cut: " + c.iniEntries[i] + " (entry " + std::to_string(i + 1) +
+                                 " of " + std::to_string(c.iniEntries.size()) + ", starting at character " +
+                                 std::to_string(c.iniOffsets[i]) + ")");
+                    break;
+                }
+            add(out, FindingSeverity::Error, "The game read only part of the archive list",
+                "Fallout 4 reads " + c.key + " into a fixed buffer and every archive after the cut is never loaded: "
+                "their scripts, meshes and textures are missing in game",
+                "High", ev,
+                {"Build again with the current version of Multiplexer: it keeps the list within what the game reads.",
+                 "Plugins whose archives do not fit stay in the load order until a longer list can be loaded."});
+        }
+        if (c.observable && !c.missing.empty()) {
+            std::vector<std::string> ev = {std::to_string(c.missing.size()) + " of " + std::to_string(c.requested.size()) +
+                                           " requested archives were not opened by the game"};
+            ev.push_back("first missing: " + c.firstMissing +
+                         (c.firstMissingOffset != std::string::npos
+                              ? " (entry " + std::to_string(c.firstMissingIndex + 1) + ", character " +
+                                    std::to_string(c.firstMissingOffset) + " of the INI value)"
+                              : " (not in the INI archive list)"));
+            for (size_t i = 0; i < c.missing.size() && i < 10; ++i)
+                ev.push_back("missing: " + c.missing[i]);
+            add(out, FindingSeverity::Error, "Requested archives did not load",
+                c.truncated ? "the archive list was cut when the game read it" : "the archives were not opened: missing "
+                              "files, a name that does not match, or an archive limit",
+                c.truncated ? "High" : "Medium", ev,
+                {"Check that the archives exist in Data under these names.",
+                 "Open the Diagnostics page for the full archive comparison."});
+        }
+        if (!c.observable)
+            add(out, FindingSeverity::Info, "Archive loading could not be verified in this session",
+                "the game's own archives were not seen opening (another plugin may observe the same files first)",
+                "Medium", {c.verdict}, {});
+        if (c.archivesOpen > 230 && !c.addictol && !c.xcell)
+            add(out, FindingSeverity::Warning, "Close to the archive limit",
+                "Fallout 4 1.10.163 and 1.10.984 load at most 256 general and 256 texture archives; past that the game "
+                "stops at start-up. No archive-limit plugin (Addictol) was loaded",
+                "Medium", {std::to_string(c.archivesOpen) + " BA2 archives opened"},
+                {"Install Addictol (its Archive Limits module is on by default)."});
+    }
+
     if (!s.unreadable.empty())
         add(out, FindingSeverity::Info, "Some lines could not be read",
             s.ended ? "the file was edited or damaged" : "the last line was cut off when the game stopped", "High",
@@ -434,6 +553,141 @@ std::vector<Finding> analyse(const RecorderSession& s, const PackageContext* pac
 
     std::stable_sort(out.begin(), out.end(), [](const Finding& a, const Finding& b) { return a.severity < b.severity; });
     return out;
+}
+
+ArchiveCheck checkArchives(const RecorderSession& s, const PackageContext* package)
+{
+    ArchiveCheck c;
+    c.available = s.hasArchiveDiagnostics();
+    for (const auto& [name, loaded] : s.pluginDlls) {
+        const std::string n = toLower(name);
+        c.addictol |= loaded && n.find("addictol") != std::string::npos;
+        c.xcell |= loaded && n.rfind("x-cell", 0) == 0;
+    }
+    if (!c.available) {
+        c.verdict = "this session has no archive diagnostics (recorder 1.2.0 or later)";
+        return c;
+    }
+    // The value the game uses: Fallout4Custom.ini over Fallout4.ini.
+    const RecorderSession::ArchiveIniValue* chosen = nullptr;
+    for (const auto& v : s.archiveIni)
+        if (iequals(v.key, c.key) && (!chosen || iequals(v.file, "Fallout4Custom.ini")))
+            chosen = &v;
+    if (chosen) {
+        c.iniFile = chosen->file;
+        c.iniValue = chosen->value;
+        splitArchiveList(c.iniValue, c.iniEntries, c.iniOffsets);
+    }
+    // The game's read of it: the one from the same file, else the last.
+    const RecorderSession::ArchiveIniRead* read = nullptr;
+    for (const auto& r : s.archiveIniReads)
+        if (iequals(r.key, c.key) && (!read || iequals(r.file, c.iniFile)))
+            read = &r;
+    if (read) {
+        c.readSeen = true;
+        c.buffer = read->buffer;
+        c.received = read->value.size();
+        c.truncated = read->truncated && c.received < c.iniValue.size();
+    }
+    std::set<std::string> seen = s.archivesOpened;
+    seen.insert(s.archivesHeld.begin(), s.archivesHeld.end());
+    c.archivesOpen = seen.size();
+    for (const auto& a : seen)
+        c.observable |= a.rfind("fallout4 - ", 0) == 0;
+    c.requested = package && !package->archiveList.empty() ? package->archiveList : c.iniEntries;
+    for (const auto& a : c.requested)
+        (seen.count(toLower(a)) ? c.loaded : c.missing).push_back(a);
+    c.firstMissingOffset = std::string::npos;
+    if (c.observable && !c.missing.empty()) {
+        std::set<std::string> missing;
+        for (const auto& m : c.missing)
+            missing.insert(toLower(m));
+        for (size_t i = 0; i < c.iniEntries.size(); ++i)
+            if (missing.count(toLower(c.iniEntries[i]))) {
+                c.firstMissing = c.iniEntries[i];
+                c.firstMissingIndex = i;
+                c.firstMissingOffset = c.iniOffsets[i];
+                break;
+            }
+        if (c.firstMissing.empty())
+            c.firstMissing = c.missing.front();
+    }
+    if (!c.observable)
+        c.verdict = "cannot verify: the game's own archives were not seen opening in this session";
+    else if (c.missing.empty())
+        c.verdict = "PASS: all " + std::to_string(c.requested.size()) + " requested archives loaded";
+    else
+        c.verdict = "FAIL: " + std::to_string(c.missing.size()) + " of " + std::to_string(c.requested.size()) +
+                    " requested archives did not load" +
+                    (c.truncated ? "; archive-list truncation: the game received " + std::to_string(c.received) +
+                                       " of " + std::to_string(c.iniValue.size()) + " characters"
+                                 : std::string());
+    return c;
+}
+
+std::string formatArchiveCheck(const ArchiveCheck& c)
+{
+    std::ostringstream o;
+    o << "Archive compatibility\n---------------------\n";
+    o << "Addictol loaded:      " << (c.addictol ? "Yes" : "No") << (c.xcell ? " (X-Cell loaded)" : "") << "\n";
+    if (!c.available) {
+        o << c.verdict << "\n";
+        return o.str();
+    }
+    o << "INI " << c.key << ": " << c.iniEntries.size() << " entries, " << c.iniValue.size() << " characters"
+      << (c.iniFile.empty() ? std::string() : " (" + c.iniFile + ")") << "\n";
+    if (c.readSeen)
+        o << "Received by the game: " << c.received << " characters (buffer " << c.buffer << ")"
+          << (c.truncated ? " - CUT" : "") << "\n";
+    else
+        o << "Received by the game: not observed\n";
+    o << "Requested archives:   " << c.requested.size() << "\n";
+    o << "Runtime verified:     " << c.loaded.size() << "\n";
+    o << "Missing:              " << c.missing.size() << "\n";
+    o << "BA2 files opened:     " << c.archivesOpen << "\n";
+    o << "Archive loading:      " << c.verdict << "\n";
+    if (!c.firstMissing.empty()) {
+        o << "First missing:        " << c.firstMissing << "\n";
+        if (c.firstMissingOffset != std::string::npos)
+            o << "  Archive index:      " << (c.firstMissingIndex + 1) << "\n  String position:    "
+              << c.firstMissingOffset << "\n";
+        for (const auto& m : c.missing)
+            o << "  missing: " << m << "\n";
+    }
+    return o.str();
+}
+
+ArchiveLimitFix detectArchiveLimitFix(const fs::path& gamePath)
+{
+    ArchiveLimitFix f;
+    if (gamePath.empty())
+        return f;
+    const auto plugins = findPathCaseInsensitive(gamePath, "Data\\F4SE\\Plugins");
+    std::error_code ec;
+    if (!plugins.empty())
+        for (const auto& e : fs::directory_iterator(plugins, ec)) {
+            const std::string n = toLower(pathToUtf8(e.path().filename()));
+            if (n == "addictol.dll")
+                f.addictol = true;
+            else if (n.rfind("x-cell", 0) == 0 && iendsWith(n, ".dll"))
+                f.xcell = true;
+        }
+    if (f.addictol) {
+        // Addictol.toml: [Patches] bArchiveLimits, on unless set to false.
+        f.addictolArchiveLimits = true;
+        for (const auto& l : textLines(readAll(findPathCaseInsensitive(plugins, "Addictol.toml")))) {
+            std::string t = toLower(trim(l));
+            t.erase(std::remove(t.begin(), t.end(), ' '), t.end());
+            if (t.rfind("barchivelimits=", 0) == 0)
+                f.addictolArchiveLimits = t.find("false") == std::string::npos && t.find("=0") == std::string::npos;
+        }
+    }
+    f.summary = f.addictol ? (f.addictolArchiveLimits ? "Addictol installed, Archive Limits on: no 256-archive limit"
+                                                      : "Addictol installed, but its Archive Limits module is off")
+                : f.xcell  ? "X-Cell installed (its archive-limit patch applies only to Fallout 4 1.11.191)"
+                           : "no archive-limit plugin: Fallout 4 1.10.163 and 1.10.984 load at most 256 general and "
+                             "256 texture archives";
+    return f;
 }
 
 fs::path newestSession(const fs::path& folder)
@@ -487,6 +741,7 @@ RecorderInstallStatus checkRecorderInstall(const fs::path& gamePath, const fs::p
     if (std::ifstream in{st.statusLog, std::ios::binary})
         st.statusText.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
     st.newestSession = newestSession(f4seFolder / "MultiplexerDiagnosticRecorder");
+    st.archiveLimits = detectArchiveLimitFix(gamePath).summary;
 
     if (st.loadedByF4se) {
         st.ok = true;
@@ -523,6 +778,8 @@ std::string formatInstallStatus(const RecorderInstallStatus& s)
         o << "Misplaced: " << pathToUtf8(m) << " (F4SE does not read this folder)\n";
     o << "f4se.log:  " << pathToUtf8(s.f4seLog) << (s.f4seLogFound ? "" : " (not found)") << "\n";
     o << "F4SE says: " << (s.f4seLine.empty() ? std::string("(nothing about the recorder)") : trim(s.f4seLine)) << "\n";
+    if (!s.archiveLimits.empty())
+        o << "Archive limit: " << s.archiveLimits << "\n";
     o << "Newest session log: " << (s.newestSession.empty() ? std::string("(none)") : pathToUtf8(s.newestSession))
       << "\n";
     if (!s.statusText.empty())
@@ -530,7 +787,7 @@ std::string formatInstallStatus(const RecorderInstallStatus& s)
     return o.str();
 }
 
-std::string formatReport(const RecorderSession& s, const std::vector<Finding>& findings)
+std::string formatReport(const RecorderSession& s, const std::vector<Finding>& findings, const PackageContext* package)
 {
     std::ostringstream o;
     o << "Diagnostic Recorder session\n===========================\n";
@@ -543,6 +800,8 @@ std::string formatReport(const RecorderSession& s, const std::vector<Finding>& f
     o << "Plugins:   " << active << " active of " << s.plugins.size() << " in plugins.txt\n";
     o << "Ended:     " << (s.ended ? "normally" : "without a normal exit") << " (" << s.messages.size()
       << " F4SE messages)\n\n";
+    if (s.hasArchiveDiagnostics())
+        o << formatArchiveCheck(checkArchives(s, package)) << "\n";
     o << "Findings (" << findings.size() << ")\n-----------\n";
     for (const auto& f : findings) {
         o << "[" << findingSeverityName(f.severity) << "] " << f.title << "\n";

@@ -188,3 +188,78 @@ TEST(diagnostics_recorder_installation)
     CHECK(text.find("OK: F4SE loaded the recorder") != std::string::npos);
     CHECK(text.find("1.1.0 loaded") != std::string::npos);
 }
+
+// Archive diagnostics (recorder 1.2.0): the list as written, what the game received, what it opened.
+// The event lines follow what the DLL writes (checked by running it under Wine with a host that reads
+// the list with a 1,024-byte buffer, as Fallout4.exe does).
+TEST(diagnostics_archive_list_cut_and_what_loaded)
+{
+    const std::string value = "Fallout4 - Animations.ba2, ModA - Main.ba2, ModB - Main.ba2, ModC - Textures.ba2";
+    const std::string cut = value.substr(0, 50); // the game received only this much
+    auto line = [](const std::string& json) { return json + "\n"; };
+    std::string log = kStart + kPostLoad +
+        line(R"({"schema":1,"seq":2,"event":"archive_observers","ini_reads":true,"open_a":true,"open_w":true})") +
+        line(R"({"schema":1,"seq":3,"event":"archive_ini","file":"Fallout4.ini","key":"SResourceArchiveList2","length":25,"value":"Fallout4 - Animations.ba2"})") +
+        line(R"({"schema":1,"seq":4,"event":"archive_ini","file":"Fallout4Custom.ini","key":"SResourceArchiveList2","length":)" +
+             std::to_string(value.size()) + R"(,"value":")" + value + R"("})") +
+        line(R"({"schema":1,"seq":5,"event":"archive_ini_read","section":"Archive","key":"SResourceArchiveList2","file":"Fallout4Custom.ini","buffer":51,"returned":50,"truncated":true,"value":")" + cut + R"("})") +
+        line(R"({"schema":1,"seq":6,"event":"archive_open","path":"E:\\Fallout 4\\Data\\Fallout4 - Animations.ba2","ok":true,"write":false})") +
+        line(R"({"schema":1,"seq":7,"event":"archive_open","path":"E:\\Fallout 4\\Data\\ModA - Main.ba2","ok":true,"write":false})") +
+        // Written by a tool, not loaded by the game: no evidence.
+        line(R"({"schema":1,"seq":8,"event":"archive_open","path":"E:\\Fallout 4\\Data\\ModC - Textures.ba2","ok":true,"write":true})") +
+        line(R"({"schema":1,"seq":9,"event":"archive_handles","stage":"main_menu","method":"snapshot","handles":900,"count":2,"ini_reads_seen":2,"opens_seen":3,"archives":["E:\\Fallout 4\\Data\\Fallout4 - Animations.ba2","E:\\Fallout 4\\Data\\ModA - Main.ba2"]})") +
+        kEnd;
+    const auto s = parseRecorderLog(log, "archives.jsonl");
+    CHECK(s.hasArchiveDiagnostics());
+    const auto c = checkArchives(s);
+    CHECK(c.observable);
+    CHECK_EQ(c.iniFile, std::string("Fallout4Custom.ini"));
+    CHECK_EQ(c.iniEntries.size(), size_t(4));
+    CHECK(c.truncated);
+    CHECK_EQ(c.received, uint64_t(50));
+    CHECK_EQ(c.loaded.size(), size_t(2));
+    CHECK_EQ(c.missing.size(), size_t(2));
+    CHECK_EQ(c.firstMissing, std::string("ModB - Main.ba2"));
+    CHECK_EQ(c.firstMissingIndex, size_t(2));
+    CHECK_EQ(c.firstMissingOffset, value.find("ModB"));
+    CHECK(c.verdict.rfind("FAIL: 2 of 4", 0) == 0);
+    const auto findings = analyse(s);
+    CHECK(find(findings, "The game read only part of the archive list") != nullptr);
+    CHECK(find(findings, "Requested archives did not load") != nullptr);
+    const auto report = formatReport(s, findings);
+    CHECK(report.find("Runtime verified:     2") != std::string::npos);
+    CHECK(report.find("String position:    " + std::to_string(value.find("ModB"))) != std::string::npos);
+
+    // The build's own list is what was requested, when a build is given.
+    PackageContext pkg;
+    pkg.archiveList = {"Fallout4 - Animations.ba2", "ModA - Main.ba2"};
+    const auto withBuild = checkArchives(s, &pkg);
+    CHECK(withBuild.missing.empty());
+    CHECK(withBuild.verdict.rfind("PASS", 0) == 0);
+
+    // Nothing of the game's own seen opening: the method does not work there, so no verdict is given.
+    std::string blind = kStart + line(R"({"schema":1,"seq":2,"event":"archive_observers","ini_reads":false,"open_a":false,"open_w":false})") +
+                        line(R"({"schema":1,"seq":3,"event":"archive_ini","file":"Fallout4Custom.ini","key":"SResourceArchiveList2","length":15,"value":"ModA - Main.ba2"})");
+    const auto b = checkArchives(parseRecorderLog(blind));
+    CHECK(!b.observable);
+    CHECK(b.missing.size() == 1 && b.firstMissing.empty());
+    CHECK(b.verdict.rfind("cannot verify", 0) == 0);
+    // A session from an older recorder has no archive section.
+    CHECK(!checkArchives(parseRecorderLog(kStart + kEnd)).available);
+}
+
+TEST(diagnostics_archive_limit_plugins_detected)
+{
+    namespace fs = std::filesystem;
+    const auto game = tempDir("archive_limit_fix") / "Fallout 4";
+    fs::create_directories(game / "Data" / "F4SE" / "Plugins");
+    CHECK(!detectArchiveLimitFix(game).addictol);
+    CHECK(detectArchiveLimitFix(game).summary.find("256") != std::string::npos);
+    std::ofstream(game / "Data" / "F4SE" / "Plugins" / "Addictol.dll") << "MZ";
+    auto f = detectArchiveLimitFix(game);
+    CHECK(f.addictol && f.addictolArchiveLimits); // on by default
+    std::ofstream(game / "Data" / "F4SE" / "Plugins" / "Addictol.toml") << "[Patches]\nbArchiveLimits = false\n";
+    f = detectArchiveLimitFix(game);
+    CHECK(f.addictol && !f.addictolArchiveLimits);
+    CHECK(f.summary.find("off") != std::string::npos);
+}

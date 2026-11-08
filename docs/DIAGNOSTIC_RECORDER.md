@@ -17,12 +17,22 @@ logger and does not try to explain every crash.
 | `modules` | after `post_load` | DLLs loaded from the game folder or from `Data\F4SE\Plugins`: name, path, size, file version; other modules (Windows, drivers) are only counted |
 | `f4se_plugins` | after `post_load` | each DLL in `Data\F4SE\Plugins` and whether it is loaded; whether the Address Library file for this game version (`version-<game version>-0.bin`) is present |
 | `f4se_log` | after `post_load` | F4SE's own plugin load lines from `f4se.log` (`plugin <dll> (...) loaded correctly` or the reason it was not loaded), at most 400 |
+| `archive_ini` | F4SE loads the plugin | each `[Archive]` key starting with `sResource` in `Fallout4.ini` and `Fallout4Custom.ini` (My Games), read as plain text, so its full value: file, key, length, value |
+| `archive_observers` | F4SE loads the plugin | whether the game's import-table entries below could be observed (`ini_reads`, `open_a`, `open_w`) |
+| `archive_ini_read` | each time the game reads a `sResource*` INI key | section, key, file name, the game's `buffer` size, the length `returned`, `truncated` (the documented sign of a value cut to fit: returned = buffer - 1), and the value the game received |
+| `archive_open` | each time the game opens a `.ba2` file | path, `ok`, `write` (opened for writing: not a load), `error` when it failed |
+| `archive_handles` | `game_data_ready` (true) and `game_loaded` (main menu), on a thread of its own | the `.ba2` files the process holds open (`method`: Windows' handle snapshot, or a scan of handle values where it is missing, as under Wine and Proton) |
 | `recorder_error` / `recorder_warning` | when something the recorder needs fails | where, and the message |
 | `session_end` | normal process exit | `reason: process_exit`. A crash, or the process being terminated, never writes it |
 
-Out of scope by design: hooks of any kind, game memory addresses or structures, FormID lookups, file
-reads, Papyrus, other plugins' internals, process memory, saves and game state. The recorder only uses
-the F4SE plugin interface and Windows APIs; every entry point catches every exception, so a failure is
+Out of scope by design: game memory addresses or structures, FormID lookups, Papyrus, other plugins'
+internals, process memory, saves and game state. The recorder uses the F4SE plugin interface and Windows
+APIs only. For the archive events (1.2.0) it replaces three entries of `Fallout4.exe`'s import table
+(`GetPrivateProfileStringA`, `CreateFileA`, `CreateFileW`) with wrappers that call the previous entry
+(Windows, or another plugin's wrapper) with the same arguments, return its result unchanged and restore
+its error code: they observe and change nothing. A plugin that replaces the same entry later and calls
+Windows directly (X-Cell's Profile patch) hides the reads from the recorder; `archive_handles` still shows
+what loaded. Every entry point catches every exception, every entry point catches every exception, so a failure is
 written to the log instead of reaching the game.
 
 ## Compatibility
@@ -77,7 +87,21 @@ a confidence, the evidence from the log and the checks to make.
 | The game's load order differs from the one Multiplexer built for | active plugins in `Multiplexer_plugins.txt` that are not active | Warning, High |
 | The plugins load in a different order | the first position where the shared active plugins differ in order | Warning, High |
 | The game version differs from Multiplexer's setting | `runtime_version` against Settings (Old Gen / Next Gen) | Warning, High |
+| The game read only part of the archive list | `archive_ini_read` of `SResourceArchiveList2` with `truncated`, shorter than the value in the INI: the buffer, the characters received, and the first archive past the cut with its entry number and character position | Error, High |
+| Requested archives did not load | the build's `Multiplexer_Archives.ini` list (or the INI's) against the BA2 files opened or held open; only when the game's own `Fallout4 - *.ba2` were seen loading, so the method is known to work there | Error, High when the list was cut, else Medium |
+| Archive loading could not be verified | none of the game's own archives seen opening | Info |
+| Close to the archive limit | more than 230 BA2 files opened and no Addictol or X-Cell loaded (Old and Next Gen load at most 256 general and 256 texture archives) | Warning, Medium |
 | The recorder could not record everything | `recorder_error` | Warning |
+
+The **Archive compatibility** section of the report (Diagnostics page, `fo4mx diagnose`) puts the layers side
+by side: entries and characters in the INI, characters the game received and its buffer, requested,
+runtime verified and missing archives, and the first missing archive with its entry number and character
+position in the INI value. Run the same build with and without X-Cell or Addictol to see which layer
+stops the list: the buffer size is the game's own in every run.
+
+`fo4mx diagnose --install` and **Check Installation** also say whether an archive-limit plugin is
+installed: Addictol (`Data\F4SE\Plugins\Addictol.dll`; its Archive Limits module is on unless
+`Addictol.toml` sets `bArchiveLimits = false`) or X-Cell.
 
 The build comparison uses the export's notes (the folder holding `Multiplexer_plugins.txt`). Given the
 folder that holds the exports (`<game>\Multiplexer Output` by default), the latest finished export in it

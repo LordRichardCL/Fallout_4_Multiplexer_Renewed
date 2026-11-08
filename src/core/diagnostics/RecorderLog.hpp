@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <set>
@@ -36,6 +37,23 @@ struct RecorderSession {
     bool hasF4seLog = false;
     std::vector<std::string> f4seLines; // "plugin <dll> (...) <result>"
     std::vector<std::pair<std::string, std::string>> errors, warnings; // recorder's own: where, message
+    // Archive diagnostics (recorder 1.2.0).
+    struct ArchiveIniValue {
+        std::string file, key, value; // the [Archive] list as written in Fallout4.ini / Fallout4Custom.ini
+    };
+    std::vector<ArchiveIniValue> archiveIni;
+    struct ArchiveIniRead {
+        std::string section, key, file, value; // what the game received
+        uint64_t buffer = 0, returned = 0;
+        bool truncated = false;
+    };
+    std::vector<ArchiveIniRead> archiveIniReads;
+    std::optional<bool> observesIniReads, observesOpens; // the import entries could be observed
+    std::set<std::string> archivesOpened;               // BA2 file names (lower case) opened successfully
+    std::vector<std::string> archivesFailed;            // BA2 paths that failed to open
+    std::set<std::string> archivesHeld;                 // BA2 file names (lower case) held open
+    bool hasArchiveHandles = false;
+    bool hasArchiveDiagnostics() const { return !archiveIni.empty() || observesIniReads.has_value(); }
     std::vector<std::string> unreadable; // lines that are not JSON events
     std::string lastEvent;
     size_t events = 0;
@@ -51,6 +69,9 @@ struct PackageContext {
     std::set<std::string> compiled;                     // Multiplexer_DisablePlugins.txt (lower case)
     std::vector<std::string> outputs;                   // plugins in the package's Data folder
     std::string expectedProfile; // "oldgen" (1.10.163) or "nextgen" (1.10.980 and later); empty: not checked
+    // Multiplexer_Archives.ini: the SResourceArchiveList2 value the build asked for, in order.
+    std::vector<std::string> archiveList;
+    std::set<std::string> registeredArchives; // the archives the build added to it (lower case)
 };
 std::optional<PackageContext> loadPackageContext(const std::filesystem::path& packageRoot);
 
@@ -68,6 +89,40 @@ struct Finding {
 };
 
 std::vector<Finding> analyse(const RecorderSession& session, const PackageContext* package = nullptr);
+
+// Which requested archives loaded, compared layer by layer: requested by the build (or written in
+// the INI), what the game received when it read the list, and what it opened.
+struct ArchiveCheck {
+    bool available = false;  // the session has archive diagnostics (recorder 1.2.0 or later)
+    bool observable = false; // the game's own archives were seen loading: the method works here
+    std::string key = "SResourceArchiveList2";
+    std::string iniFile;     // the file whose value the game uses (Fallout4Custom.ini over Fallout4.ini)
+    std::string iniValue;    // as written
+    std::vector<std::string> iniEntries;
+    std::vector<size_t> iniOffsets; // character position of each entry in iniValue
+    bool readSeen = false;          // the game's read of the key was observed
+    uint64_t buffer = 0, received = 0;
+    bool truncated = false;
+    std::vector<std::string> requested; // what Multiplexer asked for (else the INI entries)
+    std::vector<std::string> loaded, missing;
+    std::string firstMissing;
+    size_t firstMissingIndex = 0, firstMissingOffset = 0; // in the INI value; offset npos: not in the INI
+    bool addictol = false, xcell = false; // archive-limit plugins loaded in the session
+    size_t archivesOpen = 0;              // BA2 files seen opened or held
+    std::string verdict;
+};
+ArchiveCheck checkArchives(const RecorderSession& session, const PackageContext* package = nullptr);
+std::string formatArchiveCheck(const ArchiveCheck& c);
+
+// Archive-limit plugins installed in the game folder (the BA2 count limit: 256 per type on Old and Next
+// Gen without one).
+struct ArchiveLimitFix {
+    bool addictol = false;
+    bool addictolArchiveLimits = false; // [Patches] bArchiveLimits (on unless the TOML turns it off)
+    bool xcell = false;
+    std::string summary;
+};
+ArchiveLimitFix detectArchiveLimitFix(const std::filesystem::path& gamePath);
 
 // The newest session file in the recorder's folder (empty when there is none).
 std::filesystem::path newestSession(const std::filesystem::path& folder);
@@ -87,6 +142,7 @@ struct RecorderInstallStatus {
     std::filesystem::path statusLog;               // the recorder's own text log (1.1.0 and later)
     std::string statusText;                        // its contents
     std::filesystem::path newestSession;
+    std::string archiveLimits;                     // archive-limit plugin found (Addictol), or none
     std::string verdict;                           // one sentence: what is wrong, or that it works
     bool ok = false;
 };
@@ -97,6 +153,7 @@ RecorderInstallStatus checkRecorderInstall(const std::filesystem::path& gamePath
 std::string formatInstallStatus(const RecorderInstallStatus& s);
 
 // A plain-text report of a session and its findings (CLI, saved reports).
-std::string formatReport(const RecorderSession& session, const std::vector<Finding>& findings);
+std::string formatReport(const RecorderSession& session, const std::vector<Finding>& findings,
+                         const PackageContext* package = nullptr);
 
 } // namespace fo4mx::diagnostics
