@@ -55,6 +55,11 @@ private:
     QLineEdit* gamePath_;
     QLineEdit* pluginsFile_;
     QLineEdit* outputDir_;
+    QWidget* downloadsRow_;     // Vortex: where Apply to Game can put the package for Vortex to install
+    QLineEdit* downloads_;
+    QLabel* downloadsLabel_;
+    QLabel* mo2Downloads_;      // MO2: its own downloads folder, read from ModOrganizer.ini
+    QLabel* checkDownloads_;
     QLabel* pluginsDefault_;
     QLabel* checkGame_;
     QLabel* checkManager_;

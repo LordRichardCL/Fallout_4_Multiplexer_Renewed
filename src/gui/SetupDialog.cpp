@@ -5,6 +5,7 @@
 #include "Theme.hpp"
 #include "widgets/Widgets.hpp"
 
+#include "engine/VortexSupport.hpp"
 #include "util/Platform.hpp"
 #include "vfs/GameInstall.hpp"
 
@@ -145,6 +146,27 @@ SetupDialog::SetupDialog(AppController* app, QWidget* parent) : QDialog(parent),
     static_cast<QHBoxLayout*>(gameRow->layout())->addWidget(findGame);
     s2->addRow("Fallout 4 folder", gameRow);
     s2->addRow("Output folder", pathRow(outputDir_, true, "Folder holding the exports (default: <game folder>\\Multiplexer Output)"));
+    // Where the mod manager keeps downloaded mod archives: Apply to Game can copy the package there.
+    downloadsRow_ = pathRow(downloads_, true, "Vortex downloads folder for Fallout 4 (…\\downloads\\fallout4)");
+    auto* suggestDl = makeButton("Find");
+    static_cast<QHBoxLayout*>(downloadsRow_->layout())->addWidget(suggestDl);
+    downloadsLabel_ = new QLabel("Mod downloads folder");
+    s2->addRow(downloadsLabel_, downloadsRow_);
+    mo2Downloads_ = new QLabel;
+    mo2Downloads_->setObjectName("PageSubtitle");
+    mo2Downloads_->setWordWrap(true);
+    mo2Downloads_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    s2->addRow(mo2Downloads_);
+    connect(suggestDl, &QPushButton::clicked, this, [this] {
+        const auto folder = fo4mx::vortex::suggestedDownloadsFolder();
+        if (folder.empty())
+            setCheck(checkDownloads_, false,
+                     "Vortex's default downloads folder for Fallout 4 was not found. In Vortex, Settings → Downloads "
+                     "shows where it is: browse to its \"fallout4\" folder.");
+        else
+            downloads_->setText(toQString(folder));
+    });
+    connect(downloads_, &QLineEdit::textChanged, this, [this] { scheduleValidation(); });
     left->addWidget(step2);
 
     auto* step3 = new QGroupBox("3  Load order");
@@ -165,7 +187,8 @@ SetupDialog::SetupDialog(AppController* app, QWidget* parent) : QDialog(parent),
     checkGame_ = new QLabel;
     checkManager_ = new QLabel;
     checkPlugins_ = new QLabel;
-    for (auto* c : {checkGame_, checkManager_, checkPlugins_}) {
+    checkDownloads_ = new QLabel;
+    for (auto* c : {checkGame_, checkManager_, checkPlugins_, checkDownloads_}) {
         c->setWordWrap(true);
         c->setTextInteractionFlags(Qt::TextSelectableByMouse);
         cl->addWidget(c);
@@ -279,6 +302,7 @@ fo4mx::InstallConfig SetupDialog::current() const
                         : ss(profile_->currentText().trimmed());
     in.gamePath = toPath(gamePath_->text().trimmed());
     in.pluginsFile = toPath(pluginsFile_->text().trimmed());
+    in.vortexDownloads = toPath(downloads_->text().trimmed());
     return in;
 }
 
@@ -299,6 +323,11 @@ void SetupDialog::load()
     gamePath_->setText(toQString(in.gamePath));
     pluginsFile_->setText(toQString(in.pluginsFile));
     outputDir_->setText(toQString(c.exportOptions.outputDirectory));
+    downloads_->setText(toQString(in.vortexDownloads));
+    // Suggest Vortex's default when nothing is set yet (saved only when the user continues).
+    if (in.vortexDownloads.empty())
+        if (const auto folder = fo4mx::vortex::suggestedDownloadsFolder(); !folder.empty())
+            downloads_->setText(toQString(folder));
     showAtStartup_->setChecked(QSettings().value(kShowAtStartupKey, true).toBool());
 
     // First run: fill in what can be found automatically.
@@ -322,6 +351,11 @@ void SetupDialog::updateKind()
 {
     bool mo2 = mo2_->isChecked();
     mo2Rows_->setVisible(mo2);
+    // The downloads folder: chosen here for Vortex; Mod Organizer 2 has its own (shown, from its INI).
+    downloadsRow_->setVisible(vortex_->isChecked());
+    downloadsLabel_->setVisible(vortex_->isChecked());
+    mo2Downloads_->setVisible(mo2);
+    checkDownloads_->setVisible(!standalone_->isChecked());
     gamePath_->setPlaceholderText(mo2 ? "Optional: read from MO2 when empty" : "Folder containing Fallout4.exe");
     scheduleValidation();
 }
@@ -420,6 +454,33 @@ void SetupDialog::validateNow()
     case InstallKind::Standalone:
         setCheck(checkManager_, true, "No mod manager: mods are read directly from the Data folder");
         break;
+    }
+
+    // Mod downloads folder
+    if (in.kind == InstallKind::Vortex) {
+        if (in.vortexDownloads.empty()) {
+            setCheck(checkDownloads_, false,
+                     "No mod downloads folder: optional. With it, Apply to Game can put Multiplexer Output.zip in "
+                     "Vortex's downloads, ready to install; without it, drag the zip onto Vortex's Mods page.");
+        } else {
+            const auto fc = fo4mx::vortex::checkDownloadsFolder(in.vortexDownloads);
+            QStringList notes;
+            for (const auto& p : fc.problems)
+                notes << qs(p);
+            for (const auto& n : fc.notes)
+                notes << qs(n);
+            setCheck(checkDownloads_, fc.ok(),
+                     (fc.ok() ? "Mod downloads folder: " + toQString(in.vortexDownloads) : QString("Mod downloads folder: ")) +
+                         (notes.isEmpty() ? QString() : (fc.ok() ? " — " : QString()) + notes.join("; ")));
+        }
+    } else if (in.kind == InstallKind::ModOrganizer2) {
+        const bool known = !r.downloadsPath.empty();
+        mo2Downloads_->setText(known ? "Mod downloads folder: Mod Organizer 2's own, " + toQString(r.downloadsPath) +
+                                           " (set in Mod Organizer 2, Settings → Paths)"
+                                     : QString("Mod downloads folder: Mod Organizer 2's own (set in Mod Organizer 2)"));
+        setCheck(checkDownloads_, known && std::filesystem::is_directory(r.downloadsPath),
+                 known ? "Mod downloads folder: " + toQString(r.downloadsPath)
+                       : QString("Mod downloads folder: found once the MO2 instance is valid"));
     }
 
     // Load order
