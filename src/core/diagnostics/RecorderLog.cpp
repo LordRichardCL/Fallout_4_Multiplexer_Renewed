@@ -183,6 +183,12 @@ RecorderSession parseRecorderLog(std::string_view text, std::string file)
                 s.archivesOpened.insert(toLower(fileNameOf(path)));
             else
                 s.archivesFailed.push_back(path);
+        } else if (event == "archive_presence") {
+            std::set<std::string> absent;
+            if (e["missing"].isArray())
+                for (const auto& a : e["missing"].asArray())
+                    absent.insert(toLower(a.asString()));
+            s.archivesAbsent = std::move(absent);
         } else if (event == "archive_handles") {
             s.hasArchiveHandles = true;
             if (e["archives"].isArray())
@@ -517,9 +523,37 @@ std::vector<Finding> analyse(const RecorderSession& s, const PackageContext* pac
                 {"Build again with the current version of Multiplexer: it keeps the list within what the game reads.",
                  "Plugins whose archives do not fit stay in the load order until a longer list can be loaded."});
         }
+        if (c.observable && c.cutInferred && !c.truncated)
+            add(out, FindingSeverity::Error, "The game stopped loading the archive list part way",
+                "every archive listed in " + c.key + " before character " + std::to_string(c.cutAfter) +
+                    " loaded and none after character " + std::to_string(c.cutBefore) +
+                    ": the game read only the start of the list (it reads INI values into a fixed buffer)",
+                "High",
+                {std::to_string(c.iniValue.size()) + " characters in the INI (" + c.iniFile + ")",
+                 "first archive not loaded: " + c.firstMissing + " (entry " + std::to_string(c.firstMissingIndex + 1) +
+                     ", character " + std::to_string(c.firstMissingOffset) + ")",
+                 c.readSeen ? "the game's read was observed" : "the game's read itself was not observed (another plugin, "
+                                                              "such as X-Cell's Profile patch, reads the INI for it)"},
+                {"Build again with the current version of Multiplexer: it keeps the list within what the game reads."});
+        if (c.observable && !c.absent.empty()) {
+            std::vector<std::string> ev = {std::to_string(c.absent.size()) + " of " + std::to_string(c.requested.size()) +
+                                           " listed archives are not in Data"};
+            for (size_t i = 0; i < c.absent.size() && i < 10; ++i)
+                ev.push_back("not in Data: " + c.absent[i]);
+            if (c.absentInferred)
+                ev.push_back("inferred: their plugins are not in plugins.txt (recorder 1.2.0 builds before the presence "
+                             "check); a newer recorder checks Data directly");
+            add(out, FindingSeverity::Error, "Listed archives are not installed",
+                "the mods providing them are not installed or not deployed. Compiled plugins must be disabled as "
+                "plugins only; their mods must stay installed and deployed, because the archives (textures, meshes, "
+                "scripts) still come from them",
+                c.absentInferred ? "Medium" : "High", ev,
+                {"Vortex: enable and deploy those mods again, and disable only the plugins (Plugins page, or Apply to Game).",
+                 "Mod Organizer 2: tick the mods again in the left pane and untick only their plugins."});
+        }
         if (c.observable && !c.missing.empty()) {
             std::vector<std::string> ev = {std::to_string(c.missing.size()) + " of " + std::to_string(c.requested.size()) +
-                                           " requested archives were not opened by the game"};
+                                           " requested archives in Data were not opened by the game"};
             ev.push_back("first missing: " + c.firstMissing +
                          (c.firstMissingOffset != std::string::npos
                               ? " (entry " + std::to_string(c.firstMissingIndex + 1) + ", character " +
@@ -528,9 +562,10 @@ std::vector<Finding> analyse(const RecorderSession& s, const PackageContext* pac
             for (size_t i = 0; i < c.missing.size() && i < 10; ++i)
                 ev.push_back("missing: " + c.missing[i]);
             add(out, FindingSeverity::Error, "Requested archives did not load",
-                c.truncated ? "the archive list was cut when the game read it" : "the archives were not opened: missing "
-                              "files, a name that does not match, or an archive limit",
-                c.truncated ? "High" : "Medium", ev,
+                c.truncated || c.cutInferred ? "the archive list was cut when the game read it"
+                                             : "the archives were not opened: a name that does not match, or an archive "
+                                               "limit",
+                c.truncated || c.cutInferred ? "High" : "Medium", ev,
                 {"Check that the archives exist in Data under these names.",
                  "Open the Diagnostics page for the full archive comparison."});
         }
@@ -595,8 +630,61 @@ ArchiveCheck checkArchives(const RecorderSession& s, const PackageContext* packa
     for (const auto& a : seen)
         c.observable |= a.rfind("fallout4 - ", 0) == 0;
     c.requested = package && !package->archiveList.empty() ? package->archiveList : c.iniEntries;
-    for (const auto& a : c.requested)
-        (seen.count(toLower(a)) ? c.loaded : c.missing).push_back(a);
+    // Not in Data: from the recorder's own check; for logs without it, an archive named after a plugin that
+    // is not in plugins.txt at all (Vortex and MO2 list every installed plugin, enabled or not).
+    std::set<std::string> absentSet;
+    if (s.archivesAbsent) {
+        absentSet = *s.archivesAbsent;
+    } else if (s.hasLoadOrder) {
+        c.absentInferred = true;
+        std::set<std::string> bases;
+        for (const auto& [name, active] : s.plugins) {
+            const auto dot = name.rfind('.');
+            bases.insert(toLower(dot == std::string::npos ? name : name.substr(0, dot)));
+        }
+        for (const auto& a : c.requested) {
+            const std::string n = toLower(a);
+            const auto dash = n.rfind(" - ");
+            if (n.rfind("fallout4 - ", 0) == 0 || n.rfind("dlc", 0) == 0 || dash == std::string::npos)
+                continue;
+            if (!bases.count(n.substr(0, dash)))
+                absentSet.insert(n);
+        }
+    }
+    for (const auto& a : c.requested) {
+        if (seen.count(toLower(a)))
+            c.loaded.push_back(a);
+        else if (absentSet.count(toLower(a)))
+            c.absent.push_back(a);
+        else
+            c.missing.push_back(a);
+    }
+    // Where loading stops, from the archives themselves (also when another plugin hid the INI read): every
+    // listed archive in Data before a point loaded and none after it.
+    if (c.observable && !c.missing.empty()) {
+        bool anyLoaded = false, ordered = true, pastLoaded = false;
+        size_t lastLoadedEnd = 0, firstNotLoaded = std::string::npos;
+        for (size_t i = 0; i < c.iniEntries.size(); ++i) {
+            const std::string n = toLower(c.iniEntries[i]);
+            if (absentSet.count(n))
+                continue;
+            if (seen.count(n)) {
+                if (pastLoaded)
+                    ordered = false;
+                anyLoaded = true;
+                lastLoadedEnd = c.iniOffsets[i] + c.iniEntries[i].size();
+            } else {
+                pastLoaded = true;
+                if (firstNotLoaded == std::string::npos)
+                    firstNotLoaded = c.iniOffsets[i];
+            }
+        }
+        if (anyLoaded && ordered && firstNotLoaded != std::string::npos) {
+            c.cutInferred = true;
+            c.cutAfter = lastLoadedEnd;
+            c.cutBefore = firstNotLoaded;
+        }
+    }
     c.firstMissingOffset = std::string::npos;
     if (c.observable && !c.missing.empty()) {
         std::set<std::string> missing;
@@ -612,16 +700,23 @@ ArchiveCheck checkArchives(const RecorderSession& s, const PackageContext* packa
         if (c.firstMissing.empty())
             c.firstMissing = c.missing.front();
     }
+    const size_t notLoaded = c.missing.size() + c.absent.size();
     if (!c.observable)
         c.verdict = "cannot verify: the game's own archives were not seen opening in this session";
-    else if (c.missing.empty())
+    else if (notLoaded == 0)
         c.verdict = "PASS: all " + std::to_string(c.requested.size()) + " requested archives loaded";
-    else
-        c.verdict = "FAIL: " + std::to_string(c.missing.size()) + " of " + std::to_string(c.requested.size()) +
-                    " requested archives did not load" +
-                    (c.truncated ? "; archive-list truncation: the game received " + std::to_string(c.received) +
-                                       " of " + std::to_string(c.iniValue.size()) + " characters"
-                                 : std::string());
+    else {
+        c.verdict = "FAIL: " + std::to_string(notLoaded) + " of " + std::to_string(c.requested.size()) +
+                    " requested archives did not load";
+        if (!c.absent.empty())
+            c.verdict += "; " + std::to_string(c.absent.size()) + " are not in Data";
+        if (c.truncated)
+            c.verdict += "; archive-list truncation: the game received " + std::to_string(c.received) + " of " +
+                         std::to_string(c.iniValue.size()) + " characters";
+        else if (c.cutInferred)
+            c.verdict += "; possible archive-list truncation: loading stops between characters " +
+                         std::to_string(c.cutAfter) + " and " + std::to_string(c.cutBefore);
+    }
     return c;
 }
 
@@ -643,7 +738,17 @@ std::string formatArchiveCheck(const ArchiveCheck& c)
         o << "Received by the game: not observed\n";
     o << "Requested archives:   " << c.requested.size() << "\n";
     o << "Runtime verified:     " << c.loaded.size() << "\n";
-    o << "Missing:              " << c.missing.size() << "\n";
+    o << "Missing:              " << (c.missing.size() + c.absent.size()) << "\n";
+    if (!c.absent.empty())
+        o << "  Not in Data:        " << c.absent.size()
+          << (c.absentInferred ? " (probably: their plugins are not in plugins.txt, so their mods are not installed)"
+                               : " (their mods are not installed or deployed)")
+          << "\n";
+    if (!c.missing.empty())
+        o << "  In Data, not loaded: " << c.missing.size() << "\n";
+    if (c.cutInferred)
+        o << "Loading stops:        between character " << c.cutAfter << " and " << c.cutBefore
+          << " (every listed archive in Data before it loaded, none after)\n";
     o << "BA2 files opened:     " << c.archivesOpen << "\n";
     o << "Archive loading:      " << c.verdict << "\n";
     if (!c.firstMissing.empty()) {
@@ -652,8 +757,10 @@ std::string formatArchiveCheck(const ArchiveCheck& c)
             o << "  Archive index:      " << (c.firstMissingIndex + 1) << "\n  String position:    "
               << c.firstMissingOffset << "\n";
         for (const auto& m : c.missing)
-            o << "  missing: " << m << "\n";
+            o << "  not loaded: " << m << "\n";
     }
+    for (const auto& a : c.absent)
+        o << "  not in Data: " << a << "\n";
     return o.str();
 }
 

@@ -53,6 +53,7 @@ struct RecorderSession {
     std::vector<std::string> archivesFailed;            // BA2 paths that failed to open
     std::set<std::string> archivesHeld;                 // BA2 file names (lower case) held open
     bool hasArchiveHandles = false;
+    std::optional<std::set<std::string>> archivesAbsent; // listed archives not in Data (lower case), when checked
     bool hasArchiveDiagnostics() const { return !archiveIni.empty() || observesIniReads.has_value(); }
     std::vector<std::string> unreadable; // lines that are not JSON events
     std::string lastEvent;
@@ -104,7 +105,13 @@ struct ArchiveCheck {
     uint64_t buffer = 0, received = 0;
     bool truncated = false;
     std::vector<std::string> requested; // what Multiplexer asked for (else the INI entries)
-    std::vector<std::string> loaded, missing;
+    std::vector<std::string> loaded;
+    std::vector<std::string> absent;  // not in Data at all: their mods are not installed or deployed
+    bool absentInferred = false;      // no presence check in the log: absent = its plugin is not in plugins.txt
+    std::vector<std::string> missing; // in Data (or not checked) but not loaded
+    // Where loading stops: every listed archive in Data before this point loaded, none after it.
+    bool cutInferred = false;
+    size_t cutAfter = 0, cutBefore = 0; // characters: end of the last loaded entry, start of the first not loaded
     std::string firstMissing;
     size_t firstMissingIndex = 0, firstMissingOffset = 0; // in the INI value; offset npos: not in the INI
     bool addictol = false, xcell = false; // archive-limit plugins loaded in the session

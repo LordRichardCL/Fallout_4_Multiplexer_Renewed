@@ -18,6 +18,7 @@ logger and does not try to explain every crash.
 | `f4se_plugins` | after `post_load` | each DLL in `Data\F4SE\Plugins` and whether it is loaded; whether the Address Library file for this game version (`version-<game version>-0.bin`) is present |
 | `f4se_log` | after `post_load` | F4SE's own plugin load lines from `f4se.log` (`plugin <dll> (...) loaded correctly` or the reason it was not loaded), at most 400 |
 | `archive_ini` | F4SE loads the plugin | each `[Archive]` key starting with `sResource` in `Fallout4.ini` and `Fallout4Custom.ini` (My Games), read as plain text, so its full value: file, key, length, value |
+| `archive_presence` | F4SE loads the plugin | every archive the INI lists that is not in `Data` at all (`checked`, `absent`, `missing`): it cannot load whatever the list does |
 | `archive_observers` | F4SE loads the plugin | whether the game's import-table entries below could be observed (`ini_reads`, `open_a`, `open_w`) |
 | `archive_ini_read` | each time the game reads a `sResource*` INI key | section, key, file name, the game's `buffer` size, the length `returned`, `truncated` (the documented sign of a value cut to fit: returned = buffer - 1), and the value the game received |
 | `archive_open` | each time the game opens a `.ba2` file | path, `ok`, `write` (opened for writing: not a load), `error` when it failed |
@@ -89,6 +90,8 @@ a confidence, the evidence from the log and the checks to make.
 | The game version differs from Multiplexer's setting | `runtime_version` against Settings (Old Gen / Next Gen) | Warning, High |
 | The game read only part of the archive list | `archive_ini_read` of `SResourceArchiveList2` with `truncated`, shorter than the value in the INI: the buffer, the characters received, and the first archive past the cut with its entry number and character position | Error, High |
 | Requested archives did not load | the build's `Multiplexer_Archives.ini` list (or the INI's) against the BA2 files opened or held open; only when the game's own `Fallout4 - *.ba2` were seen loading, so the method is known to work there | Error, High when the list was cut, else Medium |
+| The game stopped loading the archive list part way | every listed archive in `Data` before a character position loaded and none after it (works when another plugin hid the INI read) | Error, High |
+| Listed archives are not installed | `archive_presence`; for older logs, archives named after plugins that are not in `plugins.txt` at all | Error, High (Medium when inferred) |
 | Archive loading could not be verified | none of the game's own archives seen opening | Info |
 | Close to the archive limit | more than 230 BA2 files opened and no Addictol or X-Cell loaded (Old and Next Gen load at most 256 general and 256 texture archives) | Warning, Medium |
 | The recorder could not record everything | `recorder_error` | Warning |

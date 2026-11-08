@@ -263,3 +263,36 @@ TEST(diagnostics_archive_limit_plugins_detected)
     CHECK(f.addictol && !f.addictolArchiveLimits);
     CHECK(f.summary.find("off") != std::string::npos);
 }
+
+// Listed archives that are not in Data cannot load whatever the list does: they are reported apart, and
+// where loading stops is worked out from the archives that are there (also when the INI read was hidden).
+TEST(diagnostics_archives_not_in_data_and_where_loading_stops)
+{
+    auto line = [](const std::string& json) { return json + "\n"; };
+    const std::string value = "Fallout4 - Animations.ba2, Gone - Main.ba2, ModA - Main.ba2, ModB - Main.ba2";
+    std::string log = kStart +
+        line(R"({"schema":1,"seq":1,"event":"archive_ini","file":"Fallout4Custom.ini","key":"SResourceArchiveList2","length":1,"value":")" + value + R"("})") +
+        line(R"({"schema":1,"seq":2,"event":"archive_presence","checked":4,"absent":1,"missing":["Gone - Main.ba2"]})") +
+        line(R"({"schema":1,"seq":3,"event":"archive_observers","ini_reads":true,"open_a":true,"open_w":true})") +
+        line(R"({"schema":1,"seq":4,"event":"archive_open","path":"D:\\Data\\Fallout4 - Animations.ba2","ok":true,"write":false})") +
+        line(R"({"schema":1,"seq":5,"event":"archive_open","path":"D:\\Data\\ModA - Main.ba2","ok":true,"write":false})") + kEnd;
+    const auto s = parseRecorderLog(log);
+    const auto c = checkArchives(s);
+    CHECK(!c.absentInferred);
+    CHECK_EQ(c.absent.size(), size_t(1));
+    CHECK_EQ(c.missing.size(), size_t(1));
+    CHECK_EQ(c.firstMissing, std::string("ModB - Main.ba2"));
+    CHECK(c.cutInferred);
+    CHECK_EQ(c.cutAfter, value.find("ModA") + std::string("ModA - Main.ba2").size());
+    CHECK_EQ(c.cutBefore, value.find("ModB"));
+    const auto findings = analyse(s);
+    CHECK(find(findings, "Listed archives are not installed") != nullptr);
+    CHECK(find(findings, "The game stopped loading the archive list part way") != nullptr);
+    // Not in order (a loaded archive after one in Data that did not load): no cut is claimed.
+    std::string mixed = kStart +
+        line(R"({"schema":1,"seq":1,"event":"archive_ini","file":"Fallout4Custom.ini","key":"SResourceArchiveList2","length":1,"value":")" + value + R"("})") +
+        line(R"({"schema":1,"seq":2,"event":"archive_presence","checked":4,"absent":0,"missing":[]})") +
+        line(R"({"schema":1,"seq":4,"event":"archive_open","path":"D:\\Data\\Fallout4 - Animations.ba2","ok":true,"write":false})") +
+        line(R"({"schema":1,"seq":5,"event":"archive_open","path":"D:\\Data\\ModB - Main.ba2","ok":true,"write":false})") + kEnd;
+    CHECK(!checkArchives(parseRecorderLog(mixed)).cutInferred);
+}

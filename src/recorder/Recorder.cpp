@@ -637,6 +637,25 @@ void installArchiveObservers()
         .write();
 }
 
+std::vector<std::string> g_listedArchives; // every archive named by the INI lists, in order
+
+// Which listed archives are not in Data at all: they cannot load whatever the list does.
+void recordArchivePresence()
+{
+    std::string missing = "[";
+    size_t absent = 0;
+    for (const auto& name : g_listedArchives) {
+        const std::wstring wide(name.begin(), name.end());
+        if (exists(g_gameDir + L"Data\\" + wide))
+            continue;
+        if (absent++)
+            missing += ",";
+        missing += jsonString(name);
+    }
+    missing += "]";
+    Event("archive_presence").num("checked", g_listedArchives.size()).num("absent", absent).raw("missing", missing).write();
+}
+
 // [Archive] keys starting with "sResource" in one INI file, as written (no profile API, so no buffer).
 void recordArchiveIni(const std::wstring& file)
 {
@@ -664,6 +683,20 @@ void recordArchiveIni(const std::wstring& file)
         if (!startsWithNoCase(key.c_str(), "sResource"))
             continue;
         const std::string value = l.substr(eq + 1);
+        size_t start = 0;
+        while (start <= value.size()) {
+            size_t comma = value.find(',', start);
+            if (comma == std::string::npos)
+                comma = value.size();
+            std::string name = value.substr(start, comma - start);
+            while (!name.empty() && (name.front() == ' ' || name.front() == '\t'))
+                name.erase(name.begin());
+            while (!name.empty() && (name.back() == ' ' || name.back() == '\t'))
+                name.pop_back();
+            if (!name.empty())
+                g_listedArchives.push_back(name);
+            start = comma + 1;
+        }
         Event("archive_ini")
             .str("file", fileNameOnly(utf8(file)))
             .str("key", key)
@@ -912,6 +945,7 @@ __declspec(dllexport) bool F4SEPlugin_Load(const f4se_abi::F4SEInterface* f4se)
             recordArchiveIni(g_myGames + L"Fallout4.ini");
             recordArchiveIni(g_myGames + L"Fallout4Custom.ini");
         }
+        recordArchivePresence();
         installArchiveObservers();
 
         g_handle = f4se->GetPluginHandle ? f4se->GetPluginHandle() : f4se_abi::kPluginHandleInvalid;
