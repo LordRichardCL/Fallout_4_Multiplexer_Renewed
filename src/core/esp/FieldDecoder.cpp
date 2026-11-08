@@ -216,6 +216,12 @@ private:
         case FieldKind::PrecomputedPathing:
             decodeNavmesh(i, sr, def.kind);
             break;
+        case FieldKind::PackageInputName:
+            // xEdit wbUNAMs: Data Input = UNAM index, BNAM name (text), PNAM flags. A BNAM among the data
+            // input values (after ANAM/CNAM) is wbUnknown there: scanned.
+            if (i == 0 || subs_[i - 1].signature != Signature("UNAM"))
+                heuristic(i, 0, static_cast<uint32_t>(size));
+            break;
         case FieldKind::PackageValue: {
             // Before the first data input (ANAM) CNAM is the combat style; after it, a value.
             bool input = false;

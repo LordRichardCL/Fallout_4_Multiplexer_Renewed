@@ -47,6 +47,7 @@ enum class FieldKind : uint8_t {
     EffectShaderData, // EFSH DNAM: ambient sound (and addon models in the old format), by layout size
     FurnitureMarkers, // FURN/TERM SNAM: markers (offset, rotation, keyword at +16, entry types): 24 or 20 bytes each
     BookData,       // BOOK DNAM: flags, "teaches" (a FormID only for actor value, spell or perk), text offset
+    PackageInputName, // PACK BNAM: a data input's name (text) right after its index (UNAM); else undecoded
 };
 
 // How two plugins' edits of a field combine during merging.

@@ -641,3 +641,31 @@ TEST(fields_described_from_xedit_after_build_83)
         CHECK(l.heuristic.empty() && l.formIdSlots.empty());
     }
 }
+
+// Fields the last build refused (undescribed bytes that looked like FormIDs), described from xEdit:
+// TERM XMRK (marker model), UNAM (display text), VNAM (image path); ARMA BSMP (gender), BSMS (three
+// floats); PROJ VNAM (sound level); PACK BNAM after UNAM (a data input's name). None holds a FormID.
+TEST(catalogue_text_and_number_fields_described_from_xedit)
+{
+    const auto& d = RecordDefinitions::get();
+    auto bytes = [](const std::string& s) { return std::vector<uint8_t>(s.begin(), s.end()); };
+    auto z = [&](const char* sig, const std::string& text) {
+        auto b = bytes(text);
+        b.push_back(0);
+        return Subrecord(Signature::fromString(sig), b);
+    };
+    auto heuristicFree = [&](const char* rec, std::vector<Subrecord> subs) {
+        const auto l = decodeLayout(d, Signature::fromString(rec), subs);
+        return l.heuristic.empty() && l.probableSlots.empty() && l.formIdSlots.empty();
+    };
+    CHECK(heuristicFree("TERM", {z("XMRK", "Furniture\\TerminalMarker.nif")}));
+    CHECK(heuristicFree("TERM", {z("ITXT", "Option"), z("UNAM", "0:Plac some long display text"), z("VNAM", "img.dds")}));
+    CHECK(heuristicFree("ARMA", {Subrecord(Signature::fromString("BSMP"), std::vector<uint8_t>(4, 0)),
+                                 z("BSMB", "Spine1"), Subrecord(Signature::fromString("BSMS"), std::vector<uint8_t>{0xCD, 0, 0, 0, 0, 0, 0x80, 0x3F, 0, 0, 0, 0})}));
+    CHECK(heuristicFree("PROJ", {Subrecord(Signature::fromString("VNAM"), std::vector<uint8_t>{2, 0, 0, 0})}));
+    // PACK BNAM: a name right after its index; elsewhere (a data input value) still undescribed.
+    CHECK(heuristicFree("PACK", {Subrecord(Signature::fromString("UNAM"), std::vector<uint8_t>{1}), z("BNAM", "Place to sleep"),
+                                 Subrecord(Signature::fromString("PNAM"), std::vector<uint8_t>(4, 0))}));
+    const auto value = decodeLayout(d, Signature::fromString("PACK"), {z("ANAM", "Bool"), Subrecord(Signature::fromString("BNAM"), std::vector<uint8_t>{1, 2, 3, 4})});
+    CHECK(!value.heuristic.empty());
+}

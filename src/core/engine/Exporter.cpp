@@ -104,9 +104,19 @@ std::vector<std::string> Exporter::archiveList(const Session& session, const Com
 
     std::vector<std::string> list;
     std::unordered_set<std::string> seen;
-    for (auto& a : split(session.install.ini.get("Archive", "SResourceArchiveList2", "Fallout4 - Animations.ba2"), ','))
-        if (!a.empty() && !stale.count(toLower(a)) && seen.insert(toLower(a)).second)
+    // An entry whose archive is in no Data folder loads nothing, but still uses up the 1,023 characters
+    // the game reads (an earlier build's list, mods since removed): left out. The game's own archives are
+    // always kept.
+    const bool dataKnown = !session.vfs.files().empty();
+    for (auto& a : split(session.install.ini.get("Archive", "SResourceArchiveList2", "Fallout4 - Animations.ba2"), ',')) {
+        if (a.empty() || stale.count(toLower(a)))
+            continue;
+        const std::string l = toLower(a);
+        if (dataKnown && l.rfind("fallout4 - ", 0) != 0 && l.rfind("dlc", 0) != 0 && !session.vfs.find(l))
+            continue;
+        if (seen.insert(l).second)
             list.push_back(a);
+    }
     for (const auto& a : c.archivesToRegister)
         if (seen.insert(toLower(a)).second)
             list.push_back(a);

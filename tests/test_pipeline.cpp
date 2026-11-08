@@ -5571,6 +5571,22 @@ TEST(archive_list_never_exceeds_what_the_game_reads)
     writeFile(root / "ini" / "Fallout4Custom.ini", "[Archive]\nSResourceArchiveList2=" + longList + "\n");
     auto cfg = configFor(root);
     cfg.databasePath.clear();
+    {
+        // None of those archives is in Data: they load nothing, are left out, and ModA's archive fits.
+        Pipeline none(cfg);
+        none.scan();
+        none.analyse();
+        CHECK(none.compile());
+        CHECK(none.compiledOutput()->isCompiled(none.session().findPlugin("ModA.esp")->index));
+        const auto list = join(Exporter::archiveList(none.session(), *none.compiledOutput(), root / "nowhere"), ", ");
+        CHECK(list.find("UserArchive") == std::string::npos);
+        CHECK(list.find("ModA - Main.ba2") != std::string::npos);
+    }
+    // In Data, they are the user's own archives: kept, and ModA's no longer fits.
+    for (int i = 0; i < 48; ++i)
+        writeGeneralBa2(root / "Game" / "Data" / ("UserArchive" + std::to_string(1000 + i) + ".ba2"),
+                        {{"meshes\\user\\a" + std::to_string(i) + ".nif", std::vector<uint8_t>(8, 1)}}, true);
+    writeGeneralBa2(root / "Game" / "Data" / "X.ba2", {{"meshes\\user\\x.nif", std::vector<uint8_t>(8, 1)}}, true);
     Pipeline p(cfg);
     p.scan();
     p.analyse();

@@ -495,6 +495,8 @@ void buildOldGen(RecordDefinitions& d)
     b.record("ARMA", "Armor Addon", true)
         .field("BOD2", noRefs())                    // biped body template
         .field("BSMB", zstring())                   // xEdit: bone scale modifier set / bone names
+        .field("BSMP", noRefs())                    // xEdit wbArmorAddonBoneDataItem: target gender (u32)
+        .field("BSMS", noRefs())                    // xEdit: bone scale delta (three floats)
         .field("RNAM", formId())                    // race
         .field("DNAM", noRefs())                    // priorities, weight slider, detection sound value, weapon adjust
         .field("MODL", formIdList(MergeMode::Set))  // additional races
@@ -722,6 +724,9 @@ void buildOldGen(RecordDefinitions& d)
         .field("ANAM", noRefs())  // menu item type
         .field("ITID", noRefs())  // menu item id
         .field("TNAM", formId())  // submenu terminal
+        .field("UNAM", lstring()) // xEdit: menu item display text
+        .field("VNAM", zstring()) // xEdit: menu item "Show Image" (an image path)
+        .field("XMRK", zstring()) // xEdit: marker model
         .field("WNAM", lstring()) // welcome text
         .field("NAM0", lstring()) // xEdit: header text
         .field("MNAM", noRefs())  // xEdit: active markers / flags
@@ -730,7 +735,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("CNTO", cnto) // items (holotapes)
         .field("COED", structPlain({0}, {{8, 12}}))
         .add(region("Body Text", {"BTXT"}, {"BTXT", "CTDA", "CIS1", "CIS2"}))
-        .add(region("Menu Items", {"ITXT"}, {"ITXT", "RNAM", "ANAM", "ITID", "TNAM", "CTDA", "CIS1", "CIS2"}))
+        .add(region("Menu Items", {"ITXT"}, {"ITXT", "RNAM", "ANAM", "ITID", "UNAM", "VNAM", "TNAM", "CTDA", "CIS1", "CIS2"}))
         .modelRegions();
 
     // DNAM: flags, type, gravity, speed, range, light, muzzle flash light, alt-trigger proximity and
@@ -744,6 +749,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("DNAM", projectileData)
         .field("NAM1", zstring()) // muzzle flash model
         .field("NAM2", noRefs())  // xEdit wbModelInfo: the muzzle flash model's texture hashes
+        .field("VNAM", noRefs())  // xEdit: sound level (u32 enum)
         .modelRegions();
 
     // DATA: light, sound 1, sound 2, impact data set, placed object, spawn projectile; then numbers.
@@ -1321,7 +1327,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("QNAM", formId())   // owner quest
         .field("PKCU", structAt({4}, 12)) // data input count, package template, version counter
         .field("ANAM", zstring())  // data input type, branch type
-        .field("BNAM", unknown())  // data input value (undecoded in xEdit) or name: scanned
+        .field("BNAM", special(FieldKind::PackageInputName)) // data input name after UNAM; else undecoded: scanned
         .field("PDTO", special(FieldKind::TopicData))
         .field("PLDT", special(FieldKind::PackageLocation))
         .field("PTDA", special(FieldKind::PackageTarget))
