@@ -112,6 +112,9 @@ public:
     void refreshEligibility();
 
 private:
+    // This app's own files that stay open while it runs (results database, build cache): never moved
+    // to an output backup and never packaged, even when they sit in the output folder.
+    std::vector<std::filesystem::path> workingFiles() const;
     void markBuildFailed(const std::filesystem::path& directory, const std::filesystem::path& packageRoot,
                          const std::vector<std::filesystem::path>& written, const std::string& reason);
 

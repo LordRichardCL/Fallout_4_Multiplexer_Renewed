@@ -3,6 +3,7 @@
 
 #include "ba2/Ba2Archive.hpp"
 #include "db/Database.hpp"
+#include "engine/BuildCache.hpp"
 #include "engine/CompilationResult.hpp"
 #include "engine/Exporter.hpp"
 #include "engine/Pipeline.hpp"
@@ -5421,4 +5422,37 @@ TEST(lifecycle_backup_names_are_unique_and_game_data_is_never_moved)
     CHECK(std::filesystem::exists(root / "Game" / "Data" / "Fallout4.esm"));
     CHECK(!std::filesystem::exists(root / "Game" / "Multiplexer Output.zip"));
     CHECK(backupsIn(root).empty());
+}
+
+TEST(lifecycle_own_database_in_the_output_folder_stays_and_is_never_packaged)
+{
+    // The report's case: the results database (and the build cache beside it) inside the output
+    // folder, open while the app runs. They stay in place; everything else around them moves.
+    auto root = buildInstall("life_owndb");
+    auto cfg = configFor(root);
+    cfg.exportOptions.outputDirectory = root / "Multiplexer Renewed Outputs";
+    cfg.databasePath = root / "Multiplexer Renewed Outputs" / "Multiplexer" / "multiplexer.sqlite";
+    auto first = buildOnce(cfg);
+    CHECK(std::filesystem::exists(cfg.databasePath));
+    CHECK(std::filesystem::exists(BuildCache::defaultPathFor(cfg.databasePath)));
+    writeFile(root / "Multiplexer Renewed Outputs" / "Multiplexer" / "old.txt", "stale");
+    for (const auto& n : zipNames(first.zipPath))
+        CHECK(n.find(".sqlite") == std::string::npos);
+
+    auto second = buildOnce(cfg);
+    CHECK(!second.backupFolder.empty());
+    CHECK(std::filesystem::exists(cfg.databasePath)); // never moved
+    CHECK(std::filesystem::exists(BuildCache::defaultPathFor(cfg.databasePath)));
+    CHECK_EQ(slurp(second.backupFolder / "Multiplexer" / "old.txt"), std::string("stale")); // moved around it
+    CHECK(std::filesystem::exists(second.backupFolder / "Dummy_Plugin_01.esp"));
+    auto names = zipNames(second.zipPath);
+    CHECK(names.count("Data/Dummy_Plugin_01.esp"));
+    for (const auto& n : names) {
+        CHECK(n.find(".sqlite") == std::string::npos);
+        CHECK(n.find("Multiplexer/old.txt") == std::string::npos);
+    }
+    // The build still sees its history (stable FormIDs, change detection) from the database.
+    Pipeline p(cfg);
+    p.scan();
+    CHECK(p.changes().status == BuildStatus::UpToDate);
 }

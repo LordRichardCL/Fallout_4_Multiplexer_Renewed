@@ -66,7 +66,8 @@ public:
     // The folder holding Data, the zip and the notes: the output folder's parent when it is named Data.
     static std::filesystem::path packageRoot(const std::filesystem::path& outputDirectory);
     // Zips the package's Data folder into "Multiplexer Output.zip" (after every file is written).
-    static std::filesystem::path writePackageZip(ExportResult& result);
+    static std::filesystem::path writePackageZip(ExportResult& result,
+                                                 const std::vector<std::filesystem::path>& neverPackage = {});
 
     // Updates the MO2 profile's plugins.txt / loadorder.txt (with backups):
     // compiled plugins are disabled and the outputs enabled at the end. All or nothing.

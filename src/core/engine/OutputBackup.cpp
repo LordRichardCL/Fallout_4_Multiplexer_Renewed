@@ -88,7 +88,53 @@ bool isGameDataFolder(const fs::path& outputDirectory, const fs::path& gameData)
     return fs::exists(outputDirectory / "Fallout4.esm", ec);
 }
 
-BackupResult backupPreviousOutput(const fs::path& outputDirectory, const fs::path& gameData, const std::string& stamp)
+namespace {
+
+// Splits `entry` so that nothing in `keep` is moved: a kept file stays, a folder holding one is
+// entered and its other contents are taken one by one.
+void collect(const fs::path& entry, const std::vector<std::string>& keep, std::vector<fs::path>& out)
+{
+    const std::string e = norm(entry);
+    for (const auto& k : keep)
+        if (k == e)
+            return; // this app's own file: stays where it is
+    bool holdsKept = false;
+    for (const auto& k : keep)
+        holdsKept |= k.size() > e.size() && k.compare(0, e.size(), e) == 0 && k[e.size()] == '/';
+    std::error_code ec;
+    if (holdsKept && fs::is_directory(entry, ec)) {
+        for (const auto& c : fs::directory_iterator(entry, ec))
+            collect(c.path(), keep, out);
+        return;
+    }
+    out.push_back(entry);
+}
+
+bool isKept(const fs::path& p, const std::vector<std::string>& keep)
+{
+    const std::string e = norm(p);
+    for (const auto& k : keep)
+        if (k == e || (k.size() > e.size() && k.compare(0, e.size(), e) == 0 && k[e.size()] == '/'))
+            return true; // the file itself, or a folder on the way to it
+    return false;
+}
+
+// Removes the folders under (and including) `dir` that are empty; never a file.
+void removeEmptyFolders(const fs::path& dir)
+{
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec))
+        return;
+    for (const auto& c : fs::directory_iterator(dir, ec))
+        if (c.is_directory(ec))
+            removeEmptyFolders(c.path());
+    fs::remove(dir, ec); // fails, harmlessly, when something is still in it
+}
+
+} // namespace
+
+BackupResult backupPreviousOutput(const fs::path& outputDirectory, const fs::path& gameData, const std::string& stamp,
+                                  const std::vector<fs::path>& keepFiles)
 {
     BackupResult result;
     std::error_code ec;
@@ -104,16 +150,25 @@ BackupResult backupPreviousOutput(const fs::path& outputDirectory, const fs::pat
         root = root.parent_path();
     const bool package = norm(root) != norm(dir);
 
+    // This app's own working files (its database and build cache, open while it runs) never move.
+    std::vector<std::string> keep;
+    for (const auto& k : keepFiles)
+        if (!k.empty())
+            keep.push_back(norm(k));
+    for (const auto& k : keepFiles)
+        if (!k.empty() && norm(k).rfind(norm(root) + "/", 0) == 0 && fs::exists(k, ec))
+            result.keptInPlace.push_back(k);
+
     // What the previous export left.
     std::vector<fs::path> entries; // paths inside `root`
     if (package) {
         if (fs::is_directory(dir, ec) && !fs::is_empty(dir, ec))
-            entries.push_back(dir);
+            collect(dir, keep, entries);
         for (const auto& e : fs::directory_iterator(root, ec)) {
             if (norm(e.path()) == norm(dir))
                 continue;
             if (isNoteName(toLower(pathToUtf8(e.path().filename()))))
-                entries.push_back(e.path());
+                collect(e.path(), keep, entries);
         }
     } else if (fs::is_directory(dir, ec)) {
         for (const auto& e : fs::directory_iterator(dir, ec)) {
@@ -122,7 +177,7 @@ BackupResult backupPreviousOutput(const fs::path& outputDirectory, const fs::pat
                 continue; // Mod Organizer 2's description of the mod folder stays with the mod
             // Everything else moves, an older backup someone put in here too (the new backup is
             // beside the folder, never inside what is moved).
-            entries.push_back(e.path());
+            collect(e.path(), keep, entries);
         }
         if (!entries.empty() && !madeByMultiplexer(dir))
             throw std::runtime_error("The output folder " + pathToUtf8(dir) +
@@ -130,6 +185,10 @@ BackupResult backupPreviousOutput(const fs::path& outputDirectory, const fs::pat
                                      "folder of an earlier Multiplexer export) as the output folder; nothing was "
                                      "moved or changed.");
     }
+    for (const auto& k : result.keptInPlace)
+        spdlog::warn("{} is Multiplexer's own working file inside the output folder: it stays where it is and is "
+                     "never packaged. Keeping the results database elsewhere (Settings) is better.",
+                     pathToUtf8(k));
     if (entries.empty())
         return result;
 
@@ -144,26 +203,39 @@ BackupResult backupPreviousOutput(const fs::path& outputDirectory, const fs::pat
                                  ". The previous output was left as it is.");
 
     FileTransaction tx("Back up the previous output");
-    for (const auto& e : entries)
-        tx.rename(e, backup / e.lexically_relative(root), "previous output");
+    for (const auto& e : entries) {
+        const fs::path target = backup / e.lexically_relative(root);
+        fs::create_directories(target.parent_path(), ec); // a folder split around a kept file
+        tx.rename(e, target, "previous output");
+    }
     try {
         tx.apply();
     } catch (const std::exception& e) {
-        // apply() has put back whatever it had moved.
-        fs::remove(backup, ec); // empty again
-        throw std::runtime_error("The previous output could not be moved to " + pathToUtf8(backup) + " (" + e.what() +
-                                 "). Close any program using files in " + pathToUtf8(root) +
-                                 " and export again; nothing was deleted.");
+        // apply() has put back whatever it had moved; only empty folders are left in the backup.
+        removeEmptyFolders(backup);
+        throw std::runtime_error(
+            "The previous output could not be moved to " + pathToUtf8(backup) + " (" + e.what() +
+            "). A program has a file in " + pathToUtf8(root) +
+            " open (File Explorer showing it, an editor, antivirus, Mod Organizer 2, the game): close it and export "
+            "again. Nothing was moved or deleted.");
     }
 
-    // The output folder must now be empty (apart from Mod Organizer 2's meta.ini).
+    // The output folder must now be empty, apart from Mod Organizer 2's meta.ini and this app's own
+    // working files.
     fs::create_directories(dir, ec);
-    for (const auto& e : fs::directory_iterator(dir, ec)) {
-        const std::string name = pathToUtf8(e.path().filename());
-        if (!package && iequals(name, "meta.ini"))
+    for (auto it = fs::recursive_directory_iterator(dir, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (ec)
+            break;
+        const fs::path p = it->path();
+        if (isKept(p, keep))
             continue;
+        if (!package && p.parent_path() == dir && iequals(pathToUtf8(p.filename()), "meta.ini"))
+            continue;
+        if (it->is_directory(ec) && fs::is_empty(p, ec))
+            continue; // an empty folder left by a split
+        const std::string name = pathToUtf8(p.lexically_relative(dir));
         tx.rollback();
-        fs::remove(backup, ec);
+        removeEmptyFolders(backup);
         throw std::runtime_error("The output folder " + pathToUtf8(dir) + " is not empty after moving the previous "
                                  "output away (" + name + "); the previous output was put back.");
     }

@@ -629,12 +629,27 @@ std::vector<fs::path> Exporter::applyToProfile(const Session& session, const Com
 
 namespace fo4mx {
 
-std::filesystem::path Exporter::writePackageZip(ExportResult& r)
+std::filesystem::path Exporter::writePackageZip(ExportResult& r, const std::vector<fs::path>& neverPackage)
 {
+    // This app's own working files (database, build cache) are never packaged, wherever they are.
+    std::vector<std::string> own;
+    for (const auto& p : neverPackage)
+        if (!p.empty())
+            own.push_back(toLower(pathToUtf8(fs::absolute(p).lexically_normal().generic_u8string())));
+    const fs::path base = fs::absolute(r.directory).lexically_normal();
+    auto isOwn = [&](const fs::path& rel) {
+        if (own.empty())
+            return false;
+        const std::string full = toLower(pathToUtf8((base / rel).lexically_normal().generic_u8string()));
+        for (const auto& o : own)
+            if (o == full)
+                return true;
+        return false;
+    };
     const auto zip = r.packageRoot / "Multiplexer Output.zip";
     ZipStats stats;
     if (r.packageRoot != r.directory) {
-        stats = writeZip(zip, r.directory, "Data/");
+        stats = writeZip(zip, r.directory, "Data/", isOwn);
     } else {
         // An output folder chosen by hand (not named Data) holds the notes and reports too: the zip
         // gets only what belongs in the game's Data folder, and never itself.
@@ -643,7 +658,9 @@ std::filesystem::path Exporter::writePackageZip(ExportResult& r)
                                              "multiplexer_instructions.txt",    "multiplexer_archivepriority.txt",
                                              "multiplexer_build_failed.txt",    "multiplexer_compilation.json"};
         static const char* const kFolders[] = {"multiplexer reports", "diagnostic recorder"};
-        stats = writeZip(zip, r.directory, "Data/", [](const fs::path& rel) {
+        stats = writeZip(zip, r.directory, "Data/", [&](const fs::path& rel) {
+            if (isOwn(rel))
+                return true;
             const std::string first = toLower(pathToUtf8(*rel.begin()));
             for (const char* f : kFolders)
                 if (first == f)

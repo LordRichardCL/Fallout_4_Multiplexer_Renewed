@@ -32,12 +32,15 @@ struct BackupResult {
     std::filesystem::path backupFolder;   // where it went
     std::vector<std::filesystem::path> entries; // what was moved (paths in the backup)
     bool gameDataOutput = false;          // the output folder is the game's Data folder: left as it is
+    std::vector<std::filesystem::path> keptInPlace; // this app's own files found in the output: not moved
 };
 
 // `stamp`: "DDMMYY HHMMSS" (empty: now, local time). `gameData`: the game's Data folder.
+// `keepFiles`: this app's own working files (its database and build cache, open while it runs): never
+// moved, wherever they are; a folder holding one is moved item by item around it.
 // Throws std::runtime_error, with nothing moved, when the previous output cannot be backed up.
 BackupResult backupPreviousOutput(const std::filesystem::path& outputDirectory, const std::filesystem::path& gameData,
-                                  const std::string& stamp = {});
+                                  const std::string& stamp = {}, const std::vector<std::filesystem::path>& keepFiles = {});
 
 // "DDMMYY HHMMSS", local time.
 std::string backupStamp();

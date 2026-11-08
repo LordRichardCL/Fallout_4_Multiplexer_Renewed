@@ -588,6 +588,25 @@ void Pipeline::markBuildFailed(const std::filesystem::path& directory, const std
     spdlog::error("Export failed: {}", reason);
 }
 
+std::vector<std::filesystem::path> Pipeline::workingFiles() const
+{
+    // The results database and the build cache stay open while the app runs (with SQLite's side files).
+    std::vector<std::filesystem::path> out;
+    auto add = [&](const std::filesystem::path& p) {
+        if (p.empty())
+            return;
+        for (const char* suffix : {"", "-journal", "-wal", "-shm"}) {
+            auto f = p;
+            f += suffix;
+            out.push_back(f);
+        }
+    };
+    add(config_.databasePath);
+    add(config_.cachePath.empty() && !config_.databasePath.empty() ? BuildCache::defaultPathFor(config_.databasePath)
+                                                                   : config_.cachePath);
+    return out;
+}
+
 ExportResult Pipeline::exportOutputs(ProgressSink& progress)
 {
     if (!compiled_)
@@ -611,7 +630,8 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
     // "Multiplexer Outputs Backup DDMMYY HHMMSS" beside it first. If that cannot be done, nothing is
     // changed and the export stops (the previous output is never deleted or overwritten).
     session_->releaseFiles(); // Windows cannot move files this app has open
-    const auto backup = output::backupPreviousOutput(directory, session_->install.dataPath);
+    const auto ownFiles = workingFiles();
+    const auto backup = output::backupPreviousOutput(directory, session_->install.dataPath, {}, ownFiles);
     if (backup.moved)
         previousOutputs.clear(); // nothing of the last build is left to remove or compare with
     if (config_.beforeExportWrite)
@@ -694,7 +714,7 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         spdlog::warn("No Multiplexer Output.zip: the output folder is the game's Data folder");
     if (config_.exportOptions.writeZip && !post.critical() && !backup.gameDataOutput) {
         try {
-            Exporter::writePackageZip(result);
+            Exporter::writePackageZip(result, workingFiles());
         } catch (const std::exception& e) {
             spdlog::error("Could not write Multiplexer Output.zip: {}", e.what());
         }
