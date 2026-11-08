@@ -1,5 +1,7 @@
 #include "esp/FieldDecoder.hpp"
 
+#include <cctype>
+
 #include "util/Binary.hpp"
 
 namespace fo4mx {
@@ -341,7 +343,7 @@ private:
         switch (type) {
         case 0: break;
         case 1: vmadObject(r, i, objFormat); break;
-        case 2: r.readWString(); break;
+        case 2: scriptString(r.readWString()); break;
         case 3: r.skip(4); break;
         case 4: r.skip(4); break;
         case 5: r.skip(1); break;
@@ -360,7 +362,7 @@ private:
         case 12: {
             uint32_t n = r.read<uint32_t>();
             for (uint32_t k = 0; k < n; ++k)
-                r.readWString();
+                scriptString(r.readWString());
             break;
         }
         case 13:
@@ -378,6 +380,17 @@ private:
         default:
             throw FormatError("unsupported script property type " + std::to_string(type));
         }
+    }
+
+    void scriptString(const std::string& v)
+    {
+        if (v.size() < 5 || v.size() > 260)
+            return;
+        std::string ext = v.substr(v.size() - 4);
+        for (auto& c : ext)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (ext == ".esp" || ext == ".esm" || ext == ".esl")
+            out_.scriptPluginNames.push_back(v);
     }
 
     void vmadProperty(BinaryReader& r, uint32_t i, int16_t version, int16_t objFormat, int depth)

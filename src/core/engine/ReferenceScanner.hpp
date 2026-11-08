@@ -17,6 +17,7 @@ struct ReferenceScanOptions {
     bool configs = true; // INI, JSON, TOML, XML, TXT under F4SE\Plugins and MCM
     bool binaries = true; // F4SE plugin DLLs
     bool paths = true;   // folders and file names
+    bool records = true; // script properties (VMAD) in the plugins' own records
     unsigned threads = 0;
 };
 

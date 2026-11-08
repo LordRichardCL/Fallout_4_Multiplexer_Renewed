@@ -5502,3 +5502,56 @@ TEST(relinked_configs_must_win_before_switching_over)
     CHECK(d.relinkedNotLoaded.empty());
     CHECK(d.blockers.empty());
 }
+
+// A script property in a plugin's own record holding a plugin's file name (Sim Settlements 2 add-on
+// configs: SS2 checks GetFormFromFile(the config's FormID, that name) and rejects the add-on when it
+// does not match). Compiling would leave the name pointing at a plugin that is switched off: kept out,
+// with or without the Auto-Merger. A name in a string array counts the same; other strings do not.
+TEST(references_script_property_in_a_record_keeps_the_plugin)
+{
+    auto root = referenceInstall("refvmadstring");
+    auto data = root / "Game" / "Data";
+    BinaryWriter w;
+    w.write<int16_t>(6);
+    w.write<int16_t>(2);
+    w.write<uint16_t>(1);
+    w.writeWString("SimSettlementsV2:MiscObjects:AddonPackConfiguration");
+    w.write<uint8_t>(0);
+    w.write<uint16_t>(3);
+    w.writeWString("sAddonFilename");
+    w.write<uint8_t>(2);
+    w.write<uint8_t>(1);
+    w.writeWString("ModS.esp");
+    w.writeWString("sOther");
+    w.write<uint8_t>(2);
+    w.write<uint8_t>(1);
+    w.writeWString("not a plugin name");
+    w.writeWString("Requires");
+    w.write<uint8_t>(12);
+    w.write<uint8_t>(1);
+    w.write<uint32_t>(1);
+    w.writeWString("ModT.esp");
+    writePlugin(data / "ModS.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000812, {zs("EDID", "ModS_Keyword")}),
+                 record("MISC", 0x01000813, {zs("EDID", "ModS_AddonConfig"), Subrecord(Signature("VMAD"), w.take())})});
+    for (bool autoMerge : {false, true}) {
+        auto cfg = configFor(root);
+        cfg.compile.autoMerge = autoMerge;
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const auto& s = p.session();
+        auto refs = referencesOf(s, "ModS.esp");
+        CHECK_EQ(refs.size(), size_t(1));
+        if (!refs.empty()) {
+            CHECK_EQ(refs[0]->cls, ReferenceClass::CompatibilityRequired);
+            CHECK_EQ(refs[0]->context, std::string("script property in a record"));
+            CHECK(refs[0]->location.find("ModS_AddonConfig") != std::string::npos);
+        }
+        CHECK_EQ(referencesOf(s, "ModT.esp").size(), size_t(1)); // from the string array
+        CHECK(s.findPlugin("ModS.esp")->eligibility != Eligibility::Eligible);
+        CHECK(s.findPlugin("ModT.esp")->eligibility != Eligibility::Eligible);
+        CHECK(p.compile());
+        CHECK(!p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
+    }
+}

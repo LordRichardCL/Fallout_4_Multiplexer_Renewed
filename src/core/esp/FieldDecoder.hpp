@@ -40,6 +40,9 @@ struct DecodedLayout {
     std::vector<LocalizedField> localized;
     std::vector<HeuristicSpan> heuristic;
     std::vector<DecodeIssue> issues;
+    // String values of script properties (VMAD) that look like a plugin file name ("Mod.esp"):
+    // scripts can pass them to GetFormFromFile, so the record depends on that plugin's file name.
+    std::vector<std::string> scriptPluginNames;
 
     bool slotCovers(uint32_t sub, uint32_t offset) const; // true if [offset, offset+4) overlaps a slot
 };

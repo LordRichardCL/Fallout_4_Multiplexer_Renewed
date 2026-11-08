@@ -2,6 +2,8 @@
 
 #include "assets/AssetScanner.hpp"
 #include "engine/ParallelFor.hpp"
+#include "esp/FieldDecoder.hpp"
+#include "esp/PluginFile.hpp"
 #include "papyrus/Pex.hpp"
 #include "util/Text.hpp"
 
@@ -77,6 +79,7 @@ enum class Fact {
     FormIdIni,           // bcr\<plugin>.ini: FormIDs relative to the plugin, rewritten under the output's name
     FormIdIniUnknown,    // bcr\<plugin>.ini with lines that are not "[section]" or "key=<FormID>"
     OtherFileName,       // any other file named after the plugin
+    RecordScriptString,  // a script property in a plugin's record holds the file name (VMAD string)
 };
 
 struct Rule {
@@ -180,6 +183,11 @@ Rule rule(Fact f)
     case Fact::OtherFileName:
         return {K::FilePath, C::Unknown, "file name",
                 "a file named after the plugin: something may find it by the plugin's name"};
+    case Fact::RecordScriptString:
+        return {K::PluginName, C::CompatibilityRequired, "script property in a record",
+                "a record's script property holds the plugin's file name: its scripts can look records up in that "
+                "file (Sim Settlements 2 add-on configs check GetFormFromFile(own FormID, this name) and reject "
+                "the add-on when it does not match), so the plugin must keep its name"};
     }
     return {K::Unknown, C::Unknown, "", ""};
 }
@@ -1191,6 +1199,86 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
         }
         for (auto& rr : readerRefs)
             session.nameReferences.push_back(std::move(rr));
+    }
+
+    // Script properties in the plugins' own records (VMAD strings) holding a plugin's file name.
+    if (options.records) {
+        progress.stage("Scanning script properties for plugin names");
+        std::vector<PluginIndex> scan;
+        for (const auto& p : session.plugins)
+            if (p.active && !p.generated && p.error.empty() && !p.baseGame)
+                scan.push_back(p.index);
+        std::vector<std::vector<PluginReference>> perPlugin(scan.size());
+        auto hasPluginExtension = [](std::span<const uint8_t> d) {
+            for (size_t i = 0; i + 4 <= d.size(); ++i) {
+                if (d[i] != '.' || (d[i + 1] | 0x20) != 'e' || (d[i + 2] | 0x20) != 's')
+                    continue;
+                const uint8_t c = d[i + 3] | 0x20;
+                if (c == 'p' || c == 'm' || c == 'l')
+                    return true;
+            }
+            return false;
+        };
+        std::atomic<size_t> done{0};
+        parallelFor(
+            scan.size(),
+            [&](size_t i) {
+                const auto& p = session.plugins[scan[i]];
+                try {
+                    const auto file = PluginFile::load(p.path);
+                    file.forEachRecord([&](const RecordLocation& loc) {
+                        const Signature sig = loc.header.signature;
+                        // Records that never carry scripts, and the largest ones.
+                        if (sig == Signature("LAND") || sig == Signature("NAVM") || sig == Signature("NAVI") ||
+                            sig == Signature("CELL") || sig == Signature("WRLD"))
+                            return true;
+                        std::vector<uint8_t> inflated;
+                        std::span<const uint8_t> data = loc.rawData;
+                        if (loc.header.compressed()) {
+                            inflated = Record::decompress(loc.header, loc.rawData);
+                            data = inflated;
+                        }
+                        if (!hasPluginExtension(data))
+                            return true;
+                        const auto subs = Record::parseSubrecords(data);
+                        if (std::none_of(subs.begin(), subs.end(), [](const Subrecord& s) { return s.signature == Signature("VMAD"); }))
+                            return true;
+                        const auto layout = decodeLayout(session.defs, sig, subs);
+                        std::string edid;
+                        for (const auto& s : subs)
+                            if (s.signature == Signature("EDID") && !s.data.empty()) {
+                                edid.assign(reinterpret_cast<const char*>(s.data.data()),
+                                            strnlen(reinterpret_cast<const char*>(s.data.data()), s.data.size()));
+                                break;
+                            }
+                        for (const auto& value : layout.scriptPluginNames) {
+                            auto it = names.find(toLower(value));
+                            if (it == names.end())
+                                continue;
+                            char id[16];
+                            std::snprintf(id, sizeof(id), "%08X", loc.header.formId);
+                            auto r = make(Fact::RecordScriptString, it->second, p.key, "Plugin record", value,
+                                          sig.str() + " " + (edid.empty() ? std::string() : edid + " ") + "[" + id + "]");
+                            r.source = p.sourceMod;
+                            perPlugin[i].push_back(std::move(r));
+                        }
+                        return true;
+                    });
+                } catch (const std::exception& ex) {
+                    spdlog::debug("Script properties of {} not scanned: {}", p.name, ex.what());
+                }
+                size_t n = ++done;
+                progress.progress(n, scan.size(), p.name);
+            },
+            progress, options.threads);
+        size_t count = 0;
+        for (auto& v : perPlugin)
+            for (auto& r : v) {
+                session.nameReferences.push_back(std::move(r));
+                ++count;
+            }
+        if (count)
+            spdlog::info("{} script properties in plugin records hold a plugin's file name", count);
     }
 
     std::stable_sort(session.nameReferences.begin(), session.nameReferences.end(),
