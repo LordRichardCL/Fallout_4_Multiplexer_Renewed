@@ -564,6 +564,8 @@ int cmdPipeline(const Args& a)
     }
     auto result = p.exportOutputs(progress);
     std::printf("Output in %s\n", pathToUtf8(result.directory).c_str());
+    if (!result.backupFolder.empty())
+        std::printf("Previous output moved to %s\n", pathToUtf8(result.backupFolder).c_str());
     for (const auto& n : result.writtenOutputs)
         std::printf("  written    %s\n", n.c_str());
     for (const auto& n : result.unchangedOutputs)

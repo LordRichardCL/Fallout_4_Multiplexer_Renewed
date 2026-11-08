@@ -47,6 +47,7 @@ public:
 
     void write(const std::filesystem::path& file, std::string content, std::string description,
                bool backupWhenMissing = false);
+    // Moves a file or a whole folder (a rename: same volume).
     void rename(const std::filesystem::path& from, const std::filesystem::path& to, std::string description);
     void copy(const std::filesystem::path& from, const std::filesystem::path& to, std::string description,
               bool replaceExisting = false);

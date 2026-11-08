@@ -2,6 +2,7 @@
 
 #include "engine/CompilationResult.hpp"
 #include "engine/PostCompilation.hpp"
+#include "engine/OutputBackup.hpp"
 #include "reference/FormIdReference.hpp"
 #include "util/FileTransaction.hpp"
 
@@ -606,9 +607,19 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
             previousOutputs.push_back(o.name);
     auto exportOptions = config_.exportOptions;
     exportOptions.archiveWinnerCopies = config_.archiveWinnerCopies;
+    // Every export starts from an empty output folder: the previous output is moved, unchanged, into
+    // "Multiplexer Outputs Backup DDMMYY HHMMSS" beside it first. If that cannot be done, nothing is
+    // changed and the export stops (the previous output is never deleted or overwritten).
+    session_->releaseFiles(); // Windows cannot move files this app has open
+    const auto backup = output::backupPreviousOutput(directory, session_->install.dataPath);
+    if (backup.moved)
+        previousOutputs.clear(); // nothing of the last build is left to remove or compare with
+    if (config_.beforeExportWrite)
+        config_.beforeExportWrite(directory);
     ExportResult result;
     try {
         result = Exporter::write(*session_, *compiled_, exportOptions, previousOutputs);
+        result.backupFolder = backup.backupFolder;
     } catch (const std::exception& e) {
         markBuildFailed(directory, Exporter::packageRoot(directory), {}, e.what());
         throw;
@@ -677,8 +688,11 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         exported_ = result;
         return result;
     }
-    // Every file is in Data now: zip it into the installable package.
-    if (config_.exportOptions.writeZip && !post.critical()) {
+    // Every file is in Data now: zip it into the installable package. Not when the output folder is the
+    // game's own Data folder: a package of it would hold the whole game.
+    if (backup.gameDataOutput)
+        spdlog::warn("No Multiplexer Output.zip: the output folder is the game's Data folder");
+    if (config_.exportOptions.writeZip && !post.critical() && !backup.gameDataOutput) {
         try {
             Exporter::writePackageZip(result);
         } catch (const std::exception& e) {

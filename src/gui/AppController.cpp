@@ -498,6 +498,8 @@ void AppController::runExport()
                            .arg(toQString(r.recorderFolder));
         else if (!r.recorderProblem.empty())
             recorder = QString(". Diagnostic Recorder not prepared: %1").arg(QString::fromStdString(r.recorderProblem));
+        if (!r.backupFolder.empty())
+            recorder += QString(". The previous output was moved to %1").arg(toQString(r.backupFolder));
         if (!r.zipPath.empty())
             return QString("Wrote %1 plugins; the installable package is %2%3")
                 .arg(r.pluginFiles.size())

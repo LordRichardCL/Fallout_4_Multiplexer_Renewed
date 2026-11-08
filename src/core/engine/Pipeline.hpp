@@ -15,6 +15,7 @@
 #include "engine/ValidationEngine.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -54,6 +55,8 @@ struct PipelineConfig {
     // Editor IDs of the base-game masters from an independent tool (next to the application): the
     // Definition Check compares this app's reading of those plugins with it. Optional.
     std::filesystem::path formIdReference;
+    // Tests: runs after the previous output was moved to its backup, before the export writes anything.
+    std::function<void(const std::filesystem::path& outputDirectory)> beforeExportWrite;
     // Record definitions to use instead of the runtime profile's (tests, trial catalogues). Not owned.
     const RecordDefinitions* definitions = nullptr;
 };

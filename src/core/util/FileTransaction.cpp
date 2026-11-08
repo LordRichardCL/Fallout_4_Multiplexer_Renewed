@@ -188,11 +188,13 @@ std::vector<std::string> FileTransaction::check() const
             else if (!fs::is_directory(op.target.parent_path(), ec))
                 problems.push_back("folder not found: " + pathToUtf8(op.target.parent_path()));
             break;
-        case Kind::Rename:
-            if (!fs::is_regular_file(op.source, ec))
-                problems.push_back("file not found: " + pathToUtf8(op.source));
+        case Kind::Rename: // a file or a folder (moved whole)
+            if (!fs::exists(op.source, ec))
+                problems.push_back("not found: " + pathToUtf8(op.source));
             if (fs::exists(op.target, ec))
                 problems.push_back("already exists: " + pathToUtf8(op.target));
+            else if (!fs::is_directory(op.target.parent_path(), ec))
+                problems.push_back("folder not found: " + pathToUtf8(op.target.parent_path()));
             break;
         case Kind::Copy:
             if (!fs::is_regular_file(op.source, ec))

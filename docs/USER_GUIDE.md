@@ -159,6 +159,8 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 └── Multiplexer Reports\
 ```
 
+**Every export starts from an empty output folder.** Before writing anything, the previous export's output is moved, exactly as it was, into a new folder **`Multiplexer Outputs Backup DDMMYY HHMMSS`** beside the output (for the default layout: next to `Multiplexer Output` in the game folder). That covers the Data folder, the zip, the notes and the reports; anything else you keep in the package folder stays where it is. A backup folder is never reused (a second backup in the same second gets ` (2)`), and nothing is deleted: when a file cannot be moved (another program has it open), whatever was already moved is put back and the export stops with a message. An output folder you picked yourself that holds files Multiplexer did not make is refused rather than moved; Mod Organizer 2's `meta.ini` in an output mod folder stays in place. Exporting straight into the game's `Data` folder moves nothing and writes no zip. So `Multiplexer Output.zip` holds only files written by the current export. Old backups are yours to delete when you no longer need them.
+
 With an output folder you picked yourself that is not named `Data`, the plugins and notes share that folder; the zip is written there too and holds only what belongs in the game's `Data` folder (not the notes, the reports or itself).
 
 Install `Multiplexer Output.zip` like any other mod, and make it win over every other mod (install it last):

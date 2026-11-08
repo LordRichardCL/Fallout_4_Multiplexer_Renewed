@@ -46,6 +46,7 @@ add_library(fo4mx_core STATIC
     engine/MergeEngine.cpp
     engine/Mo2Support.cpp
     engine/Normalizer.cpp
+    engine/OutputBackup.cpp
     engine/Pipeline.cpp
     engine/PluginScanner.cpp
     engine/PluginSummary.cpp

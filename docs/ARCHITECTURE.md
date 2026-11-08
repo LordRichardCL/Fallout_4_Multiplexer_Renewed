@@ -243,6 +243,20 @@ ReferenceScanner ──> detectors ──> PluginReference ──> classifier �
 
 A ghosted plugin (`<name>.ghost` in Data) is discovered as `<name>` with `PluginInfo::ghosted`, never active in the game; when the last build compiled it, it is reactivated as a source like a disabled one. When both the plain file and the ghost exist, the plain file wins.
 
+### Export lifecycle
+
+`Pipeline::exportOutputs` first calls `output::backupPreviousOutput` (`engine/OutputBackup.hpp`): the
+previous export's output (package layout: the Data folder plus the zip, notes, reports and recorder
+folder in the package folder; a hand-picked folder: everything but MO2's `meta.ini`, only when
+Multiplexer made it) is moved with one `FileTransaction` into a new `Multiplexer Outputs Backup DDMMYY
+HHMMSS` beside the package folder, and the output folder is checked empty. A failure undoes the moves
+and stops the export before anything is written. The exporter then writes into an empty folder, so the
+zip (made from the Data folder, skipping notes, reports, MO2's `meta.ini` and any backup-named folder)
+holds only this export's files. State a later step needs from the previous build was already read at
+scan and compile time: the FormID map (stable FormIDs), the Auto-Merger's and archive-winner copy
+lists, and the archives an earlier build registered in the INI (`Session::registeredArchives`, which
+`Exporter::archiveList` and `planArchiveIni` now also use, since the record of them moves to the backup).
+
 ### After compilation
 
 Everything that changes the user's setup after an export goes through `FileTransaction` (`util/FileTransaction.hpp`): a plan of writes, renames and copies that is checked before anything changes (sources present, destinations free), then applied in order with a backup of each replaced file (`uniqueBackupPath`: `.multiplexer-backup-<stamp>`, then `-2`, `-3`, … never overwriting) and atomic writes (temporary file, then rename). A failure undoes the completed steps in reverse order; `rollback()` undoes a whole applied transaction. **Apply to Game** builds one transaction from `Exporter::planProfile` (MO2) and `Exporter::planArchiveIni`.

@@ -93,7 +93,12 @@ std::vector<std::string> Exporter::archiveList(const Session& session, const Com
     std::unordered_set<std::string> needed, stale;
     for (const auto& a : c.archivesToRegister)
         needed.insert(toLower(a));
+    // Archives an earlier build registered: the record in the output folder and what the scan
+    // gathered (the previous output may have been moved to a backup by this export).
     for (const auto& a : readLines(outputDirectory / kRegisteredFile))
+        if (!needed.count(toLower(a)))
+            stale.insert(toLower(a));
+    for (const auto& a : session.registeredArchives)
         if (!needed.count(toLower(a)))
             stale.insert(toLower(a));
 
@@ -182,7 +187,7 @@ void Exporter::planArchiveIni(FileTransaction& tx, const Session& session, const
 {
     const auto registeredPath = outputDirectory / kRegisteredFile;
     auto previously = readLines(registeredPath);
-    if (c.archivesToRegister.empty() && previously.empty())
+    if (c.archivesToRegister.empty() && previously.empty() && session.registeredArchives.empty())
         return; // nothing was ever registered and nothing needs to be
 
     fs::path dir = session.install.iniDirectory;
@@ -643,6 +648,10 @@ std::filesystem::path Exporter::writePackageZip(ExportResult& r)
             for (const char* f : kFolders)
                 if (first == f)
                     return true;
+            if (first.rfind("multiplexer outputs backup ", 0) == 0)
+                return true; // never package a backup
+            if (std::distance(rel.begin(), rel.end()) == 1 && first == "meta.ini")
+                return true; // Mod Organizer 2's description of the mod folder, not part of the export
             if (std::distance(rel.begin(), rel.end()) != 1)
                 return false;
             const std::string name = toLower(pathToUtf8(rel.filename()));
