@@ -296,3 +296,28 @@ TEST(diagnostics_archives_not_in_data_and_where_loading_stops)
         line(R"({"schema":1,"seq":5,"event":"archive_open","path":"D:\\Data\\ModB - Main.ba2","ok":true,"write":false})") + kEnd;
     CHECK(!checkArchives(parseRecorderLog(mixed)).cutInferred);
 }
+
+// The archive loader (proof of concept): the game's read is still cut, but the archives past the cut load.
+// That is reported as supplied in full, not as truncation.
+TEST(diagnostics_cut_list_supplied_by_the_loader)
+{
+    auto line = [](const std::string& json) { return json + "\n"; };
+    const std::string value = "Fallout4 - Animations.ba2, ModA - Main.ba2, ModB - Main.ba2";
+    std::string log = kStart +
+        line(R"({"schema":1,"seq":1,"event":"archive_ini","file":"Fallout4Custom.ini","key":"SResourceArchiveList2","length":1,"value":")" + value + R"("})") +
+        line(R"({"schema":1,"seq":2,"event":"archive_presence","checked":3,"absent":0,"missing":[]})") +
+        line(R"({"schema":1,"seq":3,"event":"archive_ini_read","section":"Archive","key":"sResourceArchiveList2","file":"Fallout4Custom.ini","buffer":31,"returned":30,"truncated":true,"value":")" + value.substr(0, 30) + R"("})") +
+        line(R"({"schema":1,"seq":4,"event":"f4se_plugins","dlls":[{"name":"MultiplexerArchiveLoader.dll","loaded":true}],"address_library_file":"x","address_library_present":true})") +
+        line(R"({"schema":1,"seq":5,"event":"archive_open","path":"D:\\Data\\Fallout4 - Animations.ba2","ok":true,"write":false})") +
+        line(R"({"schema":1,"seq":6,"event":"archive_open","path":"D:\\Data\\ModA - Main.ba2","ok":true,"write":false})") +
+        line(R"({"schema":1,"seq":7,"event":"archive_open","path":"D:\\Data\\ModB - Main.ba2","ok":true,"write":false})") + kEnd;
+    const auto s = parseRecorderLog(log);
+    const auto c = checkArchives(s);
+    CHECK(c.truncated);
+    CHECK(c.cutCompensated);
+    CHECK(c.loader);
+    CHECK(c.verdict.rfind("PASS", 0) == 0);
+    const auto f = analyse(s);
+    CHECK(find(f, "The archive list was supplied in full") != nullptr);
+    CHECK(find(f, "The game read only part of the archive list") == nullptr);
+}

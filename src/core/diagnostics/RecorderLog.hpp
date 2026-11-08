@@ -115,6 +115,8 @@ struct ArchiveCheck {
     std::string firstMissing;
     size_t firstMissingIndex = 0, firstMissingOffset = 0; // in the INI value; offset npos: not in the INI
     bool addictol = false, xcell = false; // archive-limit plugins loaded in the session
+    bool loader = false;                  // MultiplexerArchiveLoader loaded in the session
+    bool cutCompensated = false;          // the read was cut, yet every archive in Data past the cut loaded
     size_t archivesOpen = 0;              // BA2 files seen opened or held
     std::string verdict;
 };

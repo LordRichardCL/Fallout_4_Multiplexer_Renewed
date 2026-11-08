@@ -504,7 +504,14 @@ std::vector<Finding> analyse(const RecorderSession& s, const PackageContext* pac
 
     if (s.hasArchiveDiagnostics()) {
         const auto c = checkArchives(s, package);
-        if (c.truncated) {
+        if (c.cutCompensated)
+            add(out, FindingSeverity::Info, "The archive list was supplied in full",
+                "the game's own read of " + c.key + " was cut at " + std::to_string(c.received) + " characters, but "
+                "every archive past the cut that is in Data loaded" +
+                    (c.loader ? std::string(" (MultiplexerArchiveLoader was loaded)") : std::string()),
+                "High", {std::to_string(c.loaded.size()) + " of " + std::to_string(c.requested.size()) + " requested archives loaded"},
+                {});
+        if (c.truncated && !c.cutCompensated) {
             std::vector<std::string> ev = {
                 "the game read " + c.key + " (" + c.iniFile + ") with a " + std::to_string(c.buffer) +
                 "-byte buffer and received " + std::to_string(c.received) + " of " + std::to_string(c.iniValue.size()) +
@@ -598,6 +605,7 @@ ArchiveCheck checkArchives(const RecorderSession& s, const PackageContext* packa
         const std::string n = toLower(name);
         c.addictol |= loaded && n.find("addictol") != std::string::npos;
         c.xcell |= loaded && n.rfind("x-cell", 0) == 0;
+        c.loader |= loaded && n == "multiplexerarchiveloader.dll";
     }
     if (!c.available) {
         c.verdict = "this session has no archive diagnostics (recorder 1.2.0 or later)";
@@ -700,6 +708,15 @@ ArchiveCheck checkArchives(const RecorderSession& s, const PackageContext* packa
         if (c.firstMissing.empty())
             c.firstMissing = c.missing.front();
     }
+    // A cut read that did not stop any archive in Data from loading: something supplied the rest (the
+    // archive loader).
+    if (c.truncated && c.observable && c.missing.empty()) {
+        for (size_t i = 0; i < c.iniEntries.size(); ++i)
+            if (c.iniOffsets[i] + c.iniEntries[i].size() > c.received && seen.count(toLower(c.iniEntries[i]))) {
+                c.cutCompensated = true;
+                break;
+            }
+    }
     const size_t notLoaded = c.missing.size() + c.absent.size();
     if (!c.observable)
         c.verdict = "cannot verify: the game's own archives were not seen opening in this session";
@@ -710,7 +727,7 @@ ArchiveCheck checkArchives(const RecorderSession& s, const PackageContext* packa
                     " requested archives did not load";
         if (!c.absent.empty())
             c.verdict += "; " + std::to_string(c.absent.size()) + " are not in Data";
-        if (c.truncated)
+        if (c.truncated && !c.cutCompensated)
             c.verdict += "; archive-list truncation: the game received " + std::to_string(c.received) + " of " +
                          std::to_string(c.iniValue.size()) + " characters";
         else if (c.cutInferred)
@@ -725,6 +742,7 @@ std::string formatArchiveCheck(const ArchiveCheck& c)
     std::ostringstream o;
     o << "Archive compatibility\n---------------------\n";
     o << "Addictol loaded:      " << (c.addictol ? "Yes" : "No") << (c.xcell ? " (X-Cell loaded)" : "") << "\n";
+    o << "Archive loader:       " << (c.loader ? "loaded" : "not loaded") << "\n";
     if (!c.available) {
         o << c.verdict << "\n";
         return o.str();
@@ -733,7 +751,7 @@ std::string formatArchiveCheck(const ArchiveCheck& c)
       << (c.iniFile.empty() ? std::string() : " (" + c.iniFile + ")") << "\n";
     if (c.readSeen)
         o << "Received by the game: " << c.received << " characters (buffer " << c.buffer << ")"
-          << (c.truncated ? " - CUT" : "") << "\n";
+          << (c.truncated ? (c.cutCompensated ? " - CUT, the rest supplied" : " - CUT") : "") << "\n";
     else
         o << "Received by the game: not observed\n";
     o << "Requested archives:   " << c.requested.size() << "\n";
