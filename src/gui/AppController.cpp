@@ -498,8 +498,11 @@ void AppController::runExport()
                            .arg(toQString(r.recorderFolder));
         else if (!r.recorderProblem.empty())
             recorder = QString(". Diagnostic Recorder not prepared: %1").arg(QString::fromStdString(r.recorderProblem));
-        if (!r.backupFolder.empty())
-            recorder += QString(". The previous output was moved to %1").arg(toQString(r.backupFolder));
+        if (!r.runName.empty())
+            recorder += QString(". This export is %1 in %2%3")
+                            .arg(qs(r.runName))
+                            .arg(toQString(r.outputRoot))
+                            .arg(r.latestRecorded ? QString() : QString(" (Multiplexer Latest.txt could not be updated)"));
         if (!r.zipPath.empty())
             return QString("Wrote %1 plugins; the installable package is %2%3")
                 .arg(r.pluginFiles.size())
@@ -579,7 +582,7 @@ QString bullet(const std::vector<std::string>& lines, size_t limit = 50)
 namespace {
 
 fo4mx::ApplyOptions applyOptions(const fo4mx::Session& s, const AppController::ApplyChoice& choice,
-                                 const fo4mx::CompilationResult& result, const fo4mx::PipelineConfig& config,
+                                 const fo4mx::CompilationResult& result, const fo4mx::PipelineConfig&,
                                  bool managerRunning)
 {
     fo4mx::ApplyOptions o;
@@ -600,12 +603,8 @@ fo4mx::ApplyOptions applyOptions(const fo4mx::Session& s, const AppController::A
             o.zipTo = fo4mx::vortex::uniqueName(folder, name);
         }
     }
-    if (choice.enableOutputMod && kind == fo4mx::InstallKind::ModOrganizer2) {
-        const auto out = config.exportOptions.outputDirectory.empty()
-                             ? fo4mx::Exporter::defaultOutputDirectory(s)
-                             : config.exportOptions.outputDirectory;
-        o.enableOutputMod = fo4mx::mo2::outputModName(s, out);
-    }
+    if (choice.enableOutputMod && kind == fo4mx::InstallKind::ModOrganizer2)
+        o.enableOutputMod = fo4mx::mo2::outputModName(s, result.packageRoot); // the export's own folder
     return o;
 }
 
@@ -648,9 +647,7 @@ bool AppController::previewApply(ApplyPreview* preview, QString* message)
         preview->zipAvailable = !result.zipPath.empty() && std::filesystem::is_regular_file(result.zipPath, ec);
         preview->zipPath = toQString(result.zipPath);
         if (isMo2) {
-            const auto out = config_.exportOptions.outputDirectory.empty()
-                                 ? Exporter::defaultOutputDirectory(s)
-                                 : config_.exportOptions.outputDirectory;
+            const auto out = pipeline_->exportResult()->packageRoot; // the export's own folder
             const auto mod = fo4mx::mo2::outputModName(s, out);
             preview->outputMod = qs(mod);
             preview->outputModEnabled = !mod.empty() && fo4mx::mo2::modEnabled(s.install.profilePath, mod);
@@ -686,7 +683,7 @@ bool AppController::previewApply(ApplyPreview* preview, QString* message)
 
         fo4mx::FileTransaction tx("Apply to Game (preview)");
         const auto plan = fo4mx::PostCompilation::planApply(tx, s, *pipeline_->compiledOutput(), result,
-                                                            pipeline_->exportResult()->directory,
+                                                            pipeline_->exportResult()->outputRoot,
                                                             applyOptions(s, previewChoice(*preview), result, config_,
                                                                          preview->managerRunning));
         const auto& d = plan.check;
@@ -747,7 +744,7 @@ bool AppController::applyToProfile(const ApplyChoice& choice, QString* message)
         // One transaction: zip copy, load order, INI, notes and ghosting change together or not at all.
         fo4mx::FileTransaction tx("Apply to Game");
         const auto plan = fo4mx::PostCompilation::planApply(tx, s, *pipeline_->compiledOutput(), result,
-                                                            pipeline_->exportResult()->directory,
+                                                            pipeline_->exportResult()->outputRoot,
                                                             applyOptions(s, choice, result, config_, running));
         if (tx.empty()) {
             QStringList why;

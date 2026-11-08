@@ -76,7 +76,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     outputs_->setRange(fo4mx::CompileOptions::kMinOutputs, fo4mx::CompileOptions::kMaxOutputs);
     prefix_ = new QLineEdit;
     outputDir_ = new QLineEdit;
-    outputDir_->setPlaceholderText("Default: <game folder>\\Multiplexer Output\\Data");
+    outputDir_->setPlaceholderText("Default: <game folder>\\Multiplexer Output (each export in a folder of its own)");
     auto* browse = makeButton("…");
     auto* dirRow = new QHBoxLayout;
     dirRow->addWidget(outputDir_, 1);
@@ -103,11 +103,12 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                              .arg(fo4mx::CompileOptions::kMaxOutputs));
     prefix_->setToolTip("Output plugins are named <prefix>01.esp, <prefix>02.esp, …");
     outputDir_->setToolTip(
-        "Where the generated mod is built. By default \"Multiplexer Output\" next to the game: its Data folder holds "
-        "everything the game loads, and the export zips it into \"Multiplexer Output.zip\" for your mod manager to "
-        "install. The package is the same for Vortex and Mod Organizer 2.\n\n"
-        "Advanced: a folder inside Mod Organizer 2's mods folder is used as the mod directly; then compiled plugins "
-        "that have archives are replaced by archive loaders instead of loose copies and INI entries.");
+        "The folder that holds the exports. By default \"Multiplexer Output\" next to the game. Every export gets "
+        "a folder of its own in it, \"Multiplexer Output DDMMYY HHMMSS\": its Data folder holds everything the game "
+        "loads, and \"Multiplexer Output.zip\" beside it is the package for your mod manager. An export never "
+        "changes an earlier one; \"Multiplexer Latest.txt\" names the latest.\n\n"
+        "Advanced: a folder inside Mod Organizer 2's mods folder makes every export a mod of its own there; then "
+        "compiled plugins that have archives are replaced by archive loaders instead of loose copies and INI entries.");
     outputsNote_ = new QLabel;
     outputsNote_->setObjectName("PageSubtitle");
     outputsNote_->setWordWrap(true);

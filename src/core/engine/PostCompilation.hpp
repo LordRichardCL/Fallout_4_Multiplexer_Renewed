@@ -77,15 +77,16 @@ public:
     static std::vector<GhostCheck> ghostChecks(const Session& session, const CompiledOutput& compiled,
                                                const CompilationResult& result, const DeploymentCheck& check);
     // Plans Apply to Game: the load order (MO2 profile, or plugins.txt for a Standalone install), the
-    // archive INI, the instructions file and, when asked, ghosting. Plans nothing when check() finds
+    // archive INI (with its record of added archives in `recordDirectory`: the folder holding the
+    // exports, ExportResult::outputRoot) and, when asked, ghosting. Never writes into an export. Plans nothing when check() finds
     // a blocker.
     // The zip copy (Vortex downloads) is planned even when switching over is blocked: installing the
     // package is the step that unblocks it.
     static ApplyPlan planApply(FileTransaction& tx, const Session& session, const CompiledOutput& compiled,
-                               const CompilationResult& result, const std::filesystem::path& outputDirectory,
+                               const CompilationResult& result, const std::filesystem::path& recordDirectory,
                                const ApplyOptions& options);
     static ApplyPlan planApply(FileTransaction& tx, const Session& session, const CompiledOutput& compiled,
-                               const CompilationResult& result, const std::filesystem::path& outputDirectory,
+                               const CompilationResult& result, const std::filesystem::path& recordDirectory,
                                bool ghost);
 
     // Renames the plugins whose check passed. Never writes ".ghost" names into any load order file.

@@ -45,8 +45,12 @@ struct ExportResult {
     size_t archiveWinnerFiles = 0;
     // The Diagnostic Recorder, when prepared (Pipeline): its folder, or why it was not written.
     std::filesystem::path recorderFolder;
-    // Where the previous output was moved before this export (empty: there was none).
-    std::filesystem::path backupFolder;
+    // The export's own folder: its name ("Multiplexer Output DDMMYY HHMMSS"; empty when written straight
+    // into the game's Data folder), the folder holding the exports, and whether "Multiplexer
+    // Latest.txt" now names it.
+    std::string runName;
+    std::filesystem::path outputRoot;
+    bool latestRecorded = false;
     std::string recorderProblem;
 };
 

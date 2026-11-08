@@ -3,6 +3,7 @@
 #include "engine/CompilationEngine.hpp"
 #include "engine/Exporter.hpp"
 #include "engine/Mo2Support.hpp"
+#include "engine/OutputRuns.hpp"
 #include "engine/Session.hpp"
 #include "util/FileTransaction.hpp"
 #include "util/Text.hpp"
@@ -186,7 +187,7 @@ std::string PostCompilation::instructions(const Session& session, const Compilat
         break;
     case InstallKind::Standalone:
         t += "1. Extract \"Multiplexer Output.zip\" into the game folder (its Data folder merges with the game's),\n"
-             "   or copy the contents of \"Multiplexer Output\\Data\" into the game's Data folder.\n"
+             "   or copy the contents of this export's Data folder into the game's Data folder.\n"
              "2. In Multiplexer, Compilation page: Apply to Game. After a summary and your confirmation it disables\n"
              "   the compiled plugins in plugins.txt, enables the outputs at the end and keeps the compiled mods'\n"
              "   archives loading. Every file is backed up first.\n"
@@ -272,15 +273,15 @@ std::vector<GhostCheck> PostCompilation::ghostChecks(const Session& session, con
 }
 
 ApplyPlan PostCompilation::planApply(FileTransaction& tx, const Session& session, const CompiledOutput& c,
-                                     const CompilationResult& result, const fs::path& outputDirectory, bool ghost)
+                                     const CompilationResult& result, const fs::path& recordDirectory, bool ghost)
 {
     ApplyOptions o;
     o.ghost = ghost;
-    return planApply(tx, session, c, result, outputDirectory, o);
+    return planApply(tx, session, c, result, recordDirectory, o);
 }
 
 ApplyPlan PostCompilation::planApply(FileTransaction& tx, const Session& session, const CompiledOutput& c,
-                                     const CompilationResult& result, const fs::path& outputDirectory,
+                                     const CompilationResult& result, const fs::path& recordDirectory,
                                      const ApplyOptions& o)
 {
     ApplyPlan plan;
@@ -315,17 +316,20 @@ ApplyPlan PostCompilation::planApply(FileTransaction& tx, const Session& session
     // The load order: the MO2 profile, or the plugins.txt the game reads (Standalone, and Vortex
     // while it is closed: Vortex reads plugins.txt back when it starts).
     if (enableMod) {
-        mo2::planEnableMod(tx, session.install.profilePath, o.enableOutputMod);
+        // The new export's mod on; earlier exports' mods off (their folders stay as they are).
+        const std::string keep = o.enableOutputMod;
+        mo2::planEnableMod(tx, session.install.profilePath, o.enableOutputMod, [keep](const std::string& mod) {
+            return output::isRunName(mod) && !iequals(mod, keep);
+        });
         plan.enablesMod = true;
     }
     if (o.switchLoadOrder && !session.install.pluginsFile.empty()) {
         Exporter::planProfile(tx, session, c, session.install.pluginsFile);
         plan.writesLoadOrder = true;
     }
-    Exporter::planArchiveIni(tx, session, c, outputDirectory);
-    if (!result.packageRoot.empty() && fs::is_directory(result.packageRoot))
-        tx.write(result.packageRoot / kInstructionsFile, instructions(session, result, plan.check),
-                 "how to switch over to this build, and how to undo it");
+    // The record of archives added to the INI is kept beside the exports, never inside one: a finished
+    // export is never changed (its instructions were written when it was exported).
+    Exporter::planArchiveIni(tx, session, c, recordDirectory);
     if (o.ghost && kind != InstallKind::ModOrganizer2) {
         planGhosting(tx, plan.ghosts);
         for (const auto& g : plan.ghosts)

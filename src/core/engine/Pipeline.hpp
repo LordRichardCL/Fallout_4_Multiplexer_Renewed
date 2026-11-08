@@ -11,6 +11,7 @@
 #include "engine/DependencyEngine.hpp"
 #include "engine/Exporter.hpp"
 #include "engine/PluginScanner.hpp"
+#include "engine/OutputRuns.hpp"
 #include "engine/Session.hpp"
 #include "engine/ValidationEngine.hpp"
 
@@ -55,7 +56,7 @@ struct PipelineConfig {
     // Editor IDs of the base-game masters from an independent tool (next to the application): the
     // Definition Check compares this app's reading of those plugins with it. Optional.
     std::filesystem::path formIdReference;
-    // Tests: runs after the previous output was moved to its backup, before the export writes anything.
+    // Tests: runs after the export's new folder is created, before the export writes anything.
     std::function<void(const std::filesystem::path& outputDirectory)> beforeExportWrite;
     // Record definitions to use instead of the runtime profile's (tests, trial catalogues). Not owned.
     const RecordDefinitions* definitions = nullptr;
@@ -115,6 +116,11 @@ private:
     // This app's own files that stay open while it runs (results database, build cache): never moved
     // to an output backup and never packaged, even when they sit in the output folder.
     std::vector<std::filesystem::path> workingFiles() const;
+    // Where exports go (the Output folder setting), the latest finished export's folder of build
+    // records (FormID map, copy lists; empty: none), and where the next export will write.
+    output::Location outputLocation() const;
+    std::filesystem::path previousBuildDirectory() const;
+    std::filesystem::path pendingOutputDirectory() const;
     void markBuildFailed(const std::filesystem::path& directory, const std::filesystem::path& packageRoot,
                          const std::vector<std::filesystem::path>& written, const std::string& reason);
 

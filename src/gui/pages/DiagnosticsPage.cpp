@@ -4,6 +4,7 @@
 #include "widgets/Widgets.hpp"
 
 #include "engine/Exporter.hpp"
+#include "engine/OutputRuns.hpp"
 #include "util/Platform.hpp"
 
 #include <QDesktopServices>
@@ -94,10 +95,19 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
 
 std::filesystem::path DiagnosticsPage::packageRoot() const
 {
+    // The export to compare with: the one exported in this session, else the latest finished export
+    // in the output folder (loadPackageContext resolves the folder holding the exports to it).
+    auto* p = app_->pipeline();
+    if (p && p->exportResult())
+        return p->exportResult()->packageRoot;
     const auto& c = app_->config();
-    if (!c.exportOptions.outputDirectory.empty())
-        return fo4mx::Exporter::packageRoot(c.exportOptions.outputDirectory);
-    return c.install.gamePath.empty() ? std::filesystem::path() : c.install.gamePath / "Multiplexer Output";
+    const auto mods = p && p->scanned() ? p->session().install.modsPath : std::filesystem::path();
+    const auto loc = fo4mx::output::locate(c.exportOptions.outputDirectory, c.install.gamePath,
+                                           c.install.gamePath.empty() ? std::filesystem::path() : c.install.gamePath / "Data",
+                                           mods);
+    if (auto latest = fo4mx::output::latestRun(loc))
+        return *latest;
+    return loc.root;
 }
 
 void DiagnosticsPage::open(const QString& file)

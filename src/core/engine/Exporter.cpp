@@ -229,7 +229,8 @@ std::vector<fs::path> Exporter::applyArchiveIni(const Session& session, const Co
     return written;
 }
 
-// One installable mod for every mod manager: "Multiplexer Output\Data\..." next to the game, outside
+// Where earlier versions wrote their single output folder (now only read for their build records; see
+// output::locate for where exports go). One installable mod for every mod manager: "Multiplexer Output\Data\..." next to the game, outside
 // Data and outside any mod manager's folders, zipped as "Multiplexer Output.zip" (Data\ at its root)
 // for Vortex or Mod Organizer 2 to install.
 fs::path Exporter::defaultOutputDirectory(const Session& session)
@@ -656,7 +657,8 @@ std::filesystem::path Exporter::writePackageZip(ExportResult& r, const std::vect
         static const char* const kNotes[] = {"multiplexer output.zip",          "multiplexer_archives.ini",
                                              "multiplexer_disableplugins.txt",  "multiplexer_plugins.txt",
                                              "multiplexer_instructions.txt",    "multiplexer_archivepriority.txt",
-                                             "multiplexer_build_failed.txt",    "multiplexer_compilation.json"};
+                                             "multiplexer_build_failed.txt",    "multiplexer_compilation.json",
+                                             "multiplexer_run.txt"};
         static const char* const kFolders[] = {"multiplexer reports", "diagnostic recorder"};
         stats = writeZip(zip, r.directory, "Data/", [&](const fs::path& rel) {
             if (isOwn(rel))

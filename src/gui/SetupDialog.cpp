@@ -144,7 +144,7 @@ SetupDialog::SetupDialog(AppController* app, QWidget* parent) : QDialog(parent),
     auto* findGame = makeButton("Find");
     static_cast<QHBoxLayout*>(gameRow->layout())->addWidget(findGame);
     s2->addRow("Fallout 4 folder", gameRow);
-    s2->addRow("Output folder", pathRow(outputDir_, true, "Where Dummy_Plugin_XX.esp go (default: chosen automatically)"));
+    s2->addRow("Output folder", pathRow(outputDir_, true, "Folder holding the exports (default: <game folder>\\Multiplexer Output)"));
     left->addWidget(step2);
 
     auto* step3 = new QGroupBox("3  Load order");

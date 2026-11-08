@@ -6,6 +6,7 @@
 #include "engine/Pipeline.hpp"
 #include "reference/FormIdReference.hpp"
 #include "engine/ReferenceIndex.hpp"
+#include "engine/OutputRuns.hpp"
 #include "esp/FieldValues.hpp"
 #include "esp/FieldDecoder.hpp"
 #include "esp/PluginFile.hpp"
@@ -48,6 +49,11 @@ Usage:
                  every version of every record in the load order that refers to
                  the record (xEdit's "Referenced By")
   fo4mx ba2      <archive.ba2> [--extract PATH --to FILE]
+  fo4mx clean-outputs <install> [--keep N] [--unfinished]
+                 delete exports in the output folder beyond the newest N (default
+                 5; never the latest), and with --unfinished also unfinished ones
+                 (".tmp"). Only Multiplexer's own export folders; one in use is
+                 skipped and left as it is
   fo4mx formid   <plugin> <formid>
                  look up a base-game record (Fallout4.esm, the DLC masters) in
                  the bundled reference: its Editor ID, without scanning anything.
@@ -83,7 +89,8 @@ Compile options:
   --auto-merge         Advanced Users Auto-Merger: also compile plugins named in
                        scripts/configs that can be relinked, and write relinked copies
   --exclude PLUGIN     never compile PLUGIN (repeatable)
-  --out DIR            output folder (default: <game>\\Multiplexer Output\\Data, zipped as Multiplexer Output.zip)
+  --out DIR            folder holding the exports (default: <game>\\Multiplexer Output); every export
+                       goes into "Multiplexer Output DDMMYY HHMMSS" in it, with Multiplexer Output.zip
   --reports DIR        report folder
   --diagnostic-recorder  also prepare the optional Diagnostic Recorder (F4SE plugin) beside
                        the package, in "Multiplexer Output\Diagnostic Recorder"
@@ -443,6 +450,21 @@ void printChanges(const ChangeReport& r)
         std::printf("  (*) requires recompilation. Run: fo4mx compile ...\n");
 }
 
+int cmdCleanOutputs(const Args& a)
+{
+    auto cfg = makeConfig(a);
+    const auto install = resolveInstall(cfg.install);
+    const auto loc = output::locate(cfg.exportOptions.outputDirectory, install.gamePath, install.dataPath, install.modsPath);
+    const size_t keep = std::stoul(a.get("--keep", "5"));
+    std::printf("Exports in %s (keeping the newest %zu)\n", pathToUtf8(loc.root).c_str(), keep);
+    const auto r = output::cleanupRuns(loc, keep, a.has("--unfinished"));
+    for (const auto& p : r.removed)
+        std::printf("  removed  %s\n", pathToUtf8(p.filename()).c_str());
+    for (const auto& [p, why] : r.skipped)
+        std::printf("  kept     %s (%s)\n", pathToUtf8(p.filename()).c_str(), why.c_str());
+    return 0;
+}
+
 int cmdFormId(const Args& a)
 {
     if (a.positional.size() < 2)
@@ -564,8 +586,9 @@ int cmdPipeline(const Args& a)
     }
     auto result = p.exportOutputs(progress);
     std::printf("Output in %s\n", pathToUtf8(result.directory).c_str());
-    if (!result.backupFolder.empty())
-        std::printf("Previous output moved to %s\n", pathToUtf8(result.backupFolder).c_str());
+    if (!result.runName.empty())
+        std::printf("Export %s in %s%s\n", result.runName.c_str(), pathToUtf8(result.outputRoot).c_str(),
+                    result.latestRecorded ? "" : " (Multiplexer Latest.txt could not be updated)");
     for (const auto& n : result.writtenOutputs)
         std::printf("  written    %s\n", n.c_str());
     for (const auto& n : result.unchangedOutputs)
@@ -632,6 +655,8 @@ int main(int argc, char** argv)
             return cmdDiagnose(a);
         if (a.command == "formid")
             return cmdFormId(a);
+        if (a.command == "clean-outputs")
+            return cmdCleanOutputs(a);
         if (a.command == "scan" || a.command == "analyse" || a.command == "analyze" || a.command == "compile" ||
             a.command == "status" || a.command == "check-definitions" || a.command == "references")
             return cmdPipeline(a);

@@ -245,17 +245,24 @@ A ghosted plugin (`<name>.ghost` in Data) is discovered as `<name>` with `Plugin
 
 ### Export lifecycle
 
-`Pipeline::exportOutputs` first calls `output::backupPreviousOutput` (`engine/OutputBackup.hpp`): the
-previous export's output (package layout: the Data folder plus the zip, notes, reports and recorder
-folder in the package folder; a hand-picked folder: everything but MO2's `meta.ini`, only when
-Multiplexer made it) is moved with one `FileTransaction` into a new `Multiplexer Outputs Backup DDMMYY
-HHMMSS` beside the package folder, and the output folder is checked empty. A failure undoes the moves
-and stops the export before anything is written. The exporter then writes into an empty folder, so the
-zip (made from the Data folder, skipping notes, reports, MO2's `meta.ini` and any backup-named folder)
-holds only this export's files. State a later step needs from the previous build was already read at
-scan and compile time: the FormID map (stable FormIDs), the Auto-Merger's and archive-winner copy
-lists, and the archives an earlier build registered in the INI (`Session::registeredArchives`, which
-`Exporter::archiveList` and `planArchiveIni` now also use, since the record of them moves to the backup).
+Every export writes into a folder of its own (`engine/OutputRuns.hpp`). `output::locate` turns the
+Output folder setting into a root (Package layout; a folder named `Data` means its parent, the earlier
+package setting), Mod Organizer 2's mods folder (ModFolder: each export is a mod) or the game's Data
+folder (GameData: written in place as before). `Pipeline::exportOutputs` calls `output::beginRun`
+(creates `Multiplexer Output DDMMYY HHMMSS.tmp`, never an existing name, with a `Multiplexer_Run.txt`
+marker), writes everything into it (plugins, relinked copies, zip, recorder, instructions, reports),
+then `output::finishRun` renames it to its final name (a new name if that exists; retried briefly for
+virus scanners) and `output::setLatest` writes `Multiplexer Latest.txt` atomically. Paths in the
+`ExportResult` are rebased onto the final folder before anything records them (`exported_`, the
+database's build snapshot). A failure at any step leaves the `.tmp` folder (with the build-failed note)
+and does not change `exported_` or the pointer. `output::latestRun` reads the pointer and falls back to
+the newest finished export by the date in its name. `Pipeline::previousBuildDirectory` gives the scan
+and the compiler the latest export's Data folder (FormID map, copy lists), else the single folder of
+earlier versions (read only); the compiler's checks use `pendingOutputDirectory`, which never exists.
+Apply to Game never writes into an export: the record of archives added to the INI lives in the root
+(`ExportResult::outputRoot`). `output::cleanupRuns` (CLI `clean-outputs`) is separate from exporting:
+it only touches folders named like an export that hold the marker, renames each before deleting it
+(skipping one in use) and never removes the latest.
 
 ### After compilation
 

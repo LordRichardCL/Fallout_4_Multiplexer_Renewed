@@ -109,7 +109,8 @@ std::vector<std::string> outputsNotVisible(const Session& session, const std::ve
     return missing;
 }
 
-void planEnableMod(FileTransaction& tx, const fs::path& profilePath, const std::string& modName)
+void planEnableMod(FileTransaction& tx, const fs::path& profilePath, const std::string& modName,
+                   const std::function<bool(const std::string&)>& alsoDisable)
 {
     const auto file = profilePath / "modlist.txt";
     const std::string text = slurp(file);
@@ -123,6 +124,8 @@ void planEnableMod(FileTransaction& tx, const fs::path& profilePath, const std::
         if (line.size() > 1 && (line[0] == '-' || line[0] == '+') && iequals(line.substr(1), modName)) {
             line[0] = '+';
             found = true;
+        } else if (line.size() > 1 && line[0] == '+' && alsoDisable && alsoDisable(line.substr(1))) {
+            line[0] = '-';
         }
         out += line + eol;
     }

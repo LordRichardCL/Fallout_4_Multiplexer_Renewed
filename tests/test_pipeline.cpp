@@ -10,7 +10,7 @@
 #include "engine/PostCompilation.hpp"
 #include "engine/VortexSupport.hpp"
 #include "engine/Mo2Support.hpp"
-#include "engine/OutputBackup.hpp"
+#include "engine/OutputRuns.hpp"
 #include "engine/ReferenceIndex.hpp"
 #include "esp/FieldValues.hpp"
 #include "reference/FormIdReference.hpp"
@@ -489,10 +489,10 @@ TEST(incremental_rebuild_reuses_unchanged_work)
         candidates = p.compiledOutput()->mergesReused;
         CHECK(candidates > 0);
         auto r = p.exportOutputs();
-        // Every export starts from an empty output folder (the last one is in a backup): all written anew.
+        // Every export writes into a new folder of its own: all written anew.
         CHECK_EQ(r.writtenOutputs.size(), r.pluginFiles.size());
         CHECK(r.unchangedOutputs.empty());
-        CHECK(!r.backupFolder.empty());
+        CHECK(!r.runName.empty());
     }
     // One plugin changes: only the chains it takes part in are rebuilt.
     writeModB(root / "Game" / "Data", true);
@@ -558,7 +558,8 @@ TEST(change_detection_reports_build_status)
     CHECK_EQ(added.addedPlugins, size_t(1));
 
     // Deleting a generated plugin is detected too.
-    std::filesystem::remove(root / "Output" / "Dummy_Plugin_01.esp");
+    std::filesystem::remove(*output::latestRun(output::Location{root / "Output", output::Layout::Package}) / "Data" /
+                            "Dummy_Plugin_01.esp");
     auto missing = check(cfg);
     CHECK(std::any_of(missing.items.begin(), missing.items.end(),
                       [](const ChangeItem& i) { return i.category == "Output" && i.kind == "Missing"; }));
@@ -1113,7 +1114,7 @@ TEST(archive_priority_change_is_reported)
         warned |= is.category == "Archive Priority";
     CHECK(warned);
     auto result = p.exportOutputs();
-    CHECK(std::filesystem::exists(result.directory / "Multiplexer_ArchivePriority.txt"));
+    CHECK(std::filesystem::exists(result.packageRoot / "Multiplexer_ArchivePriority.txt"));
 
     // That build's INI change is applied (ModA's archive is now in the INI list). A new build still
     // compares with the load order as it was: ModA's archive is ModA's, and ModA stays out.
@@ -1252,28 +1253,30 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
         CHECK(p.compiledOutput()->archiveLoaders.empty());
         CHECK(p.compiledOutput()->isCompiled(p.session().findPlugin("ModWeap.esp")->index));
         auto result = p.exportOutputs();
-        CHECK(result.directory == game / "Multiplexer Output" / "Data");
+        CHECK(result.directory.parent_path().parent_path() == game / "Multiplexer Output"); // <root>\<export>\Data
         CHECK_EQ(result.archiveWinnerFiles, size_t(1));
-        CHECK(std::filesystem::exists(game / "Multiplexer Output" / "Multiplexer Output.zip"));
-        CHECK(std::filesystem::exists(game / "Multiplexer Output" / "Multiplexer_DisablePlugins.txt"));
+        CHECK(std::filesystem::exists(result.packageRoot / "Multiplexer Output.zip"));
+        CHECK(std::filesystem::exists(result.packageRoot / "Multiplexer_DisablePlugins.txt"));
         CHECK(!std::filesystem::exists(result.directory / "Multiplexer_DisablePlugins.txt"));
         CHECK(result.recorderFolder.empty()); // the Diagnostic Recorder is off by default
-        CHECK(!std::filesystem::exists(game / "Multiplexer Output" / "Diagnostic Recorder"));
+        CHECK(!std::filesystem::exists(result.packageRoot / "Diagnostic Recorder"));
     }
     {
-        // The Diagnostic Recorder: beside the package, never in its Data folder; removed when turned off.
+        // The Diagnostic Recorder: beside the package in the export's folder, never in its Data folder;
+        // an export with it turned off has none.
         writeFile(root / "app" / "MultiplexerDiagnosticRecorder.dll", "MZ dll");
         auto recorder = cfg;
         recorder.databasePath = root / "db1.sqlite";
         recorder.diagnosticRecorder = true;
         recorder.diagnosticRecorderDll = root / "app" / "MultiplexerDiagnosticRecorder.dll";
-        const auto folder = game / "Multiplexer Output" / "Diagnostic Recorder";
+        std::filesystem::path folder;
         {
             Pipeline p(recorder);
             p.scan();
             p.analyse();
             CHECK(p.compile());
             auto result = p.exportOutputs();
+            folder = result.packageRoot / "Diagnostic Recorder";
             CHECK(result.recorderFolder == folder);
             CHECK(result.recorderProblem.empty());
             CHECK(std::filesystem::exists(folder / "Data" / "F4SE" / "Plugins" / "MultiplexerDiagnosticRecorder.dll"));
@@ -1299,12 +1302,15 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
             p.scan();
             p.analyse();
             CHECK(p.compile());
-            p.exportOutputs();
-            CHECK(!std::filesystem::exists(folder));
+            auto result = p.exportOutputs();
+            CHECK(!std::filesystem::exists(result.packageRoot / "Diagnostic Recorder"));
+            CHECK(std::filesystem::exists(folder)); // an earlier export is never changed
         }
     }
-    // Archive loaders: only with the output folder set to a mod inside MO2's mods folder.
+    // Archive loaders: only with the output folder set to a mod inside MO2's mods folder (every export
+    // is then a mod of its own there).
     cfg.exportOptions.outputDirectory = inst / "mods" / "Fallout 4 Multiplexer Output";
+    std::string exportMod;
     {
         Pipeline p(cfg);
         p.scan();
@@ -1317,6 +1323,9 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
         CHECK(c->archivesToRegister.empty());          // nothing for the INI
         CHECK(p.archivePriorityChanges().empty());     // ModWeap's texture keeps winning
         auto result = p.exportOutputs();
+        exportMod = pathToUtf8(result.packageRoot.filename());
+        CHECK(output::isRunName(exportMod));
+        CHECK_EQ(result.packageRoot.parent_path(), inst / "mods");
         CHECK_EQ(result.archiveLoaders.size(), size_t(1));
         auto header = readPluginHeader(result.archiveLoaders.at(0));
         CHECK(header.record.flags & RecordFlags::Light);
@@ -1359,7 +1368,7 @@ TEST(archive_loaders_keep_archive_priority_in_mo2)
 
     // After switching over: the output mod wins in MO2 and ModWeap.esp is the loader. A rescan
     // still reads the original underneath and does not treat the outputs as sources.
-    writeFile(inst / "profiles" / "Default" / "modlist.txt", "+Fallout 4 Multiplexer Output\n+ModWeap\n+ModStay\n");
+    writeFile(inst / "profiles" / "Default" / "modlist.txt", "+" + exportMod + "\n+ModWeap\n+ModStay\n");
     writeFile(inst / "profiles" / "Default" / "plugins.txt", "*ModStay.esp\n*ModWeap.esp\n*Dummy_Plugin_01.esp\n");
     Pipeline p(cfg);
     p.scan();
@@ -1847,8 +1856,7 @@ TEST(npcs_compile_with_their_facegen)
         char nif[32], dds[32];
         std::snprintf(nif, sizeof(nif), "%08x.nif", id);
         std::snprintf(dds, sizeof(dds), "%08x_d.dds", id);
-        const auto dir = p.config().exportOptions.outputDirectory.empty() ? Exporter::defaultOutputDirectory(s)
-                                                                          : p.config().exportOptions.outputDirectory;
+        const auto dir = p.exportResult()->directory;
         CHECK(std::filesystem::exists(dir / "meshes" / "actors" / "character" / "facegendata" / "facegeom" / toLower(plugin) / nif));
         CHECK(std::filesystem::exists(dir / "textures" / "actors" / "character" / "facecustomization" / toLower(plugin) / dds));
         CHECK(std::filesystem::exists(dir / "Multiplexer_FaceGen.tsv"));
@@ -2709,11 +2717,12 @@ TEST(auto_merger_relinks_scripts_and_configs)
     CHECK(json.find("Not ModS.esp|800") != std::string::npos);
     CHECK(std::filesystem::exists(result.directory / "Multiplexer_Relinked.tsv"));
 
-    // Turning it off removes the relinked copies at the next export.
+    // Turned off, the next export has no relinked copies; the earlier export is left as it is.
     p.config().compile.autoMerge = false;
-    p.exportOutputs();
-    CHECK(!std::filesystem::exists(result.directory / "scripts" / "modsuser.pex"));
-    CHECK(!std::filesystem::exists(result.directory / "Multiplexer_Relinked.tsv"));
+    auto next = p.exportOutputs();
+    CHECK(!std::filesystem::exists(next.directory / "scripts" / "modsuser.pex"));
+    CHECK(!std::filesystem::exists(next.directory / "Multiplexer_Relinked.tsv"));
+    CHECK(std::filesystem::exists(result.directory / "scripts" / "modsuser.pex"));
 }
 
 // The definition check also checks the nested group writer against the load order's plugins with
@@ -3659,9 +3668,9 @@ TEST(references_successful_transformation_rescans_clean)
     CHECK(manifest.find("Game.IsPluginInstalled\tModS.esp\t" + kw->outputPlugin + "\n") != std::string::npos);
 }
 
-// 11. Export is a transaction: when a copy cannot be written, nothing changes and the earlier copies
-//     stay as they were; rollback removes every copy. A file in the output folder that this app did
-//     not write is never replaced: its plugin is kept out instead.
+// 11. Export is a transaction: when a copy cannot be written, the export fails and is never the
+//     latest; rollback removes every copy. Every export writes into a folder of its own, so a file in
+//     an earlier export never stands in the way of a new one, and is never changed by it.
 TEST(references_rollback)
 {
     auto root = referenceInstall("refrollback");
@@ -3681,17 +3690,19 @@ TEST(references_rollback)
     CHECK(!script.empty());
     CHECK(json.find("ModS.esp") == std::string::npos);
 
-    // Rollback removes every copy; a later export writes them again.
+    // Rollback removes every copy of an export.
     CHECK_EQ(AutoMerger::rollback(dir), size_t(2));
     CHECK(!std::filesystem::exists(dir / "scripts" / "modsuser.pex"));
     CHECK(!std::filesystem::exists(dir / AutoMerger::kManifest));
-    p.exportOutputs();
-    CHECK(slurpFile(dir / "scripts" / "modsuser.pex") == script);
+    // A new export writes them again, in a folder of its own; the earlier one is left as it is.
+    auto again = p.exportOutputs();
+    CHECK(again.directory != dir);
+    CHECK(slurpFile(again.directory / "scripts" / "modsuser.pex") == script);
+    CHECK(!std::filesystem::exists(dir / "scripts" / "modsuser.pex"));
 
     // Block one temporary file: the relink fails, so the whole build is withdrawn. No half-written
-    // copy is left, the earlier copies (which name this build's outputs) are rolled back, the output
-    // plugins and the zip are removed, and a note says the build failed. (The blocker is made after
-    // the previous output has been moved to its backup, as anything left in the folder would be.)
+    // copy is left, the copies are rolled back, the output plugins and the zip are removed, and a note
+    // says the build failed. The failed export stays "<name>.tmp": never the latest.
     p.config().beforeExportWrite = [](const std::filesystem::path& out) {
         std::filesystem::create_directories(out / "scripts" / "modsuser.pex.fo4mx-new" / "blocked");
     };
@@ -3699,35 +3710,37 @@ TEST(references_rollback)
     p.config().beforeExportWrite = nullptr;
     CHECK(p.validation()->errors > 0);
     CHECK(!p.autoMerge()->errors.empty());
-    CHECK(!std::filesystem::exists(dir / "mcm" / "config" / "mods" / "config.json.fo4mx-new"));
-    CHECK(!std::filesystem::exists(dir / "scripts" / "modsuser.pex"));
-    CHECK(!std::filesystem::exists(dir / "mcm" / "config" / "mods" / "config.json"));
+    const auto fdir = failed.directory;
+    CHECK(iendsWith(pathToUtf8(failed.packageRoot.filename()), ".tmp"));
+    CHECK(!std::filesystem::exists(fdir / "mcm" / "config" / "mods" / "config.json.fo4mx-new"));
+    CHECK(!std::filesystem::exists(fdir / "scripts" / "modsuser.pex"));
+    CHECK(!std::filesystem::exists(fdir / "mcm" / "config" / "mods" / "config.json"));
     for (const auto& f : failed.pluginFiles)
         CHECK(!std::filesystem::exists(f));
     CHECK(!std::filesystem::exists(failed.packageRoot / "Multiplexer Output.zip"));
     CHECK(std::filesystem::exists(failed.packageRoot / Pipeline::kBuildFailedMarker));
-    std::filesystem::remove_all(dir / "scripts" / "modsuser.pex.fo4mx-new");
-    // The next successful build clears the note (a failed export has to be compiled again).
+    // The latest export is still the last one that finished, here and on disk.
+    CHECK(p.exportResult() && p.exportResult()->directory == again.directory);
+    auto latest = output::latestRun(output::Location{again.outputRoot, output::Layout::Package});
+    CHECK(latest && *latest == again.packageRoot);
+    CHECK(slurpFile(again.directory / "scripts" / "modsuser.pex") == script); // untouched
+    // The next successful build writes a new export; the failed one keeps its note.
     CHECK(p.compile());
-    p.exportOutputs();
-    CHECK(!std::filesystem::exists(failed.packageRoot / Pipeline::kBuildFailedMarker));
-    CHECK(slurpFile(dir / "scripts" / "modsuser.pex") == script);
-    AutoMerger::rollback(dir);
+    auto next = p.exportOutputs();
+    CHECK(!std::filesystem::exists(next.packageRoot / Pipeline::kBuildFailedMarker));
+    CHECK(std::filesystem::exists(failed.packageRoot / Pipeline::kBuildFailedMarker));
+    CHECK(slurpFile(next.directory / "scripts" / "modsuser.pex") == script);
 
-    // A user's own file where a copy would go: never replaced, the plugin stays.
-    writeFile(dir / "scripts" / "modsuser.pex", "user file");
+    // A file of the user's in an earlier export does not stand in the way of a new one, and is kept.
+    writeFile(next.directory / "scripts" / "modsuser.pex", "user file");
     Pipeline q(cfg);
     q.scan();
     q.analyse();
     CHECK(q.compile());
-    CHECK(!q.compiledOutput()->isCompiled(q.session().findPlugin("ModS.esp")->index));
-    CHECK(hasReason(*q.session().findPlugin("ModS.esp"), "never replaced"));
-    // The export moves the folder's previous contents, the user's file included, to the backup: it is
-    // kept exactly, never replaced or deleted.
-    auto moved = q.exportOutputs();
-    CHECK(!moved.backupFolder.empty());
-    CHECK_EQ(slurpFile(moved.backupFolder / "scripts" / "modsuser.pex"), std::string("user file"));
-    CHECK(!std::filesystem::exists(dir / "scripts" / "modsuser.pex"));
+    CHECK(q.compiledOutput()->isCompiled(q.session().findPlugin("ModS.esp")->index));
+    auto fresh = q.exportOutputs();
+    CHECK(slurpFile(fresh.directory / "scripts" / "modsuser.pex") == script);
+    CHECK_EQ(slurpFile(next.directory / "scripts" / "modsuser.pex"), std::string("user file"));
 }
 
 // 12. One file naming two plugins: only the compiled plugin's references change.
@@ -4288,7 +4301,7 @@ TEST(standalone_apply_refuses_until_the_outputs_are_installed)
     auto r = resultOf(p);
     CHECK(r.success);
     // The guide is written beside the package at export.
-    CHECK(std::filesystem::exists(b.root / "Multiplexer Output" / PostCompilation::kInstructionsFile));
+    CHECK(std::filesystem::exists(p.exportResult()->packageRoot / PostCompilation::kInstructionsFile));
 
     const std::string before = slurp(b.root / "plugins.txt");
     FileTransaction tx("test");
@@ -4340,7 +4353,7 @@ TEST(standalone_apply_switches_plugins_txt_and_ghosts_on_request)
         for (const auto& f : p.exportResult()->pluginFiles)
             CHECK(activeIn(txt, pathToUtf8(f.filename())));
         CHECK_EQ(countBackups(b.root, "plugins.txt"), size_t(1));
-        CHECK(std::filesystem::exists(b.root / "Multiplexer Output" / PostCompilation::kInstructionsFile));
+        CHECK(std::filesystem::exists(p.exportResult()->packageRoot / PostCompilation::kInstructionsFile));
 
         // A second look finds nothing left to switch.
         auto again = PostCompilation::check(p.session(), *p.compiledOutput(), r);
@@ -4499,27 +4512,30 @@ TEST(zip_is_written_for_an_output_folder_not_named_data)
     auto cfg = configFor(root);
     cfg.exportOptions.outputDirectory = root / "My Outputs";
     cfg.reportDirectory.clear(); // reports next to the outputs, as by default
+    ExportResult result;
     for (int round = 0; round < 2; ++round) {
         Pipeline p(cfg);
         p.scan();
         p.analyse();
         CHECK(p.compile());
-        auto result = p.exportOutputs();
-        p.writeReports(result.packageRoot / "Multiplexer Reports");
-        CHECK_EQ(result.packageRoot, result.directory);
-        CHECK(!result.zipPath.empty());
-        CHECK(std::filesystem::exists(root / "My Outputs" / "Multiplexer Output.zip"));
+        result = p.exportOutputs();
+        // The folder picked holds the exports: each in "<folder>\Multiplexer Output DDMMYY HHMMSS".
+        CHECK_EQ(result.outputRoot, root / "My Outputs");
+        CHECK_EQ(result.packageRoot.parent_path(), root / "My Outputs");
+        CHECK_EQ(result.directory, result.packageRoot / "Data");
+        CHECK(std::filesystem::exists(result.zipPath));
     }
-    const std::string zip = slurp(root / "My Outputs" / "Multiplexer Output.zip");
+    const std::string zip = slurp(result.zipPath);
     CHECK(zip.find("Data/Dummy_Plugin_01.esp") != std::string::npos);
     CHECK(zip.find("Data/Multiplexer_FormMap.tsv") != std::string::npos); // the build's own records travel along
     // Notes and reports for the user stay out, and the zip never contains itself.
-    CHECK(std::filesystem::exists(root / "My Outputs" / "Multiplexer_DisablePlugins.txt"));
+    CHECK(std::filesystem::exists(result.packageRoot / "Multiplexer_DisablePlugins.txt"));
     CHECK(zip.find("Multiplexer_DisablePlugins.txt") == std::string::npos);
     CHECK(zip.find("Multiplexer_Instructions.txt") == std::string::npos);
-    CHECK(std::filesystem::exists(root / "My Outputs" / "Multiplexer Reports"));
+    CHECK(std::filesystem::exists(result.packageRoot / "Multiplexer Reports"));
     CHECK(zip.find("Multiplexer Reports/") == std::string::npos);
     CHECK(zip.find("Multiplexer Output.zip") == std::string::npos);
+    CHECK(zip.find(output::kRunMarker) == std::string::npos);
 }
 
 TEST(vortex_downloads_folder_is_checked)
@@ -4675,8 +4691,10 @@ TEST(mo2_apply_enables_the_output_mod_and_switches_once_mo2_is_closed)
     p.exportOutputs();
     auto r = resultOf(p);
     CHECK(r.success);
-    const auto modName = mo2::outputModName(p.session(), m.cfg.exportOptions.outputDirectory);
-    CHECK_EQ(modName, std::string("Multiplexer Output"));
+    // Every export is a mod of its own in the mods folder: "Multiplexer Output DDMMYY HHMMSS".
+    const auto modName = mo2::outputModName(p.session(), p.exportResult()->packageRoot);
+    CHECK(output::isRunName(modName));
+    CHECK_EQ(p.exportResult()->packageRoot.parent_path(), m.inst / "mods");
     const std::string modlistBefore = slurp(m.profile / "modlist.txt");
     const std::string pluginsBefore = slurp(m.profile / "plugins.txt");
 
@@ -4714,7 +4732,7 @@ TEST(mo2_apply_enables_the_output_mod_and_switches_once_mo2_is_closed)
     }
     const auto lines = mo2::readModList(m.profile);
     CHECK(lines.size() == 4);
-    CHECK(lines[0].flag == '+' && lines[0].name == "Multiplexer Output");
+    CHECK(lines[0].flag == '+' && lines[0].name == modName);
     CHECK(lines[1].flag == '+' && lines[1].name == "Mod C"); // order and state preserved
     CHECK(lines[2].flag == '+' && lines[2].name == "Mod B");
     CHECK(lines[3].flag == '+' && lines[3].name == "Mod A");
@@ -4747,6 +4765,21 @@ TEST(mo2_apply_enables_the_output_mod_and_switches_once_mo2_is_closed)
     for (const auto& l : own.lines)
         listsModA |= l.rfind("Mod A: ", 0) == 0;
     CHECK(listsModA);
+}
+
+TEST(mo2_a_new_export_mod_switches_the_earlier_one_off)
+{
+    auto m = buildMo2Install("mo2_twoexports", "+Multiplexer Output 010126 120000\n+Mod C\n+Mod B\n+Mod A\n");
+    FileTransaction tx("enable");
+    mo2::planEnableMod(tx, m.profile, "Multiplexer Output 020126 120000", [](const std::string& mod) {
+        return output::isRunName(mod) && mod != "Multiplexer Output 020126 120000";
+    });
+    tx.apply();
+    const auto lines = mo2::readModList(m.profile);
+    CHECK(lines.size() == 5);
+    CHECK(lines[0].flag == '+' && lines[0].name == "Multiplexer Output 020126 120000");
+    CHECK(lines[1].flag == '-' && lines[1].name == "Multiplexer Output 010126 120000"); // off, folder untouched
+    CHECK(lines[2].flag == '+' && lines[2].name == "Mod C");
 }
 
 TEST(mo2_disabled_output_mod_is_enabled_in_place)
@@ -5228,43 +5261,22 @@ TEST(definition_check_reports_value_layout_sizes)
     CHECK(reported);
 }
 
-// ---- Export lifecycle: the previous output goes to a backup, every export starts empty ----
+
+// ---- Export runs: every export in a folder of its own, earlier exports never changed ----
 
 namespace {
 
-// The file names stored in a zip (from its central directory).
-std::set<std::string> zipNames(const std::filesystem::path& zip)
+// Every file under a folder with its content: to prove an export was not changed.
+std::map<std::string, std::string> snapshotFolder(const std::filesystem::path& dir)
 {
-    const std::string z = slurp(zip);
-    std::set<std::string> names;
-    for (size_t pos = z.find("PK\x01\x02"); pos != std::string::npos; pos = z.find("PK\x01\x02", pos + 4)) {
-        if (pos + 46 > z.size())
-            break;
-        auto u16 = [&](size_t o) { return uint16_t(uint8_t(z[o]) | uint8_t(z[o + 1]) << 8); };
-        const uint16_t nameLen = u16(pos + 28);
-        names.insert(z.substr(pos + 46, nameLen));
-    }
-    return names;
-}
-
-std::vector<std::filesystem::path> backupsIn(const std::filesystem::path& dir)
-{
-    std::vector<std::filesystem::path> out;
-    for (const auto& e : std::filesystem::directory_iterator(dir))
-        if (output::isBackupFolderName(pathToUtf8(e.path().filename())))
-            out.push_back(e.path());
-    std::sort(out.begin(), out.end());
+    std::map<std::string, std::string> out;
+    for (const auto& e : std::filesystem::recursive_directory_iterator(dir))
+        if (e.is_regular_file())
+            out[pathToUtf8(e.path().lexically_relative(dir))] = slurp(e.path());
     return out;
 }
 
-PipelineConfig packageConfig(const std::filesystem::path& root)
-{
-    auto cfg = configFor(root);
-    cfg.exportOptions.outputDirectory = root / "Multiplexer Output" / "Data"; // the package layout
-    return cfg;
-}
-
-ExportResult buildOnce(const PipelineConfig& cfg)
+ExportResult exportOnce(const PipelineConfig& cfg)
 {
     Pipeline p(cfg);
     p.scan();
@@ -5275,184 +5287,172 @@ ExportResult buildOnce(const PipelineConfig& cfg)
 
 } // namespace
 
-TEST(lifecycle_first_export_needs_no_backup)
+TEST(runs_each_export_gets_its_own_folder_and_earlier_ones_are_never_changed)
 {
-    auto root = buildInstall("life_first");
-    auto r = buildOnce(packageConfig(root));
-    CHECK(r.backupFolder.empty());
-    CHECK(backupsIn(root).empty());
-    CHECK(std::filesystem::exists(r.zipPath));
-    auto names = zipNames(r.zipPath);
-    CHECK(names.count("Data/Dummy_Plugin_01.esp"));
-    for (const auto& n : names)
-        CHECK(n.rfind("Data/", 0) == 0); // the expected structure: Data\ at the root
-}
-
-TEST(lifecycle_previous_output_moves_to_a_timestamped_backup)
-{
-    auto root = buildInstall("life_backup");
-    auto cfg = packageConfig(root);
-    auto first = buildOnce(cfg);
-    const auto pkg = first.packageRoot;
-    // Left from earlier exports: a file the current export does not write, under Data\Multiplexer.
-    writeFile(pkg / "Data" / "Multiplexer" / "old.txt", "stale");
-    // And an older zip with recognisable content.
-    writeFile(pkg / "Multiplexer Output.zip", "previous zip");
-
-    auto second = buildOnce(cfg);
-    // TEST 2: moved to a new backup beside the output, named "Multiplexer Outputs Backup DDMMYY HHMMSS".
-    CHECK(!second.backupFolder.empty());
-    CHECK_EQ(second.backupFolder.parent_path(), pkg.parent_path());
-    const auto name = pathToUtf8(second.backupFolder.filename());
-    CHECK(name.rfind(output::kBackupPrefix, 0) == 0);
-    CHECK(std::regex_match(name.substr(std::string(output::kBackupPrefix).size()), std::regex("\\d{6} \\d{6}")));
-    CHECK(std::filesystem::exists(second.backupFolder / "Data" / "Dummy_Plugin_01.esp"));
-    CHECK(std::filesystem::exists(second.backupFolder / "Multiplexer_DisablePlugins.txt"));
-    // TEST 3: the stale file is in the backup, not in the new output or the new zip.
-    CHECK_EQ(slurp(second.backupFolder / "Data" / "Multiplexer" / "old.txt"), std::string("stale"));
-    CHECK(!std::filesystem::exists(pkg / "Data" / "Multiplexer"));
-    auto names = zipNames(second.zipPath);
-    for (const auto& n : names)
-        CHECK(n.find("Multiplexer/old.txt") == std::string::npos);
-    CHECK(names.count("Data/Dummy_Plugin_01.esp"));
-    // TEST 4: the previous zip is kept exactly; a new one is written.
-    CHECK_EQ(slurp(second.backupFolder / "Multiplexer Output.zip"), std::string("previous zip"));
-    CHECK(slurp(second.zipPath).rfind("PK", 0) == 0);
-    // TEST 6: backups beside the output are never packaged.
-    auto third = buildOnce(cfg);
-    CHECK_EQ(backupsIn(root).size(), size_t(2));
-    for (const auto& n : zipNames(third.zipPath))
-        CHECK(n.find("Backup") == std::string::npos);
-    // The new output holds only what this export wrote: everything in Data is in the new zip.
-    size_t files = 0;
-    for (const auto& e : std::filesystem::recursive_directory_iterator(third.directory))
-        if (e.is_regular_file())
-            ++files;
-    CHECK_EQ(zipNames(third.zipPath).size(), files);
-}
-
-TEST(lifecycle_hand_picked_folder_and_mo2_metadata)
-{
-    // The layout from the report: an output folder that is not named Data.
-    auto root = buildInstall("life_custom");
+    auto root = buildInstall("runs_basic");
     auto cfg = configFor(root);
     cfg.exportOptions.outputDirectory = root / "Multiplexer Renewed Outputs";
-    auto first = buildOnce(cfg);
-    CHECK(std::filesystem::exists(first.zipPath));
-    // Left over in the folder: an old subfolder, Mod Organizer 2's meta.ini, and a backup folder
-    // somebody moved into it by hand.
-    writeFile(cfg.exportOptions.outputDirectory / "Multiplexer" / "old.txt", "stale");
-    writeFile(cfg.exportOptions.outputDirectory / "meta.ini", "[General]\nmodid=0\n");
-    writeFile(cfg.exportOptions.outputDirectory / "Multiplexer Outputs Backup 010101 000000" / "x.esp", "old");
-    auto second = buildOnce(cfg);
-    CHECK_EQ(second.backupFolder.parent_path(), root);
-    CHECK_EQ(slurp(second.backupFolder / "Multiplexer" / "old.txt"), std::string("stale"));
-    CHECK_EQ(slurp(second.backupFolder / "Multiplexer Outputs Backup 010101 000000" / "x.esp"), std::string("old"));
-    CHECK_EQ(slurp(cfg.exportOptions.outputDirectory / "meta.ini"), std::string("[General]\nmodid=0\n")); // left in place
-    auto names = zipNames(second.zipPath);
-    CHECK(names.count("Data/Dummy_Plugin_01.esp"));
-    for (const auto& n : names) {
-        CHECK(n.find("Multiplexer/old.txt") == std::string::npos);
-        CHECK(n.find("Backup") == std::string::npos);
-        CHECK(n != "Data/meta.ini");
-        CHECK(n.find("Multiplexer Reports") == std::string::npos);
-        CHECK(n.find("Multiplexer Output.zip") == std::string::npos);
-    }
-}
-
-TEST(lifecycle_preparation_failure_keeps_the_previous_output)
-{
-    // TEST 5: an output folder holding files Multiplexer did not make is refused, not moved or emptied.
-    auto root = buildInstall("life_refuse");
-    auto cfg = configFor(root);
-    cfg.exportOptions.outputDirectory = root / "My Documents";
-    writeFile(cfg.exportOptions.outputDirectory / "letter.txt", "mine");
-    bool threw = false;
-    try {
-        buildOnce(cfg);
-    } catch (const std::exception& e) {
-        threw = std::string(e.what()).find("did not make") != std::string::npos;
-    }
-    CHECK(threw);
-    CHECK_EQ(slurp(cfg.exportOptions.outputDirectory / "letter.txt"), std::string("mine"));
-    CHECK(backupsIn(root).empty());
-
-    // A move that fails part-way is undone (all or nothing): a folder renamed onto a taken name.
-    auto dir = tempDir("life_undo");
-    writeFile(dir / "out" / "Data" / "a.esp", "a");
-    writeFile(dir / "out" / "Multiplexer_DisablePlugins.txt", "x");
-    FileTransaction tx("move");
-    std::filesystem::create_directories(dir / "backup");
-    tx.rename(dir / "out" / "Data", dir / "backup" / "Data", "previous output");
-    tx.rename(dir / "out" / "Multiplexer_DisablePlugins.txt", dir / "backup" / "Data", "collides");
-    bool failed = false;
-    try {
-        tx.apply();
-    } catch (const std::exception&) {
-        failed = true;
-    }
-    CHECK(failed);
-    CHECK_EQ(slurp(dir / "out" / "Data" / "a.esp"), std::string("a"));
-    CHECK_EQ(slurp(dir / "out" / "Multiplexer_DisablePlugins.txt"), std::string("x"));
-}
-
-TEST(lifecycle_backup_names_are_unique_and_game_data_is_never_moved)
-{
-    auto dir = tempDir("life_names");
-    writeFile(dir / "Multiplexer Output" / "Data" / "Dummy_Plugin_01.esp", "1");
-    auto a = output::backupPreviousOutput(dir / "Multiplexer Output" / "Data", {}, "081126 150812");
-    CHECK(a.moved);
-    CHECK_EQ(pathToUtf8(a.backupFolder.filename()), std::string("Multiplexer Outputs Backup 081126 150812"));
-    writeFile(dir / "Multiplexer Output" / "Data" / "Dummy_Plugin_01.esp", "2");
-    auto b = output::backupPreviousOutput(dir / "Multiplexer Output" / "Data", {}, "081126 150812");
-    CHECK_EQ(pathToUtf8(b.backupFolder.filename()), std::string("Multiplexer Outputs Backup 081126 150812 (2)"));
-    CHECK_EQ(slurp(a.backupFolder / "Data" / "Dummy_Plugin_01.esp"), std::string("1")); // never overwritten
-    CHECK_EQ(slurp(b.backupFolder / "Data" / "Dummy_Plugin_01.esp"), std::string("2"));
-    // Nothing to move: no backup folder.
-    auto c = output::backupPreviousOutput(dir / "Multiplexer Output" / "Data", {}, "081126 150813");
-    CHECK(!c.moved);
-    CHECK(!std::filesystem::exists(dir / "Multiplexer Outputs Backup 081126 150813"));
-
-    // Exporting straight into the game's Data folder: nothing is moved and no zip of the game is made.
-    auto root = buildInstall("life_gamedata");
-    auto cfg = configFor(root);
-    cfg.exportOptions.outputDirectory = root / "Game" / "Data";
-    auto r = buildOnce(cfg);
-    CHECK(r.backupFolder.empty());
-    CHECK(std::filesystem::exists(root / "Game" / "Data" / "Fallout4.esm"));
-    CHECK(!std::filesystem::exists(root / "Game" / "Multiplexer Output.zip"));
-    CHECK(backupsIn(root).empty());
-}
-
-TEST(lifecycle_own_database_in_the_output_folder_stays_and_is_never_packaged)
-{
-    // The report's case: the results database (and the build cache beside it) inside the output
-    // folder, open while the app runs. They stay in place; everything else around them moves.
-    auto root = buildInstall("life_owndb");
-    auto cfg = configFor(root);
-    cfg.exportOptions.outputDirectory = root / "Multiplexer Renewed Outputs";
+    // The app's own database inside the folder that holds the exports (the report's setup).
     cfg.databasePath = root / "Multiplexer Renewed Outputs" / "Multiplexer" / "multiplexer.sqlite";
-    auto first = buildOnce(cfg);
-    CHECK(std::filesystem::exists(cfg.databasePath));
-    CHECK(std::filesystem::exists(BuildCache::defaultPathFor(cfg.databasePath)));
-    writeFile(root / "Multiplexer Renewed Outputs" / "Multiplexer" / "old.txt", "stale");
-    for (const auto& n : zipNames(first.zipPath))
-        CHECK(n.find(".sqlite") == std::string::npos);
+    auto first = exportOnce(cfg);
+    CHECK(output::isRunName(first.runName));
+    CHECK_EQ(first.packageRoot, root / "Multiplexer Renewed Outputs" / first.runName);
+    CHECK(first.latestRecorded);
+    CHECK(std::filesystem::exists(first.zipPath));
+    const auto before = snapshotFolder(first.packageRoot);
 
-    auto second = buildOnce(cfg);
-    CHECK(!second.backupFolder.empty());
-    CHECK(std::filesystem::exists(cfg.databasePath)); // never moved
-    CHECK(std::filesystem::exists(BuildCache::defaultPathFor(cfg.databasePath)));
-    CHECK_EQ(slurp(second.backupFolder / "Multiplexer" / "old.txt"), std::string("stale")); // moved around it
-    CHECK(std::filesystem::exists(second.backupFolder / "Dummy_Plugin_01.esp"));
-    auto names = zipNames(second.zipPath);
-    CHECK(names.count("Data/Dummy_Plugin_01.esp"));
-    for (const auto& n : names) {
-        CHECK(n.find(".sqlite") == std::string::npos);
-        CHECK(n.find("Multiplexer/old.txt") == std::string::npos);
-    }
-    // The build still sees its history (stable FormIDs, change detection) from the database.
+    auto second = exportOnce(cfg);
+    CHECK(second.runName != first.runName); // even within the same second: " (2)"
+    CHECK(std::filesystem::exists(second.zipPath));
+    CHECK(snapshotFolder(first.packageRoot) == before); // not moved, renamed, deleted or changed
+    auto latest = output::latestRun(output::locate(cfg.exportOptions.outputDirectory, root / "Game", root / "Game" / "Data", {}));
+    CHECK(latest && *latest == second.packageRoot);
+    CHECK_EQ(slurp(root / "Multiplexer Renewed Outputs" / output::kLatestFile), second.runName + "\n");
+    // No unfinished folder is left, the database stays where it is and is never packaged.
+    for (const auto& e : std::filesystem::directory_iterator(root / "Multiplexer Renewed Outputs"))
+        CHECK(!iendsWith(pathToUtf8(e.path().filename()), ".tmp"));
+    CHECK(std::filesystem::exists(cfg.databasePath));
+    CHECK(slurp(second.zipPath).find(".sqlite") == std::string::npos);
+    // The next build reads its history (stable FormIDs) from the latest export.
     Pipeline p(cfg);
     p.scan();
+    CHECK_EQ(p.session().buildRecordsDirectory, second.directory);
     CHECK(p.changes().status == BuildStatus::UpToDate);
+}
+
+TEST(runs_a_failed_export_never_becomes_the_latest)
+{
+    auto root = buildInstall("runs_failed");
+    auto cfg = configFor(root);
+    auto good = exportOnce(cfg);
+    const auto before = snapshotFolder(good.packageRoot);
+    auto failing = cfg;
+    failing.beforeExportWrite = [](const std::filesystem::path&) { throw std::runtime_error("disk full"); };
+    Pipeline p(failing);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    bool threw = false;
+    try {
+        p.exportOutputs();
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    CHECK(threw);
+    CHECK(!p.exportResult()); // nothing in this session became an export
+    const output::Location loc{root / "Output", output::Layout::Package};
+    auto latest = output::latestRun(loc);
+    CHECK(latest && *latest == good.packageRoot);
+    CHECK_EQ(slurp(root / "Output" / output::kLatestFile), good.runName + "\n");
+    CHECK(snapshotFolder(good.packageRoot) == before);
+    size_t unfinished = 0;
+    for (const auto& e : std::filesystem::directory_iterator(root / "Output"))
+        unfinished += iendsWith(pathToUtf8(e.path().filename()), ".tmp") ? 1 : 0;
+    CHECK_EQ(unfinished, size_t(1)); // left for diagnostics, never taken for a finished export
+}
+
+TEST(runs_names_never_collide_and_the_latest_survives_a_lost_pointer)
+{
+    auto dir = tempDir("runs_names");
+    const output::Location loc{dir, output::Layout::Package};
+    std::filesystem::create_directories(dir / "Multiplexer Output 081126 163020");     // finished, not ours
+    std::filesystem::create_directories(dir / "Multiplexer Output 081126 163020 (2).tmp"); // crashed earlier
+    auto a = output::beginRun(loc, "081126 163020");
+    CHECK_EQ(a.name, std::string("Multiplexer Output 081126 163020 (3)"));
+    CHECK(iendsWith(pathToUtf8(a.folder.filename()), ".tmp"));
+    CHECK(std::filesystem::exists(a.folder / output::kRunMarker));
+    auto b = output::beginRun(loc, "081126 163020");
+    CHECK_EQ(b.name, std::string("Multiplexer Output 081126 163020 (4)"));
+    // Nothing finished yet (the plain folder has no marker): no latest export.
+    CHECK(!output::latestRun(loc));
+    output::finishRun(b);
+    CHECK(output::setLatest(b));
+    output::finishRun(a);
+    CHECK(output::setLatest(a));
+    CHECK(output::latestRun(loc) && *output::latestRun(loc) == dir / "Multiplexer Output 081126 163020 (3)");
+    // A lost or wrong pointer: the newest finished export by its name.
+    std::filesystem::remove(dir / output::kLatestFile);
+    CHECK(output::latestRun(loc) && *output::latestRun(loc) == dir / "Multiplexer Output 081126 163020 (4)");
+    writeFile(dir / output::kLatestFile, "Multiplexer Output 081126 163020 (2).tmp\n");
+    CHECK(output::latestRun(loc) && *output::latestRun(loc) == dir / "Multiplexer Output 081126 163020 (4)");
+    auto c = output::beginRun(loc, "091126 080000"); // a later day sorts later, whatever the day number
+    output::finishRun(c);
+    std::filesystem::remove(dir / output::kLatestFile);
+    CHECK(output::latestRun(loc) && *output::latestRun(loc) == dir / "Multiplexer Output 091126 080000");
+    // Finishing never replaces an existing folder.
+    auto d = output::beginRun(loc, "101126 090000");
+    std::filesystem::create_directories(dir / "Multiplexer Output 101126 090000");
+    output::finishRun(d);
+    CHECK_EQ(d.name, std::string("Multiplexer Output 101126 090000 (2)"));
+}
+
+TEST(runs_cleanup_is_separate_safe_and_skips_what_it_cannot_move)
+{
+    auto dir = tempDir("runs_cleanup");
+    const output::Location loc{dir, output::Layout::Package};
+    std::vector<output::Run> runs;
+    for (const char* stamp : {"011126 100000", "021126 100000", "031126 100000", "041126 100000"}) {
+        auto r = output::beginRun(loc, stamp);
+        writeFile(r.dataDir() / "Dummy_Plugin_01.esp", stamp);
+        output::finishRun(r);
+        output::setLatest(r);
+        runs.push_back(r);
+    }
+    auto crashed = output::beginRun(loc, "051126 100000"); // never finished
+    // Things that are not Multiplexer exports: never touched.
+    std::filesystem::create_directories(dir / "Multiplexer Output 011026 100000"); // no marker
+    writeFile(dir / "Multiplexer" / "multiplexer.sqlite", "db");
+    writeFile(dir / "notes.txt", "mine");
+    // The oldest is "in use": its folder cannot be renamed (simulated by a taken name).
+    writeFile(dir / "Multiplexer Output 011126 100000.deleting" / "x", "busy");
+
+    auto r = output::cleanupRuns(loc, 2, false);
+    CHECK_EQ(r.removed.size(), size_t(1)); // 021126
+    CHECK_EQ(r.skipped.size(), size_t(1)); // 011126, left as it is
+    CHECK(std::filesystem::exists(runs[0].folder / "Data" / "Dummy_Plugin_01.esp"));
+    CHECK(!std::filesystem::exists(runs[1].folder));
+    CHECK(std::filesystem::exists(runs[2].folder));
+    CHECK(std::filesystem::exists(runs[3].folder));
+    CHECK(std::filesystem::exists(crashed.folder)); // unfinished kept unless asked
+    CHECK(std::filesystem::exists(dir / "Multiplexer Output 011026 100000"));
+    CHECK_EQ(slurp(dir / "Multiplexer" / "multiplexer.sqlite"), std::string("db"));
+    CHECK_EQ(slurp(dir / "notes.txt"), std::string("mine"));
+    // Never the latest, even with keep = 0; unfinished ones when asked.
+    auto all = output::cleanupRuns(loc, 0, true);
+    CHECK(std::filesystem::exists(runs[3].folder));
+    CHECK(!std::filesystem::exists(crashed.folder));
+    CHECK(!std::filesystem::exists(runs[2].folder));
+    CHECK(output::latestRun(loc) && *output::latestRun(loc) == runs[3].folder);
+}
+
+TEST(runs_layouts_mods_folder_game_data_and_earlier_versions)
+{
+    // The earlier package setting "...\Multiplexer Output\Data": the exports go into "...\Multiplexer Output".
+    auto l1 = output::locate("/x/Game/Multiplexer Output/Data", "/x/Game", "/x/Game/Data", {});
+    CHECK(l1.layout == output::Layout::Package && l1.root == std::filesystem::path("/x/Game/Multiplexer Output"));
+    auto l2 = output::locate({}, "/x/Game", "/x/Game/Data", {});
+    CHECK(l2.root == std::filesystem::path("/x/Game/Multiplexer Output"));
+    auto l3 = output::locate("/x/MO2/mods/Fallout 4 Multiplexer Output", "/x/Game", "/x/Game/Data", "/x/MO2/mods");
+    CHECK(l3.layout == output::Layout::ModFolder && l3.root == std::filesystem::path("/x/MO2/mods"));
+    auto l4 = output::locate("/x/Game/Data", "/x/Game", "/x/Game/Data", {});
+    CHECK(l4.layout == output::Layout::GameData);
+
+    // An export written by an earlier version into a single folder: its FormID map is still read.
+    auto root = buildInstall("runs_legacy");
+    auto cfg = configFor(root);
+    auto first = exportOnce(cfg);
+    writeFile(root / "Output" / "Multiplexer_FormMap.tsv", slurp(first.directory / "Multiplexer_FormMap.tsv"));
+    std::filesystem::remove_all(first.packageRoot);
+    std::filesystem::remove(root / "Output" / output::kLatestFile);
+    Pipeline p(cfg);
+    p.scan();
+    CHECK_EQ(p.session().buildRecordsDirectory, root / "Output");
+
+    // Straight into the game's Data folder: no export folder, no zip.
+    auto game = cfg;
+    game.exportOptions.outputDirectory = root / "Game" / "Data";
+    auto r = exportOnce(game);
+    CHECK(r.runName.empty());
+    CHECK_EQ(r.directory, root / "Game" / "Data");
+    CHECK(r.zipPath.empty());
 }

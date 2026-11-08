@@ -1,5 +1,7 @@
 #include "diagnostics/RecorderLog.hpp"
 
+#include "engine/OutputRuns.hpp"
+
 #include "util/Json.hpp"
 #include "util/Platform.hpp"
 #include "util/Text.hpp"
@@ -143,9 +145,14 @@ RecorderSession loadRecorderLog(const fs::path& file)
     return parseRecorderLog(readAll(file), pathToUtf8(file));
 }
 
-std::optional<PackageContext> loadPackageContext(const fs::path& packageRoot)
+std::optional<PackageContext> loadPackageContext(const fs::path& given)
 {
     std::error_code ec;
+    // The folder holding the exports: the latest finished export in it.
+    fs::path packageRoot = given;
+    if (!fs::exists(packageRoot / "Multiplexer_plugins.txt", ec))
+        if (auto latest = output::latestRun(output::Location{given, output::Layout::Package}))
+            packageRoot = *latest;
     const auto plugins = packageRoot / "Multiplexer_plugins.txt";
     if (!fs::exists(plugins, ec))
         return std::nullopt;
@@ -157,7 +164,9 @@ std::optional<PackageContext> loadPackageContext(const fs::path& packageRoot)
         if (!name.empty() && name[0] != '#')
             c.compiled.insert(toLower(name));
     }
-    for (const auto& entry : fs::directory_iterator(packageRoot / "Data", ec)) {
+    // Plugins are in its Data folder, or at the top for an export that is a Mod Organizer 2 mod.
+    const fs::path data = fs::is_directory(packageRoot / "Data", ec) ? packageRoot / "Data" : packageRoot;
+    for (const auto& entry : fs::directory_iterator(data, ec)) {
         const std::string name = pathToUtf8(entry.path().filename());
         const std::string ext = toLower(entry.path().extension().string());
         if (entry.is_regular_file(ec) && (ext == ".esp" || ext == ".esm" || ext == ".esl"))

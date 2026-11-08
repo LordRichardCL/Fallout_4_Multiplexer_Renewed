@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -36,7 +37,10 @@ std::vector<std::string> outputsNotVisible(const Session& session, const std::ve
 // Enables `modName` in the profile's modlist.txt: a disabled entry is switched on where it is, a
 // missing one is added at the top (highest priority, so it wins every file conflict). Every other
 // line, its order and its state stay as they are.
-void planEnableMod(FileTransaction& tx, const std::filesystem::path& profilePath, const std::string& modName);
+// `alsoDisable`: other mods to switch off in the same edit (earlier Multiplexer exports: only one
+// export's files should be in the game). Their folders are never touched.
+void planEnableMod(FileTransaction& tx, const std::filesystem::path& profilePath, const std::string& modName,
+                   const std::function<bool(const std::string&)>& alsoDisable = {});
 
 // "N compiled plugins come from M mods": which mod provides each compiled plugin (MO2's winner)
 // and how many plugins are provided by more than one mod.

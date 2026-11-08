@@ -149,19 +149,27 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 
 ## 6. Export and switch over
 
-**Export Plugins** builds one installable mod, the same for every mod manager:
+**Export Plugins** builds one installable mod, the same for every mod manager, in a folder of its own. Every export gets a new folder; an earlier export is never moved, renamed, deleted or changed:
 
 ```
-<game folder>\Multiplexer Output\
-├── Data\                      everything the game loads (see below)
-├── Multiplexer Output.zip      the Data folder, zipped (Data\ at its root): install this
-├── Multiplexer_DisablePlugins.txt, Multiplexer_plugins.txt, Multiplexer_Archives.ini
-└── Multiplexer Reports\
+<output folder>\                         Settings / Compilation page: "Output folder" (default <game folder>\Multiplexer Output)
+├── Multiplexer Latest.txt               names the latest finished export
+├── Multiplexer Output 081126 154512\    an earlier export, left exactly as it was
+└── Multiplexer Output 081126 163020\    this export
+    ├── Data\                            everything the game loads (see below)
+    ├── Multiplexer Output.zip           the Data folder, zipped (Data\ at its root): install this
+    ├── Multiplexer_DisablePlugins.txt, Multiplexer_plugins.txt, Multiplexer_Archives.ini, Multiplexer_Instructions.txt
+    └── Multiplexer Reports\
 ```
 
-**Every export starts from an empty output folder.** Before writing anything, the previous export's output is moved, exactly as it was, into a new folder **`Multiplexer Outputs Backup DDMMYY HHMMSS`** beside the output (for the default layout: next to `Multiplexer Output` in the game folder). That covers the Data folder, the zip, the notes and the reports; anything else you keep in the package folder stays where it is. A backup folder is never reused (a second backup in the same second gets ` (2)`), and nothing is deleted: when a file cannot be moved (another program has it open), whatever was already moved is put back and the export stops with a message. An output folder you picked yourself that holds files Multiplexer did not make is refused rather than moved; Mod Organizer 2's `meta.ini` in an output mod folder stays in place, and so do Multiplexer's own results database and build cache if they are in the output folder (Settings → Results database): they stay open while the app runs, so they are left where they are, the files around them are moved one by one, and they are never put in the zip. Keeping the database outside the output folder is better. Exporting straight into the game's `Data` folder moves nothing and writes no zip. So `Multiplexer Output.zip` holds only files written by the current export. Old backups are yours to delete when you no longer need them.
-
-With an output folder you picked yourself that is not named `Data`, the plugins and notes share that folder; the zip is written there too and holds only what belongs in the game's `Data` folder (not the notes, the reports or itself).
+- **While it is written** the folder is called `Multiplexer Output DDMMYY HHMMSS.tmp`; it gets its final name only when everything is written, and only then does `Multiplexer Latest.txt` name it. An export that fails or is interrupted stays `.tmp` (with `MULTIPLEXER_BUILD_FAILED.txt` saying why when it failed): it is never taken for a finished export, and the latest export stays the latest.
+- **Two exports in the same second** get ` (2)`, ` (3)`, …; an existing folder is never reused.
+- **You can keep an earlier export open** in File Explorer, xEdit, Mod Organizer 2 or the game while exporting again: nothing in it is touched.
+- **The next build** reads its history (the FormID map that keeps FormIDs the same from build to build, the lists of copied files) from the latest finished export, or, before the first export of this version, from the single output folder earlier versions used.
+- **Old exports** stay until you remove them: `fo4mx clean-outputs [install options] --keep 5` deletes all but the newest 5 (never the latest), with `--unfinished` also `.tmp` ones. Only Multiplexer's own export folders are touched (named like an export and holding its `Multiplexer_Run.txt`); one in use is skipped and left as it is. Your database, backups made by earlier versions and anything else in the output folder are never touched.
+- **A folder inside Mod Organizer 2's mods folder** as the output folder makes every export a mod of its own in the mods folder (`Multiplexer Output DDMMYY HHMMSS`); Apply to Game enables the newest and switches the earlier export mods off (their folders stay).
+- **The game's own `Data` folder** as the output folder writes the plugins there directly, as before (no export folders, no zip).
+- Multiplexer's own results database and build cache, wherever they are, are never put in a zip.
 
 Install `Multiplexer Output.zip` like any other mod, and make it win over every other mod (install it last):
 - **Vortex:** let **Apply to Game** copy it to Vortex's downloads folder (see below), or drag the zip onto the Mods page; install and enable it, and let it win every file conflict (load after all other mods).

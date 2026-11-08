@@ -74,8 +74,9 @@ a confidence, the evidence from the log and the checks to make.
 | The game version differs from Multiplexer's setting | `runtime_version` against Settings (Old Gen / Next Gen) | Warning, High |
 | The recorder could not record everything | `recorder_error` | Warning |
 
-The build comparison uses the package's notes in `Multiplexer Output` (the folder holding
-`Multiplexer_plugins.txt`).
+The build comparison uses the export's notes (the folder holding `Multiplexer_plugins.txt`). Given the
+folder that holds the exports (`<game>\Multiplexer Output` by default), the latest finished export in it
+is used.
 
 ## Using it
 

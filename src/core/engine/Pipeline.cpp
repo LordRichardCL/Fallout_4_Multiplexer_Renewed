@@ -2,7 +2,7 @@
 
 #include "engine/CompilationResult.hpp"
 #include "engine/PostCompilation.hpp"
-#include "engine/OutputBackup.hpp"
+#include "engine/OutputRuns.hpp"
 #include "reference/FormIdReference.hpp"
 #include "util/FileTransaction.hpp"
 
@@ -132,12 +132,11 @@ void Pipeline::scan(ProgressSink& progress)
 
     PluginScanner::scan(*session_, config_.scan, progress);
     // The Auto-Merger's copies in the output folder are never read as originals, and archives an
-    // earlier build added to the INI list count as their plugin's.
-    auto outputDir = config_.exportOptions.outputDirectory.empty() ? Exporter::defaultOutputDirectory(*session_)
-                                                                   : config_.exportOptions.outputDirectory;
+    // earlier build added to the INI list count as their plugin's. Read from the latest finished export.
+    auto outputDir = previousBuildDirectory();
     // The build's own records ship inside the package's Data folder: when the output folder is gone
     // (deleted between builds) but the package is installed, they are read from the game's Data.
-    if (!std::filesystem::exists(outputDir / "Multiplexer_FormMap.tsv"))
+    if (outputDir.empty() || !std::filesystem::exists(outputDir / "Multiplexer_FormMap.tsv"))
         for (const auto* f : session_->vfs.rootFiles())
             if (iequals(f->relativePath, "Multiplexer_FormMap.tsv")) {
                 outputDir = session_->vfs.winnerPath(*f).parent_path();
@@ -146,10 +145,17 @@ void Pipeline::scan(ProgressSink& progress)
                 break;
             }
     session_->buildRecordsDirectory = outputDir;
-    session_->relinkedCopies = AutoMerger::readManifest(outputDir);
-    session_->archiveWinnerCopies = Exporter::archiveWinnerCopies(outputDir);
+    session_->relinkedCopies.clear();
+    session_->archiveWinnerCopies.clear();
     session_->registeredArchives.clear();
-    for (const auto& a : Exporter::registeredArchives(outputDir))
+    if (!outputDir.empty()) {
+        session_->relinkedCopies = AutoMerger::readManifest(outputDir);
+        session_->archiveWinnerCopies = Exporter::archiveWinnerCopies(outputDir);
+        for (const auto& a : Exporter::registeredArchives(outputDir)) // written by earlier versions
+            session_->registeredArchives.insert(a);
+    }
+    // Apply to Game keeps its record of the archives it added beside the exports (never inside one).
+    for (const auto& a : Exporter::registeredArchives(outputLocation().root))
         session_->registeredArchives.insert(a);
     // Also from the oldest backup of Fallout4Custom.ini (written before this app first changed it):
     // archives of active plugins in today's list that were not in that list were added since. This
@@ -317,12 +323,9 @@ bool Pipeline::compile(ProgressSink& progress)
         for (const auto& [k, v] : resolutions)
             config_.compile.forcedWinners.emplace(k, v);
     }
-    if (config_.compile.previousFormMap.empty()) {
-        auto dir = session_->buildRecordsDirectory.empty()
-                       ? (config_.exportOptions.outputDirectory.empty() ? Exporter::defaultOutputDirectory(*session_)
-                                                                        : config_.exportOptions.outputDirectory)
-                       : session_->buildRecordsDirectory;
-        auto previous = dir / "Multiplexer_FormMap.tsv";
+    if (config_.compile.previousFormMap.empty() && !session_->buildRecordsDirectory.empty()) {
+        // The latest finished export's FormID map: FormIDs stay the same from build to build.
+        auto previous = session_->buildRecordsDirectory / "Multiplexer_FormMap.tsv";
         if (std::filesystem::exists(previous))
             config_.compile.previousFormMap = previous;
     }
@@ -333,9 +336,8 @@ bool Pipeline::compile(ProgressSink& progress)
 
     // Archive loaders need the output mod to override the original plugin files, which only a
     // Mod Organizer 2 mod folder does. Anywhere else they would overwrite the originals.
-    const auto outputDir = config_.exportOptions.outputDirectory.empty()
-                               ? Exporter::defaultOutputDirectory(*session_)
-                               : config_.exportOptions.outputDirectory;
+    // Where the next export will write (it does not exist yet: every export gets a new folder).
+    const auto outputDir = pendingOutputDirectory();
     std::string outputMod;
     std::string loadersOff; // why archive loaders are not used, for the validation report
     if (!config_.archiveLoaders) {
@@ -607,6 +609,54 @@ std::vector<std::filesystem::path> Pipeline::workingFiles() const
     return out;
 }
 
+output::Location Pipeline::outputLocation() const
+{
+    return output::locate(*session_, config_.exportOptions.outputDirectory);
+}
+
+std::filesystem::path Pipeline::previousBuildDirectory() const
+{
+    const auto loc = outputLocation();
+    if (loc.layout == output::Layout::GameData)
+        return loc.root;
+    if (auto latest = output::latestRun(loc))
+        return output::dataDir(*latest, loc.layout);
+    // Before export folders: the single output folder earlier versions wrote (only ever read).
+    std::vector<std::filesystem::path> legacy;
+    if (!config_.exportOptions.outputDirectory.empty())
+        legacy.push_back(config_.exportOptions.outputDirectory);
+    legacy.push_back(Exporter::defaultOutputDirectory(*session_));
+    for (const auto& d : legacy)
+        if (std::filesystem::exists(d / "Multiplexer_FormMap.tsv"))
+            return d;
+    return {};
+}
+
+std::filesystem::path Pipeline::pendingOutputDirectory() const
+{
+    const auto loc = outputLocation();
+    switch (loc.layout) {
+    case output::Layout::GameData: return loc.root;
+    case output::Layout::ModFolder: return loc.root / "Multiplexer Output (newest export)";
+    case output::Layout::Package: break;
+    }
+    return loc.root / "Multiplexer Output (newest export)" / "Data";
+}
+
+namespace {
+
+// After the export folder is renamed from "<name>.tmp" to "<name>": the same paths in the new place.
+void rebase(std::filesystem::path& p, const std::string& from, const std::filesystem::path& to)
+{
+    if (p.empty())
+        return;
+    const std::string s = pathToUtf8(p.lexically_normal().generic_u8string());
+    if (s.size() >= from.size() && s.compare(0, from.size(), from) == 0 && (s.size() == from.size() || s[from.size()] == '/'))
+        p = s.size() == from.size() ? to : to / utf8ToPath(s.substr(from.size() + 1));
+}
+
+} // namespace
+
 ExportResult Pipeline::exportOutputs(ProgressSink& progress)
 {
     if (!compiled_)
@@ -615,35 +665,39 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         throw std::runtime_error("validation found " + std::to_string(validation_->errors) +
                                  " critical errors; export is blocked");
     progress.stage("Export");
+    // Every export writes into a new folder of its own, "<name>.tmp" until it is complete; an earlier
+    // export is never moved, renamed, deleted or changed. (Writing straight into the game's Data folder
+    // is the one exception: there the files are replaced in place, as before.)
+    const auto location = outputLocation();
+    std::optional<output::Run> run;
+    std::filesystem::path directory;
     std::vector<std::string> previousOutputs;
-    std::optional<InstallSnapshot> build;
-    if (db_)
-        build = db::DatabaseWriter(*db_).loadSnapshot("build");
-    auto directory = config_.exportOptions.outputDirectory.empty() ? Exporter::defaultOutputDirectory(*session_)
-                                                                   : config_.exportOptions.outputDirectory;
-    if (build && build->isBuild && utf8ToPath(build->outputDirectory) == directory)
-        for (const auto& o : build->outputs)
-            previousOutputs.push_back(o.name);
+    if (location.layout == output::Layout::GameData) {
+        directory = location.root;
+        if (db_)
+            if (auto build = db::DatabaseWriter(*db_).loadSnapshot("build");
+                build && build->isBuild && utf8ToPath(build->outputDirectory) == directory)
+                for (const auto& o : build->outputs)
+                    previousOutputs.push_back(o.name);
+    } else {
+        run = output::beginRun(location);
+        directory = run->dataDir();
+    }
     auto exportOptions = config_.exportOptions;
     exportOptions.archiveWinnerCopies = config_.archiveWinnerCopies;
-    // Every export starts from an empty output folder: the previous output is moved, unchanged, into
-    // "Multiplexer Outputs Backup DDMMYY HHMMSS" beside it first. If that cannot be done, nothing is
-    // changed and the export stops (the previous output is never deleted or overwritten).
-    session_->releaseFiles(); // Windows cannot move files this app has open
-    const auto ownFiles = workingFiles();
-    const auto backup = output::backupPreviousOutput(directory, session_->install.dataPath, {}, ownFiles);
-    if (backup.moved)
-        previousOutputs.clear(); // nothing of the last build is left to remove or compare with
+    exportOptions.outputDirectory = directory;
     if (config_.beforeExportWrite)
         config_.beforeExportWrite(directory);
     ExportResult result;
     try {
         result = Exporter::write(*session_, *compiled_, exportOptions, previousOutputs);
-        result.backupFolder = backup.backupFolder;
     } catch (const std::exception& e) {
         markBuildFailed(directory, Exporter::packageRoot(directory), {}, e.what());
         throw;
     }
+    result.outputRoot = location.root;
+    if (run)
+        result.runName = run->name;
     {
         auto list = result.packageRoot / "Multiplexer_ArchivePriority.txt";
         std::error_code ec;
@@ -659,6 +713,8 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
                     << ")\n";
         }
     }
+    // A failed export stays "<name>.tmp" with a note saying why: never the latest export, and the
+    // latest one is left as it is (also in this session: exportResult() keeps naming it).
     auto post = ValidationEngine::validateWrittenFiles(*compiled_, result.pluginFiles);
     if (post.critical()) {
         // The files on disk are not what was compiled: nothing of this build may look installable,
@@ -676,7 +732,6 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         if (db_)
             db::DatabaseWriter(*db_).writeValidation("post-export", post, false);
         spdlog::error("Written files failed verification ({} errors); the build was marked failed", post.errors);
-        exported_ = result;
         return result;
     }
     {
@@ -705,14 +760,13 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         markBuildFailed(result.directory, result.packageRoot, result.pluginFiles,
                         "the Advanced Users Auto-Merger could not relink every file naming a compiled plugin (" +
                             std::to_string(post.errors) + " errors)");
-        exported_ = result;
         return result;
     }
     // Every file is in Data now: zip it into the installable package. Not when the output folder is the
     // game's own Data folder: a package of it would hold the whole game.
-    if (backup.gameDataOutput)
+    if (location.layout == output::Layout::GameData)
         spdlog::warn("No Multiplexer Output.zip: the output folder is the game's Data folder");
-    if (config_.exportOptions.writeZip && !post.critical() && !backup.gameDataOutput) {
+    else if (config_.exportOptions.writeZip) {
         try {
             Exporter::writePackageZip(result, workingFiles());
         } catch (const std::exception& e) {
@@ -748,8 +802,38 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
     } catch (const std::exception& e) {
         spdlog::warn("Could not write {}: {}", PostCompilation::kInstructionsFile, e.what());
     }
+    // Reports go into the export (unless a report folder is set) before it is finished.
+    const auto reportDir =
+        config_.reportDirectory.empty() ? result.packageRoot / "Multiplexer Reports" : config_.reportDirectory;
+    writeReports(reportDir);
+
+    // Finish: "<name>.tmp" becomes "<name>" in one rename, then it is the latest export.
+    if (run) {
+        const std::string from = pathToUtf8(run->folder.lexically_normal().generic_u8string());
+        try {
+            output::finishRun(*run);
+        } catch (const std::exception& e) {
+            // Complete but not finished: left as "<name>.tmp" (never the latest), with a note.
+            std::ofstream out(result.packageRoot / kBuildFailedMarker, std::ios::binary | std::ios::trunc);
+            out << "This export was written completely but could not be finished: " << e.what()
+                << "\nIt is not the latest export. Export again, or delete this folder.\n";
+            spdlog::error("{}", e.what());
+            throw;
+        }
+        result.runName = run->name;
+        for (auto* p : {&result.directory, &result.packageRoot, &result.zipPath, &result.formMap, &result.archiveIni,
+                        &result.disableList, &result.pluginsTxt, &result.voiceManifest, &result.recorderFolder})
+            rebase(*p, from, run->folder);
+        for (auto* list : {&result.pluginFiles, &result.archiveLoaders, &result.seqFiles})
+            for (auto& p : *list)
+                rebase(p, from, run->folder);
+        if (autoMerge_)
+            for (auto& p : autoMerge_->written)
+                rebase(p, from, run->folder);
+        result.latestRecorded = output::setLatest(*run);
+    }
     exported_ = result;
-    if (db_ && !post.critical()) {
+    if (db_) {
         // This build becomes the reference state for change detection.
         db::DatabaseWriter w(*db_);
         auto snapshot = ChangeDetector::capture(*session_);
@@ -763,10 +847,6 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         w.setMeta("export_unchanged", std::to_string(result.unchangedOutputs.size()));
         w.setMeta("export_removed", std::to_string(result.removedOutputs.size()));
     }
-    auto reportDir = config_.reportDirectory.empty() ? result.packageRoot / "Multiplexer Reports" : config_.reportDirectory;
-    writeReports(reportDir);
-    if (post.critical())
-        spdlog::error("Written files failed verification ({} errors)", post.errors);
     return result;
 }
 
