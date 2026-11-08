@@ -90,6 +90,10 @@ public:
     // Archives an earlier build added to the INI list (Multiplexer_RegisteredArchives.txt in the
     // output folder), lowercase.
     static std::vector<std::string> registeredArchives(const std::filesystem::path& outputDirectory);
+    // Fallout 4 reads SResourceArchiveList2 into a 1,024-byte buffer (GetPrivateProfileString): a
+    // longer value is cut there and every archive past the cut silently never loads (scripts, meshes
+    // and textures of compiled plugins go missing). The value this app writes stays within it.
+    static constexpr size_t kArchiveListLimit = 1023;
     static std::vector<std::string> archiveList(const Session& session, const CompiledOutput& compiled,
                                                 const std::filesystem::path& outputDirectory);
 

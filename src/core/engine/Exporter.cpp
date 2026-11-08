@@ -206,7 +206,13 @@ void Exporter::planArchiveIni(FileTransaction& tx, const Session& session, const
     }
     // backupWhenMissing: an empty backup records that there was no Fallout4Custom.ini, so the
     // oldest backup is always the state before this app's first change (the scan's archive baseline).
-    tx.write(custom, setIniValue(text, "Archive", "SResourceArchiveList2", join(archiveList(session, c, outputDirectory), ", ")),
+    const std::string value = join(archiveList(session, c, outputDirectory), ", ");
+    if (value.size() > kArchiveListLimit)
+        throw std::runtime_error("the archive list (SResourceArchiveList2) would be " + std::to_string(value.size()) +
+                                 " characters; Fallout 4 reads only the first " + std::to_string(kArchiveListLimit) +
+                                 " and every archive after that would not load. Compile again: plugins whose "
+                                 "archives do not fit stay in the load order");
+    tx.write(custom, setIniValue(text, "Archive", "SResourceArchiveList2", value),
              "the archive list (SResourceArchiveList2) the compiled mods need", true);
 
     std::string record = "# Archives Fallout 4 Multiplexer Renewed added to SResourceArchiveList2\n";

@@ -1,6 +1,8 @@
 #include "engine/Pipeline.hpp"
 
+#include "assets/AssetScanner.hpp"
 #include "engine/CompilationResult.hpp"
+#include "engine/Exporter.hpp"
 #include "engine/PostCompilation.hpp"
 #include "engine/OutputRuns.hpp"
 #include "reference/FormIdReference.hpp"
@@ -14,7 +16,9 @@
 #include "util/IniFile.hpp"
 #include "util/Text.hpp"
 
+#include <algorithm>
 #include <fstream>
+#include <unordered_set>
 
 #include <spdlog/spdlog.h>
 
@@ -403,6 +407,65 @@ bool Pipeline::compile(ProgressSink& progress)
                                      "loaders keep their place")
                         .second)
                     ++isolated;
+        // The INI archive list must fit the 1,024-byte buffer the game reads it into: past it, archives
+        // never load. Full plugins first (compiling them frees the slots that matter), then light ones,
+        // each in load order; a plugin whose archives no longer fit stays in the load order.
+        if (!compiled_->archivesToRegister.empty()) {
+            const auto list = Exporter::archiveList(*session_, *compiled_, outputDir);
+            if (join(list, ", ").size() > Exporter::kArchiveListLimit) {
+                std::unordered_set<std::string> ours, present;
+                for (const auto& a : compiled_->archivesToRegister)
+                    ours.insert(toLower(a));
+                size_t used = 0;
+                for (const auto& a : list)
+                    if (!ours.count(toLower(a))) {
+                        used += (used ? 2 : 0) + a.size();
+                        present.insert(toLower(a));
+                    }
+                const std::string lang =
+                    session_->install.config.language.empty() ? "en" : session_->install.config.language;
+                std::vector<PluginIndex> owners;
+                for (auto pi : compiled_->compiledPlugins)
+                    if (!compiled_->hasArchiveLoader(pi))
+                        owners.push_back(pi);
+                std::stable_sort(owners.begin(), owners.end(), [&](PluginIndex a, PluginIndex b) {
+                    const auto& pa = session_->plugins[a];
+                    const auto& pb = session_->plugins[b];
+                    if (pa.isLight() != pb.isLight())
+                        return !pa.isLight();
+                    return pa.loadOrder < pb.loadOrder;
+                });
+                for (auto pi : owners) {
+                    const auto& p = session_->plugins[pi];
+                    std::vector<std::string> archives;
+                    for (const auto& a : AssetScanner::pluginArchiveNames(p, lang))
+                        if (session_->vfs.find(toLower(a)) && !present.count(toLower(a)))
+                            archives.push_back(a);
+                    if (archives.empty())
+                        continue;
+                    size_t cost = 0;
+                    for (const auto& a : archives)
+                        cost += 2 + a.size();
+                    if (used == 0)
+                        cost -= 2;
+                    if (used + cost <= Exporter::kArchiveListLimit) {
+                        used += cost;
+                        for (const auto& a : archives)
+                            present.insert(toLower(a));
+                    } else if (session_->autoRetained
+                                   .emplace(p.key, "Archive list full: Fallout 4 reads at most " +
+                                                       std::to_string(Exporter::kArchiveListLimit) +
+                                                       " characters of SResourceArchiveList2, and its archives (" +
+                                                       join(archives, ", ") +
+                                                       ") no longer fit, so they would never load. On Mod "
+                                                       "Organizer 2, with the output inside the mods folder, "
+                                                       "archive loaders need no INI list")
+                                   .second) {
+                        ++isolated;
+                    }
+                }
+            }
+        }
         if (isolated && round < 8)
             continue;
         if (!validation_->critical() || !config_.autoIsolate || round >= 8)
@@ -442,7 +505,8 @@ bool Pipeline::compile(ProgressSink& progress)
         validation_->fail(Severity::Warning, "Kept Out Automatically",
                           (p ? p->name : key) +
                               (reason.rfind("Advanced Users Auto-Merger", 0) == 0 ||
-                                       reason.rfind("Archive priority", 0) == 0
+                                       reason.rfind("Archive priority", 0) == 0 ||
+                                       reason.rfind("Archive list full", 0) == 0
                                    ? " stays in the load order: " + reason
                                    : " stays in the load order because one of its records could not be written "
                                      "safely: " + reason),

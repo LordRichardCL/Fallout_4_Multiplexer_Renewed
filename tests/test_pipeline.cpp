@@ -33,6 +33,7 @@
 #include <memory>
 #include <regex>
 #include <set>
+#include <sstream>
 
 using namespace fo4mx;
 using namespace fo4mx::fixtures;
@@ -5554,4 +5555,36 @@ TEST(references_script_property_in_a_record_keeps_the_plugin)
         CHECK(p.compile());
         CHECK(!p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
     }
+}
+
+// Fallout 4 reads SResourceArchiveList2 into a 1,024-byte buffer: a longer value is cut and every archive
+// past the cut never loads (the compiled plugins' scripts go missing: "Cannot open store for class").
+// A plugin whose archives do not fit stays in the load order, and the value written never exceeds it.
+TEST(archive_list_never_exceeds_what_the_game_reads)
+{
+    auto root = buildInstall("archivelistlimit");
+    std::string longList;
+    for (int i = 0; i < 48; ++i) // 48 x 19 characters and their separators: 1,006
+        longList += (longList.empty() ? "" : ", ") + std::string("UserArchive") + std::to_string(1000 + i) + ".ba2";
+    longList += ", X.ba2"; // 1,013: fits, but ", ModA - Main.ba2" (17 more) would not
+    CHECK(longList.size() <= Exporter::kArchiveListLimit);
+    writeFile(root / "ini" / "Fallout4Custom.ini", "[Archive]\nSResourceArchiveList2=" + longList + "\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto& s = p.session();
+    const auto* modA = s.findPlugin("ModA.esp");
+    CHECK(!p.compiledOutput()->isCompiled(modA->index));
+    CHECK(s.autoRetained.count(modA->key) && s.autoRetained.at(modA->key).rfind("Archive list full", 0) == 0);
+    CHECK(p.compiledOutput()->archivesToRegister.empty());
+    auto result = p.exportOutputs();
+    Exporter::applyArchiveIni(p.session(), *p.compiledOutput(), result.directory);
+    std::ifstream in(root / "ini" / "Fallout4Custom.ini");
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    for (std::istringstream lines(text); std::getline(lines, text);)
+        if (text.rfind("SResourceArchiveList2=", 0) == 0)
+            CHECK(text.size() - std::string("SResourceArchiveList2=").size() <= Exporter::kArchiveListLimit);
 }
