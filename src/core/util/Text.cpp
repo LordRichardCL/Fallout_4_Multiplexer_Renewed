@@ -157,6 +157,27 @@ std::filesystem::path findChildCaseInsensitive(const std::filesystem::path& dir,
     return {};
 }
 
+std::filesystem::path findPathCaseInsensitive(const std::filesystem::path& root, std::string_view relative)
+{
+    std::filesystem::path at = root;
+    size_t i = 0;
+    while (i <= relative.size()) {
+        size_t j = relative.find_first_of("\\/", i);
+        if (j == std::string_view::npos)
+            j = relative.size();
+        const auto part = relative.substr(i, j - i);
+        i = j + 1;
+        if (part.empty() || part == ".")
+            continue;
+        if (part == "..")
+            return {};
+        at = findChildCaseInsensitive(at, part);
+        if (at.empty())
+            return {};
+    }
+    return at;
+}
+
 std::string sanitizeFileName(std::string_view s)
 {
     std::string out;

@@ -31,6 +31,8 @@ std::filesystem::path utf8ToPath(std::string_view s);
 
 // Case-insensitive lookup of a child entry on case-sensitive file systems.
 std::filesystem::path findChildCaseInsensitive(const std::filesystem::path& dir, std::string_view name);
+// The same for a relative path ("a\\b/c.txt"), one component at a time. Empty when it does not exist.
+std::filesystem::path findPathCaseInsensitive(const std::filesystem::path& root, std::string_view relative);
 
 // Strip characters that are illegal in Windows file names.
 std::string sanitizeFileName(std::string_view s);

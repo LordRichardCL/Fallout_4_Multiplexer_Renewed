@@ -48,6 +48,11 @@ Every line has `schema` (1), `seq` (0, 1, 2, ...), `time` (UTC, ISO 8601; not on
 (milliseconds since the recorder started) and `event`, plus the event's fields above. Readers ignore
 unknown events and fields.
 
+Beside it, `Documents\My Games\Fallout4\F4SE\MultiplexerDiagnosticRecorder.log` (recorder 1.1.0 and later)
+is a short plain-text status log, rewritten at each start, so it is easy to see that the plugin loaded:
+its version and F4SE's, the session file it records to (or why it could not create one), all F4SE plugins
+loaded, game data ready, main menu reached, new game or save loaded, game exited normally.
+
 Privacy: paths inside the user's profile folder are written as `%USERPROFILE%\...` (no account name), and
 saves appear by file name only. The log does list the plugins and F4SE plugin DLLs.
 
@@ -85,9 +90,13 @@ is used.
    its `Data` folder, so installing the package never installs the recorder): the DLL under
    `Data\F4SE\Plugins`, `Multiplexer Diagnostic Recorder.zip` and the install notes. Turning the setting
    off removes them at the next export.
-3. Install the zip as a mod (Vortex, MO2), or copy the DLL into `<game>\Data\F4SE\Plugins`.
+3. Install the zip as a mod (Vortex, MO2), or copy the DLL into `<game>\Data\F4SE\Plugins`. F4SE reads
+   plugins from that folder only: a copy in the game folder (next to `Fallout4.exe`) is never loaded.
 4. Start the game through F4SE and play.
-5. Diagnostics page → **Open Newest Log** (or `fo4mx diagnose [file] --package "<game>\Multiplexer Output"`).
+5. Not sure it loaded? The Diagnostics page says so (read from `f4se.log`); **Check Installation** (or
+   `fo4mx diagnose --install --game "<game>"`) names the problem: the DLL in a folder F4SE does not read,
+   F4SE's own reason for refusing it, or the game not started through F4SE.
+6. Diagnostics page → **Open Newest Log** (or `fo4mx diagnose [file] --package "<game>\Multiplexer Output"`).
 
 ## Building
 

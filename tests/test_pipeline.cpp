@@ -5458,3 +5458,47 @@ TEST(runs_layouts_mods_folder_game_data_and_earlier_versions)
     CHECK_EQ(r.directory, root / "Game" / "Data");
     CHECK(r.zipPath.empty());
 }
+
+// MCM configs and scripts the Auto-Merger rewrote must be the copies the game loads: under Vortex the
+// original mod's file can win the conflict, and the menu then looks for "ModS.esp|812" in a plugin
+// that is switched off. Switching over is blocked until the rewritten copy wins.
+TEST(relinked_configs_must_win_before_switching_over)
+{
+    auto root = referenceInstall("relink_deploy");
+    auto data = root / "Game" / "Data";
+    writeFile(data / "MCM" / "Config" / "ModS" / "config.json",
+              "{\"modName\": \"ModS\", \"pluginRequirements\": [\"ModS.esp\"],\n"
+              " \"content\": [{\"valueOptions\": {\"sourceType\": \"GlobalValue\", \"sourceForm\": \"ModS.esp|812\"}}]}\n");
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    p.exportOutputs();
+    auto r = resultOf(p);
+    CHECK(r.compiledSuccessfully("ModS.esp"));
+    installOutputs(p, root); // the plugins only: the original config still wins
+
+    auto d = PostCompilation::check(p.session(), *p.compiledOutput(), r);
+    CHECK(d.missingOutputs.empty());
+    CHECK_EQ(d.relinkedNotLoaded.size(), size_t(1));
+    CHECK(!d.relinkedNotLoaded.empty() && d.relinkedNotLoaded.front().find("config.json") != std::string::npos);
+    bool blocked = false;
+    for (const auto& b : d.blockers)
+        blocked |= b.find("MCM config") != std::string::npos;
+    CHECK(blocked);
+    CHECK(PostCompilation::instructions(p.session(), r, d).find("Rewritten scripts and MCM configs") !=
+          std::string::npos);
+    for (const auto& g : PostCompilation::ghostChecks(p.session(), *p.compiledOutput(), r, d))
+        CHECK(!g.ok());
+
+    // The rewritten copy deployed over the original (whatever the letter case on disk): nothing blocks.
+    const auto copy = p.exportResult()->directory / "mcm" / "config" / "mods" / "config.json";
+    CHECK(slurpFile(copy).find("ModS.esp") == std::string::npos);
+    std::filesystem::copy_file(copy, data / "MCM" / "Config" / "ModS" / "config.json",
+                               std::filesystem::copy_options::overwrite_existing);
+    d = PostCompilation::check(p.session(), *p.compiledOutput(), r);
+    CHECK(d.relinkedNotLoaded.empty());
+    CHECK(d.blockers.empty());
+}

@@ -31,8 +31,11 @@ bool modEnabled(const std::filesystem::path& profilePath, const std::string& mod
 // The output plugins the game would not see through MO2 right now: in no enabled mod of the
 // profile (read fresh from modlist.txt), not in overwrite and not in the game's Data folder, or
 // different from this build. `assumeEnabled` is a mod treated as enabled (it is about to be).
+// With `base`, each output is looked up at its path relative to it (scripts, MCM configs) and
+// reported by that path; without, by its file name in the root of Data.
 std::vector<std::string> outputsNotVisible(const Session& session, const std::vector<std::filesystem::path>& outputs,
-                                           const std::string& assumeEnabled = {});
+                                           const std::string& assumeEnabled = {},
+                                           const std::filesystem::path& base = {});
 
 // Enables `modName` in the profile's modlist.txt: a disabled entry is switched on where it is, a
 // missing one is added at the top (highest priority, so it wins every file conflict). Every other

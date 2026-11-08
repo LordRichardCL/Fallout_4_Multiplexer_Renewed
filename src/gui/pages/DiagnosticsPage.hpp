@@ -21,6 +21,9 @@ private:
     void open(const QString& file);
     std::filesystem::path packageRoot() const;
 
+    void showInstallStatus();
+
+    QLabel* install_;
     QLabel* summary_;
     QTreeWidget* findings_;
     QString file_;

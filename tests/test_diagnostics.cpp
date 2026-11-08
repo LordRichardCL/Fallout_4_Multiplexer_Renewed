@@ -137,3 +137,54 @@ TEST(diagnostics_compared_with_the_multiplexer_build)
     CHECK_EQ(newestSession(logs).filename().string(), std::string("session-20261104-090000-2.jsonl"));
     CHECK(loadRecorderLog(newestSession(logs)).ended);
 }
+
+// "It captured nothing": the recorder's installation is checked from where it is and what F4SE said.
+TEST(diagnostics_recorder_installation)
+{
+    namespace fs = std::filesystem;
+    const auto root = tempDir("recorder_install");
+    const auto game = root / "Fallout 4";
+    const auto f4se = root / "My Games" / "Fallout4" / "F4SE";
+    fs::create_directories(game / "Data");
+    fs::create_directories(f4se);
+    auto write = [](const fs::path& p, const std::string& text) {
+        fs::create_directories(p.parent_path());
+        std::ofstream(p, std::ios::binary) << text;
+    };
+
+    // Never started through F4SE.
+    auto st = checkRecorderInstall(game, f4se);
+    CHECK(!st.ok);
+    CHECK(st.verdict.find("not been started through F4SE") != std::string::npos);
+
+    // Copied into the game folder: F4SE never reads it there.
+    write(game / "MultiplexerDiagnosticRecorder.dll", "MZ");
+    write(f4se / "f4se.log", "plugin directory = X\\Data\\F4SE\\Plugins\\\nplugin X\\Data\\F4SE\\Plugins\\\\achievements.dll "
+                             "(00000001 ACNT 00000001) loaded correctly\n");
+    st = checkRecorderInstall(game, f4se);
+    CHECK(!st.ok);
+    CHECK(!st.installed);
+    CHECK_EQ(st.misplaced.size(), size_t(1));
+    CHECK(st.verdict.find("never reads") != std::string::npos);
+
+    // In Data\F4SE\Plugins but F4SE refused it: its own words are the verdict.
+    write(game / "Data" / "F4SE" / "Plugins" / "MultiplexerDiagnosticRecorder.dll", "MZ");
+    write(f4se / "f4se.log", "plugin X\\MultiplexerDiagnosticRecorder.dll (00000001 MultiplexerDiagnosticRecorder "
+                             "01010000) disabled, couldn't load plugin\r\n");
+    st = checkRecorderInstall(game, f4se);
+    CHECK(st.installed);
+    CHECK(!st.ok);
+    CHECK(st.verdict.find("couldn't load plugin") != std::string::npos);
+
+    // Loaded: OK, with the status log and the newest session.
+    write(f4se / "f4se.log", "plugin X\\MultiplexerDiagnosticRecorder.dll (00000001 MultiplexerDiagnosticRecorder "
+                             "01010000) loaded correctly (handle 7)\n");
+    write(f4se / "MultiplexerDiagnosticRecorder.log", "[10:00:00] MultiplexerDiagnosticRecorder 1.1.0 loaded\r\n");
+    write(f4se / "MultiplexerDiagnosticRecorder" / "session-20261108-100000-1.jsonl", kStart);
+    st = checkRecorderInstall(game, f4se);
+    CHECK(st.ok);
+    CHECK(!st.newestSession.empty());
+    const auto text = formatInstallStatus(st);
+    CHECK(text.find("OK: F4SE loaded the recorder") != std::string::npos);
+    CHECK(text.find("1.1.0 loaded") != std::string::npos);
+}

@@ -72,7 +72,7 @@ bool modEnabled(const fs::path& profilePath, const std::string& modName)
 }
 
 std::vector<std::string> outputsNotVisible(const Session& session, const std::vector<fs::path>& outputs,
-                                           const std::string& assumeEnabled)
+                                           const std::string& assumeEnabled, const fs::path& base)
 {
     // Where the game sees files through MO2: enabled mods (highest priority first), overwrite,
     // then the game's Data folder. The highest-priority copy is the one the game loads.
@@ -93,18 +93,19 @@ std::vector<std::string> outputsNotVisible(const Session& session, const std::ve
     std::vector<std::string> missing;
     std::error_code ec;
     for (const auto& f : outputs) {
+        const std::string rel = pathToUtf8(base.empty() ? f.filename() : f.lexically_relative(base));
         bool ok = false;
         for (const auto& root : roots) {
             if (root.empty())
                 continue;
-            const auto candidate = root / f.filename();
-            if (fs::is_regular_file(candidate, ec)) {
+            const auto candidate = findPathCaseInsensitive(root, rel);
+            if (!candidate.empty() && fs::is_regular_file(candidate, ec)) {
                 ok = sameFile(candidate, f); // the winner decides
                 break;
             }
         }
         if (!ok)
-            missing.push_back(pathToUtf8(f.filename()));
+            missing.push_back(rel);
     }
     return missing;
 }

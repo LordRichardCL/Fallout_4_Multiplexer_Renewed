@@ -1,4 +1,5 @@
 #include "diagnostics/RecorderLog.hpp"
+#include "diagnostics/RecorderPackage.hpp"
 
 #include "engine/OutputRuns.hpp"
 
@@ -8,6 +9,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <sstream>
 
@@ -449,6 +451,83 @@ fs::path newestSession(const fs::path& folder)
 fs::path defaultRecorderFolder()
 {
     return platform::fallout4DocumentsDir() / "F4SE" / "MultiplexerDiagnosticRecorder";
+}
+
+RecorderInstallStatus checkRecorderInstall(const fs::path& gamePath, const fs::path& f4seFolderIn)
+{
+    RecorderInstallStatus st;
+    const std::string dll = kRecorderDllName;
+    const fs::path f4seFolder = f4seFolderIn.empty() ? defaultRecorderFolder().parent_path() : f4seFolderIn;
+    std::error_code ec;
+    if (!gamePath.empty()) {
+        st.expected = gamePath / "Data" / "F4SE" / "Plugins" / dll;
+        st.installed = !findPathCaseInsensitive(gamePath, "Data\\F4SE\\Plugins\\" + dll).empty();
+        for (const char* wrong : {"", "Data\\", "Data\\F4SE\\", "F4SE\\Plugins\\", "Data\\Plugins\\"})
+            if (auto p = findPathCaseInsensitive(gamePath, std::string(wrong) + dll); !p.empty())
+                st.misplaced.push_back(p);
+    }
+    st.f4seLog = f4seFolder / "f4se.log";
+    std::string text;
+    if (std::ifstream in{st.f4seLog, std::ios::binary}) {
+        st.f4seLogFound = true;
+        text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    // The last line naming the DLL holds F4SE's result ("loaded correctly", "disabled, ...", "couldn't load").
+    {
+        std::istringstream in(text);
+        for (std::string line; std::getline(in, line);) {
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            if (toLower(line).find("multiplexerdiagnosticrecorder") != std::string::npos)
+                st.f4seLine = line;
+        }
+    }
+    st.loadedByF4se = toLower(st.f4seLine).find("loaded correctly") != std::string::npos;
+    st.statusLog = f4seFolder / "MultiplexerDiagnosticRecorder.log";
+    if (std::ifstream in{st.statusLog, std::ios::binary})
+        st.statusText.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    st.newestSession = newestSession(f4seFolder / "MultiplexerDiagnosticRecorder");
+
+    if (st.loadedByF4se) {
+        st.ok = true;
+        st.verdict = "F4SE loaded the recorder in the last game session";
+        if (st.newestSession.empty())
+            st.verdict += ", but no session log was found in " +
+                          pathToUtf8(f4seFolder / "MultiplexerDiagnosticRecorder");
+    } else if (!st.f4seLine.empty()) {
+        st.verdict = "F4SE found the recorder but did not load it: \"" + trim(st.f4seLine) + "\"";
+    } else if (!st.installed && !st.misplaced.empty()) {
+        st.verdict = "the recorder is in a folder F4SE never reads (" + pathToUtf8(st.misplaced.front()) +
+                     "): move it to " + pathToUtf8(st.expected);
+    } else if (!st.f4seLogFound) {
+        st.verdict = "no f4se.log in " + pathToUtf8(f4seFolder) +
+                     ": the game has not been started through F4SE (f4se_loader.exe or the mod manager's F4SE entry)";
+    } else if (st.installed) {
+        st.verdict = "the recorder is installed, but the last F4SE session did not mention it: start the game "
+                     "through F4SE again (f4se.log is rewritten on every start)";
+    } else {
+        st.verdict = "F4SE did not see the recorder: it is not in " + pathToUtf8(st.expected) +
+                     " (under Mod Organizer 2: enable the mod holding Data\\F4SE\\Plugins\\" + dll +
+                     "; under Vortex: deploy it)";
+    }
+    return st;
+}
+
+std::string formatInstallStatus(const RecorderInstallStatus& s)
+{
+    std::ostringstream o;
+    o << "Diagnostic Recorder installation\n================================\n";
+    o << "Verdict:   " << (s.ok ? "OK: " : "PROBLEM: ") << s.verdict << "\n";
+    o << "Expected:  " << pathToUtf8(s.expected) << (s.installed ? " (present)" : " (not there)") << "\n";
+    for (const auto& m : s.misplaced)
+        o << "Misplaced: " << pathToUtf8(m) << " (F4SE does not read this folder)\n";
+    o << "f4se.log:  " << pathToUtf8(s.f4seLog) << (s.f4seLogFound ? "" : " (not found)") << "\n";
+    o << "F4SE says: " << (s.f4seLine.empty() ? std::string("(nothing about the recorder)") : trim(s.f4seLine)) << "\n";
+    o << "Newest session log: " << (s.newestSession.empty() ? std::string("(none)") : pathToUtf8(s.newestSession))
+      << "\n";
+    if (!s.statusText.empty())
+        o << "\nThe recorder's own log (" << pathToUtf8(s.statusLog) << "):\n" << s.statusText;
+    return o.str();
 }
 
 std::string formatReport(const RecorderSession& s, const std::vector<Finding>& findings)

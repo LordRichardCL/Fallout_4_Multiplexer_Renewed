@@ -64,6 +64,9 @@ Usage:
                  list what it recognises: likely causes, evidence, checks.
                  --package: the "Multiplexer Output" folder, to compare the
                  game's load order with the one Multiplexer built for
+  fo4mx diagnose --install [--game DIR]
+                 check the recorder itself: is the DLL in Data\F4SE\Plugins,
+                 did F4SE load it (f4se.log), and its own status log
 
 Install selection:
   --mo2 DIR            Mod Organizer 2 instance folder (contains ModOrganizer.ini)
@@ -123,7 +126,7 @@ struct Args {
 Args parseArgs(int argc, char** argv)
 {
     static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
-                                                   "--diagnostic-recorder",
+                                                   "--diagnostic-recorder", "--install",
                                                    "--verbose", "-v"};
     Args a;
     for (int i = 1; i < argc; ++i) {
@@ -605,6 +608,11 @@ int cmdPipeline(const Args& a)
 int cmdDiagnose(const Args& a)
 {
     namespace fs = std::filesystem;
+    if (a.has("--install")) {
+        const auto st = diagnostics::checkRecorderInstall(a.has("--game") ? utf8ToPath(a.get("--game")) : fs::path());
+        std::fputs(diagnostics::formatInstallStatus(st).c_str(), stdout);
+        return st.ok ? 0 : 2;
+    }
     fs::path file = a.positional.empty() ? diagnostics::newestSession(diagnostics::defaultRecorderFolder())
                                          : utf8ToPath(a.positional[0]);
     if (file.empty() || !fs::exists(file)) {

@@ -74,6 +74,28 @@ std::filesystem::path newestSession(const std::filesystem::path& folder);
 // Where the recorder writes: Documents\My Games\Fallout4\F4SE\MultiplexerDiagnosticRecorder.
 std::filesystem::path defaultRecorderFolder();
 
+// Whether the recorder is installed where F4SE looks, and whether F4SE loaded it. Answers "it
+// captured nothing": the DLL in the wrong folder, F4SE refusing it, or the game not started through F4SE.
+struct RecorderInstallStatus {
+    std::filesystem::path expected;                // <game>\Data\F4SE\Plugins\MultiplexerDiagnosticRecorder.dll
+    bool installed = false;                        // found there
+    std::vector<std::filesystem::path> misplaced;  // found in a folder F4SE never reads
+    std::filesystem::path f4seLog;                 // Documents\My Games\Fallout4\F4SE\f4se.log
+    bool f4seLogFound = false;
+    std::string f4seLine;                          // F4SE's line about the recorder (empty: not mentioned)
+    bool loadedByF4se = false;                     // "... loaded correctly"
+    std::filesystem::path statusLog;               // the recorder's own text log (1.1.0 and later)
+    std::string statusText;                        // its contents
+    std::filesystem::path newestSession;
+    std::string verdict;                           // one sentence: what is wrong, or that it works
+    bool ok = false;
+};
+// `f4seFolder`: Documents\My Games\Fallout4\F4SE (empty: the default). Under Mod Organizer 2 the DLL
+// is inside a mod folder, so `installed` may be false while F4SE still loads it: its log decides.
+RecorderInstallStatus checkRecorderInstall(const std::filesystem::path& gamePath,
+                                           const std::filesystem::path& f4seFolder = {});
+std::string formatInstallStatus(const RecorderInstallStatus& s);
+
 // A plain-text report of a session and its findings (CLI, saved reports).
 std::string formatReport(const RecorderSession& session, const std::vector<Finding>& findings);
 

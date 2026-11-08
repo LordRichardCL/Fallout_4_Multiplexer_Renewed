@@ -31,9 +31,10 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     auto* openBtn = makeButton("Open Log…");
     auto* folder = makeButton("Open Log Folder");
     auto* save = makeButton("Save Report…");
+    auto* check = makeButton("Check Installation");
     l->addWidget(makePageHeader("Diagnostics",
                                 "What the optional Diagnostic Recorder saw while you played, and what it likely means.",
-                                {newest, openBtn, folder, save}));
+                                {newest, openBtn, folder, check, save}));
 
     auto* intro = new QLabel(
         "Turn on <b>Prepare the Diagnostic Recorder</b> in Settings, export, and install "
@@ -44,6 +45,11 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     intro->setWordWrap(true);
     intro->setStyleSheet("color:#8aa196");
     l->addWidget(intro);
+
+    install_ = new QLabel;
+    install_->setWordWrap(true);
+    install_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    l->addWidget(install_);
 
     summary_ = new QLabel("No log opened.");
     summary_->setWordWrap(true);
@@ -78,6 +84,11 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
                                                        toQString(dg::defaultRecorderFolder()), "Recorder logs (*.jsonl)");
         if (!f.isEmpty())
             open(f);
+    });
+    connect(check, &QPushButton::clicked, this, [this] {
+        showInstallStatus();
+        const auto st = dg::checkRecorderInstall(app_->config().install.gamePath);
+        QMessageBox::information(this, "Diagnostic Recorder", QString::fromStdString(dg::formatInstallStatus(st)));
     });
     connect(folder, &QPushButton::clicked, this,
             [] { QDesktopServices::openUrl(QUrl::fromLocalFile(toQString(dg::defaultRecorderFolder()))); });
@@ -153,6 +164,19 @@ void DiagnosticsPage::open(const QString& file)
         new QTreeWidgetItem(findings_, {"", "No recognised problems in this session."});
 }
 
-void DiagnosticsPage::refresh() {}
+void DiagnosticsPage::refresh()
+{
+    showInstallStatus();
+}
+
+void DiagnosticsPage::showInstallStatus()
+{
+    // Read from f4se.log of the last game start: whether F4SE loaded the recorder, or why not.
+    const auto st = dg::checkRecorderInstall(app_->config().install.gamePath);
+    install_->setText(QString("<b>Recorder:</b> <span style=\"color:%1\">%2</span> %3")
+                          .arg(st.ok ? "#6fbf73" : "#e0a040")
+                          .arg(st.ok ? "loaded" : "not loaded")
+                          .arg(QString::fromStdString(st.verdict).toHtmlEscaped()));
+}
 
 } // namespace gui

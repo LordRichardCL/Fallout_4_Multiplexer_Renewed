@@ -18,6 +18,9 @@ struct DeploymentCheck {
     // Outputs the game cannot see yet: not in its Data folder (under Mod Organizer 2: in no enabled
     // mod of the profile, overwrite or Data), or different from the package's copy.
     std::vector<std::string> missingOutputs;
+    // Scripts and configs the Auto-Merger rewrote (MCM menus, GetFormFromFile scripts) whose copy is not
+    // the one the game loads: another mod's original wins, and it still names a compiled plugin.
+    std::vector<std::string> relinkedNotLoaded;
     // Compiled plugins enabled in the plugins.txt on disk right now (they must be disabled).
     std::vector<std::string> stillEnabled;
     size_t fullPluginsAfter = 0;  // active full plugins once compiled plugins are off and outputs on

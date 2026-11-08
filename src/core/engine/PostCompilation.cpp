@@ -1,5 +1,6 @@
 #include "engine/PostCompilation.hpp"
 
+#include "engine/AutoMerger.hpp"
 #include "engine/CompilationEngine.hpp"
 #include "engine/Exporter.hpp"
 #include "engine/Mo2Support.hpp"
@@ -9,6 +10,7 @@
 #include "util/Text.hpp"
 #include "vfs/GameInstall.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <iterator>
 #include <unordered_map>
@@ -114,6 +116,44 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
         }
     }
 
+    // The Auto-Merger's rewritten scripts and MCM configs: the copy the game loads must be ours. Under
+    // Vortex the original mod's file can win the conflict, and MCM then looks for "Plugin.esl|F99" in a
+    // plugin that is switched off (the menu is empty or its settings do nothing).
+    if (d.missingOutputs.empty() && !result.dataFolder.empty()) {
+        std::vector<fs::path> copies;
+        for (const auto& [rel, hash] : AutoMerger::readManifest(result.dataFolder)) {
+            (void)hash;
+            if (auto p = findPathCaseInsensitive(result.dataFolder, rel); !p.empty())
+                copies.push_back(p);
+        }
+        std::sort(copies.begin(), copies.end());
+        if (kind == InstallKind::ModOrganizer2 && !session.install.profilePath.empty())
+            d.relinkedNotLoaded = mo2::outputsNotVisible(session, copies, assumeEnabledMod, result.dataFolder);
+        else if (kind != InstallKind::ModOrganizer2 && !session.install.dataPath.empty() &&
+                 norm(result.dataFolder) != norm(session.install.dataPath))
+            for (const auto& f : copies) {
+                const auto rel = pathToUtf8(f.lexically_relative(result.dataFolder));
+                const auto installed = findPathCaseInsensitive(session.install.dataPath, rel);
+                if (installed.empty() || !sameFile(f, installed))
+                    d.relinkedNotLoaded.push_back(rel);
+            }
+        if (!d.relinkedNotLoaded.empty()) {
+            std::string how;
+            if (kind == InstallKind::Vortex)
+                how = "in Vortex, open Mods, resolve the file conflicts so the output mod loads after the mods it "
+                      "conflicts with (or always wins), then deploy";
+            else if (kind == InstallKind::ModOrganizer2)
+                how = "give the output mod a higher priority than the mods it conflicts with";
+            else
+                how = "install the package again, overwriting the existing files";
+            d.blockers.push_back(std::to_string(d.relinkedNotLoaded.size()) +
+                                 " script(s) or MCM config(s) rewritten by this build are not the copies the game "
+                                 "loads (first: " + d.relinkedNotLoaded.front() +
+                                 "): another mod's original wins and still names a compiled plugin, so MCM menus and "
+                                 "scripts would look for records that are gone. " + how);
+        }
+    }
+
     // Compiled plugins still enabled in the plugins.txt the game (or the profile) uses.
     if (!session.install.pluginsFile.empty()) {
         std::unordered_set<std::string> enabled;
@@ -151,6 +191,14 @@ std::string PostCompilation::instructions(const Session& session, const Compilat
         t += "DO NOT SWITCH OVER YET\n";
         for (const auto& b : d.blockers)
             t += "  - " + b + "\n";
+        t += "\n";
+    }
+    if (!d.relinkedNotLoaded.empty()) {
+        t += "Rewritten scripts and MCM configs the game does not load yet (another mod's copy wins)\n";
+        for (size_t i = 0; i < d.relinkedNotLoaded.size() && i < 50; ++i)
+            t += "  - " + d.relinkedNotLoaded[i] + "\n";
+        if (d.relinkedNotLoaded.size() > 50)
+            t += "  ... and " + std::to_string(d.relinkedNotLoaded.size() - 50) + " more\n";
         t += "\n";
     }
     if (!d.warnings.empty()) {

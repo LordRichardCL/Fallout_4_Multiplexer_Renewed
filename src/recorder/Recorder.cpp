@@ -33,8 +33,8 @@
 
 namespace {
 
-constexpr std::uint32_t kRecorderVersion = f4se_abi::packVersion(1, 0, 0);
-constexpr const char* kRecorderVersionText = "1.0.0";
+constexpr std::uint32_t kRecorderVersion = f4se_abi::packVersion(1, 1, 0);
+constexpr const char* kRecorderVersionText = "1.1.0";
 constexpr int kSchema = 1;
 constexpr size_t kKeepSessions = 10;   // older session logs are deleted
 constexpr size_t kMaxF4seLines = 400;  // plugin lines copied from f4se.log
@@ -42,6 +42,8 @@ constexpr size_t kMaxPlugins = 8192;   // entries copied from plugins.txt
 
 std::mutex g_lock;
 HANDLE g_file = INVALID_HANDLE_VALUE;
+HANDLE g_status = INVALID_HANDLE_VALUE; // F4SE\MultiplexerDiagnosticRecorder.log: plain text, rewritten each start
+std::wstring g_sessionPath;
 std::uint64_t g_startTick = 0;
 std::uint64_t g_seq = 0;
 f4se_abi::PluginHandle g_handle = f4se_abi::kPluginHandleInvalid;
@@ -150,6 +152,21 @@ void writeLine(const std::string& line)
     DWORD written = 0;
     WriteFile(g_file, line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
     FlushFileBuffers(g_file); // events are few: each one is on disk before the game goes on
+}
+
+// One line of the plain-text status log, the usual place to check that an F4SE plugin loaded.
+void statusLine(const std::string& text)
+{
+    if (g_status == INVALID_HANDLE_VALUE)
+        return;
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    char stamp[32];
+    std::snprintf(stamp, sizeof(stamp), "[%02u:%02u:%02u] ", t.wHour, t.wMinute, t.wSecond);
+    const std::string line = stamp + text + "\r\n";
+    DWORD written = 0;
+    WriteFile(g_status, line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
+    FlushFileBuffers(g_status);
 }
 
 void Event::write()
@@ -289,8 +306,18 @@ void openSession()
     wchar_t name[64];
     swprintf(name, 64, L"session-%04u%02u%02u-%02u%02u%02u-%u.jsonl", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
              t.wSecond, GetCurrentProcessId());
-    g_file = CreateFileW((folder + name).c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
+    g_sessionPath = folder + name;
+    g_file = CreateFileW(g_sessionPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
                          FILE_ATTRIBUTE_NORMAL, nullptr);
+}
+
+void openStatus()
+{
+    if (g_myGames.empty())
+        return;
+    CreateDirectoryW((g_myGames + L"F4SE").c_str(), nullptr);
+    g_status = CreateFileW((g_myGames + L"F4SE\\MultiplexerDiagnosticRecorder.log").c_str(), GENERIC_WRITE,
+                           FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
 // ---- Snapshots -----------------------------------------------------------------------------
@@ -479,6 +506,16 @@ void onMessage(f4se_abi::F4SEMessagingInterface::Message* msg)
         if (msg->type == M::kGameDataReady)
             e.flag("ready", msg->data != nullptr);
         e.write();
+        if (msg->type == M::kPostLoad)
+            statusLine("All F4SE plugins loaded");
+        else if (msg->type == M::kGameDataReady && msg->data != nullptr)
+            statusLine("Game data ready (plugins loaded by the game)");
+        else if (msg->type == M::kGameLoaded)
+            statusLine("Main menu reached: the recorder is active for this session");
+        else if (msg->type == M::kNewGame)
+            statusLine("New game started");
+        else if (msg->type == M::kPostLoadGame)
+            statusLine(std::string("Save loaded") + (msg->data != nullptr ? "" : " (failed)"));
         if (msg->type == M::kPostLoad && !g_loadRecorded) {
             g_loadRecorded = true;
             recordLoadOrder();
@@ -552,6 +589,13 @@ __declspec(dllexport) bool F4SEPlugin_Load(const f4se_abi::F4SEInterface* f4se)
         if (!documents.empty())
             g_myGames = documents + L"My Games\\" + saveFolder + L"\\";
         openSession();
+        openStatus();
+        statusLine(std::string("MultiplexerDiagnosticRecorder ") + kRecorderVersionText + " loaded by F4SE " +
+                   versionText(g_f4seVersion) + " (Fallout 4 " + versionText(g_runtimeVersion) + ")");
+        statusLine(g_file != INVALID_HANDLE_VALUE ? "Recording to " + pathText(g_sessionPath)
+                                                  : "ERROR: the session log could not be created in " +
+                                                        pathText(logFolder()) + " (error " +
+                                                        std::to_string(GetLastError()) + ")");
 
         Event("session_start")
             .str("recorder_version", kRecorderVersionText)
@@ -568,11 +612,14 @@ __declspec(dllexport) bool F4SEPlugin_Load(const f4se_abi::F4SEInterface* f4se)
                               ? static_cast<f4se_abi::F4SEMessagingInterface*>(f4se->QueryInterface(f4se_abi::kInterfaceMessaging))
                               : nullptr;
         if (!messaging || !messaging->RegisterListener) {
+            statusLine("ERROR: the F4SE messaging interface is not available: game events will not be recorded");
             recorderError("load", "the F4SE messaging interface is not available: game events will not be recorded");
             return true; // the session start is still useful
         }
-        if (!messaging->RegisterListener(g_handle, "F4SE", onMessage))
+        if (!messaging->RegisterListener(g_handle, "F4SE", onMessage)) {
+            statusLine("ERROR: registering for F4SE messages failed: game events will not be recorded");
             recorderError("load", "registering for F4SE messages failed: game events will not be recorded");
+        }
         return true;
     } catch (const std::exception& ex) {
         recorderError("load", ex.what());
@@ -599,6 +646,11 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID reserved)
         FlushFileBuffers(g_file);
         CloseHandle(g_file);
         g_file = INVALID_HANDLE_VALUE;
+    }
+    if (reason == DLL_PROCESS_DETACH && reserved != nullptr && g_status != INVALID_HANDLE_VALUE) {
+        statusLine("Game exited normally");
+        CloseHandle(g_status);
+        g_status = INVALID_HANDLE_VALUE;
     }
     return TRUE;
 }
