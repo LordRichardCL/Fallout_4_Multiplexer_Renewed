@@ -80,6 +80,7 @@ enum class Fact {
     FormIdIniUnknown,    // bcr\<plugin>.ini with lines that are not "[section]" or "key=<FormID>"
     OtherFileName,       // any other file named after the plugin
     RecordScriptString,  // a script property in a plugin's record holds the file name (VMAD string)
+    PluginIni,           // Data\<plugin>.ini: read by the game only while that plugin is active
 };
 
 struct Rule {
@@ -183,6 +184,10 @@ Rule rule(Fact f)
     case Fact::OtherFileName:
         return {K::FilePath, C::Unknown, "file name",
                 "a file named after the plugin: something may find it by the plugin's name"};
+    case Fact::PluginIni:
+        return {K::FilePath, C::CompatibilityRequired, "plugin INI",
+                "Fallout 4 reads Data\\<plugin>.ini (game settings for that mod) only while the plugin is active: "
+                "compiled and disabled, its settings would no longer apply"};
     case Fact::RecordScriptString:
         return {K::PluginName, C::CompatibilityRequired, "script property in a record",
                 "a record's script property holds the plugin's file name: its scripts can look records up in that "
@@ -959,6 +964,22 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             session.nameReferences.push_back(std::move(r));
         }
     }
+    // Data\<plugin>.ini: loose INI files in the Data folder named after an active plugin (without its
+    // extension). The game reads them with its own INIs, but only for plugins that are active.
+    if (options.paths)
+        for (const auto* f : session.vfs.rootFiles()) {
+            const std::string& rel = f->relativePath;
+            if (!iendsWith(rel, ".ini") || rel.size() <= 4)
+                continue;
+            const std::string base = toLower(rel.substr(0, rel.size() - 4));
+            for (const auto& [name, plugin] : names) {
+                if (toLower(session.plugins[plugin].baseName()) != base)
+                    continue;
+                auto r = make(Fact::PluginIni, plugin, toLower(rel), "INI", rel, {});
+                r.source = session.vfs.winnerName(*f);
+                session.nameReferences.push_back(std::move(r));
+            }
+        }
     std::map<PluginIndex, std::unordered_set<std::string>> pathCache;
     for (const auto& [key, value] : folders) {
         const auto& [plugin, folder] = key;

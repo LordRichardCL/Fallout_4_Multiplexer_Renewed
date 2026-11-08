@@ -5588,3 +5588,31 @@ TEST(archive_list_never_exceeds_what_the_game_reads)
         if (text.rfind("SResourceArchiveList2=", 0) == 0)
             CHECK(text.size() - std::string("SResourceArchiveList2=").size() <= Exporter::kArchiveListLimit);
 }
+
+// Fallout 4 reads Data\<plugin>.ini only while that plugin is active: compiled and disabled, the mod's
+// settings would no longer apply. The plugin stays in the load order, with or without the Auto-Merger.
+TEST(references_plugin_ini_keeps_the_plugin)
+{
+    auto root = referenceInstall("refpluginini");
+    writeFile(root / "Game" / "Data" / "ModS.ini", "[Archive]\nsResourceIndexFileList=Fallout4 - Textures1.ba2\n");
+    writeFile(root / "Game" / "Data" / "Unrelated.ini", "[General]\n");
+    for (bool autoMerge : {false, true}) {
+        auto cfg = configFor(root);
+        cfg.compile.autoMerge = autoMerge;
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const auto& s = p.session();
+        auto refs = referencesOf(s, "ModS.esp");
+        CHECK_EQ(refs.size(), size_t(1));
+        if (!refs.empty()) {
+            CHECK_EQ(refs[0]->cls, ReferenceClass::CompatibilityRequired);
+            CHECK_EQ(refs[0]->context, std::string("plugin INI"));
+            CHECK_EQ(refs[0]->assetPath, std::string("mods.ini"));
+        }
+        CHECK(referencesOf(s, "ModT.esp").empty());
+        CHECK(s.findPlugin("ModS.esp")->eligibility != Eligibility::Eligible);
+        CHECK(p.compile());
+        CHECK(!p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
+    }
+}
