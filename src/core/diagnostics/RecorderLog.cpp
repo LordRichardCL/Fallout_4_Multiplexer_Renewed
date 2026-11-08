@@ -511,7 +511,14 @@ std::vector<Finding> analyse(const RecorderSession& s, const PackageContext* pac
                     (c.loader ? std::string(" (MultiplexerArchiveLoader was loaded)") : std::string()),
                 "High", {std::to_string(c.loaded.size()) + " of " + std::to_string(c.requested.size()) + " requested archives loaded"},
                 {});
-        if (c.truncated && !c.cutCompensated) {
+        if (c.truncated && !c.cutCompensated && c.missing.empty() && c.pastCutWithPlugin)
+            add(out, FindingSeverity::Warning, "The archive list was cut, but its archives loaded with their plugins",
+                "the game read only " + std::to_string(c.received) + " characters of " + c.key + "; the " +
+                    std::to_string(c.pastCutWithPlugin) + " archives listed after the cut loaded because their own plugins "
+                    "are active, not from the list",
+                "High", {"the archive loader did not supply the list in this session"},
+                {"The list matters only for archives of compiled (disabled) plugins."});
+        if (c.truncated && !c.cutCompensated && !(c.missing.empty() && c.pastCutWithPlugin)) {
             std::vector<std::string> ev = {
                 "the game read " + c.key + " (" + c.iniFile + ") with a " + std::to_string(c.buffer) +
                 "-byte buffer and received " + std::to_string(c.received) + " of " + std::to_string(c.iniValue.size()) +
@@ -710,12 +717,26 @@ ArchiveCheck checkArchives(const RecorderSession& s, const PackageContext* packa
     }
     // A cut read that did not stop any archive in Data from loading: something supplied the rest (the
     // archive loader).
+    // Archives past the cut whose plugin is active load with their plugin anyway: only one whose plugin
+    // is not active shows that the list itself arrived in full.
     if (c.truncated && c.observable && c.missing.empty()) {
-        for (size_t i = 0; i < c.iniEntries.size(); ++i)
-            if (c.iniOffsets[i] + c.iniEntries[i].size() > c.received && seen.count(toLower(c.iniEntries[i]))) {
-                c.cutCompensated = true;
-                break;
+        std::set<std::string> activeBases;
+        for (const auto& [name, active] : s.plugins)
+            if (active) {
+                const auto dot = name.rfind('.');
+                activeBases.insert(toLower(dot == std::string::npos ? name : name.substr(0, dot)));
             }
+        for (size_t i = 0; i < c.iniEntries.size(); ++i) {
+            const std::string n = toLower(c.iniEntries[i]);
+            if (c.iniOffsets[i] + c.iniEntries[i].size() <= c.received || !seen.count(n))
+                continue;
+            const auto dash = n.rfind(" - ");
+            if (dash != std::string::npos && activeBases.count(n.substr(0, dash))) {
+                ++c.pastCutWithPlugin;
+                continue;
+            }
+            c.cutCompensated = true;
+        }
     }
     const size_t notLoaded = c.missing.size() + c.absent.size();
     if (!c.observable)

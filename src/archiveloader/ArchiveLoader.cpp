@@ -39,10 +39,9 @@
 
 namespace {
 
-constexpr std::uint32_t kVersion = f4se_abi::packVersion(0, 1, 0);
-constexpr const char* kVersionText = "0.1.0";
+constexpr std::uint32_t kVersion = f4se_abi::packVersion(0, 2, 0);
+constexpr const char* kVersionText = "0.2.0";
 constexpr const char* kKey = "sResourceArchiveList2";
-constexpr const char* kSettingName = "sresourcearchivelist2:archive"; // compared in lower case
 
 std::mutex g_lock;
 HANDLE g_log = INVALID_HANDLE_VALUE;
@@ -208,101 +207,130 @@ bool readable(const void* p, size_t n)
     return static_cast<const std::uint8_t*>(p) + n <= end;
 }
 
-// Finds the game's SResourceArchiveList2 setting and points it at the full list.
+// Memory regions worth scanning: committed, readable, not guard pages; the executable and private memory
+// (the game's heap), not mapped files.
+template <class F>
+void forEachRegion(bool writableOnly, F f)
+{
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    auto* at = static_cast<std::uint8_t*>(si.lpMinimumApplicationAddress);
+    auto* end = static_cast<std::uint8_t*>(si.lpMaximumApplicationAddress);
+    MEMORY_BASIC_INFORMATION mbi{};
+    while (at < end && VirtualQuery(at, &mbi, sizeof(mbi)) == sizeof(mbi)) {
+        auto* base = static_cast<std::uint8_t*>(mbi.BaseAddress);
+        const DWORD prot = mbi.Protect & 0xFF;
+        const bool readableProt = prot == PAGE_READONLY || prot == PAGE_READWRITE || prot == PAGE_EXECUTE_READ ||
+                                  prot == PAGE_EXECUTE_READWRITE || prot == PAGE_WRITECOPY || prot == PAGE_EXECUTE_WRITECOPY;
+        const bool writable = prot == PAGE_READWRITE || prot == PAGE_EXECUTE_READWRITE || prot == PAGE_WRITECOPY ||
+                              prot == PAGE_EXECUTE_WRITECOPY;
+        if (mbi.State == MEM_COMMIT && readableProt && !(mbi.Protect & PAGE_GUARD) &&
+            (mbi.Type == MEM_PRIVATE || mbi.Type == MEM_IMAGE) && (!writableOnly || writable))
+            f(base, mbi.RegionSize);
+        at = base + mbi.RegionSize;
+    }
+}
+
+bool nameLike(const char* p)
+{
+    // A pointer next to the value that names the setting: "sResourceArchiveList2" (any case, with or
+    // without ":Archive").
+    static const std::string want = "sresourcearchivelist2";
+    if (!p || !readable(p, want.size() + 1))
+        return false;
+    for (size_t i = 0; i < want.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(p[i])) != want[i])
+            return false;
+    return p[want.size()] == 0 || p[want.size()] == ':';
+}
+
+// Finds the game's SResourceArchiveList2 setting and points it at the full list. It looks for what is
+// certain rather than for a layout: the text the game received (in its heap), the places that point at
+// that text, and, next to such a place, a pointer to the setting's name.
 void supplyList()
 {
     if (g_full.empty())
         return;
     log("The game opens its first archive: " + std::to_string(g_reads) + " reads of " + kKey + " seen, the last returned " +
         std::to_string(g_received.size()) + " characters");
-    auto* base = reinterpret_cast<std::uint8_t*>(GetModuleHandleW(nullptr));
-    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-    const size_t imageSize = nt->OptionalHeader.SizeOfImage;
-    auto* sections = IMAGE_FIRST_SECTION(nt);
-    const WORD count = nt->FileHeader.NumberOfSections;
-    const std::string name = kSettingName;
-
-    // 1. The setting's name in the executable ("sResourceArchiveList2:Archive", any letter case).
-    std::vector<const std::uint8_t*> names;
-    for (WORD i = 0; i < count; ++i) {
-        const auto& s = sections[i];
-        if (!(s.Characteristics & IMAGE_SCN_MEM_READ))
-            continue;
-        const std::uint8_t* p = base + s.VirtualAddress;
-        const size_t size = std::min<size_t>(s.Misc.VirtualSize, imageSize - s.VirtualAddress);
-        for (size_t k = 0; k + name.size() < size; ++k) {
-            if (std::tolower(p[k]) != name[0])
-                continue;
-            size_t j = 1;
-            while (j < name.size() && std::tolower(p[k + j]) == static_cast<unsigned char>(name[j]))
-                ++j;
-            if (j == name.size() && p[k + j] == 0 && (k == 0 || p[k - 1] == 0))
-                names.push_back(p + k);
-        }
-    }
-    log("Setting name found " + std::to_string(names.size()) + " time(s) in the executable");
-
-    // 2. Objects pointing at it: name at +0x10, value at +0x08, vtable at +0x00 (CommonLibF4's Setting).
-    struct Candidate {
-        char** slot;
-        const char* value;
-        bool matches;
-    };
-    std::vector<Candidate> candidates;
-    for (WORD i = 0; i < count; ++i) {
-        const auto& s = sections[i];
-        if (!(s.Characteristics & IMAGE_SCN_MEM_WRITE))
-            continue; // settings live in writable data
-        auto* p = base + s.VirtualAddress;
-        const size_t size = std::min<size_t>(s.Misc.VirtualSize, imageSize - s.VirtualAddress);
-        for (size_t k = 0x10; k + 8 <= size; k += 8) {
-            const auto value = *reinterpret_cast<const std::uintptr_t*>(p + k);
-            if (std::find(names.begin(), names.end(), reinterpret_cast<const std::uint8_t*>(value)) == names.end())
-                continue;
-            auto* obj = reinterpret_cast<std::uintptr_t*>(p + k - 0x10);
-            const auto vtable = reinterpret_cast<std::uint8_t*>(obj[0]);
-            if (vtable < base || vtable >= base + imageSize)
-                continue;
-            auto** slot = reinterpret_cast<char**>(p + k - 0x08);
-            const char* current = *slot;
-            bool matches = false;
-            if (current && readable(current, 1)) {
-                const size_t len = strnlen(current, 4096);
-                if (readable(current, len + 1)) {
-                    const std::string v(current, len);
-                    matches = g_reads ? v == g_received : (!v.empty() && g_full.rfind(v, 0) == 0);
-                }
-            }
-            candidates.push_back({slot, current, matches});
-        }
-    }
-    std::vector<Candidate*> chosen;
-    for (auto& c : candidates)
-        if (c.matches)
-            chosen.push_back(&c);
-    log(std::to_string(candidates.size()) + " setting object(s) found, " + std::to_string(chosen.size()) +
-        " holding exactly the value the game read");
-    // Copies of the same setting (one per settings collection) all hold that value: all are supplied.
-    if (chosen.empty() || chosen.size() > 4) {
-        log("Not changed: the setting could not be identified with certainty");
+    if (g_received.size() < 32) {
+        log("Not changed: the value the game read was not seen (another plugin may read the INI for the game)");
         return;
     }
-    const size_t had = std::strlen(chosen.front()->value);
-    if (had >= g_full.size()) {
-        log("Not changed: the game already holds the whole list (" + std::to_string(had) + " characters)");
+    const DWORD started = GetTickCount();
+    // 1. Where the received text is in memory.
+    std::vector<const char*> copies;
+    const std::string head = g_received.substr(0, 32);
+    size_t scanned = 0;
+    forEachRegion(false, [&](std::uint8_t* base, size_t size) {
+        scanned += size;
+        if (copies.size() >= 64 || size < head.size())
+            return;
+        const auto* p = base;
+        const auto* last = base + size - head.size();
+        while (p <= last) {
+            p = static_cast<const std::uint8_t*>(std::memchr(p, head[0], static_cast<size_t>(last - p) + 1));
+            if (!p)
+                break;
+            if (std::memcmp(p, head.data(), head.size()) == 0 &&
+                static_cast<size_t>(base + size - p) > g_received.size() &&
+                std::memcmp(p, g_received.data(), g_received.size()) == 0 && p[g_received.size()] == 0 &&
+                reinterpret_cast<const char*>(p) != g_received.data())
+                copies.push_back(reinterpret_cast<const char*>(p));
+            ++p;
+        }
+    });
+    log("Copies of the received value in memory: " + std::to_string(copies.size()) + " (" + std::to_string(scanned >> 20) +
+        " MB scanned)");
+    // 2. Places pointing at a copy, and 3. which of them have the setting's name beside them.
+    struct Slot {
+        char** slot;
+        int nameOffset;
+    };
+    std::vector<Slot> pointers;
+    forEachRegion(true, [&](std::uint8_t* base, size_t size) {
+        for (size_t k = 0; k + 8 <= size; k += 8) {
+            const auto v = *reinterpret_cast<const char* const*>(base + k);
+            if (std::find(copies.begin(), copies.end(), v) == copies.end())
+                continue;
+            int nameAt = 0;
+            for (int off : {8, -8, 16, -16, 24, -24}) {
+                const auto at = static_cast<std::ptrdiff_t>(k) + off;
+                if (at < 0 || static_cast<size_t>(at) + 8 > size)
+                    continue;
+                if (nameLike(*reinterpret_cast<const char* const*>(base + at))) {
+                    nameAt = off;
+                    break;
+                }
+            }
+            pointers.push_back({reinterpret_cast<char**>(base + k), nameAt});
+        }
+    });
+    std::vector<char**> chosen;
+    for (const auto& p : pointers) {
+        char where[64];
+        std::snprintf(where, sizeof(where), "%p", static_cast<void*>(p.slot));
+        log(std::string("  pointer at ") + where +
+            (p.nameOffset ? ", setting name at " + std::to_string(p.nameOffset) + " bytes" : ", no setting name beside it"));
+        if (p.nameOffset)
+            chosen.push_back(p.slot);
+    }
+    log(std::to_string(pointers.size()) + " pointer(s) to the value, " + std::to_string(chosen.size()) +
+        " with the setting's name beside them (" + std::to_string(GetTickCount() - started) + " ms)");
+    if (chosen.empty() || chosen.size() > 4) {
+        log("Not changed: the setting could not be identified with certainty");
         return;
     }
     // The supplied value stays allocated for the whole session (the game may keep using it).
     char* full = new char[g_full.size() + 1];
     std::memcpy(full, g_full.c_str(), g_full.size() + 1);
-    for (auto* c : chosen) {
-        g_slots.emplace_back(c->slot, *c->slot);
-        InterlockedExchangePointer(reinterpret_cast<PVOID*>(c->slot), full);
+    for (auto* slot : chosen) {
+        g_slots.emplace_back(slot, *slot);
+        InterlockedExchangePointer(reinterpret_cast<PVOID*>(slot), full);
     }
-    log("Supplied the full list to " + std::to_string(chosen.size()) + " setting object(s): " +
-        std::to_string(g_full.size()) + " characters (the game held " + std::to_string(had) + "), " +
-        std::to_string(g_wanted.size()) + " archives");
+    log("Supplied the full list to " + std::to_string(chosen.size()) + " setting(s): " + std::to_string(g_full.size()) +
+        " characters (the game held " + std::to_string(g_received.size()) + "), " + std::to_string(g_wanted.size()) +
+        " archives");
 }
 
 std::string fileNameLower(const std::wstring& path)

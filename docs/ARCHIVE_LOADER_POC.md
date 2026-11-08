@@ -18,11 +18,13 @@ before that.
    comments), or, without that file, `SResourceArchiveList2` from `Fallout4Custom.ini` as plain text.
 2. Observes the game's INI reads of `sResourceArchiveList2` (a pass-through wrapper of the game's
    `GetPrivateProfileStringA` import), so it knows the exact value the game received.
-3. When the game opens its first BA2 archive (every INI read is over by then), it looks for the game's
-   setting objects named `sResourceArchiveList2:Archive` (vtable, value, name, as in CommonLibF4's
-   `Setting`), by the name text in the executable: no game addresses, no Address Library. Only objects
-   whose value is exactly what the game received are changed (copies of the same setting in several
-   collections are all changed, at most four); anything else and nothing is changed.
+3. When the game opens its first BA2 archive (every INI read is over by then), it finds the game's setting
+   from what is certain rather than from an assumed memory layout: the copies of the received text in
+   memory, the places that point at a copy, and, of those, the ones with a pointer to the setting's name
+   (`sResourceArchiveList2`, any case, with or without `:Archive`) within 24 bytes. Only those are changed
+   (at most four); anything else and nothing is changed. No game addresses, no Address Library. (0.1.0
+   assumed CommonLibF4's `Setting` layout and found nothing in Fallout 4 1.10.163; 0.2.0 logs every
+   pointer it finds and where the name was beside it.)
 4. Points them at the full list. The game's own code then opens and registers every archive, in list
    order, as it does for a short list.
 5. At game data ready (every archive is open by then) it puts the original values back.
@@ -48,6 +50,11 @@ list before its first archive opened: the next experiment then supplies the valu
 To remove it, delete the DLL.
 
 ## Checked so far
+
+In the game (1.10.163, 0.1.0): the setting name was found in the executable but no setting object with
+the assumed layout, so nothing was changed (the recorder's report then showed archives past the cut
+loading only because their plugins were active again; it now says so instead of crediting the list).
+
 
 Under Wine, with a host program that keeps its settings like the game, reads the INI with a 1,024-byte
 buffer and opens the archives from its setting: without the loader 36 of 81 archives opened, with it 81 of
