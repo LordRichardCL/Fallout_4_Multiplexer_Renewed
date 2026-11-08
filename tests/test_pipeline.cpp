@@ -5429,14 +5429,14 @@ TEST(runs_layouts_mods_folder_game_data_and_earlier_versions)
 {
     // The earlier package setting "...\Multiplexer Output\Data": the exports go into "...\Multiplexer Output".
     const auto x = tempDir("runs_layouts");
-    const auto game = x / "Game";
-    auto l1 = output::locate(game / "Multiplexer Output" / "Data", game, game / "Data", {});
-    CHECK(l1.layout == output::Layout::Package && l1.root == game / "Multiplexer Output");
-    auto l2 = output::locate({}, game, game / "Data", {});
-    CHECK(l2.root == game / "Multiplexer Output");
-    auto l3 = output::locate(x / "MO2" / "mods" / "Fallout 4 Multiplexer Output", game, game / "Data", x / "MO2" / "mods");
+    const auto gameDir = x / "Game";
+    auto l1 = output::locate(gameDir / "Multiplexer Output" / "Data", gameDir, gameDir / "Data", {});
+    CHECK(l1.layout == output::Layout::Package && l1.root == gameDir / "Multiplexer Output");
+    auto l2 = output::locate({}, gameDir, gameDir / "Data", {});
+    CHECK(l2.root == gameDir / "Multiplexer Output");
+    auto l3 = output::locate(x / "MO2" / "mods" / "Fallout 4 Multiplexer Output", gameDir, gameDir / "Data", x / "MO2" / "mods");
     CHECK(l3.layout == output::Layout::ModFolder && l3.root == x / "MO2" / "mods");
-    auto l4 = output::locate(game / "Data", game, game / "Data", {});
+    auto l4 = output::locate(gameDir / "Data", gameDir, gameDir / "Data", {});
     CHECK(l4.layout == output::Layout::GameData);
 
     // An export written by an earlier version into a single folder: its FormID map is still read.
