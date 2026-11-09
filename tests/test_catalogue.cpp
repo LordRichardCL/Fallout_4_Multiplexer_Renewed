@@ -644,7 +644,7 @@ TEST(fields_described_from_xedit_after_build_83)
 
 // Fields the last build refused (undescribed bytes that looked like FormIDs), described from xEdit:
 // TERM XMRK (marker model), UNAM (display text), VNAM (image path); ARMA BSMP (gender), BSMS (three
-// floats); PROJ VNAM (sound level); PACK BNAM after UNAM (a data input's name). None holds a FormID.
+// floats); PROJ VNAM (sound level); CSTY CSCV (a float); PACK BNAM after UNAM (a data input's name). None holds a FormID.
 TEST(catalogue_text_and_number_fields_described_from_xedit)
 {
     const auto& d = RecordDefinitions::get();
@@ -663,6 +663,8 @@ TEST(catalogue_text_and_number_fields_described_from_xedit)
     CHECK(heuristicFree("ARMA", {Subrecord(Signature::fromString("BSMP"), std::vector<uint8_t>(4, 0)),
                                  z("BSMB", "Spine1"), Subrecord(Signature::fromString("BSMS"), std::vector<uint8_t>{0xCD, 0, 0, 0, 0, 0, 0x80, 0x3F, 0, 0, 0, 0})}));
     CHECK(heuristicFree("PROJ", {Subrecord(Signature::fromString("VNAM"), std::vector<uint8_t>{2, 0, 0, 0})}));
+    // CSTY CSCV: a float (cover search distance mult); 0.5 is 3F000000, which looked like a FormID.
+    CHECK(heuristicFree("CSTY", {Subrecord(Signature::fromString("CSCV"), std::vector<uint8_t>{0, 0, 0, 0x3F})}));
     // PACK BNAM: a name right after its index; elsewhere (a data input value) still undescribed.
     CHECK(heuristicFree("PACK", {Subrecord(Signature::fromString("UNAM"), std::vector<uint8_t>{1}), z("BNAM", "Place to sleep"),
                                  Subrecord(Signature::fromString("PNAM"), std::vector<uint8_t>(4, 0))}));

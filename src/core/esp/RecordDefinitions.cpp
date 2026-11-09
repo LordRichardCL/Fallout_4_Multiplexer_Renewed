@@ -1376,6 +1376,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("CSME", noRefs())
         .field("CSCR", noRefs())
         .field("CSLR", noRefs())
+        .field("CSCV", noRefs()) // xEdit: cover search distance mult (float, default 0.5)
         .field("CSFL", noRefs())
         .field("DATA", noRefs());
     b.record("WATR", "Water", true)
