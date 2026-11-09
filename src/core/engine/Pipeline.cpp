@@ -386,6 +386,9 @@ bool Pipeline::compile(ProgressSink& progress)
                                pathToUtf8(config_.archiveLoaderDll) + ")";
     }
     const bool archiveLoaderOn = config_.f4seArchiveLoader && archiveLoaderOff.empty();
+    spdlog::info("F4SE archive loader: {}", archiveLoaderOn                 ? std::string("on")
+                                            : config_.f4seArchiveLoader     ? "turned on but not used: " + archiveLoaderOff
+                                                                            : std::string("off (Settings > Archives)"));
     std::map<std::string, std::string> isolatedPatchRecords; // record label -> finding
     if (autoMerge_)
         autoMerge_->keptOut.clear();
