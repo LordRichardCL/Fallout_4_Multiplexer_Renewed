@@ -321,6 +321,20 @@ std::string dllOfLine(const std::string& line)
 
 } // namespace
 
+// Quitting to the desktop: the game writes an exit save, deletes the previous exit save, and ends the
+// process without the normal shutdown, so no session_end is written. The last F4SE messages are then a
+// completed save followed only by the deletion of an "Exitsave".
+bool quitAfterExitSave(const RecorderSession& s)
+{
+    size_t i = s.messages.size();
+    bool deletedExitSave = false;
+    while (i > 0 && s.messages[i - 1].name == "delete_game") {
+        deletedExitSave |= toLower(s.messages[i - 1].save).rfind("exitsave", 0) == 0;
+        --i;
+    }
+    return deletedExitSave && i > 0 && s.messages[i - 1].name == "post_save_game";
+}
+
 std::vector<Finding> analyse(const RecorderSession& s, const PackageContext* package)
 {
     std::vector<Finding> out;
@@ -382,6 +396,11 @@ std::vector<Finding> analyse(const RecorderSession& s, const PackageContext* pac
             add(out, FindingSeverity::Error, "The game stopped before F4SE finished loading its plugins",
                 "an F4SE plugin crashed while loading, or the game was closed during start-up", "Medium", evidence,
                 {kCrashLogCheck, "Check the F4SE plugin results below and f4se.log."});
+        } else if (quitAfterExitSave(s)) {
+            add(out, FindingSeverity::Info, "The game was quit after its exit save",
+                "Fallout 4 saves an exit save when you quit to the desktop, removes the previous one, and then ends "
+                "without the normal shutdown the recorder listens for: this is how the game quits, not a crash",
+                "High", evidence, {});
         } else {
             add(out, FindingSeverity::Warning, "The session ended without a normal exit",
                 "a crash, or the game was closed in a way that skips the normal shutdown (Task Manager, some quit "
@@ -961,7 +980,7 @@ std::string formatReport(const RecorderSession& s, const std::vector<Finding>& f
     for (const auto& p : s.plugins)
         active += p.second;
     o << "Plugins:   " << active << " active of " << s.plugins.size() << " in plugins.txt\n";
-    o << "Ended:     " << (s.ended ? "normally" : "without a normal exit") << " (" << s.messages.size()
+    o << "Ended:     " << (s.ended ? "normally" : quitAfterExitSave(s) ? "quit after the exit save" : "without a normal exit") << " (" << s.messages.size()
       << " F4SE messages)\n\n";
     if (s.hasArchiveDiagnostics())
         o << formatArchiveCheck(checkArchives(s, package)) << "\n";

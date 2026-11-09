@@ -92,6 +92,10 @@ struct Finding {
 
 std::vector<Finding> analyse(const RecorderSession& session, const PackageContext* package = nullptr);
 
+// No session_end, but the game was quit to the desktop: a completed exit save, then only the deletion of
+// the previous "Exitsave" (the game ends without the shutdown the recorder listens for).
+bool quitAfterExitSave(const RecorderSession& session);
+
 // Which requested archives loaded, compared layer by layer: requested by the build (or written in
 // the INI), what the game received when it read the list, and what it opened.
 struct ArchiveCheck {

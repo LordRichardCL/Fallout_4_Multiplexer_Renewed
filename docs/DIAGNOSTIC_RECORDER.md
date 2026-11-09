@@ -78,6 +78,7 @@ a confidence, the evidence from the log and the checks to make.
 | The game stopped while saving | `pre_save_game` without `post_save_game`, no `session_end` | Error, High |
 | The game stopped while loading the plugins | `game_data_ready` false without true, no `session_end` | Error, Medium |
 | The game stopped before F4SE finished loading plugins | no `post_load`, no `session_end` | Error, Medium |
+| The game was quit after its exit save | no `session_end`, and the last F4SE messages are a completed save followed only by the deletion of an `Exitsave` (quitting to the desktop ends the game without the shutdown the recorder sees) | Info, High |
 | The session ended without a normal exit | no `session_end` otherwise (a crash, or a quit path that skips the normal shutdown) | Warning, Low |
 | A save failed to load | `post_load_game` with `success: false` | Error, High |
 | F4SE did not load a plugin | F4SE's own line; the cause from its wording (built for another game version, Address Library missing, Old Gen plugin under Next Gen F4SE, Windows error 126/193, declined during query or load) | Warning, High |

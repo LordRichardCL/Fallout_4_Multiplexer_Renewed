@@ -350,3 +350,27 @@ TEST(diagnostics_f4se_allocation_lines_are_not_load_failures)
     for (const auto& f : analyse(parseRecorderLog(log)))
         CHECK(f.title.find("F4SE did not load") == std::string::npos);
 }
+
+// Quitting to the desktop: an exit save, the previous exit save deleted, then the game ends without the
+// shutdown the recorder sees. Not reported as a possible crash; a session that just stops still is.
+TEST(diagnostics_quit_after_exit_save_is_not_a_crash)
+{
+    auto msg = [](int seq, const std::string& name, const std::string& extra = {}) {
+        return R"({"schema":1,"seq":)" + std::to_string(seq) + R"(,"event":"f4se_message","message":")" + name + R"(","type":0)" +
+               extra + "}\n";
+    };
+    const std::string base = kStart + kPostLoad + msg(2, "game_loaded") + msg(3, "pre_load_game", R"(,"save":"Quickstart")") +
+                             msg(4, "post_load_game", R"(,"success":true)");
+    const std::string quit = base + msg(5, "pre_save_game") + msg(6, "post_save_game") +
+                             msg(7, "delete_game", R"(,"save":"Exitsave0_00000000_416C6578_Vault111Cryo_000053_1_2")");
+    auto s = parseRecorderLog(quit);
+    CHECK(quitAfterExitSave(s));
+    const auto f = analyse(s);
+    CHECK(find(f, "The game was quit after its exit save") != nullptr);
+    CHECK(find(f, "The session ended without a normal exit") == nullptr);
+    CHECK(formatReport(s, f).find("quit after the exit save") != std::string::npos);
+    // An ordinary save (no exit save deleted) followed by nothing: still a possible crash.
+    auto stopped = parseRecorderLog(base + msg(5, "pre_save_game") + msg(6, "post_save_game"));
+    CHECK(!quitAfterExitSave(stopped));
+    CHECK(find(analyse(stopped), "The session ended without a normal exit") != nullptr);
+}

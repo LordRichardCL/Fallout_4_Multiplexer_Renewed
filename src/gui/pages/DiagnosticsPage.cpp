@@ -146,7 +146,9 @@ void DiagnosticsPage::open(const QString& file)
                           .arg(QString::fromStdString(session_.f4seVersion))
                           .arg(QString::fromStdString(session_.recorderVersion))
                           .arg(active)
-                          .arg(session_.ended ? "ended normally" : "<b>no normal exit recorded</b>")
+                          .arg(session_.ended                       ? "ended normally"
+                               : dg::quitAfterExitSave(session_) ? "quit after the exit save"
+                                                                 : "<b>no normal exit recorded</b>")
                           .arg((package ? "Compared with the build in " + toQString(package->root).toHtmlEscaped()
                                         : QString("No Multiplexer build found to compare with.")) +
                                (archives.available
