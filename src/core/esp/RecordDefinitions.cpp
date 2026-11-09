@@ -1138,6 +1138,7 @@ void buildOldGen(RecordDefinitions& d)
         .field("ANAM", zstring())  // track file
         .field("BNAM", zstring())  // finale file
         .field("LNAM", noRefs())   // loop data
+        .field("FNAM", noRefs())   // xEdit: cue points (array of floats)
         .field("SNAM", formIdArray(MergeMode::Multiset)) // tracks
         .conditionRegion();
     b.record("RELA", "Relationship", true).field("DATA", structAt({0, 4, 12}, 16)); // parent, child, association
