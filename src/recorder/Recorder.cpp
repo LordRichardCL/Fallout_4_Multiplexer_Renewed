@@ -460,7 +460,7 @@ void recordModules()
     std::string found = "[";
     size_t n = 0;
     for (const auto& l : lines(text)) {
-        if (l.rfind("plugin ", 0) != 0 || l.rfind("plugin directory", 0) == 0)
+        if (l.rfind("plugin ", 0) != 0 || l.rfind("plugin directory", 0) == 0 || lower(std::wstring(l.begin(), l.end())).find(L".dll") == std::wstring::npos)
             continue;
         if (n >= kMaxF4seLines)
             break;

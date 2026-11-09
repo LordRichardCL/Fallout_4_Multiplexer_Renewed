@@ -341,3 +341,12 @@ TEST(diagnostics_archive_loader_did_not_supply)
     PackageContext plain;
     CHECK(find(analyse(parseRecorderLog(log), &plain), "The archive loader did not supply") == nullptr);
 }
+
+// F4SE writes lines like "plugin 2 allocated 32 bytes from branch pool": not a plugin that failed to load.
+TEST(diagnostics_f4se_allocation_lines_are_not_load_failures)
+{
+    const std::string log = kStart + kPostLoad +
+        R"j({"schema":1,"seq":6,"event":"f4se_log","plugin_lines":["plugin 2 allocated 32 bytes from branch pool","plugin E:\\Data\\F4SE\\Plugins\\\\A.dll (00000001 A 00000001) loaded correctly"]})j" "\n" + kEnd;
+    for (const auto& f : analyse(parseRecorderLog(log)))
+        CHECK(f.title.find("F4SE did not load") == std::string::npos);
+}

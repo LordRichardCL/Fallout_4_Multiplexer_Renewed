@@ -410,6 +410,9 @@ std::vector<Finding> analyse(const RecorderSession& s, const PackageContext* pac
         const std::string l = toLower(line);
         if (l.find("loaded correctly") != std::string::npos)
             continue;
+        // Only lines about a DLL are load results ("plugin 2 allocated 32 bytes from branch pool" is not).
+        if (l.find(".dll") == std::string::npos)
+            continue;
         const auto [cause, checks] = pluginLoadCause(line, s);
         const std::string dll = dllOfLine(line);
         explained.insert(dll);
