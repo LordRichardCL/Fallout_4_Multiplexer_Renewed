@@ -2044,6 +2044,54 @@ TEST(reference_stored_outside_a_cell_keeps_its_plugin)
     CHECK(!result.pluginFiles.empty());
 }
 
+// An override of another record type (made for an older version of its master, where the FormID was
+// a different record): the game keeps the first definition and ignores the override (checked in game
+// with StoryWealth-eXoArmors' recipe "overriding" Enclave-X02's placed light). Both plugins compile,
+// the original is written and the override is reported, not written.
+TEST(override_of_another_record_type_is_ignored_as_in_game)
+{
+    auto root = buildInstall("typemismatch");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "Armor.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000801, {zs("EDID", "ArmorKeyword")})});
+    writePlugin(data / "ArmorPatch.esp", {"Fallout4.esm", "Armor.esp"},
+                {record("GLOB", 0x01000801, {zs("EDID", "StaleOverride"), raw("FNAM", {'f'}), u32("FLTV", 0)}),
+                 record("KYWD", 0x02000800, {zs("EDID", "PatchKeyword")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*Armor.esp\n*ArmorPatch.esp\n");
+    Pipeline p(configFor(root));
+    p.scan();
+    const auto& s = p.session();
+    CHECK_EQ(s.typeMismatches.size(), size_t(1));
+    if (s.typeMismatches.size() != 1)
+        return;
+    CHECK(s.typeMismatches[0].signature == Signature("GLOB"));
+    CHECK(s.typeMismatches[0].original == Signature("KYWD"));
+    CHECK_EQ(s.pluginName(s.typeMismatches[0].plugin), std::string("ArmorPatch.esp"));
+    // Only the first definition is in the override chain, so it is the winner.
+    const auto key = s.typeMismatches[0].key;
+    CHECK(s.findGroup(key) != nullptr);
+    if (!s.findGroup(key))
+        return;
+    CHECK_EQ(s.findGroup(key)->size(), 1u);
+    CHECK(s.winner(key)->signature == Signature("KYWD"));
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto* out = p.compiledOutput();
+    CHECK(out->isCompiled(s.findPlugin("Armor.esp")->index));
+    CHECK(out->isCompiled(s.findPlugin("ArmorPatch.esp")->index));
+    CHECK(s.autoRetained.empty());
+    bool reported = false;
+    for (const auto& i : out->issues)
+        if (i.category == "Broken in Source" && i.message.find("overrides a KYWD of Armor.esp") != std::string::npos)
+            reported = true;
+    CHECK(reported);
+    auto it = out->indexByKey.find(key);
+    CHECK(it != out->indexByKey.end());
+    if (it != out->indexByKey.end())
+        CHECK(out->records[it->second].sig == Signature("KYWD"));
+}
+
 // A new reference listed in its cell's precombine data keeps its plugin out: the precombined meshes
 // were made for its FormID.
 TEST(new_reference_in_precombines_keeps_its_plugin)

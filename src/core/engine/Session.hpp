@@ -180,6 +180,19 @@ struct ReferenceDecision {
     std::string action;  // what the user can do
 };
 
+// An override whose record type differs from the record it overrides (a plugin made for another
+// version of its master, e.g. a recipe "overriding" what is now a placed light). The game keeps the
+// first definition and ignores the override (checked in game: prid shows the original reference,
+// last changed by its own plugin), so the scan drops it from the override chain.
+struct TypeMismatch {
+    FormKey key;
+    PluginIndex plugin = kInvalidPlugin;  // the plugin with the mismatched override
+    Signature signature;                  // its record type
+    PluginIndex definer = kInvalidPlugin; // the plugin of the first definition
+    Signature original;                   // the first definition's record type
+    uint32_t editorId = 0;                // the override's Editor ID (Session::strings id)
+};
+
 struct RecordEdge {
     FormKey from;
     FormKey to;
@@ -202,6 +215,7 @@ public:
     std::vector<PluginInfo> plugins;
     std::vector<PluginIndex> loadOrder; // active plugins, final order
     std::vector<RecordInstance> records; // sorted by FormKey, then load order
+    std::vector<TypeMismatch> typeMismatches; // overrides of another record type, left out of `records`
     std::vector<FormGroup> groups;
     StringPool strings;
 

@@ -808,3 +808,11 @@ Build 83 (the first with the S-1 proof): 1,391 plugins compiled (2,112 before), 
 
 Still undescribed on purpose: PACK `BNAM` (unknown in xEdit itself), and anything past xEdit's layouts.
 
+
+## Overrides of another record type (T1)
+
+StoryWealth-eXoArmors.esp, Enclave-X02.esp and the 14 plugins that need StoryWealth-eXoArmors.esp as a master were kept out: "co_PA_X01_Material_Standard [REFR:...] is stored outside any cell". That label was wrong. Reading both plugins showed that Enclave-X02's object 36A is a placed light (REFR) in its cell `0C1ph3rr01`. StoryWealth-eXoArmors, made for an older Enclave-X02 in which 36A was a recipe, "overrides" it with a recipe (COBJ) in the ordinary top-level COBJ group. The other ten overrides of Enclave-X02 in that plugin match their records' types.
+
+**In game:** with both plugins active, `prid` on the FormID selects the placed light in its cell, last changed by Enclave-X02.esp. The game ignores an override of another record type and keeps the first definition.
+
+**Scan:** such overrides are now left out of the override chain (`Session::typeMismatches`), so every later stage (winner, conflicts, merge, compile) sees what the game loads. Each one in a compiled plugin is reported as **Broken in Source**: "[COBJ:...] in StoryWealth-eXoArmors.esp overrides a REFR of Enclave-X02.esp with a record of another type; the game ignores it and keeps the REFR, so it is not written". The likely cause names the version mismatch. Before this, the scan took the record type from the first definition and the placement from the winner, which produced the "outside any cell" label.

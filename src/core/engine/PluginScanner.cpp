@@ -375,6 +375,33 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
         return a.loadPos < b.loadPos;
     });
 
+    // The game ignores an override whose record type differs from the first definition: it keeps
+    // the record it already has. Drop such overrides so every later stage sees what the game loads.
+    session.typeMismatches.clear();
+    {
+        size_t w = 0;
+        for (size_t i = 0; i < session.records.size();) {
+            size_t j = i + 1;
+            while (j < session.records.size() && session.records[j].key == session.records[i].key)
+                ++j;
+            const RecordInstance first = session.records[i];
+            for (size_t k = i; k < j; ++k) {
+                const auto& r = session.records[k];
+                if (k != i && r.signature != first.signature) {
+                    session.typeMismatches.push_back(
+                        {r.key, r.plugin, r.signature, first.plugin, first.signature, r.editorId});
+                    continue;
+                }
+                session.records[w++] = r;
+            }
+            i = j;
+        }
+        session.records.resize(w);
+        if (!session.typeMismatches.empty())
+            spdlog::warn("{} overrides of another record type ignored, as the game does",
+                         session.typeMismatches.size());
+    }
+
     session.groups.clear();
     for (uint32_t i = 0; i < session.records.size();) {
         uint32_t j = i + 1;

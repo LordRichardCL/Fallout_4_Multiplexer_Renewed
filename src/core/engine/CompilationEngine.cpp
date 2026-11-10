@@ -347,6 +347,25 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         return out;
     }
 
+    // Overrides of another record type (left out by the scan, as the game ignores them).
+    for (const auto& m : session.typeMismatches) {
+        if (m.plugin >= out.compiledFlag_.size() || !out.compiledFlag_[m.plugin])
+            continue;
+        const std::string edid = m.editorId ? session.strings.get(m.editorId) : std::string();
+        addIssue(Severity::Warning, "Broken in Source",
+                 (edid.empty() ? std::string() : edid + " ") + "[" + m.signature.str() + ":" +
+                     session.loadOrderFormId(m.key) + "] in " + session.pluginName(m.plugin) + " overrides a " +
+                     m.original.str() + " of " + session.pluginName(m.definer) +
+                     " with a record of another type; the game ignores it and keeps the " + m.original.str() +
+                     ", so it is not written",
+                 m.key, session.pluginName(m.plugin));
+        out.issues.back().cause =
+            session.pluginName(m.plugin) + " was made for another version of " + session.pluginName(m.definer) +
+            ", in which this FormID was a " + m.signature.str() + "; it has since been renumbered (for example by ESL "
+            "compaction). Use a version of " + session.pluginName(m.plugin) + " made for your version of " +
+            session.pluginName(m.definer) + ".";
+    }
+
     // ---- Resolve: which records need to be materialised -------------------
     progress.stage("Resolve");
     struct Candidate {
