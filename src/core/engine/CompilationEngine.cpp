@@ -754,12 +754,16 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     }
             if (const auto* rvis = subOf(e, Signature("RVIS")))
                 for (const auto& [off, k] : rvis->refs)
-                    if (k.valid() && isNewCompiledCell(k) && previsCells.insert(e.key).second)
+                    if (k.valid() && isNewCompiledCell(k)) {
+                        // Always reported (each RVIS names the plugin to keep out); the cell is
+                        // checked once.
+                        previsCells.insert(e.key);
                         addIssue(Severity::Error, "Precombined Cell",
                                  session.formLabel(e.key) + " is in the previs file of " + session.formLabel(k) +
                                      ", a new cell: that file is found by its plugin's name and FormID, so its plugin "
                                      "stays",
                                  k, session.pluginName(k.origin));
+                    }
             const auto* xclc = subOf(e, Signature("XCLC"));
             if (e.placement != Placement::Kind::WorldCell || !e.parent.valid() || !xclc || xclc->bytes.size() < 8 ||
                 (e.fields.flags() & RecordFlags::Persistent))
