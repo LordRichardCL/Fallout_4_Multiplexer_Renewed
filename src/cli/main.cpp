@@ -130,6 +130,7 @@ Args parseArgs(int argc, char** argv)
 {
     static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
                                                    "--diagnostic-recorder", "--install", "--archive-loader",
+                                                   "--values", "--tree", "--help", "--unfinished",
                                                    "--verbose", "-v"};
     Args a;
     for (int i = 1; i < argc; ++i) {
