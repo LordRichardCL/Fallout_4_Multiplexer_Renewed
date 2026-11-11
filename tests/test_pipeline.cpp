@@ -2044,6 +2044,64 @@ TEST(reference_stored_outside_a_cell_keeps_its_plugin)
     CHECK(!result.pluginFiles.empty());
 }
 
+// A cell's previs (XPRI) and combined (XCRI) reference lists stay sorted by FormID after their FormIDs
+// are rewritten into the output's master numbering. ModS lists its masters out of load order (MastB
+// before MastA), so its sorted lists come out in the opposite order once rewritten.
+TEST(cell_reference_lists_stay_sorted_after_rewriting)
+{
+    auto root = buildInstall("sortedlists");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "MastA.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000801, {zs("EDID", "RefA")})});
+    writePlugin(data / "MastB.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000801, {zs("EDID", "RefB")})});
+    std::vector<uint8_t> xpri(8);
+    storeLE<uint32_t>(xpri.data(), 0x01000801);     // MastB's record
+    storeLE<uint32_t>(xpri.data() + 4, 0x02000801); // MastA's record
+    std::vector<uint8_t> xcri(8 + 4 + 16, 0);
+    storeLE<uint32_t>(xcri.data(), 1);
+    storeLE<uint32_t>(xcri.data() + 4, 4);
+    storeLE<uint32_t>(xcri.data() + 8, 0xABCDEF01);
+    storeLE<uint32_t>(xcri.data() + 12, 0x01000801);
+    storeLE<uint32_t>(xcri.data() + 16, 0xABCDEF01);
+    storeLE<uint32_t>(xcri.data() + 20, 0x02000801);
+    storeLE<uint32_t>(xcri.data() + 24, 0xABCDEF01);
+    writePlugin(data / "ModS.esp", {"Fallout4.esm", "MastB.esp", "MastA.esp"},
+                {record("CELL", 0x00000805, {zs("EDID", "VanillaCell"), raw("XPRI", xpri), raw("XCRI", xcri)}),
+                 record("KYWD", 0x03000800, {zs("EDID", "OwnRecord")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*MastA.esp\n*MastB.esp\n*ModS.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"MastA.esp", "MastB.esp"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto* out = p.compiledOutput();
+    CHECK(out->isCompiled(p.session().findPlugin("ModS.esp")->index));
+    bool found = false;
+    for (const auto& op : out->outputs)
+        for (const auto& rec : op.built) {
+            if (rec.header.signature != Signature("CELL"))
+                continue;
+            for (const auto& sr : rec.subrecords) {
+                if (sr.signature == Signature("XPRI")) {
+                    found = true;
+                    CHECK_EQ(sr.data.size(), size_t(8));
+                    const uint32_t a = loadLE<uint32_t>(sr.data.data()), b = loadLE<uint32_t>(sr.data.data() + 4);
+                    CHECK(a < b);
+                    // MastA loads first, so its record now has the lower master index.
+                    CHECK_EQ(op.masterNames.at(a >> 24), std::string("MastA.esp"));
+                }
+                if (sr.signature == Signature("XCRI")) {
+                    const uint32_t a = loadLE<uint32_t>(sr.data.data() + 12), b = loadLE<uint32_t>(sr.data.data() + 20);
+                    CHECK(a < b);
+                    CHECK_EQ(op.masterNames.at(a >> 24), std::string("MastA.esp"));
+                    CHECK_EQ(loadLE<uint32_t>(sr.data.data() + 16), 0xABCDEF01u); // mesh stays with its reference
+                }
+            }
+        }
+    CHECK(found);
+}
+
 // An override of another record type (made for an older version of its master, where the FormID was
 // a different record): the game keeps the first definition and ignores the override (checked in game
 // with StoryWealth-eXoArmors' recipe "overriding" Enclave-X02's placed light). Both plugins compile,
@@ -2122,6 +2180,57 @@ TEST(new_reference_in_precombines_keeps_its_plugin)
     CHECK(!p.compiledOutput()->isCompiled(p.session().findPlugin("ModQ.esp")->index));
     CHECK(p.session().autoRetained.count("modq.esp") == 1);
     CHECK(p.session().autoRetained.at("modq.esp").find("precombine data") != std::string::npos);
+}
+
+// A cell kept out for its previs data gets read-only evidence: its previs file's IDs read in the
+// numbering of each plugin that could own them, compared with the cell's XPRI; and its precombined
+// meshes looked up by the cell's plugin and FormID (no folder for Fallout4.esm).
+TEST(previs_check_reports_what_the_previs_file_holds)
+{
+    auto root = buildInstall("previscheck");
+    auto data = root / "Game" / "Data";
+    std::vector<uint8_t> xpri(4);
+    storeLE<uint32_t>(xpri.data(), 0x01000800);
+    std::vector<uint8_t> xcri(8 + 4, 0);
+    storeLE<uint32_t>(xcri.data(), 1);
+    storeLE<uint32_t>(xcri.data() + 8, 0x1234ABCD);
+    writePlugin(data / "ModP.esp", {"Fallout4.esm"},
+                {record("CELL", 0x00000805, {zs("EDID", "VanillaCell"), raw("XPRI", xpri), raw("XCRI", xcri)}),
+                 record("REFR", 0x01000800, {zs("EDID", "PrevisRef"), u32("NAME", 0x800)})});
+    std::vector<uint8_t> uvd(0x150 + 8, 0);
+    storeLE<uint32_t>(uvd.data(), 0xD6000012);
+    storeLE<uint32_t>(uvd.data() + 0x08, uint32_t(uvd.size()));
+    storeLE<uint32_t>(uvd.data() + 0x40, 2);
+    storeLE<uint32_t>(uvd.data() + 0x50, 0x150);
+    storeLE<uint32_t>(uvd.data() + 0x150, 0xFD000000);
+    storeLE<uint32_t>(uvd.data() + 0x154, 0x01000800); // ModP's reference, in ModP's numbering
+    std::filesystem::create_directories(data / "Vis" / "Fallout4.esm");
+    writeFile(data / "Vis" / "Fallout4.esm" / "00000805.uvd", std::string(uvd.begin(), uvd.end()));
+    std::filesystem::create_directories(data / "Meshes" / "Precombined");
+    writeFile(data / "Meshes" / "Precombined" / "00000805_1234ABCD_OC.nif", "nif");
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n");
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK(p.session().autoRetained.count("modp.esp") == 1);
+    const auto& checks = p.session().previsChecks;
+    CHECK_EQ(checks.size(), size_t(1));
+    if (checks.empty())
+        return;
+    const std::string& t = checks.begin()->second;
+    CHECK(t.find("Precombined meshes found: 1 of 1") != std::string::npos);
+    CHECK(t.find("2 IDs, 1 combined objects, 1 FormIDs") != std::string::npos);
+    CHECK(t.find("Read in ModP.esp's numbering: 1 exist, 1 in XPRI, 0 in XCRI; 0 XPRI references not in the file") !=
+          std::string::npos);
+    // In Fallout4.esm's numbering the same value names one of its own records (an index past a
+    // plugin's masters is the plugin itself, as in game), which is in no list of this cell.
+    CHECK(t.find("Read in Fallout4.esm's numbering: 1 exist, 0 in XPRI, 0 in XCRI; 1 XPRI references not in the file") !=
+          std::string::npos);
+    bool reported = false;
+    for (const auto& i : p.validation()->issues)
+        reported |= i.category == "Previs Check";
+    CHECK(reported);
 }
 
 namespace {

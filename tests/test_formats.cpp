@@ -9,6 +9,7 @@
 #include "ba2/Ba2Archive.hpp"
 #include "esp/FieldDecoder.hpp"
 #include "esp/GroupLayout.hpp"
+#include "esp/PrevisFile.hpp"
 #include "esp/LayoutCheck.hpp"
 #include "esp/PluginFile.hpp"
 #include "esp/PluginWriter.hpp"
@@ -691,4 +692,35 @@ TEST(zip_package_with_zip64)
     CHECK(zip.find("Data/Plugin.esp") != std::string::npos);
     CHECK(zip.find("Data/many/65999.txt") != std::string::npos);
     CHECK(zip.size() < 66001u * 200u);
+}
+
+// A previs file's object ID table, found through its header (0x40 count, 0x50 offset); anything that
+// does not match the known layout is reported as not recognised, never guessed at.
+TEST(previs_file_id_table_is_read_from_its_header)
+{
+    std::vector<uint8_t> b(0x150 + 12, 0);
+    storeLE<uint32_t>(b.data(), 0xD6000012);
+    storeLE<uint32_t>(b.data() + 0x08, uint32_t(b.size()));
+    storeLE<uint32_t>(b.data() + 0x40, 3);
+    storeLE<uint32_t>(b.data() + 0x50, 0x150);
+    storeLE<uint32_t>(b.data() + 0x150, 0xFD000026);
+    storeLE<uint32_t>(b.data() + 0x154, 0x0700213D);
+    storeLE<uint32_t>(b.data() + 0x158, 0xFD000000);
+    auto f = readPrevisFile(b);
+    CHECK(f.recognised);
+    CHECK_EQ(f.ids.size(), size_t(3));
+    CHECK(PrevisFile::isCombinedObject(f.ids[0]));
+    CHECK_EQ(f.ids[1], 0x0700213Du);
+    CHECK(!PrevisFile::isCombinedObject(f.ids[1]));
+
+    auto broken = b;
+    storeLE<uint32_t>(broken.data() + 0x40, 4); // one ID past the end
+    CHECK(!readPrevisFile(broken).recognised);
+    broken = b;
+    storeLE<uint32_t>(broken.data() + 0x08, 5); // wrong size field
+    CHECK(!readPrevisFile(broken).recognised);
+    broken = b;
+    broken[0] = 0;
+    CHECK(!readPrevisFile(broken).recognised);
+    CHECK(!readPrevisFile(std::vector<uint8_t>(16, 0)).recognised);
 }

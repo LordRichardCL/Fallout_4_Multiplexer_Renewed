@@ -239,6 +239,9 @@ public:
     // Plugins kept out of compilation because validation found records it cannot write safely
     // (lowercase name -> the finding that caused it). Rebuilt by every compilation.
     std::map<std::string, std::string> autoRetained;
+    // Cells kept out for their precombine or previs data -> what their previs file and precombined
+    // meshes hold (PrevisCheck, read-only evidence). Rebuilt by every compilation.
+    std::map<FormKey, std::string> previsChecks;
     // Plugins whose navmesh data does not decode (plugin -> the first such record and why); worked
     // out once per scan, when navmeshes are compiled.
     std::optional<std::map<PluginIndex, std::string>> navmeshFaults;

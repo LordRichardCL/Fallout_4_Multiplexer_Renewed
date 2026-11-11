@@ -1,4 +1,5 @@
 #include "engine/CompilationEngine.hpp"
+#include "engine/PrevisCheck.hpp"
 
 #include "assets/AssetScanner.hpp"
 #include "engine/BuildCache.hpp"
@@ -127,6 +128,37 @@ std::vector<FormMapping> CompilationEngine::readFormMap(const std::filesystem::p
 }
 
 namespace {
+
+// A cell's previs (XPRI) and combined (XCRI) reference lists are sorted by FormID (xEdit keeps them
+// sorted, as the Creation Kit writes them). Rewriting their FormIDs into an output's master numbering
+// can change the order, so they are sorted again once the output's FormIDs are written.
+void sortCellReferenceLists(Subrecord& sr)
+{
+    auto& b = sr.data;
+    if (sr.signature == Signature("XPRI")) {
+        const size_t n = b.size() / 4;
+        std::vector<uint32_t> ids(n);
+        for (size_t i = 0; i < n; ++i)
+            ids[i] = loadLE<uint32_t>(b.data() + 4 * i);
+        std::sort(ids.begin(), ids.end());
+        for (size_t i = 0; i < n; ++i)
+            storeLE<uint32_t>(b.data() + 4 * i, ids[i]);
+    } else if (sr.signature == Signature("XCRI") && b.size() >= 8) {
+        // Meshes count, references count, mesh IDs (sorted, unchanged), then (reference, mesh) pairs.
+        const size_t start = 8 + size_t(4) * loadLE<uint32_t>(b.data());
+        if (start > b.size())
+            return;
+        const size_t n = (b.size() - start) / 8;
+        std::vector<std::pair<uint32_t, uint32_t>> refs(n);
+        for (size_t i = 0; i < n; ++i)
+            refs[i] = {loadLE<uint32_t>(b.data() + start + 8 * i), loadLE<uint32_t>(b.data() + start + 8 * i + 4)};
+        std::sort(refs.begin(), refs.end());
+        for (size_t i = 0; i < n; ++i) {
+            storeLE<uint32_t>(b.data() + start + 8 * i, refs[i].first);
+            storeLE<uint32_t>(b.data() + start + 8 * i + 4, refs[i].second);
+        }
+    }
+}
 
 bool sameRecord(const FieldSet& a, const FieldSet& b)
 {
@@ -659,6 +691,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     }
 
     // ---- Precombines and previs --------------------------------------------------
+    std::set<FormKey> previsCells; // cells whose precombine or previs data keeps a plugin out
     // A new reference listed in a cell's precombine (XCRI) or previs (XPRI) data was combined into
     // meshes made for its FormID; whether those files depend on it cannot be checked, so its plugin
     // stays in the load order.
@@ -675,6 +708,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     auto it = out.indexByKey.find(k);
                     if (it == out.indexByKey.end() || !out.records[it->second].isNew)
                         continue;
+                    previsCells.insert(e.key);
                     addIssue(Severity::Error, "Precombined Reference",
                              session.formLabel(k) + " is a new reference in the " +
                                  (sub.sig == Signature("XCRI") ? "precombine" : "previs") + " data of " +
@@ -710,6 +744,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             if (e.isNew)
                 for (const char* data : {"PCMB", "VISI", "XCRI", "XPRI"})
                     if (subOf(e, Signature::fromString(data))) {
+                        previsCells.insert(e.key);
                         addIssue(Severity::Error, "Precombined Cell",
                                  session.formLabel(e.key) + " is a new cell with precombine or previs data (" + data +
                                      "): those files are found by its plugin's name and its FormID, which compiling "
@@ -719,7 +754,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     }
             if (const auto* rvis = subOf(e, Signature("RVIS")))
                 for (const auto& [off, k] : rvis->refs)
-                    if (k.valid() && isNewCompiledCell(k))
+                    if (k.valid() && isNewCompiledCell(k) && previsCells.insert(e.key).second)
                         addIssue(Severity::Error, "Precombined Cell",
                                  session.formLabel(e.key) + " is in the previs file of " + session.formLabel(k) +
                                      ", a new cell: that file is found by its plugin's name and FormID, so its plugin "
@@ -741,6 +776,20 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                              ": a new cell there would collide in one plugin, so its plugin stays",
                          clash, session.pluginName(clash.origin));
             }
+        }
+    }
+
+    // Evidence for the cells above: what their previs files and precombined meshes hold (read only).
+    for (const auto& k : previsCells) {
+        if (session.previsChecks.count(k))
+            continue; // checked in an earlier round, while the plugin was still compiled
+        auto it = out.indexByKey.find(k);
+        if (it == out.indexByKey.end())
+            continue;
+        try {
+            session.previsChecks.emplace(k, checkPrevis(session, out.records[it->second]));
+        } catch (const std::exception& ex) {
+            session.previsChecks.emplace(k, "Previs check of " + session.formLabel(k) + " failed: " + ex.what());
         }
     }
 
@@ -1333,6 +1382,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                                  e.key, op.name);
                     storeLE<uint32_t>(sr.data.data() + off, raw);
                 }
+                if (e.sig == sig::CELL)
+                    sortCellReferenceLists(sr);
                 // Undescribed bytes are written exactly as their source wrote them: never rewritten
                 // because a value looks like a FormID (validation proves they mean the same here).
                 rec.subrecords.push_back(std::move(sr));

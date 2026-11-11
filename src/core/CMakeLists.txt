@@ -20,6 +20,7 @@ add_library(fo4mx_core STATIC
     esp/PluginFile.cpp
     esp/PluginHeader.cpp
     esp/PluginWriter.cpp
+    esp/PrevisFile.cpp
     esp/Record.cpp
     esp/RecordCatalogue.cpp
     esp/RecordDefinitions.cpp
@@ -37,6 +38,7 @@ add_library(fo4mx_core STATIC
     engine/ChangeDetector.cpp
     engine/CleaningEngine.cpp
     engine/CompilationEngine.cpp
+    engine/PrevisCheck.cpp
     engine/CompilationResult.cpp
     engine/ConflictEngine.cpp
     engine/DependencyEngine.cpp

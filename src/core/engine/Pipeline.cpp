@@ -336,6 +336,7 @@ bool Pipeline::compile(ProgressSink& progress)
     // Compile, and while validation finds records that cannot be written safely, set their source
     // plugins (or patch records) aside and compile again. Each round only ever removes work.
     session_->autoRetained.clear();
+    session_->previsChecks.clear();
     CompileOptions options = config_.compile;
 
     // Archive loaders need the output mod to override the original plugin files, which only a
@@ -538,6 +539,9 @@ bool Pipeline::compile(ProgressSink& progress)
                                           " could not be rewritten safely: " + f.validation,
                                       session_->plugins[pi].name);
         }
+    for (const auto& [cell, text] : session_->previsChecks)
+        validation_->fail(Severity::Info, "Previs Check", text, session_->pluginName(cell.origin),
+                          session_->loadOrderFormId(cell));
     for (const auto& [label, reason] : isolatedPatchRecords)
         validation_->fail(Severity::Warning, "Kept Out Automatically",
                           label + " was left out of the patch (last plugin wins for it): " + reason);
