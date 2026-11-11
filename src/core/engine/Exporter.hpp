@@ -44,6 +44,7 @@ struct ExportResult {
     size_t faceGenFiles = 0; // FaceGen meshes and face textures of compiled new NPCs (Multiplexer_FaceGen.tsv)
     std::filesystem::path voiceManifest;
     size_t archiveWinnerFiles = 0;
+    size_t previsFiles = 0; // previs files translated into an output's numbering (Multiplexer_Previs.tsv)
     // The Diagnostic Recorder, when prepared (Pipeline): its folder, or why it was not written.
     std::filesystem::path recorderFolder;
     // The export's own folder: its name ("Multiplexer Output DDMMYY HHMMSS"; empty when written straight
@@ -64,7 +65,11 @@ public:
                               const std::vector<std::string>& previousOutputs = {});
 
     // The loose copies an earlier export wrote to keep archive winners (path -> content hash).
+    // Loose copies an export wrote (archive winners and translated previs files): path -> content hash.
     static std::unordered_map<std::string, uint64_t> archiveWinnerCopies(const std::filesystem::path& outputDir);
+    // The copies one manifest lists (first two columns: path, content hash).
+    static std::unordered_map<std::string, uint64_t> looseCopies(const std::filesystem::path& outputDir,
+                                                               const char* manifestName);
 
     // Default output folder: "<game folder>\Multiplexer Output\Data", for every mod manager.
     static std::filesystem::path defaultOutputDirectory(const Session& session);

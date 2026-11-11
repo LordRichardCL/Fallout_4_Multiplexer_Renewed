@@ -692,9 +692,11 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
     // ---- Precombines and previs --------------------------------------------------
     std::set<FormKey> previsCells; // cells whose precombine or previs data keeps a plugin out
-    // Previs (XPRI): a new reference listed there is in the cell's previs file (.uvd), which holds
-    // its FormID in the numbering of the plugin it was made for; that file is not rewritten, so the
-    // reference's plugin stays in the load order.
+    // Previs (XPRI): a new reference listed there is in a previs file (.uvd), which holds its FormID in
+    // the numbering of the plugin whose cell record wins. A cell's own previs file is translated into
+    // the output's numbering when the cell is written (P2b, "Previs Numbering" below), or keeps the
+    // plugins out when it cannot be. A cell in another cell's previs file (RVIS, an exterior cluster)
+    // keeps the reference's plugin out: that file is read in the other cell's numbering.
     // Precombine (XCRI) only (P2a): the precombined meshes hold no FormIDs and are found by the cell's
     // own plugin and FormID, which compiling an override of the cell does not change; the previs file
     // does not list combined references (checked on 946 cells of a real load order: none was in a
@@ -724,12 +726,14 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                         ++combinedOnly;
                         continue;
                     }
+                    if (sub.sig == Signature("XPRI") && !e.isNew && ownsPrevisFile(e))
+                        continue; // its previs file is translated with the cell (checked when written)
                     previsCells.insert(e.key);
                     addIssue(Severity::Error, "Precombined Reference",
                              session.formLabel(k) + " is a new reference in the previs data of " +
                                  session.formLabel(e.key) +
-                                 ": the cell's previs file (.uvd) holds its FormID, which compiling would change, so "
-                                 "its plugin stays",
+                                 ", which is in the previs file of another cell (RVIS): that file holds its FormID in "
+                                 "that cell's numbering, which compiling would change, so its plugin stays",
                              k, session.pluginName(k.origin));
                 }
             }
@@ -1452,6 +1456,69 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 }
             }
             op.seqFormIds.push_back(op.built[k].header.formId);
+        }
+    }
+
+    // ---- Previs numbering (P2b) ------------------------------------------------
+    // Every cell written to an output wins in game (outputs load last), so its previs file is read in the
+    // output's numbering from then on. Each FormID is translated from the numbering it is read in today;
+    // a file that changes is written loose as a translated copy. One that cannot be translated keeps out
+    // the plugins that put the cell in the output (the cell's compiled versions and its compiled
+    // references), so the cell keeps today's winning record and file.
+    progress.stage("Previs");
+    {
+        std::map<FormKey, std::vector<uint32_t>> children; // cell -> its compiled references (indices)
+        for (uint32_t i = 0; i < out.records.size(); ++i)
+            if (out.records[i].parent.valid())
+                children[out.records[i].parent].push_back(i);
+        for (const auto& e : out.records) {
+            if (e.sig != sig::CELL || e.output < 0 || e.isNew)
+                continue; // a new cell with previs data keeps its plugin out (above)
+            PrevisTranslation t;
+            try {
+                t = translatePrevis(session, out, e);
+            } catch (const std::exception& ex) {
+                t.hasFile = true;
+                t.ok = false;
+                t.problem = ex.what();
+            }
+            if (!t.hasFile)
+                continue;
+            if (t.ok) {
+                if (t.changed == 0)
+                    continue;
+                addIssue(Severity::Info, "Previs Numbering",
+                         t.path + " (" + session.formLabel(e.key) + "): " + std::to_string(t.changed) + " of " +
+                             std::to_string(t.formIds) + " FormIDs translated from " + t.numbering +
+                             "'s numbering into " + out.outputName(e.output) +
+                             "'s, which now holds the cell's winning record; the translated copy is written loose",
+                         e.key, t.numbering);
+                PrevisRewrite r;
+                r.path = t.path;
+                r.bytes = std::move(t.bytes);
+                r.cell = e.key;
+                r.source = t.source;
+                r.numbering = t.numbering;
+                r.output = out.outputName(e.output);
+                r.formIds = t.formIds;
+                r.changed = t.changed;
+                out.previsFiles.push_back(std::move(r));
+                continue;
+            }
+            const std::string why = session.formLabel(e.key) + " is written to " + out.outputName(e.output) +
+                                    ", so its previs file " + t.path + " would be read in that plugin's numbering, but " +
+                                    t.problem + "; the plugins that put the cell there stay, so it keeps today's record";
+            // Keep out what puts the cell in the output: its compiled versions, then its compiled references.
+            std::set<PluginIndex> named;
+            if (std::any_of(e.chain.begin(), e.chain.end(), [&](PluginIndex p) { return out.isCompiled(p); }))
+                addIssue(Severity::Error, "Previs Numbering", why, e.key, session.pluginName(e.winner));
+            for (uint32_t ci : children[e.key]) {
+                const auto& c = out.records[ci];
+                const PluginIndex p = c.isNew ? c.key.origin : c.winner;
+                if (p == kInvalidPlugin || !out.isCompiled(p) || !named.insert(p).second)
+                    continue;
+                addIssue(Severity::Error, "Previs Numbering", why, c.key, session.pluginName(p));
+            }
         }
     }
 

@@ -2223,7 +2223,8 @@ TEST(new_reference_in_precombines_only_compiles)
     CHECK(noted);
 }
 
-// A cell kept out for its previs data gets read-only evidence: its previs file's IDs read in the
+// A cell kept out for its previs data (a new reference in the previs file of its cluster's cell, RVIS)
+// gets read-only evidence: its previs file's IDs read in the
 // numbering of each plugin that could own them, compared with the cell's XPRI; and its precombined
 // meshes looked up by the cell's plugin and FormID (no folder for Fallout4.esm).
 TEST(previs_check_reports_what_the_previs_file_holds)
@@ -2236,7 +2237,8 @@ TEST(previs_check_reports_what_the_previs_file_holds)
     storeLE<uint32_t>(xcri.data(), 1);
     storeLE<uint32_t>(xcri.data() + 8, 0x1234ABCD);
     writePlugin(data / "ModP.esp", {"Fallout4.esm"},
-                {record("CELL", 0x00000805, {zs("EDID", "VanillaCell"), raw("XPRI", xpri), raw("XCRI", xcri)}),
+                {record("CELL", 0x00000805, {zs("EDID", "VanillaCell"), u32("RVIS", 0x00000806), raw("XPRI", xpri),
+                                              raw("XCRI", xcri)}),
                  record("REFR", 0x01000800, {zs("EDID", "PrevisRef"), u32("NAME", 0x800)})});
     std::vector<uint8_t> uvd(0x150 + 8, 0);
     storeLE<uint32_t>(uvd.data(), 0xD6000012);
@@ -2246,7 +2248,7 @@ TEST(previs_check_reports_what_the_previs_file_holds)
     storeLE<uint32_t>(uvd.data() + 0x150, 0xFD000000);
     storeLE<uint32_t>(uvd.data() + 0x154, 0x01000800); // ModP's reference, in ModP's numbering
     std::filesystem::create_directories(data / "Vis" / "Fallout4.esm");
-    writeFile(data / "Vis" / "Fallout4.esm" / "00000805.uvd", std::string(uvd.begin(), uvd.end()));
+    writeFile(data / "Vis" / "Fallout4.esm" / "00000806.uvd", std::string(uvd.begin(), uvd.end()));
     std::filesystem::create_directories(data / "Meshes" / "Precombined");
     writeFile(data / "Meshes" / "Precombined" / "00000805_1234ABCD_OC.nif", "nif");
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n");
@@ -2261,6 +2263,7 @@ TEST(previs_check_reports_what_the_previs_file_holds)
         return;
     const std::string& t = checks.begin()->second;
     CHECK(t.find("Precombined meshes found: 1 of 1") != std::string::npos);
+    CHECK(t.find("vis\\fallout4.esm\\00000806.uvd") != std::string::npos); // the file RVIS names
     CHECK(t.find("2 IDs, 1 combined objects, 1 FormIDs") != std::string::npos);
     CHECK(t.find("Read in ModP.esp's numbering: 1 exist, 1 in XPRI, 0 in XCRI; 0 XPRI references not in the file") !=
           std::string::npos);
@@ -2288,7 +2291,7 @@ TEST(previs_check_names_what_does_not_match)
     storeLE<uint32_t>(xpri.data(), 0x01000800);
     storeLE<uint32_t>(xpri.data() + 4, 0x01000801);
     writePlugin(data / "ModP.esp", {"Fallout4.esm"},
-                {record("CELL", 0x00000805, {zs("EDID", "VanillaCell"), raw("XPRI", xpri)}),
+                {record("CELL", 0x00000805, {zs("EDID", "VanillaCell"), u32("RVIS", 0x00000806), raw("XPRI", xpri)}),
                  record("REFR", 0x01000800, {zs("EDID", "InFile"), u32("NAME", 0x800)}),
                  record("REFR", 0x01000801, {zs("EDID", "NotInFile"), u32("NAME", 0x800)})});
     std::vector<uint8_t> uvd(0x150 + 8, 0);
@@ -2299,7 +2302,7 @@ TEST(previs_check_names_what_does_not_match)
     storeLE<uint32_t>(uvd.data() + 0x150, 0x01000800); // matches
     storeLE<uint32_t>(uvd.data() + 0x154, 0x01000999); // a record ModP does not have
     std::filesystem::create_directories(data / "Vis" / "Fallout4.esm");
-    writeFile(data / "Vis" / "Fallout4.esm" / "00000805.uvd", std::string(uvd.begin(), uvd.end()));
+    writeFile(data / "Vis" / "Fallout4.esm" / "00000806.uvd", std::string(uvd.begin(), uvd.end()));
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n");
     Pipeline p(configFor(root));
     p.scan();
@@ -2312,6 +2315,119 @@ TEST(previs_check_names_what_does_not_match)
     const std::string& t = checks.begin()->second;
     CHECK(t.find("File IDs not in XPRI (1): 01000999 = nothing in ModP.esp") != std::string::npos);
     CHECK(t.find("XPRI references not in the file (1): NotInFile [REFR:") != std::string::npos);
+}
+
+namespace {
+// A previs file with the given IDs in its table (header as the game's files have it).
+std::string previsBytes(const std::vector<uint32_t>& ids)
+{
+    std::vector<uint8_t> b(0x150 + 4 * ids.size(), 0);
+    storeLE<uint32_t>(b.data(), 0xD6000012);
+    storeLE<uint32_t>(b.data() + 0x08, uint32_t(b.size()));
+    storeLE<uint32_t>(b.data() + 0x40, uint32_t(ids.size()));
+    storeLE<uint32_t>(b.data() + 0x50, 0x150);
+    for (size_t i = 0; i < ids.size(); ++i)
+        storeLE<uint32_t>(b.data() + 0x150 + 4 * i, ids[i]);
+    return std::string(b.begin(), b.end());
+}
+} // namespace
+
+// P2b: a cell written to an output wins in game, so its previs file is read in the output's numbering.
+// ModW lists MastX as its master 01; the output lists MastZ before it (02), so the file's FormIDs are
+// translated and the copy written loose; ModW's new reference in XPRI compiles with it. The copy is
+// listed with its hash, so a later scan does not take it for a source.
+TEST(previs_file_is_translated_into_the_output_numbering)
+{
+    auto root = buildInstall("previstranslate");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "MastZ.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000800, {zs("EDID", "ZWord")})});
+    writePlugin(data / "MastX.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000800, {zs("EDID", "XRef")})});
+    writePlugin(data / "ModZ.esp", {"Fallout4.esm", "MastZ.esp"}, {record("KYWD", 0x01000800, {zs("EDID", "ZWordEdit")})});
+    std::vector<uint8_t> xpri(8);
+    storeLE<uint32_t>(xpri.data(), 0x01000800);
+    storeLE<uint32_t>(xpri.data() + 4, 0x02000800);
+    writePlugin(data / "ModW.esp", {"Fallout4.esm", "MastX.esp"},
+                {record("CELL", 0x00000805, {zs("EDID", "VanillaCell"), raw("XPRI", xpri)}),
+                 record("REFR", 0x02000800, {zs("EDID", "NewPrevisRef"), u32("NAME", 0x800)})});
+    std::filesystem::create_directories(data / "Vis" / "Fallout4.esm");
+    writeFile(data / "Vis" / "Fallout4.esm" / "00000805.uvd", previsBytes({0xFD000000, 0x01000800, 0x02000800}));
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*MastZ.esp\n*MastX.esp\n*ModZ.esp\n*ModW.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"MastZ.esp", "MastX.esp"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto& s = p.session();
+    const auto* out = p.compiledOutput();
+    CHECK(out->isCompiled(s.findPlugin("ModW.esp")->index));
+    CHECK_EQ(out->previsFiles.size(), size_t(1));
+    if (out->previsFiles.empty())
+        return;
+    const auto& pf = out->previsFiles[0];
+    CHECK_EQ(pf.path, std::string("vis\\fallout4.esm\\00000805.uvd"));
+    CHECK_EQ(pf.numbering, std::string("ModW.esp"));
+    CHECK_EQ(pf.formIds, size_t(2));
+    const auto cellIt = out->indexByKey.find(pf.cell);
+    CHECK(cellIt != out->indexByKey.end());
+    if (cellIt == out->indexByKey.end())
+        return;
+    const int o = out->records[cellIt->second].output;
+    bool ok = true;
+    const uint32_t xref = out->translate(s, FormKey{s.findPlugin("MastX.esp")->index, 0x800}, o, &ok);
+    const uint32_t wref = out->translate(s, FormKey{s.findPlugin("ModW.esp")->index, 0x800}, o, &ok);
+    CHECK(ok);
+    CHECK(xref != 0x01000800u); // MastX is not master 01 of the output
+    CHECK_EQ(loadLE<uint32_t>(pf.bytes.data() + 0x150), 0xFD000000u); // combined objects untouched
+    CHECK_EQ(loadLE<uint32_t>(pf.bytes.data() + 0x154), xref);
+    CHECK_EQ(loadLE<uint32_t>(pf.bytes.data() + 0x158), wref);
+    CHECK_EQ(pf.bytes.size(), size_t(0x150 + 12));
+    bool noted = false;
+    for (const auto& i : out->issues)
+        noted |= i.category == "Previs Numbering" && i.severity == Severity::Info;
+    CHECK(noted);
+
+    auto result = p.exportOutputs();
+    const auto written = result.directory / "vis" / "fallout4.esm" / "00000805.uvd";
+    CHECK(std::filesystem::exists(written));
+    CHECK(std::filesystem::exists(result.directory / "Multiplexer_Previs.tsv"));
+    CHECK_EQ(result.previsFiles, size_t(1));
+    std::ifstream in(written, std::ios::binary);
+    std::string disk((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(disk == std::string(pf.bytes.begin(), pf.bytes.end()));
+    CHECK(Exporter::archiveWinnerCopies(result.directory).count("vis\\fallout4.esm\\00000805.uvd") == 1);
+}
+
+// The guard: when a previs file holds a FormID the output cannot express (here a record of MastQ, a
+// master of ModW that nothing written refers to), the cell would lose that object in game. ModW stays
+// in the load order, so the cell keeps today's record and file.
+TEST(untranslatable_previs_file_keeps_its_plugin_out)
+{
+    auto root = buildInstall("previsguard");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "MastX.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000800, {zs("EDID", "XRef")})});
+    writePlugin(data / "MastQ.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000800, {zs("EDID", "QRef")})});
+    std::vector<uint8_t> xpri(4);
+    storeLE<uint32_t>(xpri.data(), 0x01000800);
+    writePlugin(data / "ModW.esp", {"Fallout4.esm", "MastX.esp", "MastQ.esp"},
+                {record("CELL", 0x00000805, {zs("EDID", "VanillaCell"), raw("XPRI", xpri)}),
+                 record("KYWD", 0x03000800, {zs("EDID", "OwnRecord")})});
+    std::filesystem::create_directories(data / "Vis" / "Fallout4.esm");
+    writeFile(data / "Vis" / "Fallout4.esm" / "00000805.uvd", previsBytes({0x01000800, 0x02000800}));
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*MastX.esp\n*MastQ.esp\n*ModW.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"MastX.esp", "MastQ.esp"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto& s = p.session();
+    CHECK(!p.compiledOutput()->isCompiled(s.findPlugin("ModW.esp")->index));
+    CHECK(s.autoRetained.count("modw.esp") == 1 &&
+          s.autoRetained.at("modw.esp").find("cannot be expressed") != std::string::npos);
+    CHECK(p.compiledOutput()->previsFiles.empty());
 }
 
 namespace {

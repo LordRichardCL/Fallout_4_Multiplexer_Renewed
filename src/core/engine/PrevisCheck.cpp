@@ -46,6 +46,73 @@ std::string assetSource(Session& session, const std::string& path)
 
 } // namespace
 
+std::string previsFilePath(const Session& session, FormKey cell)
+{
+    return normalizeAssetPath("vis\\" + session.pluginName(cell.origin) + "\\" + hex8(cell.objectId) + ".uvd");
+}
+
+bool ownsPrevisFile(const EmittedRecord& e)
+{
+    if (const auto* s = subOf(e, Signature("RVIS")))
+        for (const auto& [off, k] : s->refs)
+            if (k.valid() && k != e.key)
+                return false;
+    return true;
+}
+
+PrevisTranslation translatePrevis(Session& session, const CompiledOutput& out, const EmittedRecord& e)
+{
+    PrevisTranslation t;
+    t.path = previsFilePath(session, e.key);
+    if (e.output < 0 || !ownsPrevisFile(e) || !assetExists(session, t.path))
+        return t;
+    t.hasFile = true;
+    t.source = assetSource(session, t.path);
+    const auto* winner = session.winner(e.key);
+    if (!winner) {
+        t.ok = false;
+        t.problem = "the cell's winning record was not found";
+        return t;
+    }
+    t.numbering = session.pluginName(winner->plugin);
+    t.bytes = session.readAsset(t.path);
+    const auto file = readPrevisFile(t.bytes);
+    if (!file.recognised) {
+        t.ok = false;
+        t.problem = "its layout is not recognised (" + file.problem + ")";
+        return t;
+    }
+    const auto& numbering = session.plugins[winner->plugin];
+    for (uint32_t i = 0; i < file.ids.size(); ++i) {
+        const uint32_t raw = file.ids[i];
+        if (PrevisFile::isCombinedObject(raw))
+            continue;
+        ++t.formIds;
+        const FormKey k = session.resolve(numbering, raw);
+        bool ok = k.valid();
+        const uint32_t now = ok ? out.translate(session, k, e.output, &ok) : 0;
+        if (!ok) {
+            t.ok = false;
+            t.problem = "its FormID " + hex8(raw) + " (" +
+                        (k.valid() ? session.formLabel(k) + " in " + session.pluginName(k.origin) : std::string("no plugin")) +
+                        ", read in " + t.numbering + "'s numbering) cannot be expressed in " +
+                        out.outputName(e.output);
+            return t;
+        }
+        if (now != raw) {
+            storeLE<uint32_t>(t.bytes.data() + file.idOffset + 4 * size_t(i), now);
+            ++t.changed;
+        }
+    }
+    // The copy must read back as the same file with only its ID table changed.
+    const auto check = readPrevisFile(t.bytes);
+    if (!check.recognised || check.ids.size() != file.ids.size()) {
+        t.ok = false;
+        t.problem = "the translated copy does not read back";
+    }
+    return t;
+}
+
 std::string checkPrevis(Session& session, const EmittedRecord& e)
 {
     std::set<FormKey> xpri, xcri;

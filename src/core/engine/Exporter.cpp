@@ -283,8 +283,19 @@ std::string Exporter::proposedPluginsTxt(const Session& session, const CompiledO
 
 std::unordered_map<std::string, uint64_t> Exporter::archiveWinnerCopies(const std::filesystem::path& outputDir)
 {
+    // Translated previs files are copies too; on a path listed in both, the previs copy is what was
+    // written last.
+    auto out = looseCopies(outputDir, "Multiplexer_ArchiveWinners.tsv");
+    for (const auto& [path, hash] : looseCopies(outputDir, "Multiplexer_Previs.tsv"))
+        out[path] = hash;
+    return out;
+}
+
+std::unordered_map<std::string, uint64_t> Exporter::looseCopies(const std::filesystem::path& outputDir,
+                                                              const char* manifestName)
+{
     std::unordered_map<std::string, uint64_t> out;
-    std::ifstream in(outputDir / "Multiplexer_ArchiveWinners.tsv");
+    std::ifstream in(outputDir / manifestName);
     for (std::string line; std::getline(in, line);) {
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
@@ -293,7 +304,7 @@ std::unordered_map<std::string, uint64_t> Exporter::archiveWinnerCopies(const st
         const auto tab = line.find('\t');
         if (tab == std::string::npos)
             continue;
-        out[line.substr(0, tab)] = std::strtoull(line.c_str() + tab + 1, nullptr, 16);
+        out[line.substr(0, tab)] = std::strtoull(line.c_str() + tab + 1, nullptr, 16); // further columns ignored
     }
     return out;
 }
@@ -471,14 +482,19 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
     // game shows the same version.
     {
         const auto manifestPath = r.directory / "Multiplexer_ArchiveWinners.tsv";
-        const auto previous = archiveWinnerCopies(r.directory);
+        const auto previous = looseCopies(r.directory, "Multiplexer_ArchiveWinners.tsv");
         std::set<std::string> current;
         std::string manifest = "# Fallout 4 Multiplexer Renewed archive winners v1\n#file\tcontent_hash\tarchive\n";
         const auto& idx = session.assets;
+        std::set<std::string> translated; // previs files written translated below, not as winners
+        for (const auto& pf : c.previsFiles)
+            translated.insert(pf.path);
         if (options.archiveWinnerCopies)
             for (const auto& [entry, slot] : ValidationEngine::archiveWinners(session, c)) {
                 const auto& e = idx.entries[entry];
                 const auto& path = idx.path(e);
+                if (translated.count(path))
+                    continue;
                 std::string relFs = path;
                 std::replace(relFs.begin(), relFs.end(), '\\', '/');
                 const auto dest = r.directory / utf8ToPath(relFs);
@@ -511,6 +527,47 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
         } else {
             writeText(manifestPath, manifest);
             spdlog::info("Archive winners: {} files kept as loose copies", r.archiveWinnerFiles);
+        }
+    }
+    // Previs files translated into an output's numbering (P2b): written loose (a loose file wins over
+    // every archive); Multiplexer_Previs.tsv lists them with their content hash, so a later scan does
+    // not take a copy for a source.
+    {
+        const auto manifestPath = r.directory / "Multiplexer_Previs.tsv";
+        const auto previous = looseCopies(r.directory, "Multiplexer_Previs.tsv");
+        std::set<std::string> current;
+        std::string manifest = "# Fallout 4 Multiplexer Renewed translated previs files v1\n"
+                               "#file\tcontent_hash\tcell\tsource\tread_in\twritten_for\tformids\tchanged\n";
+        for (const auto& pf : c.previsFiles) {
+            std::string relFs = pf.path;
+            std::replace(relFs.begin(), relFs.end(), '\\', '/');
+            const auto dest = r.directory / utf8ToPath(relFs);
+            std::error_code ec;
+            fs::create_directories(dest.parent_path(), ec);
+            if (!sameContent(dest, pf.bytes))
+                writeBinary(dest, pf.bytes);
+            char hash[24];
+            std::snprintf(hash, sizeof(hash), "%016llx",
+                          static_cast<unsigned long long>(fnv1a64(pf.bytes.data(), pf.bytes.size())));
+            manifest += pf.path + "\t" + hash + "\t" + session.loadOrderFormId(pf.cell) + "\t" + pf.source + "\t" +
+                        pf.numbering + "\t" + pf.output + "\t" + std::to_string(pf.formIds) + "\t" +
+                        std::to_string(pf.changed) + "\n";
+            current.insert(pf.path);
+            ++r.previsFiles;
+        }
+        for (const auto& [old, hash] : previous)
+            if (!current.count(old)) {
+                std::string relFs = old;
+                std::replace(relFs.begin(), relFs.end(), '\\', '/');
+                std::error_code ec;
+                fs::remove(r.directory / utf8ToPath(relFs), ec);
+            }
+        std::error_code ec;
+        if (current.empty()) {
+            fs::remove(manifestPath, ec);
+        } else {
+            writeText(manifestPath, manifest);
+            spdlog::info("Previs files: {} translated copies written loose", r.previsFiles);
         }
     }
     // Outputs from the previous build that this build no longer produces.

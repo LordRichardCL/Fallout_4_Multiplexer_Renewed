@@ -137,6 +137,20 @@ struct CompileIssue {
     std::string cause; // likely cause, in plain language
 };
 
+// A previs file (.uvd) written loose into the output with its FormIDs translated into the numbering of
+// the output that now holds its cell's winning record (P2b). The game reads a previs file's FormIDs in
+// the numbering of the plugin whose cell record wins; writing the cell to an output changes that.
+struct PrevisRewrite {
+    std::string path;           // data-relative, lowercase (vis\<plugin>\<cell>.uvd)
+    std::vector<uint8_t> bytes; // the source file with its ID table translated
+    FormKey cell;
+    std::string source;         // mod or archive providing the original
+    std::string numbering;      // plugin whose numbering the original is read in today
+    std::string output;         // output whose numbering the copy uses
+    size_t formIds = 0;         // FormIDs in the file
+    size_t changed = 0;         // FormIDs whose value changed
+};
+
 struct CompiledOutput {
     CompileOptions options;
     std::vector<PluginIndex> compiledPlugins;
@@ -150,6 +164,7 @@ struct CompiledOutput {
     // ships it with the list, and Apply writes the whole list into the INI.
     bool f4seArchiveLoader = false;
     std::vector<CompileIssue> issues;
+    std::vector<PrevisRewrite> previsFiles; // translated previs files, written loose on export
     std::unordered_map<FormKey, uint32_t> indexByKey;
     size_t sourceRecords = 0;      // instances in compiled plugins
     size_t retainedWins = 0;       // overrides left to retained plugins
