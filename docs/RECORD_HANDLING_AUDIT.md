@@ -825,3 +825,15 @@ The 22 plugins kept out for precombine or previs data are the largest group of k
 - **What a precombined mesh holds.** No FormIDs (C2). Its root node is named after its file (`<cell>_<mesh>_OC`), and its path uses the cell's own plugin (no folder for Fallout4.esm) and FormID, as xEdit builds it.
 - **Previs check (read only).** For every cell that keeps a plugin out, the compiler now reads the cell's previs file and looks up its precombined meshes. It reports, as a **Previs Check** row: where the file comes from, how many IDs and combined objects it holds, how many meshes exist, and the file's FormIDs read in the numbering of each plugin that could own them (the winning cell record's, the cell's own, the previs file's cell's), compared with the cell's `XPRI` and `XCRI`. The next build therefore shows, for every such cell in a real load order, which plugin's numbering the files use and whether the table is exactly `XPRI`. That decides what P2 can allow.
 - **Fixed: `XPRI` and `XCRI` order.** Both lists are sorted by FormID (xEdit keeps them sorted, as the Creation Kit writes them). Rewriting their FormIDs into an output's master numbering could change the order, for example when a plugin lists its masters out of load order. Both are now sorted again once an output's FormIDs are written; each `XCRI` reference keeps its mesh.
+
+## Previs, stage P2a: precombine-only references compile; P1.1
+
+The P1 check ran on 946 cells of a real load order (the report shows 500):
+
+- **Precombined meshes:** every cell that lists meshes had all of them at the path built from the cell's own plugin and FormID.
+- **Previs files do not list combined references:** in 499 of 500 cells no `XCRI` reference was in the `.uvd`; in the other, the references were in `XPRI` as well.
+- **A `.uvd` uses the numbering of the plugin whose cell record wins:** 292 cells match it exactly (every FormID exists, `XPRI` complete); in 228, reading it in another candidate plugin's numbering fails. Most of the other 208 are ELFX-PreVis.esp files that differ from `XPRI` by 1 to 5 references in any numbering. A few cells take their cell record and their `.uvd` from different mods (Vault111Cryo: 21 `XPRI` references not in the file), which the game shows the same with or without compilation.
+
+**P2a.** A new reference listed only in a cell's precombine data (`XCRI`) no longer keeps its plugin out when the cell itself keeps its FormID (an override). The meshes hold no FormIDs and keep their path; `XCRI` is rewritten with the new FormID and sorted again, so the reference stays combined into its mesh. Each such cell gets an Info row (**Precombined Reference**). A new reference also listed in `XPRI` still keeps its plugin out (the `.uvd` holds its FormID; rewriting it is P2b). New cells with precombine or previs data still keep their plugin out.
+
+**P1.1.** For the winning cell record's plugin, each Previs Check row now names up to five file IDs that are not `XPRI` references (with what they resolve to) and up to five `XPRI` references the file does not have.

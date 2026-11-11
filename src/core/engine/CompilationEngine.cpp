@@ -692,12 +692,24 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
     // ---- Precombines and previs --------------------------------------------------
     std::set<FormKey> previsCells; // cells whose precombine or previs data keeps a plugin out
-    // A new reference listed in a cell's precombine (XCRI) or previs (XPRI) data was combined into
-    // meshes made for its FormID; whether those files depend on it cannot be checked, so its plugin
-    // stays in the load order.
+    // Previs (XPRI): a new reference listed there is in the cell's previs file (.uvd), which holds
+    // its FormID in the numbering of the plugin it was made for; that file is not rewritten, so the
+    // reference's plugin stays in the load order.
+    // Precombine (XCRI) only (P2a): the precombined meshes hold no FormIDs and are found by the cell's
+    // own plugin and FormID, which compiling an override of the cell does not change; the previs file
+    // does not list combined references (checked on 946 cells of a real load order: none was in a
+    // .uvd without also being in XPRI). XCRI is rewritten with the new FormID (and sorted again), so
+    // the reference stays combined into the same mesh. A new cell keeps its plugin out (below).
     for (const auto& e : out.records) {
         if (e.sig != sig::CELL)
             continue;
+        std::set<FormKey> xpri;
+        for (const auto& f : e.fields.fields)
+            for (const auto& sub : f.subs)
+                if (sub.sig == Signature("XPRI"))
+                    for (const auto& [off, k] : sub.refs)
+                        xpri.insert(k);
+        size_t combinedOnly = 0;
         for (const auto& f : e.fields.fields)
             for (const auto& sub : f.subs) {
                 if (sub.sig != Signature("XCRI") && sub.sig != Signature("XPRI"))
@@ -708,16 +720,26 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     auto it = out.indexByKey.find(k);
                     if (it == out.indexByKey.end() || !out.records[it->second].isNew)
                         continue;
+                    if (sub.sig == Signature("XCRI") && !xpri.count(k)) {
+                        ++combinedOnly;
+                        continue;
+                    }
                     previsCells.insert(e.key);
                     addIssue(Severity::Error, "Precombined Reference",
-                             session.formLabel(k) + " is a new reference in the " +
-                                 (sub.sig == Signature("XCRI") ? "precombine" : "previs") + " data of " +
+                             session.formLabel(k) + " is a new reference in the previs data of " +
                                  session.formLabel(e.key) +
-                                 ": the precombined meshes and previs files were made for its FormID, which "
-                                 "compiling would change, so its plugin stays",
+                                 ": the cell's previs file (.uvd) holds its FormID, which compiling would change, so "
+                                 "its plugin stays",
                              k, session.pluginName(k.origin));
                 }
             }
+        if (combinedOnly && !e.isNew)
+            addIssue(Severity::Info, "Precombined Reference",
+                     std::to_string(combinedOnly) + " new reference" + (combinedOnly == 1 ? "" : "s") +
+                         " in the precombine data (XCRI) of " + session.formLabel(e.key) +
+                         " compile with new FormIDs: the precombined meshes hold no FormIDs and are found by the "
+                         "cell, which keeps its FormID; XCRI is rewritten so each stays combined into its mesh",
+                     e.key, session.pluginName(e.winner));
     }
 
     // New cells (W4). Precombined meshes and previs files are found by the cell's defining plugin and

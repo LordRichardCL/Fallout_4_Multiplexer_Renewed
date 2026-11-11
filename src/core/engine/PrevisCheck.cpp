@@ -131,6 +131,38 @@ std::string checkPrevis(Session& session, const EmittedRecord& e)
         out += " Read in " + session.plugins[p].name + "'s numbering: " + std::to_string(exist) + " exist, " +
                std::to_string(inXpri) + " in XPRI, " + std::to_string(inXcri) + " in XCRI; " +
                std::to_string(xpriMissing) + " XPRI references not in the file.";
+        // For the winning cell record's plugin, name what does not match (up to 5 each), so a
+        // difference can be traced: file IDs that are no XPRI reference, and XPRI references the
+        // file does not have.
+        if (p != e.winner)
+            continue;
+        constexpr size_t kShown = 5;
+        std::string unmatched;
+        size_t unmatchedCount = 0;
+        for (uint32_t raw : formIds) {
+            const FormKey k = session.resolve(session.plugins[p], raw);
+            if (k.valid() && xpri.count(k))
+                continue;
+            if (++unmatchedCount > kShown)
+                continue;
+            unmatched += (unmatched.empty() ? "" : ", ") + hex8(raw) + " = " +
+                         (!k.valid()            ? std::string("no plugin")
+                          : session.exists(k)   ? session.formLabel(k) + " in " + session.pluginName(k.origin)
+                                                : "nothing in " + session.pluginName(k.origin));
+        }
+        if (unmatchedCount)
+            out += " File IDs not in XPRI (" + std::to_string(unmatchedCount) + "): " + unmatched +
+                   (unmatchedCount > kShown ? ", ..." : "") + ".";
+        std::string absent;
+        size_t absentCount = 0;
+        for (const auto& k : xpri) {
+            if (seen.count(k) || ++absentCount > kShown)
+                continue;
+            absent += (absent.empty() ? "" : ", ") + session.formLabel(k) + " in " + session.pluginName(k.origin);
+        }
+        if (absentCount)
+            out += " XPRI references not in the file (" + std::to_string(absentCount) + "): " + absent +
+                   (absentCount > kShown ? ", ..." : "") + ".";
     }
     return out;
 }
