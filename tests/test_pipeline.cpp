@@ -2202,6 +2202,11 @@ TEST(new_reference_in_precombines_only_compiles)
         for (const auto& rec : op.built) {
             if (rec.header.signature != Signature("CELL"))
                 continue;
+            // The cell keeps its Editor ID (coc finds interior cells by it).
+            bool edid = false;
+            for (const auto& sr : rec.subrecords)
+                edid |= sr.signature == Signature("EDID") && std::string(sr.data.begin(), sr.data.end()).rfind("Vault", 0) == 0;
+            CHECK(edid);
             for (const auto& sr : rec.subrecords)
                 if (sr.signature == Signature("XCRI")) {
                     found = true;
