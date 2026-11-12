@@ -2317,6 +2317,60 @@ TEST(previs_check_names_what_does_not_match)
     CHECK(t.find("XPRI references not in the file (1): NotInFile [REFR:") != std::string::npos);
 }
 
+// Version Control Info is kept: each written record carries the header values of the version written
+// (the winner's), as the game sees them today. The game compares cells' and references' timestamps
+// with the cells' precombine and previs data and treats "none" as changed, disabling them; an output
+// that wrote every record with none broke USAFSatellite01 (found with PJM's previsbine tools).
+TEST(version_control_info_of_the_written_version_is_kept)
+{
+    auto root = buildInstall("versioncontrol");
+    auto data = root / "Game" / "Data";
+    auto withVc = [](Record r, uint32_t vc1, uint16_t vc2) {
+        r.header.versionControl1 = vc1;
+        r.header.versionControl2 = vc2;
+        return r;
+    };
+    const uint32_t cellDate = (26u << 9) | (10u << 5) | 31u; // 2026-10-31
+    writePlugin(data / "ModD.esp", {"Fallout4.esm"},
+                {withVc(record("KYWD", 0x01000800, {zs("EDID", "Defined")}), 0x00010000 | 100, 7)});
+    writePlugin(data / "ModV.esp", {"Fallout4.esm", "ModD.esp"},
+                {withVc(record("CELL", 0x00000805, {zs("EDID", "VanillaCell")}), 0x00AB0000 | cellDate, 0x1A2B),
+                 withVc(record("REFR", 0x02000800, {zs("EDID", "NewRef"), u32("NAME", 0x800)}), 0x00CD0000 | 200, 0x0101),
+                 withVc(record("KYWD", 0x01000800, {zs("EDID", "DefinedEdit")}), 0x00EF0000 | 300, 9)});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModD.esp\n*ModV.esp\n");
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto* out = p.compiledOutput();
+    CHECK(out->isCompiled(p.session().findPlugin("ModV.esp")->index));
+    std::map<std::string, std::pair<uint32_t, uint16_t>> seen;
+    for (const auto& op : out->outputs)
+        for (const auto& rec : op.built)
+            seen[rec.editorId()] = {rec.header.versionControl1, rec.header.versionControl2};
+    CHECK(seen.count("VanillaCell") && seen["VanillaCell"].first == (0x00AB0000u | cellDate) &&
+          seen["VanillaCell"].second == 0x1A2B);
+    CHECK(seen.count("NewRef") && seen["NewRef"].first == (0x00CD0000u | 200) && seen["NewRef"].second == 0x0101);
+    // The keyword is ModD's record; ModV's version wins, so ModV's values are written.
+    CHECK(seen.count("DefinedEdit") && seen["DefinedEdit"].first == (0x00EF0000u | 300) && seen["DefinedEdit"].second == 9);
+
+    // And they reach the file.
+    auto result = p.exportOutputs();
+    bool checked = false;
+    for (const auto& f : result.pluginFiles) {
+        auto file = PluginFile::load(f);
+        file.forEachRecord([&](const RecordLocation& loc) {
+            if (loc.header.signature == Signature("CELL")) {
+                CHECK_EQ(loc.header.versionControl1, 0x00AB0000u | cellDate);
+                checked = true;
+            }
+            return true;
+        });
+    }
+    CHECK(checked);
+}
+
 namespace {
 // A previs file with the given IDs in its table (header as the game's files have it).
 std::string previsBytes(const std::vector<uint32_t>& ids)

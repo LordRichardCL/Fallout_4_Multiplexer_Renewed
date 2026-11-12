@@ -14,7 +14,7 @@ namespace fo4mx {
 
 namespace {
 
-constexpr uint32_t kFormatVersion = 6; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
+constexpr uint32_t kFormatVersion = 7; // 7: Version Control Info of every record; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
                                        // 4: record-level classification of types that are not merged;
                                        // 5: record placement (cells, worldspaces, topics)
 
@@ -367,6 +367,8 @@ std::optional<CachedPluginIndex> BuildCache::loadPluginIndex(const std::string& 
             c.placement = r.read<uint8_t>();
             c.persistent = r.read<uint8_t>() != 0;
             c.parentRaw = r.read<uint32_t>();
+            c.versionControl1 = r.read<uint32_t>();
+            c.versionControl2 = r.read<uint16_t>();
         }
         plugins.hits++;
         return out;
@@ -393,6 +395,8 @@ void BuildCache::storePluginIndex(const std::string& path, uint64_t size, int64_
         w.write<uint8_t>(c.placement);
         w.write<uint8_t>(c.persistent ? 1 : 0);
         w.write(c.parentRaw);
+        w.write(c.versionControl1);
+        w.write(c.versionControl2);
     }
     auto blob = pack(w.buffer());
     std::lock_guard lock(mutex_);

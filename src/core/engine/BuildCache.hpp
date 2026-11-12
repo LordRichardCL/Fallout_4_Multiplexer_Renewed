@@ -28,6 +28,8 @@ struct CachedRecord {
     uint8_t placement = 0; // Placement::Kind
     bool persistent = false;
     uint32_t parentRaw = 0;
+    uint32_t versionControl1 = 0;
+    uint16_t versionControl2 = 0;
 };
 
 struct CachedPluginIndex {

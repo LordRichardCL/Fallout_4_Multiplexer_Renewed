@@ -280,6 +280,8 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
                             r.placement = c.placement;
                             r.persistent = c.persistent;
                             r.parentRaw = c.parentRaw;
+                            r.versionControl1 = c.versionControl1;
+                            r.versionControl2 = c.versionControl2;
                             r.key = session.resolve(p, c.rawFormId);
                             if (!c.editorId.empty())
                                 r.editorId = session.strings.intern(c.editorId);
@@ -320,6 +322,8 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
                     r.placement = static_cast<uint8_t>(placement.kind);
                     r.persistent = placement.persistent;
                     r.parentRaw = placement.parent;
+                    r.versionControl1 = loc.header.versionControl1;
+                    r.versionControl2 = loc.header.versionControl2;
                     uint32_t flagsForHash = loc.header.flags & ~RecordFlags::Compressed;
                     r.hash = fnv1a64(loc.rawData.data(), loc.rawData.size(), 0xcbf29ce484222325ULL ^ flagsForHash);
                     auto edid = quickEditorId(loc);
@@ -332,7 +336,8 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
                     out.push_back(r);
                     if (pc.store)
                         pc.index.records.push_back({r.signature, r.flags, r.dataSize, r.rawFormId, r.offset, r.hash, edid,
-                                                    r.placement, r.persistent, r.parentRaw});
+                                                    r.placement, r.persistent, r.parentRaw, r.versionControl1,
+                                                    r.versionControl2});
                     return true;
                 });
                 p.scanned = true;

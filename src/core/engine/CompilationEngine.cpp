@@ -1393,6 +1393,21 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             rec.header.signature = e.sig;
             rec.header.flags = e.fields.flags() & ~RecordFlags::Compressed;
             rec.header.formVersion = e.fields.formVersion ? e.fields.formVersion : 131;
+            // Version Control Info of the version written (the winner's; the last version in the load
+            // order otherwise), as the game sees it today: the game compares cells' and references'
+            // timestamps with the cells' precombine and previs data, and treats a missing one ("none")
+            // as changed, disabling them (PJM's previsbine tools keep these values for that reason).
+            if (const auto* g = session.findGroup(e.key)) {
+                const auto chain = session.instances(*g);
+                const RecordInstance* src = chain.empty() ? nullptr : &chain.back();
+                for (const auto& inst : chain)
+                    if (inst.plugin == e.winner)
+                        src = &inst;
+                if (src) {
+                    rec.header.versionControl1 = src->versionControl1;
+                    rec.header.versionControl2 = src->versionControl2;
+                }
+            }
             rec.header.formId = out.translate(session, e.key, op.index, &ok);
             e.rawFormId = rec.header.formId;
             if (!ok)

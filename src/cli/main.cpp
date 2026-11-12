@@ -420,8 +420,14 @@ int cmdDump(const Args& a)
             return true;
         auto rec = Record::parse(loc.header, loc.rawData);
         auto layout = decodeLayout(defs, rec.signature(), rec.subrecords);
-        std::printf("%s %s flags=%08X  %s\n", rec.signature().str().c_str(), formatFormId(rec.header.formId).c_str(),
-                    loc.header.flags, rec.editorId().c_str());
+        // Version Control Info 1: its low 16 bits are a date (day, month, year since 2000), "none" when 0.
+        const uint32_t vc = loc.header.versionControl1 & 0xFFFF;
+        char date[16] = "none";
+        if (vc)
+            std::snprintf(date, sizeof(date), "%04u-%02u-%02u", 2000 + ((vc >> 9) & 0x7F), (vc >> 5) & 0xF, vc & 0x1F);
+        std::printf("%s %s flags=%08X vc=%08X/%04X (%s)  %s\n", rec.signature().str().c_str(),
+                    formatFormId(rec.header.formId).c_str(), loc.header.flags, loc.header.versionControl1,
+                    loc.header.versionControl2, date, rec.editorId().c_str());
         for (uint32_t i = 0; i < rec.subrecords.size(); ++i) {
             const auto& sr = rec.subrecords[i];
             std::string refs;

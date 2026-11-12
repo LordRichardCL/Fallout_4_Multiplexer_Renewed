@@ -114,6 +114,11 @@ struct RecordInstance {
     uint8_t placement = 0;
     bool persistent = false;
     uint32_t parentRaw = 0;
+    // Version Control Info from the record header, as the plugin wrote it. The game compares a cell's
+    // and its references' timestamps with the cell's precombine and previs data, so an output keeps
+    // the values of the version it writes.
+    uint32_t versionControl1 = 0;
+    uint16_t versionControl2 = 0;
 };
 
 // All instances of one FormKey: records[begin, end), in load order.
