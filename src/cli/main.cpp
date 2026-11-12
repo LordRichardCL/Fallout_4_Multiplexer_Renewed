@@ -21,6 +21,8 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <limits>
+#include <unordered_set>
 #include <vector>
 
 using namespace fo4mx;
@@ -43,7 +45,8 @@ Usage:
                  list every Fallout 4 record type with its category, placement
                  and how the compiler handles it (tab separated)
   fo4mx info     <plugin.esp>
-  fo4mx dump     <plugin.esp> [--formid XXXXXXXX] [--limit N] [--values] [--tree]
+  fo4mx dump     <plugin.esp> [--formid XXXXXXXX | --cell XXXXXXXX] [--limit N] [--values] [--tree]
+                 --cell: the cell and every record in it (FormIDs as the plugin writes them)
                  --values: every field by name and value (where defined), else bytes
                  --tree: the group / record tree, as xEdit shows it
   fo4mx references <install> <plugin> <formid>
@@ -384,8 +387,36 @@ int cmdDump(const Args& a)
         print(file.tree(), 0);
         return 0;
     }
+    // --cell: the cell record and every record in its children groups (persistent, temporary, distant),
+    // FormIDs as the plugin writes them.
+    std::unordered_set<uint32_t> inCell;
+    const bool cellMode = a.has("--cell");
+    if (cellMode) {
+        const uint32_t cell = static_cast<uint32_t>(std::stoul(a.get("--cell"), nullptr, 16));
+        inCell.insert(cell);
+        const std::function<void(const std::vector<PluginNode>&, bool)> walk = [&](const std::vector<PluginNode>& nodes,
+                                                                                  bool inside) {
+            for (const auto& n : nodes) {
+                if (n.kind == PluginNode::Kind::Group) {
+                    const auto t = n.group.groupType;
+                    const bool children = (t == 6 || t == 8 || t == 9 || t == 10) && n.group.label == cell;
+                    walk(n.children, inside || children);
+                } else {
+                    if (inside)
+                        inCell.insert(n.record.formId);
+                    walk(n.children, inside);
+                }
+            }
+        };
+        walk(file.tree(), false);
+        if (!a.has("--limit"))
+            limit = std::numeric_limits<size_t>::max();
+        std::printf("# cell %08X: %zu records (the cell and its references)\n", cell, inCell.size());
+    }
     file.forEachRecord([&](const RecordLocation& loc) {
         if (only && loc.header.formId != only)
+            return true;
+        if (cellMode && !inCell.count(loc.header.formId))
             return true;
         auto rec = Record::parse(loc.header, loc.rawData);
         auto layout = decodeLayout(defs, rec.signature(), rec.subrecords);
