@@ -10,6 +10,7 @@
 #include "engine/OutputRuns.hpp"
 #include "esp/FieldValues.hpp"
 #include "esp/FieldDecoder.hpp"
+#include "esp/GroupLayout.hpp"
 #include "esp/PluginFile.hpp"
 #include "util/Log.hpp"
 #include "util/Platform.hpp"
@@ -90,7 +91,8 @@ Compile options:
                        matches PATTERN to output N (repeatable)
   --no-merge           last plugin wins instead of merging compatible edits
   --light              ESL-flag outputs that fit the light plugin range
-  --no-previs-translation  do not write translated previs files (the same plugins compile; for testing)
+  --no-previs-translation  do not write translated previs files (only the export changes: the same
+                       checks run and the same plugins compile; for testing)
   --patch              also write Multiplexer_Patch.esp, merging conflicts between
                        plugins that stay in the load order (like a Bashed Patch)
   --patch-only         write only the patch; compile no plugins
@@ -401,7 +403,11 @@ int cmdDump(const Args& a)
             for (const auto& n : nodes) {
                 if (n.kind == PluginNode::Kind::Group) {
                     const auto t = n.group.groupType;
-                    const bool children = (t == 6 || t == 8 || t == 9 || t == 10) && n.group.label == cell;
+                    // The cell's own groups (labelled with its FormID). QuestChildren (10) is labelled with a
+                    // quest's FormID, so it is not one of them.
+                    const bool children =
+                        (t == GroupType::CellChildren || t == GroupType::CellPersistent || t == GroupType::CellTemporary) &&
+                        n.group.label == cell;
                     walk(n.children, inside || children);
                 } else {
                     if (inside)

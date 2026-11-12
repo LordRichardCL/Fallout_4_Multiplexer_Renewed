@@ -176,8 +176,10 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     translatePrevis_ = new QCheckBox("Translate previs files into the output's numbering");
     translatePrevis_->setToolTip(
         "A cell written to an output wins in game, so its previs file (.uvd) is read in the output's numbering. "
-        "On: a translated copy is written loose. Off: the original file is used; the same plugins compile. "
-        "Turn off only to compare the two in game.");
+        "On: a translated copy is written loose. Off: the original file is used. Either way the same plugins "
+        "compile: this setting only decides whether translated copies are written. The checks still run, and a "
+        "previs file that cannot be translated keeps its cell's plugins out. Turn off only to compare the two in "
+        "game.");
     for (auto* c : {merge_, light_, translatePrevis_}) {
         c->setStyleSheet("QCheckBox { spacing: 8px; }");
         ml->addWidget(c);
