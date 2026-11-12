@@ -521,6 +521,35 @@ TEST(incremental_rebuild_reuses_unchanged_work)
     }
 }
 
+// Translate previs files changes what the export writes, so switching it either way requires a rebuild
+// (an export with it off removes the translated copies an earlier export wrote).
+TEST(change_detection_tracks_previs_translation)
+{
+    auto root = buildInstall("changesprevis");
+    auto on = configFor(root);
+    auto off = on;
+    off.compile.translatePrevis = false;
+    auto build = [&](const PipelineConfig& c) {
+        Pipeline p(c);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        p.exportOutputs();
+    };
+    auto check = [&](const PipelineConfig& c) {
+        Pipeline p(c);
+        return p.checkForChanges().status;
+    };
+    build(on);
+    CHECK(check(on) == BuildStatus::UpToDate);
+    CHECK(check(off) == BuildStatus::RequiresRebuild); // on -> off
+    build(off);
+    CHECK(check(off) == BuildStatus::UpToDate);
+    CHECK(check(on) == BuildStatus::RequiresRebuild); // off -> on
+    const std::vector<std::string> none;
+    CHECK(ChangeDetector::settingsHash(on.compile, none, "x", {}) != ChangeDetector::settingsHash(off.compile, none, "x", {}));
+}
+
 TEST(change_detection_reports_build_status)
 {
     auto root = buildInstall("changes");

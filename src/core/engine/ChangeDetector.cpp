@@ -527,6 +527,9 @@ uint64_t ChangeDetector::settingsHash(const CompileOptions& c, const std::vector
                     std::to_string(c.mergeCompatible) + std::to_string(c.lightOutputsWhenPossible) +
                     std::to_string(c.rewriteHeuristicReferences) + std::to_string(c.buildPatch) + std::to_string(c.patchOnly) +
                     (c.autoMerge ? "|automerge" : "") +
+                    // Translated previs files are export output: switching this changes what is written.
+                    // Only "off" is added, so a build made with the default keeps its hash.
+                    (c.translatePrevis ? "" : "|noprevistranslation") +
                     "|" + c.patchName + "|" + runtimeName;
     for (const auto& r : c.rules)
         s += "|" + toLower(r.pattern) + "=" + std::to_string(r.output);
