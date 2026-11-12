@@ -2564,6 +2564,93 @@ TEST(previs_translation_can_be_turned_off)
     CHECK(!std::filesystem::exists(result.directory / "Multiplexer_Previs.tsv"));
 }
 
+// Cell inheritance: a cell override without XPRI/XCRI does not clear an earlier version's lists, and
+// a partial cell (flag 0x4000) takes omitted fields from earlier versions. When the version written
+// omits a list that an earlier version in a compiled plugin has, or is partial with an earlier
+// compiled version, compiling would remove what it inherits: the cell's compiled plugins stay (the
+// chain is kept out). An earlier version in a plugin that stays (here Base.esm, excluded) loads as
+// today, so nothing is kept out.
+namespace {
+struct InheritResult {
+    bool earlierCompiled = false;
+    bool laterCompiled = false;
+    bool reported = false; // a Cell Inheritance issue in the final round
+    std::string retained;  // why ModP.esp was kept out
+};
+
+InheritResult compileInheritance(const char* name, bool earlierHasLists, uint32_t laterFlags, bool laterHasLists)
+{
+    auto root = buildInstall(name);
+    auto data = root / "Game" / "Data";
+    std::vector<uint8_t> xpri(4);
+    storeLE<uint32_t>(xpri.data(), 0x01000804);
+    std::vector<uint8_t> xcri(8 + 4 + 8, 0);
+    storeLE<uint32_t>(xcri.data(), 1);
+    storeLE<uint32_t>(xcri.data() + 4, 2);
+    storeLE<uint32_t>(xcri.data() + 8, 0xABCDEF01);
+    storeLE<uint32_t>(xcri.data() + 12, 0x01000804);
+    storeLE<uint32_t>(xcri.data() + 16, 0xABCDEF01);
+    auto cell = [&](bool lists, uint32_t flags) {
+        std::vector<Subrecord> subs{zs("EDID", "Lab")};
+        if (lists) {
+            subs.push_back(raw("XPRI", xpri));
+            subs.push_back(raw("XCRI", xcri));
+        }
+        return record("CELL", 0x01000803, subs, flags);
+    };
+    writePlugin(data / "Base.esm", {"Fallout4.esm"},
+                {cell(true, 0), record("REFR", 0x01000804, {zs("EDID", "Desk"), u32("NAME", 0x800)})}, ESM);
+    writePlugin(data / "ModP.esp", {"Fallout4.esm", "Base.esm"},
+                {cell(earlierHasLists, 0), record("KYWD", 0x02000800, {zs("EDID", "EarlierOwn")})});
+    writePlugin(data / "ModL.esp", {"Fallout4.esm", "Base.esm"},
+                {cell(laterHasLists, laterFlags), record("KYWD", 0x02000800, {zs("EDID", "LaterOwn")})});
+    writeFile(root / "plugins.txt", "*Base.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n*ModL.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"Base.esm"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    InheritResult r;
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto& s = p.session();
+    const auto* out = p.compiledOutput();
+    r.earlierCompiled = out->isCompiled(s.findPlugin("ModP.esp")->index);
+    r.laterCompiled = out->isCompiled(s.findPlugin("ModL.esp")->index);
+    for (const auto& i : out->issues)
+        r.reported |= i.category == "Cell Inheritance";
+    if (s.autoRetained.count("modp.esp"))
+        r.retained = s.autoRetained.at("modp.esp");
+    return r;
+}
+} // namespace
+
+TEST(cell_override_omitting_previs_lists_keeps_its_chain_out)
+{
+    const auto r = compileInheritance("inheritomit", true, 0, false);
+    CHECK(!r.earlierCompiled);
+    CHECK(!r.laterCompiled);
+    CHECK(r.retained.find("omits XPRI") != std::string::npos);
+}
+
+TEST(partial_cell_override_keeps_its_chain_out)
+{
+    // The partial override carries its own lists, so only the partial flag is at issue.
+    const auto r = compileInheritance("inheritpartial", false, 0x4000, true);
+    CHECK(!r.earlierCompiled);
+    CHECK(!r.laterCompiled);
+    CHECK(r.retained.find("partial cell") != std::string::npos);
+}
+
+TEST(cell_inheritance_from_plugins_that_stay_compiles)
+{
+    // Only Base.esm (excluded, so it stays) has the lists the written version omits.
+    const auto r = compileInheritance("inheritstays", false, 0, false);
+    CHECK(r.earlierCompiled);
+    CHECK(r.laterCompiled);
+    CHECK(!r.reported);
+}
+
 // The guard: when a previs file holds a FormID the output cannot express (here a record of MastQ, a
 // master of ModW that nothing written refers to), the cell would lose that object in game. ModW stays
 // in the load order, so the cell keeps today's record and file.

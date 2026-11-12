@@ -856,7 +856,21 @@ PJM's previsbine scripts (FO4Check_PreVisbines and its helpers) show why that ma
 
 **Fix.** The scan keeps both values for every record (`RecordInstance`, and the plugin index cache, format 7). Each record written takes them from the version written (the winner's; the last version in the load order otherwise), so the outputs carry the values the game sees today. `fo4mx dump` prints them, with the date decoded.
 
-**Follow-ups found in the same scripts (not yet acted on):**
-- A cell's `XPRI` and `XCRI` that are absent from an override do not clear earlier ones ("no XPRI field does not clear XPRI - like partial form"); PJM adds an empty or dummy one to clear them. When a compiled winner lacks them and an earlier compiled version has them, writing only the winner could drop data the game used.
-- Cells flagged partial (record flag 0x4000) take their missing fields from earlier versions; writing a partial winner alone could drop earlier compiled versions' fields.
+**Follow-ups found in the same scripts:**
+- A cell's `XPRI` and `XCRI` that are absent from an override do not clear earlier ones ("no XPRI field does not clear XPRI - like partial form"); PJM adds an empty or dummy one to clear them. When a compiled winner lacks them and an earlier compiled version has them, writing only the winner could drop data the game used. Guarded, see "Cell inheritance" below.
+- Cells flagged partial (record flag 0x4000) take their missing fields from earlier versions; writing a partial winner alone could drop earlier compiled versions' fields. Guarded, see below.
 - The No PreVis cell flag (0x80) disables previs; it is copied with the winner's flags.
+
+The forced-winner case was fixed after review: a forced winner's Version Control Info (and placement) now come from the forced version, not from the last one.
+
+## Cell inheritance and change detection (review of the previs work)
+
+**Change detection.** Turning Translate previs files on or off changes what the export writes, but the setting was not in the settings hash, so a project built with one value counted as up to date after switching. It is now included. Only "off" adds to the hash, so builds made with the default keep theirs. A test switches it in both directions.
+
+**Cell inheritance.** Which version supplies the fields a cell override omits is not established in game, so the compiler fails closed instead of resolving it. For each cell written, it compares the version written with the earlier versions in compiled plugins (which leave the load order):
+- the version written is partial (0x4000) and an earlier compiled version exists; or
+- the version written lacks `XPRI` or `XCRI` and an earlier compiled version has it.
+
+In either case a "Cell Inheritance" error keeps the cell's chain out: every compiled plugin with a version of the cell stays, so the game loads the cell as it does today. Earlier versions in plugins that stay are unchanged by compiling and keep nothing out. Tests cover an override that omits the lists, a partial override, and an omitted list supplied only by a plugin that stays.
+
+**`dump --cell`** now matches the cell's groups by name (`CellChildren`, `CellPersistent`, `CellTemporary`). The old literal list also included type 10, which in Fallout 4 is `QuestChildren`, labelled with a quest's FormID: a quest with the same raw FormID as the cell would have had its dialogue listed.

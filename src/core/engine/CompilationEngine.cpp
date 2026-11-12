@@ -128,6 +128,9 @@ std::vector<FormMapping> CompilationEngine::readFormMap(const std::filesystem::p
 }
 
 namespace {
+// Cell record flag "Partial Form": fields the record omits are taken from earlier versions.
+constexpr uint32_t kCellPartialFlag = 0x00004000;
+
 
 // A cell's previs (XPRI) and combined (XCRI) reference lists are sorted by FormID (xEdit keeps them
 // sorted, as the Creation Kit writes them). Rewriting their FormIDs into an output's master numbering
@@ -747,6 +750,71 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                          " compile with new FormIDs: the precombined meshes hold no FormIDs and are found by the "
                          "cell, which keeps its FormID; XCRI is rewritten so each stays combined into its mesh",
                      e.key, session.pluginName(e.winner));
+    }
+
+    // Cell inheritance. A cell override without XPRI or XCRI does not clear an earlier version's lists
+    // (tools that clear them add an empty one), and a partial cell (flag 0x4000) takes the fields it
+    // omits from earlier versions. Which version supplies them in game is not established, so when the
+    // version written omits a list an earlier version in a compiled plugin has (that plugin would leave
+    // the load order), or is partial with an earlier compiled version, the cell's chain stays out: an
+    // error on the cell keeps every compiled plugin in it (fail closed). Earlier versions in plugins
+    // that stay load as they do today, so they keep nothing out.
+    for (const auto& e : out.records) {
+        if (e.sig != sig::CELL)
+            continue;
+        bool writtenHas[2] = {false, false};
+        const Signature lists[2] = {Signature("XPRI"), Signature("XCRI")};
+        for (const auto& f : e.fields.fields)
+            for (const auto& sub : f.subs)
+                for (int l = 0; l < 2; ++l)
+                    writtenHas[l] |= sub.sig == lists[l];
+        const bool partial = (e.fields.flags() & kCellPartialFlag) != 0;
+        if (!partial && writtenHas[0] && writtenHas[1])
+            continue;
+        const auto* g = session.findGroup(e.key);
+        if (!g)
+            continue;
+        const auto chain = session.instances(*g);
+        size_t written = chain.size();
+        for (size_t i = chain.size(); i-- > 0;)
+            if (chain[i].plugin == e.winner) {
+                written = i;
+                break;
+            }
+        if (written == chain.size())
+            continue;
+        std::set<PluginIndex> named;
+        for (size_t i = 0; i < written; ++i) {
+            const PluginIndex p = chain[i].plugin;
+            if (!out.isCompiled(p) || p == e.winner || named.count(p))
+                continue;
+            std::string what;
+            if (partial) {
+                what = "is a partial cell (flag 0x4000), which takes the fields it omits from earlier versions";
+            } else {
+                try {
+                    const Record earlier = session.loadRecord(chain[i]);
+                    for (int l = 0; l < 2; ++l)
+                        if (!writtenHas[l] && earlier.find(lists[l])) {
+                            what = "omits " + lists[l].str() + ", which " + session.pluginName(p) +
+                                   "'s version has: an override without it does not clear it in game";
+                            break;
+                        }
+                } catch (const std::exception& ex) {
+                    what = std::string("cannot be compared with an earlier version (") + ex.what() + ")";
+                }
+            }
+            if (what.empty())
+                continue;
+            named.insert(p);
+            previsCells.insert(e.key);
+            addIssue(Severity::Error, "Cell Inheritance",
+                     session.formLabel(e.key) + " as written from " + session.pluginName(e.winner) + " " + what +
+                         "; compiling would remove " + session.pluginName(p) +
+                         "'s version from the load order and change what the cell inherits, so the plugins "
+                         "compiling the cell stay",
+                     e.key, session.pluginName(p));
+        }
     }
 
     // New cells (W4). Precombined meshes and previs files are found by the cell's defining plugin and
