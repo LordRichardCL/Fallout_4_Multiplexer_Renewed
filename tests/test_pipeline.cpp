@@ -2371,6 +2371,50 @@ TEST(version_control_info_of_the_written_version_is_kept)
     CHECK(checked);
 }
 
+// A forced winner (the user chose an earlier plugin's version) is written with that plugin's Version
+// Control Info, not the last plugin's: for cells and references it decides how the game treats their
+// precombine and previs data.
+TEST(forced_winner_keeps_its_own_version_control_info)
+{
+    auto root = buildInstall("forcedvc");
+    auto data = root / "Game" / "Data";
+    auto withVc = [](Record r, uint32_t vc1, uint16_t vc2) {
+        r.header.versionControl1 = vc1;
+        r.header.versionControl2 = vc2;
+        return r;
+    };
+    writePlugin(data / "ModV.esp", {"Fallout4.esm"},
+                {withVc(record("CELL", 0x00000805, {zs("EDID", "VanillaCellV")}), 0x00110000 | 111, 1)});
+    writePlugin(data / "ModW.esp", {"Fallout4.esm"},
+                {withVc(record("CELL", 0x00000805, {zs("EDID", "VanillaCellW")}), 0x00220000 | 222, 2)});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModV.esp\n*ModW.esp\n");
+    auto cfg = configFor(root);
+    Pipeline probe(cfg);
+    probe.scan();
+    const auto* fo4 = probe.session().findPlugin("Fallout4.esm");
+    const auto* modV = probe.session().findPlugin("ModV.esp");
+    CHECK(fo4 && modV);
+    if (!fo4 || !modV)
+        return;
+    cfg.compile.forcedWinners[FormKey{fo4->index, 0x805}.packed()] = modV->index;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    bool found = false;
+    for (const auto& op : p.compiledOutput()->outputs)
+        for (const auto& rec : op.built) {
+            if (rec.header.signature != Signature("CELL"))
+                continue;
+            found = true;
+            CHECK_EQ(rec.editorId(), std::string("VanillaCellV")); // ModV's version is written...
+            CHECK_EQ(rec.header.versionControl1, 0x00110000u | 111); // ...with ModV's header values
+            CHECK_EQ(rec.header.versionControl2, uint16_t(1));
+        }
+    CHECK(found);
+}
+
 namespace {
 // A previs file with the given IDs in its table (header as the game's files have it).
 std::string previsBytes(const std::vector<uint32_t>& ids)

@@ -552,7 +552,10 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 e.isNew = c.isNew;
                 e.patch = c.patch;
                 e.merged = m.merged;
-                e.winner = inst.back().plugin;
+                // The plugin whose version is written: the user's forced choice, else the last. Its
+                // placement and Version Control Info are written with it.
+                const auto& source = inst[c.forced >= 0 ? static_cast<size_t>(c.forced) : inst.size() - 1];
+                e.winner = source.plugin;
                 for (const auto& r : inst)
                     e.chain.push_back(r.plugin);
                 for (uint32_t idx : m.contributors)
@@ -562,7 +565,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                         e.issues.insert(e.issues.end(), m.issues[i].begin(), m.issues[i].end());
                 e.fields = m.fields;
                 e.size = estimateSize(e.fields);
-                placeFrom(e, inst[c.forced >= 0 ? static_cast<size_t>(c.forced) : inst.size() - 1]);
+                placeFrom(e, source);
                 emitted[ci] = std::move(e);
             } catch (const std::exception& ex) {
                 mergeIssues[ci].push_back({Severity::Error, "Unreadable Record",
