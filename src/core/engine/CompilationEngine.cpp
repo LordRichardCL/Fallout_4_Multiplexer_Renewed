@@ -1502,6 +1502,15 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             if (t.ok) {
                 if (t.changed == 0)
                     continue;
+                if (!options.translatePrevis) {
+                    addIssue(Severity::Info, "Previs Numbering",
+                             t.path + " (" + session.formLabel(e.key) + "): " + std::to_string(t.changed) + " of " +
+                                 std::to_string(t.formIds) + " FormIDs read in " + t.numbering +
+                                 "'s numbering would change in " + out.outputName(e.output) +
+                                 "; not translated (Translate previs files is off), the original file is used",
+                             e.key, t.numbering);
+                    continue;
+                }
                 addIssue(Severity::Info, "Previs Numbering",
                          t.path + " (" + session.formLabel(e.key) + "): " + std::to_string(t.changed) + " of " +
                              std::to_string(t.formIds) + " FormIDs translated from " + t.numbering +

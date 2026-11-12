@@ -90,6 +90,7 @@ Compile options:
                        matches PATTERN to output N (repeatable)
   --no-merge           last plugin wins instead of merging compatible edits
   --light              ESL-flag outputs that fit the light plugin range
+  --no-previs-translation  do not write translated previs files (the same plugins compile; for testing)
   --patch              also write Multiplexer_Patch.esp, merging conflicts between
                        plugins that stay in the load order (like a Bashed Patch)
   --patch-only         write only the patch; compile no plugins
@@ -131,7 +132,7 @@ struct Args {
 
 Args parseArgs(int argc, char** argv)
 {
-    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
+    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
                                                    "--diagnostic-recorder", "--install", "--archive-loader",
                                                    "--values", "--tree", "--help", "--unfinished",
                                                    "--verbose", "-v"};
@@ -236,6 +237,7 @@ PipelineConfig makeConfig(const Args& a)
     }
     c.mergeCompatible = !a.has("--no-merge");
     c.lightOutputsWhenPossible = a.has("--light");
+    c.translatePrevis = !a.has("--no-previs-translation");
     c.patchOnly = a.has("--patch-only");
     c.autoMerge = a.has("--auto-merge");
     c.buildPatch = c.patchOnly || a.has("--patch");

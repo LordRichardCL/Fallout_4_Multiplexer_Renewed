@@ -198,6 +198,8 @@ Files for you and for the next build (the game does not read them; nothing needs
 | `Multiplexer_Archives.ini` | a copy of the archive line **Apply to Game** writes into `Fallout4Custom.ini`; the game does not read this file itself |
 | `Multiplexer_RegisteredArchives.txt` | archives Apply to Game added to the INI, so the next build compares with the load order as it was |
 | `Multiplexer_ArchiveWinners.tsv`, `Multiplexer_Voices.tsv`, `Multiplexer_FaceGen.tsv`, `Multiplexer_Relinked.tsv`, `Multiplexer_Previs.tsv` | what each copy above is and where it came from; the next export removes copies no longer needed, and the next scan does not mistake them for mod files |
+
+**Translate previs files** (Compilation page, on by default; CLI `--no-previs-translation` turns it off): a cell written to an output wins in game, so its previs file (`vis\<plugin>\<cell>.uvd`) is read in the output's numbering, and the export writes a translated copy loose (`Multiplexer_Previs.tsv`). Turning it off writes no copies and uses the original files; the same plugins compile. It is there to compare the two in game.
 | `Multiplexer_ArchivePriority.txt` | only when loose copies are off: files whose winning archive would change |
 | `Multiplexer_ArchiveLoaders.txt` | MO2: which compiled plugins have an archive loader |
 | `Multiplexer_DisablePlugins.txt`, `Multiplexer_plugins.txt` | plugins to disable, and a proposed `plugins.txt` (for Vortex and manual installs) |

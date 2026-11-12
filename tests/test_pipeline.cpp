@@ -2453,6 +2453,44 @@ TEST(previs_file_is_translated_into_the_output_numbering)
     CHECK(Exporter::archiveWinnerCopies(result.directory).count("vis\\fallout4.esm\\00000805.uvd") == 1);
 }
 
+// Translate previs files off (for comparing in game): the same plugins compile, nothing is written,
+// and the report says the original file is used.
+TEST(previs_translation_can_be_turned_off)
+{
+    auto root = buildInstall("previsoff");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "MastZ.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000800, {zs("EDID", "ZWord")})});
+    writePlugin(data / "MastX.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000800, {zs("EDID", "XRef")})});
+    writePlugin(data / "ModZ.esp", {"Fallout4.esm", "MastZ.esp"}, {record("KYWD", 0x01000800, {zs("EDID", "ZWordEdit")})});
+    std::vector<uint8_t> xpri(8);
+    storeLE<uint32_t>(xpri.data(), 0x01000800);
+    storeLE<uint32_t>(xpri.data() + 4, 0x02000800);
+    writePlugin(data / "ModW.esp", {"Fallout4.esm", "MastX.esp"},
+                {record("CELL", 0x00000805, {zs("EDID", "VanillaCell"), raw("XPRI", xpri)}),
+                 record("REFR", 0x02000800, {zs("EDID", "NewPrevisRef"), u32("NAME", 0x800)})});
+    std::filesystem::create_directories(data / "Vis" / "Fallout4.esm");
+    writeFile(data / "Vis" / "Fallout4.esm" / "00000805.uvd", previsBytes({0xFD000000, 0x01000800, 0x02000800}));
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*MastZ.esp\n*MastX.esp\n*ModZ.esp\n*ModW.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"MastZ.esp", "MastX.esp"};
+    cfg.compile.translatePrevis = false;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto* out = p.compiledOutput();
+    CHECK(out->isCompiled(p.session().findPlugin("ModW.esp")->index));
+    CHECK(out->previsFiles.empty());
+    bool noted = false;
+    for (const auto& i : out->issues)
+        noted |= i.category == "Previs Numbering" && i.message.find("not translated") != std::string::npos;
+    CHECK(noted);
+    auto result = p.exportOutputs();
+    CHECK(!std::filesystem::exists(result.directory / "vis" / "fallout4.esm" / "00000805.uvd"));
+    CHECK(!std::filesystem::exists(result.directory / "Multiplexer_Previs.tsv"));
+}
+
 // The guard: when a previs file holds a FormID the output cannot express (here a record of MastQ, a
 // master of ModW that nothing written refers to), the cell would lose that object in game. ModW stays
 // in the load order, so the cell keeps today's record and file.

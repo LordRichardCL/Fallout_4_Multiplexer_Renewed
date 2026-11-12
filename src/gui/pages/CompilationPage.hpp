@@ -46,6 +46,7 @@ private:
     QPlainTextEdit* rules_;
     QCheckBox* merge_;
     QCheckBox* light_;
+    QCheckBox* translatePrevis_;
     QCheckBox* patch_;
     QCheckBox* patchOnly_;
     QLineEdit* outputDir_;

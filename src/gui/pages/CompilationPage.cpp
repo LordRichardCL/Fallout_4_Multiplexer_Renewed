@@ -173,7 +173,12 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                        "different fields), combine their changes instead of keeping only the last mod's version.");
     light_->setToolTip("An output with few enough new records (2,048 or fewer) is ESL-flagged, so it takes no full "
                        "plugin slot. Outputs with new cells or worldspaces are never ESL-flagged.");
-    for (auto* c : {merge_, light_}) {
+    translatePrevis_ = new QCheckBox("Translate previs files into the output's numbering");
+    translatePrevis_->setToolTip(
+        "A cell written to an output wins in game, so its previs file (.uvd) is read in the output's numbering. "
+        "On: a translated copy is written loose. Off: the original file is used; the same plugins compile. "
+        "Turn off only to compare the two in game.");
+    for (auto* c : {merge_, light_, translatePrevis_}) {
         c->setStyleSheet("QCheckBox { spacing: 8px; }");
         ml->addWidget(c);
     }
@@ -515,6 +520,7 @@ void CompilationPage::loadOptions()
     updateInstallNote();
     merge_->setChecked(c.mergeCompatible);
     light_->setChecked(c.lightOutputsWhenPossible);
+    translatePrevis_->setChecked(c.translatePrevis);
     patchOnly_->setChecked(c.patchOnly);
     patch_->setChecked(c.buildPatch || c.patchOnly);
     patch_->setEnabled(!c.patchOnly);
@@ -536,6 +542,7 @@ void CompilationPage::storeOptions()
     }
     c.mergeCompatible = merge_->isChecked();
     c.lightOutputsWhenPossible = light_->isChecked();
+    c.translatePrevis = translatePrevis_->isChecked();
     c.patchOnly = patchOnly_->isChecked();
     c.buildPatch = c.patchOnly || patch_->isChecked();
     app_->config().exportOptions.outputDirectory = toPath(outputDir_->text().trimmed());

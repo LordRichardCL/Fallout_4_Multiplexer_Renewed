@@ -38,6 +38,11 @@ struct CompileOptions {
     std::vector<AllocationRule> rules;
     bool mergeCompatible = true;
     bool lightOutputsWhenPossible = false;
+    // Write a cell's previs file (.uvd) translated into the output's numbering when the output holds the
+    // cell's winning record (P2b). Off: the same plugins compile and the same files are checked (the
+    // guard still keeps out what cannot be translated), but no translated copy is written, so the game
+    // reads the original file. For comparing the two in game.
+    bool translatePrevis = true;
     // No longer used: values in undescribed data are never rewritten because they look like FormIDs
     // (kept so older settings load). Undescribed data must be proved safe to move, or is not compiled.
     bool rewriteHeuristicReferences = false;
