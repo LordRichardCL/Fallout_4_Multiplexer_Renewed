@@ -886,3 +886,22 @@ The cause was a file the tool did not know about. Both cells use "clean" precomb
 **Follow-ups.**
 - The game only needs a plugin of that name loaded, not its records: an empty placeholder plugin with the same name (like the archive loaders written for Mod Organizer 2) might let such plugins compile. Untested in game.
 - Previs translation was not what broke these cells. Whether translating .uvd files is needed at all is still to be settled in game (America Rising 2 cells in a build with translation off).
+
+## Planned work (agreed order)
+
+1. **PBAR, PBEA, PCON, PFLA:** finish the evidence gate for each (definition check and group layout on a load order that has them); promote only those whose layout and reference rewriting are confirmed.
+2. **Cell configuration merge (requested; optional setting, off by default).** Like PJM's FO4CheckPrevisbines option 4 ("Fix only Cell Config Conflicts"): the written cell keeps the winner's precombine and previs data, and brings forward the last real change of each configuration field from earlier versions.
+   - **Fields brought forward.**
+     - CELL: MHDT, EDID, XCLL, XLCN, XCMO, XEZN, XCAS, XCIM, XGDR, XCCM, XCWT, XWCU, XCLW, XILW, LTMP, and XCLR (regions, the union of every version's list).
+     - CELL flags: No LOD Water, Show Sky, Use Sky Lighting, Distance LOD Only, Has Water, Sunlight Shadows, Can Travel From Here, Player Followers Can't Travel Here, Public Area, Hand Changed, Can't Wait, Off Limits.
+     - WRLD: MHDT, XWEM, ICON, XEZN, CNAM, LTMP, XLCN, NAM2, NAM3, ZNAM.
+   - **Never changed:** PCMB, XCRI, XPRI, VISI, RVIS, the No Previs flag, the Version Control Info and the record's identity. The game decides whether precombines and previs are used from those, so the merge cannot break them.
+   - **The value taken:** the last version whose value is not blank and does not revert to the defining plugin's value (a version that only repeats the base game is not a change).
+   - **Partial cells** (flag 0x4000) and cells the Cell Inheritance guard keeps out are left as they are.
+   - **Where it is written:** in the output for compiled cells, and in Multiplexer_Patch.esp for cells whose winner stays in the load order.
+   - **Reporting:** each brought-forward field is listed, with the plugin it came from.
+3. **Previs follow-ups:**
+   - Settle in game whether translating .uvd files is needed at all.
+   - Accept .uvd files with no IDs.
+   - Map IDs that point to records that no longer exist instead of refusing them.
+4. **Clean precombines:** test whether an empty placeholder plugin with the same name (as for the archive loaders) loads `<plugin> - Geometry.csg`, so that such plugins can compile.
