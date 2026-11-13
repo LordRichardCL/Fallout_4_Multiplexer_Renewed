@@ -6239,6 +6239,34 @@ TEST(references_plugin_ini_keeps_the_plugin)
     }
 }
 
+// "Clean" precombines: the precombined meshes take their geometry from <plugin> - Geometry.csg (indexed
+// by <plugin>.cdx), which the game loads only while that plugin is in the load order; the meshes store a
+// hash of the file name, so it cannot be renamed. Compiled and disabled, the plugin's precombined meshes
+// would lose their geometry (seen in game: USAFSatellite01, f3DNPCVault75A). The plugin stays.
+TEST(references_precombine_geometry_keeps_the_plugin)
+{
+    auto root = referenceInstall("refgeometry");
+    writeFile(root / "Game" / "Data" / "ModS - Geometry.csg", "bcsg");
+    writeFile(root / "Game" / "Data" / "ModS.cdx", "cdx");
+    writeFile(root / "Game" / "Data" / "Unrelated - Geometry.csg", "bcsg");
+    writeFile(root / "Game" / "Data" / "meshes" / "ModT - Geometry.csg", "bcsg"); // not in the Data root
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    auto refs = referencesOf(s, "ModS.esp");
+    CHECK_EQ(refs.size(), size_t(2));
+    for (const auto* r : refs) {
+        CHECK_EQ(r->cls, ReferenceClass::CompatibilityRequired);
+        CHECK_EQ(r->context, std::string("precombine shared geometry"));
+    }
+    CHECK(referencesOf(s, "ModT.esp").empty());
+    CHECK(s.findPlugin("ModS.esp")->eligibility != Eligibility::Eligible);
+    CHECK(p.compile());
+    CHECK(!p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
+    CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModT.esp")->index));
+}
+
 // The F4SE archive loader: the archive list is no longer limited to the 1,023 characters the game reads.
 // Export ships the DLL and the full list in the package; Apply writes the whole list; switching over waits
 // until the loader is installed. Without the DLL, or on another game version, the limit applies as before.

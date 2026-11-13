@@ -81,6 +81,7 @@ enum class Fact {
     OtherFileName,       // any other file named after the plugin
     RecordScriptString,  // a script property in a plugin's record holds the file name (VMAD string)
     PluginIni,           // Data\<plugin>.ini: read by the game only while that plugin is active
+    PrecombineGeometry,  // <plugin> - Geometry.csg, <plugin>.cdx: "clean" precombines' shared geometry
 };
 
 struct Rule {
@@ -188,6 +189,12 @@ Rule rule(Fact f)
         return {K::FilePath, C::CompatibilityRequired, "plugin INI",
                 "Fallout 4 reads Data\\<plugin>.ini (game settings for that mod) only while the plugin is active: "
                 "compiled and disabled, its settings would no longer apply"};
+    case Fact::PrecombineGeometry:
+        return {K::FilePath, C::CompatibilityRequired, "precombine shared geometry",
+                "\"clean\" precombined meshes take their geometry from <plugin> - Geometry.csg (indexed by "
+                "<plugin>.cdx), which the game loads only while that plugin is in the load order, and the meshes "
+                "store a hash of that file name, so it cannot be renamed: compiled and disabled, the plugin's "
+                "precombined meshes would lose their geometry"};
     case Fact::RecordScriptString:
         return {K::PluginName, C::CompatibilityRequired, "script property in a record",
                 "a record's script property holds the plugin's file name: its scripts can look records up in that "
@@ -903,6 +910,32 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
     const auto names = pluginNames(session);
     const auto& idx = session.assets;
 
+    // "<plugin> - Geometry.csg" and "<plugin>.cdx" in the Data folder's root (loose or in an archive):
+    // shared geometry of "clean" precombines, loaded only while that plugin is active.
+    std::set<std::pair<PluginIndex, std::string>> geometrySeen;
+    auto checkGeometry = [&](const std::string& rel, const std::string& source) {
+        if (rel.find('\\') != std::string::npos || rel.find('/') != std::string::npos)
+            return;
+        const std::string lower = toLower(rel);
+        std::string base;
+        if (iendsWith(lower, " - geometry.csg"))
+            base = lower.substr(0, lower.size() - std::strlen(" - geometry.csg"));
+        else if (iendsWith(lower, ".cdx"))
+            base = lower.substr(0, lower.size() - 4);
+        else
+            return;
+        for (const auto& [name, plugin] : names) {
+            if (toLower(session.plugins[plugin].baseName()) != base || !geometrySeen.insert({plugin, lower}).second)
+                continue;
+            auto r = make(Fact::PrecombineGeometry, plugin, lower, "File name", rel, {});
+            r.source = source;
+            session.nameReferences.push_back(std::move(r));
+        }
+    };
+    if (options.paths)
+        for (const auto* f : session.vfs.rootFiles())
+            checkGeometry(f->relativePath, session.vfs.winnerName(*f));
+
     std::vector<uint32_t> candidates;
     std::map<std::pair<PluginIndex, std::string>, std::pair<size_t, std::string>> folders; // -> (files, mod)
     std::map<std::pair<PluginIndex, std::string>, std::vector<std::string>> folderFiles;
@@ -912,6 +945,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             candidates.push_back(i);
         if (!options.paths)
             continue;
+        checkGeometry(p, idx.modName(idx.entries[i].winner()));
         if (istartsWith(p, "seq\\") && iendsWith(p, ".seq")) {
             // SEQ files are named after the plugin without its extension.
             const std::string base = toLower(p.substr(4, p.size() - 8));

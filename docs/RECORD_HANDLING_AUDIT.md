@@ -874,3 +874,15 @@ The forced-winner case was fixed after review: a forced winner's Version Control
 In either case a "Cell Inheritance" error keeps the cell's chain out: every compiled plugin with a version of the cell stays, so the game loads the cell as it does today. Earlier versions in plugins that stay are unchanged by compiling and keep nothing out. Tests cover an override that omits the lists, a partial override, and an omitted list supplied only by a plugin that stays.
 
 **`dump --cell`** now matches the cell's groups by name (`CellChildren`, `CellPersistent`, `CellTemporary`). The old literal list also included type 10, which in Fallout 4 is `QuestChildren`, labelled with a quest's FormID: a quest with the same raw FormID as the cell would have had its dialogue listed.
+
+## Clean precombines keep their plugin (USAFSatellite01, f3DNPCVault75A)
+
+Two interior cells stayed broken in game (missing geometry and textures) whether previs files were translated or not. The output's copies of both cells and all their references matched the sources record for record: Version Control Info, flags, XPRI and XCRI (only master numbers changed), and every override and new reference. The archives holding their precombined meshes and previs files were opened, and their files were copied loose where their winner would change.
+
+The cause was a file the tool did not know about. Both cells use "clean" precombines: their meshes (from `PLI-eXofied-ELFX - Main.ba2` and `3DNPC_FO4-Patch - Main.ba2`) contain `BSPackedCombinedSharedGeomDataExtra`, which takes the geometry from `<plugin> - Geometry.csg` (indexed by `<plugin>.cdx`) in the Data folder. The game loads that file only while the plugin of that name is in the load order, and the meshes store a hash of its name, so it cannot be renamed (PJM's previsbine guide: "you still need a <plugin>.esp file in your load order (so the game loads the csg file)"). Compiling disabled PLI-eXofied-ELFX.esp and 3DNPC_FO4-Patch.esp, so the geometry was gone. Both .csg files exist in that install (magic `bcsg`).
+
+**Fix.** A `<plugin> - Geometry.csg` or `<plugin>.cdx` in the Data folder's root (loose or at the root of an archive) is a Compatibility Required filename reference: the plugin stays. The general filename scan only looked at names containing a plugin's extension, so these were never seen.
+
+**Follow-ups.**
+- The game only needs a plugin of that name loaded, not its records: an empty placeholder plugin with the same name (like the archive loaders written for Mod Organizer 2) might let such plugins compile. Untested in game.
+- Previs translation was not what broke these cells. Whether translating .uvd files is needed at all is still to be settled in game (America Rising 2 cells in a build with translation off).
