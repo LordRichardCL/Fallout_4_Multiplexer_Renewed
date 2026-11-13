@@ -887,6 +887,12 @@ The cause was a file the tool did not know about. Both cells use "clean" precomb
 - The game only needs a plugin of that name loaded, not its records: an empty placeholder plugin with the same name (like the archive loaders written for Mod Organizer 2) might let such plugins compile. Untested in game.
 - Previs translation was not what broke these cells. Whether translating .uvd files is needed at all is still to be settled in game (America Rising 2 cells in a build with translation off).
 
+## RobCo Patcher configs named after a compiled plugin
+
+The build after the Clean precombine fix compiled 484 plugins with no errors, but RobCo Patcher's log showed it skipping configs: "kcd-legendarylimiter.esp not found or is not a valid plugin file, skipping config file ...\\kcd-legendarylimiter.esp.ini". RobCo applies a config named exactly `<plugin>.ini` only while that plugin is loaded. The scanner had classed these file names as Safe ("the file name is not used"), and the Auto-Merger rewrote their contents (176 lines in Multiplexer_Relinked.tsv) but kept the names, so RobCo skipped every config whose plugin was compiled. About 20 configs of 20 compiled plugins were affected: KCD-LegendaryLimiter, TrueStormsFO4, PigsWastelandWeaponry, Tactical Flashlights patches and Outfit Workbench recipes.
+
+**Fix.** A RobCo config named exactly `<plugin>.ini` is now a Rewritable reference ("RobCo Patcher gate"), so it needs the Auto-Merger. With the plugin compiled, the copy is written as `<folder>\Multiplexer - <plugin without extension>\<output>.ini`. The log shows RobCo reads subfolders and gates each file by its own name, so the copy applies while the output is loaded. It is written even when no line needs rewriting. The original is left alone and is skipped while its plugin is disabled. Two configs that would share one target fail closed. Configs whose name only contains a plugin name stay Safe.
+
 ## Planned work (agreed order)
 
 1. **PBAR, PBEA, PCON, PFLA:** finish the evidence gate for each (definition check and group layout on a load order that has them); promote only those whose layout and reference rewriting are confirmed. The owner's working model is in `docs/specs/PLACED_RECORDS_PBAR_PBEA_PCON_PFLA.txt`:
@@ -916,4 +922,9 @@ The cause was a file the tool did not know about. Both cells use "clean" precomb
    - user choices where changes compete, and round-trip checks of the written patch;
    - research first, with every decision traced to a source.
    Its first deliverable is an assessment and a research report, before any large change. The cell configuration merge (2) and the placed-record contracts (1) are narrow early cases of it.
-5. **Clean precombines:** test whether an empty placeholder plugin with the same name (as for the archive loaders) loads `<plugin> - Geometry.csg`, so that such plugins can compile.
+5. **Cell inheritance, computed instead of kept out (requested).** In the latest build the Cell Inheritance guard kept out 19 plugins: 16 omit a list, 3 are partial cells. PJM's previsbine guide documents what the game does as it reads each cell version in load order:
+   - a non-partial version's record flags, PCMB and VISI become current, even when blank;
+   - its XCRI and XPRI become current only when present and not empty;
+   - a partial version (flag 0x4000) changes none of these.
+   The compiler can apply these rules to the cell's whole chain, as it loads today, and write the result: the winner's record with the lists and timestamps the game would end up with. The guard then keeps out only what this cannot express. Tests: omitted and empty lists, partial versions, and chains mixing compiled plugins with plugins that stay.
+6. **Clean precombines:** test whether an empty placeholder plugin with the same name (as for the archive loaders) loads `<plugin> - Geometry.csg`, so that such plugins can compile.

@@ -516,6 +516,7 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
     }
 
     std::vector<RelinkFile*> formIdInis;
+    std::map<std::string, std::string> gateTargets; // lowercase target -> config (RobCo gates)
     // A failed check of an earlier round of this compilation: it stays on record while the file is not
     // planned (its plugins are kept out); when this round plans the file, it becomes a note.
     std::vector<std::string> earlier(report.files.size());
@@ -547,6 +548,16 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
         }
         if (compiledHere.empty())
             continue;
+        // A RobCo Patcher config named <plugin>.ini applies only while that plugin is loaded: with the
+        // plugin compiled, the copy is written as <output>.ini in a folder of its own (below).
+        const PluginReference* gate = nullptr;
+        for (auto it = todo.begin(); it != todo.end();)
+            if ((*it)->context == std::string(ReferenceScanner::kRobCoGate)) {
+                gate = *it;
+                it = todo.erase(it);
+            } else {
+                ++it;
+            }
         if (f.kind == RelinkKind::FormIdIni && blocking.empty()) {
             formIdInis.push_back(&f);
             continue;
@@ -558,10 +569,22 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
             const auto* entry = session.assets.find(f.path);
             if (!entry)
                 throw std::runtime_error("not found in the load order's files");
+            if (gate && isScript(f.path))
+                throw std::runtime_error("a script cannot be a RobCo Patcher config");
             // A file in the output folder that this app did not write would be replaced: never do that.
+            auto mustBeOurs = [&](const std::string& path) {
+                std::error_code ec;
+                if (!std::filesystem::exists(below(outputDir, path), ec))
+                    return;
+                auto it = previous.find(path);
+                if (it == previous.end() || (it->second != 0 && it->second != hashOf(readFile(below(outputDir, path)))))
+                    throw std::runtime_error(path + ": the output folder already has this file and it was not written by "
+                                             "this app; it is never replaced (use a separate output folder, such as a "
+                                             "Mod Organizer 2 mod)");
+            };
             const auto target = below(outputDir, f.path);
             std::error_code ec;
-            if (std::filesystem::exists(target, ec)) {
+            if (!gate && std::filesystem::exists(target, ec)) {
                 auto it = previous.find(f.path);
                 if (it == previous.end() || (it->second != 0 && it->second != hashOf(readFile(target))))
                     throw std::runtime_error("the output folder already has this file and it was not written by this "
@@ -806,8 +829,25 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                     from = e.end;
                 }
                 out.append(text.substr(from));
-                if (!f.changes.empty())
+                if (!f.changes.empty() || gate)
                     f.output.assign(out.begin(), out.end());
+            }
+            if (gate) {
+                // ...\<plugin>.ini -> ...\Multiplexer - <plugin without extension>\<output>.ini: RobCo reads
+                // the folders below its own and applies the copy while the output is loaded. The original is
+                // left as it is (RobCo skips it while its plugin is not loaded).
+                const auto slash = f.path.rfind('\\');
+                const std::string dir = f.path.substr(0, slash + 1);
+                std::string stem = f.path.substr(slash + 1, f.path.size() - slash - 1 - 4);
+                if (const auto dot = stem.rfind('.'); dot != std::string::npos)
+                    stem.resize(dot);
+                const std::string output = primaryOf(gate->plugin);
+                f.target = dir + "Multiplexer - " + stem + "\\" + output + ".ini";
+                auto [it, added] = gateTargets.emplace(toLower(f.target), f.path);
+                if (!added)
+                    throw std::runtime_error(f.target + " would hold both " + it->second + " and " + f.path);
+                mustBeOurs(f.target);
+                change(*gate, output + " (written as " + f.target + ")");
             }
             if (f.changes.empty())
                 continue; // every reference left as it was: no copy needed

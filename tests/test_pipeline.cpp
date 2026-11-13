@@ -4275,6 +4275,63 @@ TEST(references_successful_transformation_rescans_clean)
     CHECK(manifest.find("Game.IsPluginInstalled\tModS.esp\t" + kw->outputPlugin + "\n") != std::string::npos);
 }
 
+// RobCo Patcher applies a config named <plugin>.ini only while that plugin is loaded (its log: "<plugin>
+// not found ... skipping config file"). With the plugin compiled, the Auto-Merger writes the config again
+// as <output>.ini in a folder of its own (also when no line needs rewriting); the original stays and is
+// skipped. Without the Auto-Merger the plugin stays in the load order.
+TEST(robco_config_named_after_a_compiled_plugin_follows_the_output)
+{
+    auto root = referenceInstall("refrobcogate");
+    auto data = root / "Game" / "Data";
+    writeFile(data / "F4SE" / "Plugins" / "RobCo_Patcher" / "kcd" / "ModS.esp.ini",
+              "filterByKeyword=ModS.esp|812:Fallout4.esm|800\n");
+    writeFile(data / "F4SE" / "Plugins" / "RobCo_Patcher" / "plain" / "ModS.esp.ini",
+              "filterByKeyword=Fallout4.esm|800\n");
+    {
+        Pipeline p(configFor(root)); // Auto-Merger off
+        p.scan();
+        p.analyse();
+        const auto& s = p.session();
+        bool gate = false;
+        for (const auto* r : referencesOf(s, "ModS.esp"))
+            gate |= r->context == ReferenceScanner::kRobCoGate && r->cls == ReferenceClass::Rewritable;
+        CHECK(gate);
+        CHECK(s.findPlugin("ModS.esp")->eligibility != Eligibility::Eligible);
+    }
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto& s = p.session();
+    CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const FormMapping* kw = nullptr;
+    for (const auto& m : p.compiledOutput()->mappings)
+        if (m.editorId == "ModS_Keyword")
+            kw = &m;
+    CHECK(kw != nullptr);
+    if (!kw)
+        return;
+    const auto base = result.directory / "f4se" / "plugins" / "robco_patcher";
+    char id[16];
+    std::snprintf(id, sizeof(id), "%03X", kw->objectId);
+    const auto rewritten = base / "kcd" / "Multiplexer - mods" / (kw->outputPlugin + ".ini");
+    const auto copied = base / "plain" / "Multiplexer - mods" / (kw->outputPlugin + ".ini");
+    CHECK(std::filesystem::exists(rewritten));
+    CHECK(std::filesystem::exists(copied));
+    CHECK_EQ(slurpFile(rewritten), "filterByKeyword=" + kw->outputPlugin + "|" + id + ":Fallout4.esm|800\n");
+    CHECK_EQ(slurpFile(copied), std::string("filterByKeyword=Fallout4.esm|800\n"));
+    // Not written under the original name (RobCo would skip it: ModS.esp is not loaded).
+    CHECK(!std::filesystem::exists(base / "kcd" / "mods.esp.ini"));
+    CHECK(!std::filesystem::exists(base / "plain" / "mods.esp.ini"));
+    const auto manifest = slurpFile(result.directory / AutoMerger::kManifest);
+    CHECK(manifest.find("Multiplexer - mods\\" + kw->outputPlugin + ".ini") != std::string::npos);
+}
+
 // 11. Export is a transaction: when a copy cannot be written, the export fails and is never the
 //     latest; rollback removes every copy. Every export writes into a folder of its own, so a file in
 //     an earlier export never stands in the way of a new one, and is never changed by it.

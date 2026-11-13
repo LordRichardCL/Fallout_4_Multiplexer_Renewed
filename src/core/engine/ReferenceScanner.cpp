@@ -75,7 +75,8 @@ enum class Fact {
     RecordPathFolder,    // a folder named after the plugin whose every file its records name by path
     AssetFolder,         // a folder named after the plugin under meshes, textures, materials, sound or music
     EngineFileName,      // seq\<plugin>.seq (start-game-enabled quests)
-    ToolFileName,        // RobCo Patcher INI named after the plugin
+    ToolFileName,        // RobCo Patcher INI with the plugin's name in its file name
+    ToolGate,            // RobCo Patcher INI named <plugin>.ini: applied only while that plugin is loaded
     FormIdIni,           // bcr\<plugin>.ini: FormIDs relative to the plugin, rewritten under the output's name
     FormIdIniUnknown,    // bcr\<plugin>.ini with lines that are not "[section]" or "key=<FormID>"
     OtherFileName,       // any other file named after the plugin
@@ -173,7 +174,13 @@ Rule rule(Fact f)
                 "gets its own SEQ file and this one is no longer read"};
     case Fact::ToolFileName:
         return {K::FilePath, C::Safe, "file name",
-                "RobCo Patcher reads every INI in its folders: the file name is not used to find the plugin"};
+                "RobCo Patcher reads every INI in its folders; only a file named exactly <plugin>.ini is tied to that "
+                "plugin, and this one is not"};
+    case Fact::ToolGate:
+        return {K::FilePath, C::Rewritable, ReferenceScanner::kRobCoGate,
+                "RobCo Patcher applies a config named <plugin>.ini only while that plugin is loaded (its log: "
+                "\"<plugin> not found ... skipping config file\"): the Auto-Merger writes the config again as "
+                "<output>.ini in a folder of its own, so it applies while the output is loaded"};
     case Fact::FormIdIni:
         return {K::FilePath, C::Rewritable, "per-plugin FormID INI",
                 "a tool INI named after the plugin, listing FormIDs relative to it: the Auto-Merger writes the same "
@@ -977,7 +984,10 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             auto it = names.find(n);
             if (it == names.end() || toLower(file) == n)
                 continue;
-            Fact f = istartsWith(p, "f4se\\plugins\\robco_patcher\\") ? Fact::ToolFileName : Fact::OtherFileName;
+            const bool robco = istartsWith(p, "f4se\\plugins\\robco_patcher\\");
+            Fact f = !robco                       ? Fact::OtherFileName
+                     : toLower(file) == n + ".ini" ? Fact::ToolGate
+                                                   : Fact::ToolFileName;
             std::string problem;
             if (isFormIdIniPath(toLower(p), n)) {
                 try {

@@ -27,6 +27,9 @@ struct ReferenceScanOptions {
 // a DLL string, a folder); classify() turns each fact into a ReferenceClass and a reason.
 class ReferenceScanner {
 public:
+    // Context of a RobCo Patcher config named <plugin>.ini: RobCo applies it only while that plugin is
+    // loaded, so the Auto-Merger writes it again under the output's name.
+    static constexpr const char* kRobCoGate = "RobCo Patcher gate";
     // Fills Session::nameReferences.
     static void scan(Session& session, const ReferenceScanOptions& options, ProgressSink& progress = nullProgress());
 
