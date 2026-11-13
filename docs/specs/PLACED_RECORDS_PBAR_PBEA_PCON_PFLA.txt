@@ -1,0 +1,984 @@
+PBAR / PBEA / PCON / PFLA - WORKING MODEL FOR MULTIPLEXER
+
+I want Multiplexer to handle PBAR, PBEA, PCON and PFLA correctly
+when analysing CELL conflicts and compiling compatibility patches.
+
+You already understand xEdit and have access to the relevant record
+definitions, so use those definitions as the authority for exact
+field layouts.
+
+The important architectural point is that these should NOT be modelled
+as ordinary fields of a CELL record.
+
+Treat them as specialised placed/reference-style records associated
+with CELL child groups.
+
+Conceptually:
+
+WRLD
+└── CELL
+    ├── CELL record/configuration
+    │
+    └── child groups
+        ├── REFR
+        ├── ACHR
+        ├── PGRE
+        ├── PMIS
+        ├── PHZD
+        ├── PARW
+        ├── PBAR
+        ├── PBEA
+        ├── PCON
+        └── PFLA
+
+Each child record has its own identity/FormID and potentially its own
+override chain.
+
+Therefore distinguish:
+
+1. CELL configuration merging
+2. CELL child-record conflict resolution
+
+Do NOT flatten these into one CELL merge operation.
+
+
+==================================================
+1. WHAT I CURRENTLY BELIEVE THESE REPRESENT
+==================================================
+
+The safest current interpretation is:
+
+PBAR
+PBEA
+PCON
+PFLA
+
+belong to the PXXX specialised placed-reference family.
+
+They should be treated architecturally alongside signatures such as:
+
+PARW
+PGRE
+PHZD
+PMIS
+
+rather than as scalar CELL subfields.
+
+Do NOT rely on guessed expansions of the abbreviations.
+
+Use the xEdit Fallout 4 definitions/source to determine their precise
+underlying record semantics.
+
+What matters immediately to Multiplexer is:
+
+- they are record signatures
+- instances have record identities/FormIDs
+- they can appear as part of CELL child/reference structures
+- they should therefore have their own override chains
+- they should not be "merged into the CELL" merely because they are
+  associated with the same CELL
+
+
+==================================================
+2. EXAMPLE: TWO DIFFERENT REFERENCES
+==================================================
+
+Suppose ModA adds:
+
+CELL 00012345
+
+    PBAR 01001234
+
+
+And ModB adds:
+
+CELL 00012345
+
+    PBAR 02005678
+
+
+Do NOT interpret this as:
+
+CELL.PBAR = ModA value
+
+versus:
+
+CELL.PBAR = ModB value
+
+
+They are conceptually separate records:
+
+CELL:
+00012345
+
+
+CHILD RECORD:
+PBAR 01001234
+Source = ModA
+
+
+CHILD RECORD:
+PBAR 02005678
+Source = ModB
+
+
+If both plugins remain active and Fallout 4's group/reference semantics
+allow both records to exist, there may be no PBAR override conflict at
+all.
+
+They merely happen to belong to the same CELL hierarchy.
+
+
+Therefore:
+
+PBAR 01001234
+
+and
+
+PBAR 02005678
+
+must be tracked independently.
+
+
+==================================================
+3. EXAMPLE: ACTUAL PBAR OVERRIDE CONFLICT
+==================================================
+
+Now consider:
+
+Base/Master:
+
+PBAR 000ABCDE
+
+
+ModA:
+
+PBAR 000ABCDE
+Field X = A
+
+
+ModB:
+
+PBAR 000ABCDE
+Field Y = B
+
+
+This IS an override chain because all versions represent the same record
+identity.
+
+Multiplexer should build:
+
+PBAR 000ABCDE
+    │
+    ├── Base/master
+    │
+    ├── ModA
+    │
+    └── ModB
+          ↓
+       winner
+
+
+Now the compatibility analyser can investigate the fields inside that
+PBAR record.
+
+For example, purely conceptually:
+
+Base:
+
+Position = P1
+Property X = VanillaX
+Property Y = VanillaY
+
+
+ModA:
+
+Position = P1
+Property X = ModA-X
+Property Y = VanillaY
+
+
+ModB:
+
+Position = P1
+Property X = VanillaX
+Property Y = ModB-Y
+
+
+If the actual PBAR definition proves X and Y are independently
+mergeable, then a compatibility patch might contain:
+
+PBAR 000ABCDE
+
+Property X = ModA-X
+Property Y = ModB-Y
+
+
+But this must ONLY happen once the actual PBAR field semantics establish
+that X and Y can coexist.
+
+Do not blindly apply generic field merging.
+
+
+==================================================
+4. SAME RULE FOR PBEA / PCON / PFLA
+==================================================
+
+Apply exactly the same identity principle:
+
+PBEA 0100AAAA
+and
+PBEA 0200BBBB
+
+are separate records.
+
+
+PCON 0100AAAA
+and
+PCON 0200BBBB
+
+are separate records.
+
+
+PFLA 0100AAAA
+and
+PFLA 0200BBBB
+
+are separate records.
+
+
+Only when the resolved FormID represents the same record do we have an
+override chain requiring record conflict analysis.
+
+Conceptually:
+
+PCON 00012345
+    ↓
+ModA override
+    ↓
+ModB override
+    ↓
+ModC override
+    ↓
+Compatibility Patch override
+
+
+NOT:
+
+CELL
+    ↓
+collect every PCON
+    ↓
+merge PCON list
+
+
+==================================================
+5. FORMID IDENTITY IS CRITICAL
+==================================================
+
+Don't compare raw numeric FormIDs naively.
+
+Multiplexer already needs to account for:
+
+- master indices
+- plugin ownership
+- resolved FormID identity
+- ESL/light-plugin indexing
+- injected records where applicable
+- originating plugin
+- override relationship
+
+Two records displaying superficially similar local IDs are not
+automatically the same record.
+
+The comparison must use Multiplexer's canonical resolved FormID identity.
+
+Conceptually:
+
+RecordIdentity {
+    signature
+    originPlugin
+    localFormID
+    resolvedFormID
+}
+
+or whatever equivalent already fits the existing architecture.
+
+
+==================================================
+6. PARENT CELL ASSOCIATION IS DIFFERENT FROM IDENTITY
+==================================================
+
+Store CELL association as contextual information:
+
+PlacedRecord {
+    identity
+    signature
+    parentCell
+    persistenceClass
+    groupContext
+    overrideChain
+}
+
+The parent CELL helps explain WHERE the placed record belongs.
+
+It does NOT replace the record's own identity.
+
+Therefore:
+
+CELL 00011111
+    PBAR X
+
+CELL 00011111
+    PBAR Y
+
+means:
+
+same parent
+different records.
+
+
+Whereas:
+
+ModA:
+CELL 00011111
+    PBAR X
+
+
+ModB:
+CELL 00011111
+    PBAR X
+
+means:
+
+same parent
+same record identity
+potential override chain.
+
+
+==================================================
+7. MOVING A RECORD BETWEEN CELLS
+==================================================
+
+Be especially careful when the same placed/reference record appears to
+change CELL/group ownership.
+
+Conceptually:
+
+ModA:
+
+CELL A
+    PBAR X
+
+
+ModB:
+
+CELL B
+    PBAR X
+
+
+Do NOT interpret this as:
+
+PBAR X deleted
++
+brand-new PBAR X created
+
+
+without checking actual Fallout 4/xEdit semantics.
+
+Likewise, do not blindly preserve:
+
+CELL A -> PBAR X
+
+AND
+
+CELL B -> PBAR X
+
+into the compatibility output.
+
+That could incorrectly duplicate one logical placed reference.
+
+Treat parent/group relocation as a structural conflict requiring a
+specific rule.
+
+The same principle applies to:
+
+PBAR
+PBEA
+PCON
+PFLA
+REFR
+ACHR
+and other reference-like CELL children.
+
+
+==================================================
+8. PERSISTENT VERSUS TEMPORARY GROUPING
+==================================================
+
+Preserve the distinction between CELL child grouping as represented by
+the real Fallout 4 plugin structure.
+
+Do not flatten:
+
+Persistent
+Temporary
+Other applicable child groups
+
+into:
+
+CELL.references[]
+
+
+For compatibility analysis retain:
+
+signature
+FormID
+origin
+parent CELL
+group type
+persistence state
+override chain
+
+If an override changes something that affects group placement or
+persistence, treat that as structural rather than an ordinary scalar
+merge until verified otherwise.
+
+
+==================================================
+9. DEFINE EACH SIGNATURE USING A MERGE CONTRACT
+==================================================
+
+I want PBAR/PBEA/PCON/PFLA eventually defined for the compatibility
+compiler using a MergeContract.
+
+Something conceptually like:
+
+RecordMergeContract {
+    signature
+
+    identityRules
+
+    parentRules
+
+    fieldDefinitions
+
+    fieldMergePolicies
+
+    structuralFields
+
+    atomicStructures
+
+    keyedCollections
+
+    orderingRules
+
+    FormIDReferenceFields
+
+    requiredDependencies
+
+    conflictRules
+
+    outputRules
+
+    validationRules
+
+    automaticMergeLevel
+}
+
+
+For:
+
+PBAR
+PBEA
+PCON
+PFLA
+
+
+Claude should inspect the xEdit Fallout 4 definitions and populate the
+contracts from actual evidence.
+
+
+==================================================
+10. CLASSIFY EVERY INTERNAL FIELD
+==================================================
+
+For every field/subrecord exposed by xEdit for PBAR/PBEA/PCON/PFLA,
+classify it as one of:
+
+SCALAR_INDEPENDENT
+
+Potentially suitable for field-level carry-forward.
+
+
+FORMID_REFERENCE
+
+Can potentially be selected from another override, but requires:
+- target validation
+- master validation
+- dependency validation
+
+
+BITFIELD
+
+Compare individual bit transitions but do not automatically OR unknown
+flags.
+
+
+ATOMIC_STRUCTURE
+
+Compare as a structure and initially select one complete source version.
+
+
+KEYED_COLLECTION
+
+Members have stable identities that allow additions/removals/replacements
+to be tracked.
+
+
+ORDERED_COLLECTION
+
+Ordering has semantic significance.
+
+
+STRUCTURAL_IDENTITY
+
+Changing this affects record meaning, ownership, placement or hierarchy.
+
+Do not automatically merge.
+
+
+RUNTIME_DEPENDENT
+
+Cannot be understood solely from plugin bytes/fields.
+
+
+OPAQUE
+
+Multiplexer can preserve and compare the data but does not understand
+its semantics.
+
+
+UNSUPPORTED
+
+Never automatically merge.
+
+
+==================================================
+11. CHANGE PROVENANCE INSIDE EACH PXXX RECORD
+==================================================
+
+Once a signature has a reliable contract, use the same provenance model
+we've designed for the rest of Multiplexer.
+
+Example:
+
+PBAR X
+
+Base
+    Field A = 10
+    Field B = BaseRef
+
+ModA
+    Field A = 20
+    Field B = BaseRef
+
+ModB
+    Field A = 10
+    Field B = ModBRef
+
+
+Then report:
+
+PBAR X
+
+FIELD A
+
+Introduced by:
+ModA
+
+10 -> 20
+
+Final winner:
+10
+
+Status:
+LOST
+
+
+FIELD B
+
+Introduced by:
+ModB
+
+BaseRef -> ModBRef
+
+Final winner:
+ModBRef
+
+Status:
+SURVIVES
+
+
+If the PBAR merge contract states that A and B are independent:
+
+Proposed compatibility result:
+
+Field A = 20      from ModA
+Field B = ModBRef from ModB
+
+
+If the contract says they are coupled:
+
+Manual review required.
+
+
+==================================================
+12. ADDITIONS ARE DIFFERENT FROM OVERRIDES
+==================================================
+
+This distinction is extremely important.
+
+Scenario A:
+
+ModA introduces:
+
+PBAR X
+
+
+ModB introduces:
+
+PBAR Y
+
+
+These are independent new records.
+
+Do not build:
+
+X versus Y
+
+
+Scenario B:
+
+ModA modifies:
+
+PBAR X
+
+
+ModB modifies:
+
+PBAR X
+
+
+This is an override chain.
+
+Build:
+
+Origin X
+→ ModA X
+→ ModB X
+
+
+Scenario C:
+
+ModA introduces:
+
+PBAR X
+
+
+ModB later overrides:
+
+PBAR X
+
+
+This is:
+
+New record from ModA
+→ ModB override
+
+
+Multiplexer should preserve the fact that ModA is the origin rather
+than incorrectly treating Fallout4.esm as the master of X.
+
+
+==================================================
+13. PATCH COMPILATION
+==================================================
+
+When compiling the compatibility plugin, do not write PBAR/PBEA/PCON/PFLA
+records merely because they were discovered beneath a conflicted CELL.
+
+Only emit one when the patch plan actually needs to override that record.
+
+Example:
+
+ModA:
+PBAR X
+
+ModB:
+PBAR Y
+
+No conflict requiring patch:
+
+Patch.esp does NOT need to duplicate X + Y simply to make them coexist.
+
+
+But:
+
+ModA:
+PBAR X
+    Field A = A
+
+ModB:
+PBAR X
+    Field A = vanilla
+    Field B = B
+
+
+Validated desired result:
+
+PBAR X
+    Field A = A
+    Field B = B
+
+
+Then:
+
+CompatibilityPatch.esp
+
+    PBAR X
+        Field A = A
+        Field B = B
+
+
+This record should be emitted in the correct Fallout 4 group/parent
+structure according to the writer's validated rules.
+
+
+==================================================
+14. RELATIONSHIP TO CELL CONFIGURATION MERGING
+==================================================
+
+Keep these pipelines separate:
+
+PIPELINE A
+
+CELL FormID
+    ↓
+CELL configuration override chain
+    ↓
+CELL configuration compatibility analysis
+    ↓
+possible CELL override in patch
+
+
+PIPELINE B
+
+PBAR/PBEA/PCON/PFLA FormID
+    ↓
+placed-record override chain
+    ↓
+signature-specific compatibility analysis
+    ↓
+possible PXXX override in patch
+
+
+They can be displayed together to the user because they relate to the
+same location.
+
+But internally they remain separate conflict domains.
+
+
+Example UI:
+
+CELL: ExampleInterior01
+
+CELL CONFIGURATION CONFLICTS
+
+    Lighting:
+       ModA → LOST
+
+    Water:
+       ModB → SURVIVES
+
+
+PLACED/CHILD RECORD CONFLICTS
+
+    PBAR X
+       ModA
+       ModC
+       → compatibility candidate
+
+    PBEA Y
+       ModB
+       ModC
+       → competing modification
+
+    PCON Z
+       ModA only
+       → no conflict
+
+    PFLA Q
+       ModB only
+       → no conflict
+
+
+This is much clearer than reporting:
+
+"ExampleInterior01 has 4 conflicts."
+
+
+==================================================
+15. WHAT I WANT YOU TO DETERMINE FROM XEDIT
+==================================================
+
+For EACH of:
+
+PBAR
+PBEA
+PCON
+PFLA
+
+inspect the Fallout 4 xEdit record definition and provide:
+
+1. The xEdit record definition.
+
+2. Every recognised subrecord/field.
+
+3. Which fields are shared with ordinary REFR-style records.
+
+4. Which fields are unique to this signature.
+
+5. Which fields contain FormID references.
+
+6. Which structures are optional.
+
+7. Which structures are repeated.
+
+8. Whether repeated structures are:
+   - ordered
+   - keyed
+   - set-like
+   - unknown
+
+9. Which fields affect world/cell placement.
+
+10. Which fields affect persistence/group ownership.
+
+11. Which fields can reasonably be compared independently.
+
+12. Which structures should initially be treated atomically.
+
+13. Which structures should never initially be auto-merged.
+
+14. How xEdit identifies overrides of the same record.
+
+15. How xEdit displays these records under CELL groups.
+
+16. Whether Fallout4.esm or official DLC contains examples.
+
+17. Give several REAL examples from official Fallout 4 plugins if
+    available:
+
+    signature
+    FormID
+    EditorID if present
+    parent CELL
+    base/reference fields
+    relevant subrecords
+
+18. Show at least one example of the complete xEdit-visible structure
+    of an actual PBAR, PBEA, PCON and PFLA if examples exist.
+
+19. Explain what actual type of game-world object each signature
+    represents, but ONLY where supported by the xEdit definition,
+    official plugin data or another strong source.
+
+20. State explicitly where meaning is uncertain.
+
+
+==================================================
+16. DO NOT GUESS THE ACRONYM EXPANSIONS
+==================================================
+
+Do not infer:
+
+PBAR = "Placed _____"
+PBEA = "Placed _____"
+PCON = "Placed _____"
+PFLA = "Placed _____"
+
+merely because the abbreviation looks obvious.
+
+If the xEdit definitions, source comments, official records or reliable
+documentation give the names, use them.
+
+Otherwise retain the signature itself:
+
+PBAR
+PBEA
+PCON
+PFLA
+
+and describe observed structure/behaviour.
+
+The compatibility compiler cares more about correct semantics than a
+friendly expansion of the four-letter signature.
+
+
+==================================================
+17. ULTIMATE QUESTION
+==================================================
+
+The goal of this research is NOT merely:
+
+"What does PBAR mean?"
+
+For each signature, answer:
+
+"What is the smallest semantic unit inside this record that Multiplexer
+can safely carry forward from an earlier override into a compatibility
+patch without changing unrelated behaviour?"
+
+
+The final result should therefore look roughly like:
+
+PBAR MERGE CONTRACT
+
+Record identity:
+    FormID-based override chain
+
+Parent context:
+    CELL child/reference structure
+
+Safe independently mergeable:
+    [verified fields]
+
+Selectable but not automatically mergeable:
+    [verified fields]
+
+Atomic:
+    [verified structures]
+
+Structural/do not merge:
+    [verified fields]
+
+FormID dependencies:
+    [verified fields]
+
+Unknown:
+    [anything not adequately understood]
+
+Automatic compatibility:
+    Supported / Partial / Disabled
+
+
+Repeat for:
+
+PBEA
+PCON
+PFLA.
+
+
+Then show exactly how these contracts integrate with Multiplexer's
+existing compatibility-patch compiler.

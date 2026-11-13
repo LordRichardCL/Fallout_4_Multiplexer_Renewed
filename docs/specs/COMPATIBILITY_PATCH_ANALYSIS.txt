@@ -1,0 +1,1506 @@
+I want you to research and design a robust compatibility-patch analysis system for Fallout 4 Multiplexer Renewed.
+
+This is not simply a request to detect that two plugins contain the same FormID.
+
+The main objective is to determine:
+
+1. What each plugin changed within a record.
+2. Which changes survive into the final winning override.
+3. Which changes are lost because of later overrides.
+4. Which lost changes could potentially coexist.
+5. Which changes compete with one another.
+6. Which records or subrecords are too complex to merge automatically.
+7. How a safe compatibility patch could be proposed or generated.
+
+Before making major code changes, inspect the existing repository and research well-documented Fallout 4, FO4Edit/xEdit, plugin-merging, conflict-resolution and compatibility-patching resources.
+
+Do not design the system solely from assumptions or from the simplified examples in this prompt.
+
+==================================================
+1. RESEARCH REQUIREMENT
+==================================================
+
+Research must be a major part of this task.
+
+Prioritise authoritative, technical and well-documented resources concerning:
+
+- xEdit and FO4Edit conflict detection
+- xEdit conflict-resolution methodology
+- Fallout 4 plugin record override behaviour
+- Fallout 4 record and subrecord structures
+- manual compatibility-patch creation
+- load-order conflict resolution
+- override chains
+- record signatures
+- subrecords
+- arrays and collections
+- FormID references
+- keywords
+- object modifications
+- attachment systems
+- constructible objects
+- leveled lists
+- templates
+- linked records
+- injected records
+- deletion and disabling behaviour
+- record ownership
+- master dependencies
+- ESL and light-plugin FormIDs
+- merged patches
+- bashed or smashed patch concepts, where relevant
+- xEdit scripts that merge specific record types
+- established Fallout 4 compatibility-patching practices
+
+Start with the official xEdit documentation, especially its material covering:
+
+- conflicts versus overrides
+- conflict detection
+- conflict-resolution patches
+- manual patch creation
+- merged patches
+- the xEdit conflict-detection algorithm
+- records that merge at runtime
+- xEdit scripting and element traversal
+
+Then look for Fallout 4-specific documentation and mature, well-explained tools or scripts that demonstrate compatibility patching for particular record types.
+
+Prefer sources in roughly this order:
+
+1. Official xEdit documentation.
+2. xEdit source code or established xEdit scripting documentation.
+3. Bethesda Fallout 4 Creation Kit documentation, where applicable.
+4. Well-maintained Fallout 4 modding documentation.
+5. Established FO4Edit scripts with documented merge logic.
+6. Technically detailed guides from experienced mod authors.
+7. Community discussions only when primary documentation does not answer the question.
+
+Do not treat an unsupported forum comment, Reddit post or AI-generated explanation as authoritative.
+
+For every important technical decision, record:
+
+- the source
+- the relevant concept
+- what the source explicitly establishes
+- how it applies to Multiplexer
+- any uncertainty or Fallout 4-specific limitation
+
+Create a research summary before implementing major changes.
+
+The research summary should include:
+
+- Source title
+- Source type
+- Relevant topic
+- Key finding
+- Effect on Multiplexer’s design
+- Reliability level
+- Remaining uncertainty
+
+Do not assume that xEdit’s old automatic “Create Merged Patch” function represents the correct modern architecture.
+
+Distinguish carefully between:
+
+- a manually authored conflict-resolution or compatibility patch
+- an automated merged patch
+- a bashed or smashed patch
+- a specialised record-type merger
+- combining whole plugins
+- carrying selected changes into a new winning override
+
+The system being discussed here is primarily a compatibility/conflict-resolution analyser and patch generator. It is not necessarily a traditional whole-plugin merger.
+
+==================================================
+2. CORE FALLOUT 4 PROBLEM
+==================================================
+
+Multiple Fallout 4 plugins can override the same record.
+
+The plugin loading later normally supplies the winning version of that record. However, the fact that one record wins does not mean that it contains every desirable change introduced earlier in the override chain.
+
+Different mods can change different parts of the same record.
+
+A later override can restore an earlier field to its master value or omit an element introduced earlier. This can cause a valid change from another mod to disappear.
+
+Therefore, Multiplexer must not stop at:
+
+“Which plugin wins this record?”
+
+It must investigate:
+
+“What individual changes were introduced throughout the override chain, which changes survive, which changes disappear, and which changes could safely coexist in a compatibility patch?”
+
+==================================================
+3. SIMPLE SCALAR-FIELD EXAMPLE
+==================================================
+
+Consider a simplified Combat Rifle record.
+
+VANILLA OR MASTER RECORD:
+
+Damage = 33
+Weight = 11
+Value = 100
+
+MOD A changes Damage:
+
+Damage = 55
+Weight = 11
+Value = 100
+
+MOD B changes Weight:
+
+Damage = 33
+Weight = 7
+Value = 100
+
+MOD C changes Value:
+
+Damage = 33
+Weight = 11
+Value = 250
+
+LOAD ORDER:
+
+Fallout4.esm
+ModA.esp
+ModB.esp
+ModC.esp
+
+If ModC.esp is the final winning override, the effective record may be:
+
+Damage = 33
+Weight = 11
+Value = 250
+
+The following changes are consequently absent from the winner:
+
+ModA.esp:
+Damage = 55
+
+ModB.esp:
+Weight = 7
+
+The following change survives:
+
+ModC.esp:
+Value = 250
+
+A manually reviewed compatibility patch could potentially produce:
+
+Damage = 55     from ModA.esp
+Weight = 7      from ModB.esp
+Value = 250     from ModC.esp
+
+This would preserve three independent scalar changes in one final winning record.
+
+However, this example is deliberately simplified.
+
+Do not assume that every real Fallout 4 record can be merged safely by independently copying scalar values.
+
+==================================================
+4. ADDED ATTACHMENT EXAMPLE
+==================================================
+
+Now expand the example.
+
+Assume the original record conceptually contains:
+
+Damage = 33
+Weight = 11
+Value = 100
+
+Attachments:
+- Standard Sight
+
+ModA.esp changes Damage:
+
+Damage = 55
+
+ModB.esp changes Weight and introduces a laser attachment:
+
+Weight = 7
+
+Attachments:
+- Standard Sight
+- Laser Attachment
+
+ModC.esp changes Value but does not carry ModA or ModB’s changes forward:
+
+Damage = 33
+Weight = 11
+Value = 250
+
+Attachments:
+- Standard Sight
+
+If ModC.esp is the winner, the following changes may be lost:
+
+ModA.esp:
+- Damage = 55
+
+ModB.esp:
+- Weight = 7
+- Laser Attachment added
+
+ModC.esp:
+- Value = 250 survives
+
+A potential compatibility result could conceptually be:
+
+Damage = 55
+Weight = 7
+Value = 250
+
+Attachments:
+- Standard Sight
+- Laser Attachment
+
+The important point is that the laser is not simply a scalar value changing from one number to another.
+
+It may be represented through one or more of the following, depending on the actual Fallout 4 record structure:
+
+- an added element
+- a reference
+- a keyword
+- a linked record
+- an object-modification relationship
+- an attachment parent slot
+- an association with another record
+- a separate record added by the plugin
+- a collection entry
+- a constructible object
+- another Fallout 4-specific structure
+
+Do not assume how the laser is represented.
+
+Research the actual Fallout 4 record types and relationships involved.
+
+The simplified “Attachments” list is only an explanatory model. The implementation must use the real plugin structure exposed by the parser or xEdit-compatible data model.
+
+==================================================
+5. WHY MASTER-VERSUS-WINNER COMPARISON IS INSUFFICIENT
+==================================================
+
+Do not only compare the master record with the final winner.
+
+For example:
+
+Vanilla:
+Attachments = [Standard Sight]
+
+ModB:
+Attachments = [Standard Sight, Laser]
+
+Winner:
+Attachments = [Standard Sight]
+
+A master-versus-winner comparison would report that the attachment collection is unchanged.
+
+That conclusion would miss the important event in the middle of the chain:
+
+Vanilla
+    Standard Sight
+        ↓
+ModA
+    Damage changed
+        ↓
+ModB
+    Weight changed
+    Laser introduced
+        ↓
+ModC
+    Value changed
+    Laser absent
+        ↓
+Winner
+    Laser no longer survives
+
+Multiplexer must analyse the complete override chain in load-order sequence.
+
+It must recognise that ModB introduced something and that the introduced element is not present in the winner.
+
+This requires change provenance.
+
+==================================================
+6. CHANGE-PROVENANCE MODEL
+==================================================
+
+Design a change-provenance system for every record’s override chain.
+
+For each meaningful path, field, element, collection member, reference or subrecord, Multiplexer should attempt to identify:
+
+- record FormID
+- record signature
+- record EditorID, if available
+- source/master record
+- complete override chain
+- plugin containing each override
+- plugin load-order position
+- element path
+- element identity
+- previous value or state
+- new value or state
+- operation type
+- plugin that introduced the operation
+- later plugin that preserved it
+- later plugin that replaced it
+- later plugin after which it disappeared
+- final winning value or state
+- whether the change survives
+- whether the change was reverted to a master value
+- whether the change conflicts with another intentional change
+- whether the change depends on records from another plugin
+- whether carrying it forward would add a new master
+- merge confidence
+- review status
+- evidence used to reach the conclusion
+
+Potential operation types may include:
+
+- VALUE_ADDED
+- VALUE_MODIFIED
+- VALUE_REMOVED
+- ELEMENT_ADDED
+- ELEMENT_MODIFIED
+- ELEMENT_REMOVED
+- REFERENCE_ADDED
+- REFERENCE_CHANGED
+- REFERENCE_REMOVED
+- SUBRECORD_ADDED
+- SUBRECORD_MODIFIED
+- SUBRECORD_REMOVED
+- COLLECTION_ITEM_ADDED
+- COLLECTION_ITEM_MODIFIED
+- COLLECTION_ITEM_REMOVED
+- RECORD_ADDED
+- RECORD_OVERRIDDEN
+- RECORD_DELETED
+- RECORD_DISABLED
+- RECORD_REPLACED
+- ORDER_CHANGED
+- UNKNOWN_STRUCTURAL_CHANGE
+
+Do not adopt these names blindly.
+
+First inspect the current Multiplexer domain model and research how xEdit represents elements and subrecords. Then propose names that fit the existing architecture.
+
+==================================================
+7. ELEMENT IDENTITY MUST NOT RELY ONLY ON LIST POSITION
+==================================================
+
+Do not compare structured collections solely by array index.
+
+An item moving from index 2 to index 3 is not necessarily:
+
+- one deletion
+- followed by one unrelated addition
+
+It may simply be the same logical element in a different position.
+
+Investigate suitable identity strategies for each structure, including where applicable:
+
+- referenced FormID
+- record signature
+- subrecord type
+- editor ID
+- keyword FormID
+- slot identifier
+- stable key fields
+- composite identity
+- canonical element path
+- order-sensitive identity
+- order-insensitive identity
+
+Different Fallout 4 structures may require different comparison strategies.
+
+The system may need a record-signature-specific or path-specific handler registry rather than one universal list-merging algorithm.
+
+Research which arrays are:
+
+- sets
+- keyed collections
+- ordered lists
+- duplicate-permitting lists
+- condition lists
+- script data
+- opaque binary data
+- runtime-merged structures
+
+Do not assume that ordering is irrelevant.
+
+==================================================
+8. CHANGE STATUS
+==================================================
+
+Each detected change should receive a status such as:
+
+SURVIVES:
+The change introduced by a plugin remains represented in the winning record.
+
+LOST:
+The change is no longer represented in the winning record.
+
+REPLACED:
+A later plugin changed the same element to another value.
+
+REVERTED:
+A later plugin restored the element to an earlier or master value.
+
+REMOVED:
+A later plugin explicitly removed the element.
+
+ABSENT_FROM_LATER_OVERRIDE:
+The element appeared in an earlier override but is not present later.
+
+COMPETING:
+Two or more plugins deliberately changed the same logical field or element differently.
+
+PRESERVED_BY_LATER_PLUGIN:
+A later override contains the earlier change.
+
+DUPLICATED:
+The same logical addition appears more than once.
+
+DEPENDENCY_MISSING:
+A proposed carried-forward change references a record that cannot safely be resolved.
+
+UNKNOWN:
+The parser or analysis layer cannot confidently interpret the difference.
+
+Research whether a distinction can reliably be made between:
+
+- an explicit removal
+- omission from an override
+- reversion to a master value
+- normal overriding behaviour
+- a parser failing to expose the structure
+
+Do not claim intent with certainty unless the data supports it.
+
+For example, prefer:
+
+“ModC no longer contains the laser element introduced by ModB”
+
+over:
+
+“ModC intentionally removed ModB’s laser”
+
+unless there is evidence of an intentional deletion or removal operation.
+
+==================================================
+9. MERGE AND COMPATIBILITY CLASSIFICATION
+==================================================
+
+Separate detection from resolution.
+
+The detection layer should report what happened.
+
+A separate compatibility-analysis layer should assess whether changes may coexist.
+
+A separate patch-planning layer should construct a proposed result.
+
+A separate writer should serialise an approved patch.
+
+Do not combine all four responsibilities into one function.
+
+Use a conservative classification system.
+
+GREEN: POTENTIALLY SAFE OR LOW-RISK
+
+Examples may include:
+
+- separate scalar fields changed by different plugins
+- a clearly identifiable set-like element added by one plugin
+- another plugin changing an unrelated scalar field
+- an earlier change that is carried forward without invalidating references
+- supported record-specific merge behaviour backed by documentation and tests
+
+Green must not mean “guaranteed safe”.
+
+It should mean that the change matches a documented low-risk rule and that all validation checks passed.
+
+YELLOW: AMBIGUOUS OR REVIEW REQUIRED
+
+Examples:
+
+- two mods change the same scalar field differently
+- a later mod returns a field to its master value
+- one mod removes an element another mod adds
+- reordered collections where order may matter
+- additions with dependencies on another plugin
+- conditions modified by multiple plugins
+- template or inheritance changes
+- several plausible merged outcomes
+- a later override may be deliberately replacing earlier behaviour
+
+RED: COMPLEX, UNSUPPORTED OR UNSAFE
+
+Examples may include:
+
+- scripts or script properties
+- VMAD-related structures not fully understood by the parser
+- navmesh data
+- worldspace or cell structures with spatial meaning
+- package or condition logic
+- quest structures
+- dialogue structures
+- ownership or enable-parent relationships
+- deleted records
+- injected records
+- complex reference graphs
+- inaccessible or opaque binary data
+- record types for which no validated merge strategy exists
+- structural changes where copying selected child elements may corrupt the record
+- cases that require Creation Kit processing
+- cases where IDs, masters or references cannot be emitted safely
+
+These examples are not final rules.
+
+Verify them through research before encoding them.
+
+UNKNOWN: NO RULE
+
+If Multiplexer does not have a documented and tested handler for a structure, it should classify it as unknown or manual-review-only.
+
+It must not silently apply generic merge logic.
+
+==================================================
+10. SAME-FIELD COMPETITION
+==================================================
+
+Consider:
+
+ModA:
+Damage = 55
+
+ModB:
+Damage = 80
+
+Both plugins modify the same logical field.
+
+Multiplexer must not automatically choose 55 or 80 merely because one plugin loaded earlier or later.
+
+The normal game winner may be easy to identify, but the desired compatibility result cannot be inferred safely.
+
+Report:
+
+- original value
+- ModA value
+- ModB value
+- current winning value
+- source plugin for every value
+- load-order order
+- whether either later plugin preserves the earlier value
+- why automatic resolution was withheld
+
+The user should be able to select:
+
+- keep current winner
+- use ModA
+- use ModB
+- enter or select another supported value
+- exclude this field from the generated patch
+
+Do not invent numeric blending rules such as averaging values.
+
+==================================================
+11. ADDITION VERSUS REMOVAL
+==================================================
+
+Consider:
+
+Vanilla:
+[Standard Sight]
+
+ModB:
+[Standard Sight, Laser]
+
+ModC:
+[Standard Sight]
+
+The analyser can establish that:
+
+- ModB contains an additional laser element.
+- The laser element is absent from ModC.
+- The final winner does not contain it.
+
+The analyser should not automatically claim why it disappeared.
+
+Potential interpretations include:
+
+- ModC was authored without ModB installed.
+- ModC unintentionally overwrote ModB’s addition.
+- ModC deliberately removed the laser.
+- The apparent list is built through another referenced record.
+- The parser has not reconstructed the structure correctly.
+- Runtime behaviour merges the structure differently.
+
+Research the record type before deciding.
+
+The system should report the observable facts first, then give a compatibility assessment with a confidence level.
+
+==================================================
+12. RECORDS THAT MERGE AT RUNTIME
+==================================================
+
+Research xEdit’s documentation concerning records or structures that merge at runtime.
+
+Multiplexer must not flag a lost change merely because an element is absent from the final plugin override if the Fallout 4 engine combines that data at runtime.
+
+Create a documented policy for:
+
+- records that are selected as whole-record winners
+- records containing fields that merge at runtime
+- records requiring bash tags or specialised patchers
+- records requiring manual resolution
+- structures where behaviour differs between Bethesda games
+- structures where Fallout 4 differs from Skyrim, Fallout 3 or Fallout: New Vegas
+
+Do not apply rules from another Bethesda game to Fallout 4 without verifying that they also apply to Fallout 4.
+
+==================================================
+13. PATCH-GENERATION MODEL
+==================================================
+
+The proposed architecture should keep these stages separate:
+
+STAGE 1: LOAD
+
+- Load active plugins.
+- Resolve masters.
+- establish load order.
+- validate plugin metadata.
+- build FormID identity correctly.
+- account for full and light plugins where supported.
+
+STAGE 2: BUILD OVERRIDE CHAINS
+
+For each record identity:
+
+Master or origin
+    ↓
+Override 1
+    ↓
+Override 2
+    ↓
+Override 3
+    ↓
+Current winner
+
+STAGE 3: NORMALISE
+
+Convert parser output into a comparison-friendly representation without losing:
+
+- type information
+- ordering
+- referenced FormIDs
+- subrecord boundaries
+- absent-versus-empty distinctions
+- deletion state
+- raw evidence needed for debugging
+
+STAGE 4: COMPUTE TRANSITIONS
+
+Compare each adjacent pair:
+
+Origin → ModA
+ModA → ModB
+ModB → ModC
+
+Record what each override introduces, preserves, changes, removes or apparently reverts.
+
+STAGE 5: TRACE PROVENANCE
+
+Connect transitions across the chain to determine:
+
+- where a change originated
+- where it was preserved
+- where it was replaced
+- where it disappeared
+- whether it survives in the winner
+
+STAGE 6: COMPATIBILITY ANALYSIS
+
+Classify:
+
+- independent
+- competing
+- dependent
+- ambiguous
+- complex
+- unsupported
+
+STAGE 7: PATCH PLAN
+
+Construct an intermediate patch plan containing:
+
+- source plugin
+- source element path
+- selected source value or element
+- reason for selection
+- required masters
+- safety classification
+- warnings
+- user decision, where necessary
+
+STAGE 8: VALIDATION
+
+Before writing:
+
+- validate referenced FormIDs
+- validate required masters
+- detect circular or invalid dependencies
+- confirm record ownership
+- confirm that the selected value is serialisable
+- check for deleted or missing referenced records
+- verify supported record type
+- validate load-order assumptions
+- compare the planned output with expected provenance
+
+STAGE 9: WRITE
+
+Write the approved result into a new patch plugin.
+
+Do not mutate source plugins.
+
+STAGE 10: VERIFY
+
+Reopen or reparse the generated plugin.
+
+Confirm that:
+
+- expected records exist
+- expected fields match the patch plan
+- references resolve
+- masters are correct
+- generated record identities are valid
+- the patch loads last in the analysed chain
+- the output is structurally readable
+- no selected change silently disappeared during serialisation
+
+==================================================
+14. PATCH PLAN MUST USE EXPLICIT PROVENANCE
+==================================================
+
+The patch generator should not receive only a final anonymous value.
+
+It should receive an explicit resolution instruction similar to:
+
+Record:
+Combat Rifle [FormID]
+
+Resolution entries:
+
+Damage:
+- selected value: 55
+- source: ModA.esp
+- operation: carry forward scalar modification
+- confidence: review or supported
+- reason: independent change lost in later override
+
+Weight:
+- selected value: 7
+- source: ModB.esp
+- operation: carry forward scalar modification
+- confidence: review or supported
+- reason: independent change lost in later override
+
+Value:
+- selected value: 250
+- source: ModC.esp
+- operation: retain current winner
+- confidence: high
+- reason: current winning change
+
+Laser attachment:
+- selected element: referenced attachment data
+- source: ModB.esp
+- operation: carry forward element addition
+- confidence: dependent on validated record handler
+- reason: addition is absent from the winning override
+- required master: ModB.esp, if applicable
+- reference validation: required
+
+This creates an audit trail.
+
+The user should be able to understand exactly why every part of the generated patch exists.
+
+==================================================
+15. USER INTERFACE AND REPORTING
+==================================================
+
+The report should clearly distinguish:
+
+A. Record conflict
+
+Several plugins override the same record.
+
+B. Lost change
+
+A specific change introduced earlier is absent from the winning result.
+
+C. Competing change
+
+Several plugins modify the same logical element differently.
+
+D. Compatible candidate
+
+Different changes appear capable of coexisting under a documented handler.
+
+E. Unsupported structure
+
+Multiplexer can detect a difference but cannot safely resolve it.
+
+Example report:
+
+COMPATIBILITY ANALYSIS
+
+Record:
+Combat Rifle [FormID]
+
+Override chain:
+Fallout4.esm
+→ ModA.esp
+→ ModB.esp
+→ ModC.esp
+
+CURRENT WINNER:
+ModC.esp
+
+LOST CHANGE 1:
+
+Source:
+ModA.esp
+
+Path:
+Damage
+
+Operation:
+VALUE_MODIFIED
+
+Original:
+33
+
+Introduced:
+55
+
+Winning value:
+33
+
+Status:
+LOST OR REVERTED
+
+Classification:
+Potential independent-field merge
+
+LOST CHANGE 2:
+
+Source:
+ModB.esp
+
+Path:
+Weight
+
+Operation:
+VALUE_MODIFIED
+
+Original:
+11
+
+Introduced:
+7
+
+Winning value:
+11
+
+Status:
+LOST OR REVERTED
+
+Classification:
+Potential independent-field merge
+
+LOST CHANGE 3:
+
+Source:
+ModB.esp
+
+Path:
+Attachment-related element path determined from real record data
+
+Operation:
+ELEMENT OR REFERENCE ADDED
+
+Introduced:
+Laser Attachment [FormID if available]
+
+Winning state:
+Absent
+
+Status:
+ADDITION DOES NOT SURVIVE
+
+Classification:
+Requires record-specific attachment validation
+
+SURVIVING CHANGE:
+
+Source:
+ModC.esp
+
+Path:
+Value
+
+Operation:
+VALUE_MODIFIED
+
+Original:
+100
+
+Winning value:
+250
+
+Status:
+SURVIVES
+
+PROPOSED RESULT:
+
+Damage = 55         selected from ModA.esp
+Weight = 7          selected from ModB.esp
+Value = 250         retained from ModC.esp
+Laser attachment    selected from ModB.esp, pending validation
+
+WARNINGS:
+
+- The laser must not be treated as an arbitrary text item.
+- Its real Fallout 4 record relationships must be resolved.
+- Carrying it forward may require ModB.esp as a patch master.
+- The relevant attachment structure must have a documented merge handler.
+- User review is required if later removal may be intentional.
+
+==================================================
+16. DO NOT CONFUSE ASSETS WITH PLUGIN RECORDS
+==================================================
+
+Research and document the difference between:
+
+- plugin record conflicts
+- loose-file conflicts
+- BA2 archive conflicts
+- mesh conflicts
+- texture conflicts
+- material conflicts
+- script-file conflicts
+- plugin references to external assets
+
+A plugin compatibility patch can carry record data and references, but it does not automatically combine two meshes, textures, scripts or archives.
+
+If ModB adds a laser attachment that depends on:
+
+- a mesh
+- a texture
+- a material
+- an animation
+- a script
+- a sound
+- a BA2 archive
+
+the generated plugin patch does not replace those assets.
+
+Multiplexer should report dependencies and avoid presenting a plugin patch as a solution to every file-level conflict.
+
+Keep plugin-record analysis and asset/file conflict analysis as separate domains, even when the UI links them together.
+
+==================================================
+17. DO NOT BLINDLY COPY EVERYTHING
+==================================================
+
+Do not implement compatibility patching as:
+
+“Start with the winner and copy every different value from every earlier plugin.”
+
+That approach is unsafe.
+
+A later mod may deliberately:
+
+- remove an element
+- replace an attachment
+- restore a vanilla value
+- use a template
+- remove an incompatible keyword
+- alter conditions
+- replace a referenced record
+- disable a feature
+- restructure the record
+- expect another field to change at the same time
+- depend on scripts or assets
+- delete or disable a reference
+
+The system should begin conservatively.
+
+Automatic patching should only occur where there is:
+
+- an explicit handler
+- a documented rule
+- an unambiguous element identity
+- valid references
+- clear source provenance
+- adequate tests
+- no unresolved competing change
+- no unsupported structural dependency
+
+Everything else should be reported for review.
+
+==================================================
+18. RECORD-SPECIFIC STRATEGIES
+==================================================
+
+Investigate whether the best architecture is a registry of record-specific or path-specific comparison and merge strategies.
+
+For example:
+
+GenericScalarHandler
+SetLikeReferenceCollectionHandler
+OrderedReferenceListHandler
+KeywordCollectionHandler
+LeveledListHandler
+AttachmentRelationshipHandler
+ConditionListHandler
+ScriptDataHandler
+OpaqueElementHandler
+
+These are conceptual names only.
+
+Do not implement them until the required record semantics are understood.
+
+Each handler should declare:
+
+- supported record signatures
+- supported element paths
+- identity strategy
+- ordering rules
+- allowed operations
+- comparison method
+- compatibility rules
+- required validation
+- automatic-merge eligibility
+- patch-writing method
+- known limitations
+- documentation sources
+- test fixtures
+
+Unknown paths should fall back to detection-only behaviour.
+
+==================================================
+19. TESTING REQUIREMENTS
+==================================================
+
+Create small deterministic plugin-chain fixtures or parser-level fixtures representing:
+
+TEST 1: INDEPENDENT SCALAR CHANGES
+
+Origin:
+Damage 33
+Weight 11
+Value 100
+
+ModA:
+Damage 55
+
+ModB:
+Weight 7
+
+ModC:
+Value 250
+
+Expected:
+- three introduced changes detected
+- Damage and Weight marked lost in winner
+- Value marked surviving
+- merged candidate proposed only if handler permits it
+
+TEST 2: SAME-FIELD COMPETITION
+
+ModA:
+Damage 55
+
+ModB:
+Damage 80
+
+Expected:
+- competing change
+- no automatic selection
+
+TEST 3: ADDED ELEMENT LOST LATER
+
+Origin:
+[Standard Sight]
+
+ModB:
+[Standard Sight, Laser]
+
+ModC:
+[Standard Sight]
+
+Expected:
+- Laser addition attributed to ModB
+- Laser absent from winner
+- reason or intent not asserted without evidence
+
+TEST 4: ADDED ELEMENT PRESERVED
+
+Origin:
+[Standard Sight]
+
+ModB:
+[Standard Sight, Laser]
+
+ModC:
+[Standard Sight, Laser]
+
+Expected:
+- addition attributed to ModB
+- ModC marked as preserving it
+- change marked surviving
+
+TEST 5: LATER MOD CHANGES ADDED ELEMENT
+
+ModB:
+Laser A
+
+ModC:
+Laser B
+
+Expected:
+- competing or replacement relationship
+- no blind union if they occupy the same logical slot
+
+TEST 6: ORDER CHANGE
+
+ModA:
+[A, B, C]
+
+ModB:
+[B, A, C]
+
+Expected:
+- behaviour determined by record-specific ordering rules
+- no false delete/add sequence when identity is stable
+
+TEST 7: DUPLICATE ELEMENTS
+
+Expected:
+- behaviour based on whether duplicates are legal
+- no inappropriate set conversion
+
+TEST 8: MISSING REFERENCE
+
+Expected:
+- patch generation blocked or warned
+- dependency identified
+
+TEST 9: REQUIRED MASTER
+
+Expected:
+- patch plan records the required master
+- writer adds it only through validated logic
+
+TEST 10: DELETED RECORD
+
+Expected:
+- conservative classification
+- no automatic restoration without a specific rule
+
+TEST 11: UNKNOWN STRUCTURE
+
+Expected:
+- difference detected
+- classified as unsupported
+- no automatic merge
+
+TEST 12: MASTER AND WINNER APPEAR IDENTICAL
+
+Origin:
+No laser
+
+Intermediate plugin:
+Laser added
+
+Winner:
+No laser
+
+Expected:
+- intermediate lost change still detected
+
+TEST 13: RUNTIME-MERGED STRUCTURE
+
+Expected:
+- result follows verified Fallout 4 runtime semantics
+- no false lost-change warning
+
+TEST 14: GENERATED PATCH ROUND TRIP
+
+Expected:
+- write patch
+- reopen patch
+- verify values, masters, FormIDs and references
+- compare reopened output to patch plan
+
+==================================================
+20. PERFORMANCE AND SCALABILITY
+==================================================
+
+Multiplexer may need to analyse large load orders.
+
+Design with:
+
+- record indexing by stable identity
+- lazy parsing where appropriate
+- cached canonical representations
+- incremental comparison
+- deterministic output
+- structured diagnostics
+- bounded memory use
+- cancellation support
+- progress reporting
+- repeatable results
+- clear separation between parsing and analysis
+
+Do not optimise prematurely at the cost of correctness.
+
+First establish:
+
+- correct record identity
+- correct load-order ordering
+- correct provenance
+- correct element identity
+- correct supported merge rules
+
+Then profile realistic plugin sets.
+
+==================================================
+21. REQUIRED DELIVERABLES BEFORE MAJOR IMPLEMENTATION
+==================================================
+
+Before changing the architecture substantially, provide:
+
+1. CURRENT ARCHITECTURE ASSESSMENT
+
+Explain:
+
+- how Multiplexer currently parses plugins
+- how it identifies records
+- how it handles masters
+- how it understands load order
+- how it compares records
+- whether it preserves subrecord structure
+- whether it can write valid plugins
+- what can be reused
+- what is currently missing
+
+2. RESEARCH REPORT
+
+List the authoritative and useful sources consulted.
+
+For each source explain:
+
+- what it establishes
+- how reliable it is
+- which design requirement it supports
+- any limitations
+
+3. TERMINOLOGY MODEL
+
+Define:
+
+- override
+- conflict
+- winning override
+- origin/master record
+- override chain
+- lost change
+- preserved change
+- competing change
+- revert
+- removal
+- compatibility patch
+- merged patch
+- plugin merge
+- runtime merge
+- change provenance
+- patch plan
+
+Use terminology consistent with well-documented modding resources.
+
+4. PROPOSED DOMAIN MODEL
+
+Show the proposed data objects and relationships for:
+
+- record identity
+- override chain
+- plugin snapshot
+- element path
+- element identity
+- change operation
+- provenance trace
+- conflict classification
+- proposed resolution
+- patch plan
+- validation result
+
+5. PROCESS DIAGRAM
+
+Show:
+
+Plugins
+    ↓
+Load and validate
+    ↓
+Build override chains
+    ↓
+Normalise records
+    ↓
+Compare adjacent overrides
+    ↓
+Track provenance
+    ↓
+Identify surviving and lost changes
+    ↓
+Classify compatibility
+    ↓
+Build reviewable patch plan
+    ↓
+Validate dependencies
+    ↓
+Write approved patch
+    ↓
+Reopen and verify output
+
+6. SAFETY MATRIX
+
+For every currently supported record type or element category, state:
+
+- detection support
+- provenance support
+- automatic merge support
+- manual selection support
+- writing support
+- validation support
+- known limitations
+- source documentation
+
+7. IMPLEMENTATION PLAN
+
+Break work into small stages.
+
+Suggested order:
+
+Phase 1:
+Research and terminology.
+
+Phase 2:
+Override-chain construction and diagnostics.
+
+Phase 3:
+Generic scalar provenance.
+
+Phase 4:
+Structured-element identity.
+
+Phase 5:
+Lost addition and removal detection.
+
+Phase 6:
+Compatibility classification.
+
+Phase 7:
+Reviewable patch-plan model.
+
+Phase 8:
+One narrowly selected, well-documented record-specific handler.
+
+Phase 9:
+Patch writing and round-trip verification.
+
+Phase 10:
+Additional handlers added only after documentation and tests.
+
+8. TEST PLAN
+
+Include:
+
+- unit tests
+- integration tests
+- real-plugin validation
+- generated fixture tests
+- malformed-input tests
+- patch round-trip tests
+- comparison against FO4Edit/xEdit display where feasible
+
+==================================================
+22. IMPLEMENTATION PRINCIPLES
+==================================================
+
+Follow these principles:
+
+- Research first.
+- Preserve raw evidence.
+- Detect before resolving.
+- Resolve before writing.
+- Validate before claiming success.
+- Never infer mod-author intent solely from record differences.
+- Never treat every override as a problem.
+- Never treat every lost change as something that must be restored.
+- Never union unknown arrays blindly.
+- Never compare complex collections only by index.
+- Never silently discard unsupported data.
+- Never silently generate new masters or references.
+- Never mutate source plugins.
+- Never claim a generated patch is safe merely because it serialises.
+- Prefer a conservative warning over a destructive automatic merge.
+- Make every generated resolution traceable to its source plugin.
+- Keep the system extensible through documented, testable handlers.
+- Use actual Fallout 4 structures rather than simplified labels from this prompt.
+
+==================================================
+23. CENTRAL DESIGN STATEMENT
+==================================================
+
+The central principle is:
+
+Fallout 4 Multiplexer Renewed should not merely determine which plugin wins a conflicting record.
+
+It should determine what each plugin contributed throughout the complete override chain, which contributions survive, which contributions disappear, which contributions compete, and which combinations can be proposed safely through documented and tested compatibility rules.
+
+The scalar example demonstrates lost field values.
+
+The laser example demonstrates a lost structural addition or reference.
+
+Both must be represented through one provenance system, but they may require different record-specific comparison and patching strategies.
+
+==================================================
+24. FIRST RESPONSE EXPECTED FROM YOU
+==================================================
+
+Do not immediately make broad changes across the repository.
+
+Begin by returning:
+
+1. A concise summary of your understanding.
+2. An assessment of the existing Multiplexer architecture.
+3. The sources you intend to consult.
+4. A research plan.
+5. A list of relevant Fallout 4 record structures requiring investigation.
+6. A proposed provenance data model.
+7. A conservative classification system.
+8. The smallest sensible implementation milestone.
+9. The tests required for that milestone.
+10. The files that would likely need modification.
+11. The major unknowns that must be resolved before patch writing.
+12. Any parts of this prompt that conflict with demonstrated Fallout 4 or xEdit behaviour.
+
+Do not present the simplified Combat Rifle or laser representation as the real Fallout 4 record layout.
+
+Use it only to explain the required behaviour.
+
+Where the real plugin format differs, follow the verified Fallout 4 format and explain the difference clearly.

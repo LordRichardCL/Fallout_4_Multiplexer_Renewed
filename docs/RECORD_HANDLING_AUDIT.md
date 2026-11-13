@@ -889,7 +889,11 @@ The cause was a file the tool did not know about. Both cells use "clean" precomb
 
 ## Planned work (agreed order)
 
-1. **PBAR, PBEA, PCON, PFLA:** finish the evidence gate for each (definition check and group layout on a load order that has them); promote only those whose layout and reference rewriting are confirmed.
+1. **PBAR, PBEA, PCON, PFLA:** finish the evidence gate for each (definition check and group layout on a load order that has them); promote only those whose layout and reference rewriting are confirmed. The owner's working model is in `docs/specs/PLACED_RECORDS_PBAR_PBEA_PCON_PFLA.txt`:
+   - each placed record is its own record with its own override chain;
+   - the parent cell is context, not identity;
+   - moving a record to another cell or changing its persistence is structural;
+   - every field gets a merge contract (identity, parent rules, field classes, FormID references, validation, automatic-merge level), filled in from xEdit's definitions and real plugin data, not from guesses at what the abbreviations mean.
 2. **Cell configuration merge (requested; optional setting, off by default).** Like PJM's FO4CheckPrevisbines option 4 ("Fix only Cell Config Conflicts"): the written cell keeps the winner's precombine and previs data, and brings forward the last real change of each configuration field from earlier versions.
    - **Fields brought forward.**
      - CELL: MHDT, EDID, XCLL, XLCN, XCMO, XEZN, XCAS, XCIM, XGDR, XCCM, XCWT, XWCU, XCLW, XILW, LTMP, and XCLR (regions, the union of every version's list).
@@ -904,4 +908,12 @@ The cause was a file the tool did not know about. Both cells use "clean" precomb
    - Settle in game whether translating .uvd files is needed at all.
    - Accept .uvd files with no IDs.
    - Map IDs that point to records that no longer exist instead of refusing them.
-4. **Clean precombines:** test whether an empty placeholder plugin with the same name (as for the archive loaders) loads `<plugin> - Geometry.csg`, so that such plugins can compile.
+4. **Compatibility patch analysis (requested; later).** The owner's specification is in `docs/specs/COMPATIBILITY_PATCH_ANALYSIS.txt`. It covers:
+   - change provenance across the whole override chain: what each plugin changed, and which changes survive, are lost, compete or could coexist;
+   - element identity that does not depend on list position;
+   - conservative GREEN, YELLOW, RED and UNKNOWN classes;
+   - detection, analysis, patch plan and writing kept as separate layers;
+   - user choices where changes compete, and round-trip checks of the written patch;
+   - research first, with every decision traced to a source.
+   Its first deliverable is an assessment and a research report, before any large change. The cell configuration merge (2) and the placed-record contracts (1) are narrow early cases of it.
+5. **Clean precombines:** test whether an empty placeholder plugin with the same name (as for the archive loaders) loads `<plugin> - Geometry.csg`, so that such plugins can compile.
