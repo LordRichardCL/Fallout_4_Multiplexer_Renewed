@@ -34,6 +34,8 @@ Optional overrides: a different `plugins.txt`, a different INI folder, and the s
 
 **Never compile these plugins** lets you keep plugins in the load order. For example, keep a patch you are still editing.
 
+**Saving settings.** The Settings page is where all settings live, but the Compilation and Advanced Users Auto-Merger pages have options too, and each of these pages has a **Save Settings** button. All of them save the same settings, wherever the changes were made. A change is kept as soon as you make it, while you move between pages, and the next Scan, Analyse or Compile uses it. **Save Settings** keeps it after the app is closed. While something is unsaved the button shows a dot (**Save Settings •**). Closing the app with unsaved changes asks whether to save them. A new results database path is used only once saved. Running a task never saves settings for you. Excluding a plugin on the Plugins page is saved at once, without saving anything else.
+
 ## 3. Scan
 
 **Dashboard → Scan** builds the virtual Data folder and reads every plugin, archive and loose file. The dashboard then shows mods, plugins (ESM/ESP/ESL), archives, loose files, records and eligibility.

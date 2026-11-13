@@ -110,7 +110,7 @@ AppController::~AppController()
 
 QString AppController::databasePath() const
 {
-    return toQString(config_.databasePath);
+    return toQString(activeDatabase_);
 }
 
 QSqlDatabase AppController::readDb()
@@ -125,7 +125,7 @@ QSqlDatabase AppController::readDb()
                                                               : QSqlDatabase::addDatabase("QSQLITE", connectionName_);
     db.setDatabaseName(databasePath());
     db.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000");
-    if (!std::filesystem::exists(config_.databasePath))
+    if (!std::filesystem::exists(activeDatabase_))
         return db; // not open: pages show empty state
     if (!db.open())
         spdlog::warn("Cannot open results database: {}", db.lastError().text().toStdString());
@@ -169,7 +169,7 @@ QStringList AppController::resetToFreshState(bool keepSettings)
         std::ofstream(p, std::ios::trunc);
         removed << toQString(p) + " (emptied)";
     };
-    std::vector<fs::path> databases = {config_.databasePath, platform::applicationDataDir() / "multiplexer.sqlite"};
+    std::vector<fs::path> databases = {activeDatabase_, platform::applicationDataDir() / "multiplexer.sqlite"};
     for (const auto& db : databases) {
         if (db.empty())
             continue;
@@ -210,6 +210,7 @@ QStringList AppController::resetToFreshState(bool keepSettings)
         config_ = PipelineConfig{};
         loadSettings(); // defaults
     }
+    setUnsaved(false);
     spdlog::info("Reset to a fresh state: {} items removed", removed.size());
     emit settingsChanged();
     emit dataChanged();
@@ -280,6 +281,29 @@ void AppController::loadSettings()
     QString db = s.value("advanced/database").toString();
     config_.databasePath = db.isEmpty() ? platform::applicationDataDir() / "multiplexer.sqlite" : toPath(db);
     config_.reportDirectory = toPath(s.value("advanced/reportDirectory").toString());
+    activeDatabase_ = config_.databasePath;
+    setUnsaved(false);
+}
+
+void AppController::settingsEdited()
+{
+    setUnsaved(true);
+}
+
+void AppController::setUnsaved(bool unsaved)
+{
+    if (unsaved_ == unsaved)
+        return;
+    unsaved_ = unsaved;
+    emit unsavedSettingsChanged(unsaved);
+}
+
+PipelineConfig AppController::pipelineConfig() const
+{
+    PipelineConfig c = config_;
+    c.databasePath = activeDatabase_;
+    c.conflicts.threads = c.analysis.threads = c.compile.threads = c.scan.threads;
+    return c;
 }
 
 void AppController::saveSettings()
@@ -320,16 +344,15 @@ void AppController::saveSettings()
     s.setValue("advanced/threads", config_.scan.threads);
     s.setValue("advanced/database", toQString(config_.databasePath));
     s.setValue("advanced/reportDirectory", toQString(config_.reportDirectory));
+    s.sync();
     config_.conflicts.threads = config_.analysis.threads = config_.compile.threads = config_.scan.threads;
-    if (pipeline_ && !busy_) {
-        auto& pc = pipeline_->config();
-        auto forced = std::move(pc.compile.forcedWinners);
-        pc.compile = config_.compile;
-        pc.compile.forcedWinners = std::move(forced);
-        pc.exportOptions = config_.exportOptions;
-        pc.analysis = config_.analysis;
-        pc.reportDirectory = config_.reportDirectory;
-    }
+    const bool databaseChanged = activeDatabase_ != config_.databasePath;
+    activeDatabase_ = config_.databasePath;
+    if (pipeline_ && !busy_)
+        ensurePipeline(false);
+    if (databaseChanged)
+        reopenDatabase();
+    setUnsaved(false);
     emit settingsChanged();
 }
 
@@ -349,7 +372,10 @@ void AppController::setExcluded(const QString& plugin, bool excluded)
                list.end());
     if (excluded)
         list.push_back(ss(plugin));
-    saveSettings();
+    // Saved at once (an action on the Plugins page, not an option), without saving other unsaved
+    // settings.
+    QSettings().setValue("analysis/excluded", excludedPlugins());
+    emit settingsChanged();
     if (pipeline_ && pipeline_->scanned() && !busy_) {
         pipeline_->config().analysis = config_.analysis;
         pipeline_->refreshEligibility();
@@ -359,7 +385,7 @@ void AppController::setExcluded(const QString& plugin, bool excluded)
 
 void AppController::saveResolution(const QString& originPlugin, quint32 objectId, const QString& winnerPlugin)
 {
-    db::Database db(config_.databasePath);
+    db::Database db(activeDatabase_);
     db::DatabaseWriter(db).saveResolution(ss(originPlugin), objectId, ss(winnerPlugin));
     if (pipeline_) {
         auto& s = pipeline_->session();
@@ -372,7 +398,7 @@ void AppController::saveResolution(const QString& originPlugin, quint32 objectId
 
 void AppController::clearResolution(const QString& originPlugin, quint32 objectId)
 {
-    db::Database db(config_.databasePath);
+    db::Database db(activeDatabase_);
     db::DatabaseWriter(db).clearResolution(ss(originPlugin), objectId);
     if (pipeline_) {
         auto& s = pipeline_->session();
@@ -383,17 +409,21 @@ void AppController::clearResolution(const QString& originPlugin, quint32 objectI
 
 void AppController::ensurePipeline(bool fresh)
 {
+    // Tasks use the settings state as shown, saved or not (saving is the user's choice).
+    const PipelineConfig cfg = pipelineConfig();
     if (fresh || !pipeline_) {
-        pipeline_ = std::make_unique<Pipeline>(config_);
+        pipeline_ = std::make_unique<Pipeline>(cfg);
     } else {
         auto& pc = pipeline_->config();
         auto forced = std::move(pc.compile.forcedWinners);
-        pc.compile = config_.compile;
+        pc.compile = cfg.compile;
         pc.compile.forcedWinners = std::move(forced);
-        pc.exportOptions = config_.exportOptions;
-        pc.analysis = config_.analysis;
-        pc.conflicts = config_.conflicts;
-        pc.reportDirectory = config_.reportDirectory;
+        pc.exportOptions = cfg.exportOptions;
+        pc.analysis = cfg.analysis;
+        pc.conflicts = cfg.conflicts;
+        pc.reportDirectory = cfg.reportDirectory;
+        pc.diagnosticRecorder = cfg.diagnosticRecorder;
+        pc.f4seArchiveLoader = cfg.f4seArchiveLoader;
     }
 }
 
@@ -439,7 +469,6 @@ void AppController::runTask(const QString& name, std::function<QString(ProgressS
 
 void AppController::runScan()
 {
-    saveSettings();
     ensurePipeline(true);
     runTask("Scan", [this](ProgressSink& p) {
         pipeline_->scan(p);
@@ -450,7 +479,6 @@ void AppController::runScan()
 
 void AppController::runAnalyse()
 {
-    saveSettings();
     ensurePipeline(false);
     runTask("Analyse", [this](ProgressSink& p) {
         pipeline_->analyse(p);
@@ -463,7 +491,6 @@ void AppController::runAnalyse()
 
 void AppController::runDefinitionCheck()
 {
-    saveSettings();
     ensurePipeline(false);
     runTask("Check Definitions", [this](ProgressSink& p) {
         auto check = pipeline_->checkDefinitions({}, p);
@@ -476,7 +503,6 @@ void AppController::runDefinitionCheck()
 
 void AppController::runCompile()
 {
-    saveSettings();
     ensurePipeline(false);
     runTask("Compile", [this](ProgressSink& p) {
         bool ok = pipeline_->compile(p);
@@ -519,11 +545,7 @@ void AppController::runExport()
 
 void AppController::runCheck()
 {
-    saveSettings();
-    if (!pipeline_)
-        pipeline_ = std::make_unique<Pipeline>(config_);
-    else
-        ensurePipeline(false);
+    ensurePipeline(false);
     runTask("Check", [this](ProgressSink& p) {
         auto r = pipeline_->checkForChanges(p);
         return QString("%1 — %2 change(s) since the last build").arg(qs(buildStatusName(r.status))).arg(r.items.size());
@@ -532,7 +554,6 @@ void AppController::runCheck()
 
 void AppController::runRebuild()
 {
-    saveSettings();
     ensurePipeline(true);
     runTask("Rebuild", [this](ProgressSink& p) {
         pipeline_->scan(p);
@@ -552,10 +573,10 @@ void AppController::runRebuild()
 
 void AppController::checkOnStartup()
 {
-    if (!std::filesystem::exists(config_.databasePath))
+    if (!std::filesystem::exists(activeDatabase_))
         return;
     try {
-        db::Database db(config_.databasePath);
+        db::Database db(activeDatabase_);
         db::DatabaseWriter(db).initSchema();
         if (db.scalar("SELECT COUNT(*) FROM Snapshots WHERE kind = 'build'").value_or(0) > 0)
             runCheck();

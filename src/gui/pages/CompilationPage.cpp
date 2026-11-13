@@ -47,10 +47,11 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     apply_->setToolTip("Mod Organizer 2: switch the profile's load order to the output plugins. All installs: add "
                        "compiled plugins' archives to Fallout4Custom.ini so their assets keep loading.");
     openFolder_ = makeButton("Open Output Folder");
+    auto* saveSettings = makeSaveSettingsButton();
     l->addWidget(makePageHeader("Multiplexer Compilation",
                                 "Scan → Analyse → Resolve → Merge → Rewrite → Compile → Validate → Export. Eligible "
                                 "plugins are compiled into a small set of fully materialised output plugins.",
-                                {compile_, export_, apply_, openFolder_}));
+                                {compile_, export_, apply_, openFolder_, saveSettings}));
 
     stages_ = new StageIndicator({"Scan", "Analyse", "Resolve", "Merge", "Rewrite", "Compile", "Validate", "Export"});
     auto* stageFrame = new QFrame;
@@ -260,14 +261,8 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         if (!d.isEmpty())
             outputDir_->setText(d);
     });
-    connect(compile_, &QPushButton::clicked, this, [this] {
-        storeOptions();
-        app_->runCompile();
-    });
-    connect(export_, &QPushButton::clicked, this, [this] {
-        storeOptions();
-        app_->runExport();
-    });
+    connect(compile_, &QPushButton::clicked, app_, &AppController::runCompile);
+    connect(export_, &QPushButton::clicked, app_, &AppController::runExport);
     connect(apply_, &QPushButton::clicked, this, [this] {
         // First what will happen (nothing changes yet), then the user's confirmation.
         AppController::ApplyPreview preview;
@@ -453,8 +448,36 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         rules_->setEnabled(strategy_->currentData().toInt() == int(AllocationStrategy::UserDefined));
         updateStrategyNote();
     });
+    // Every option is written to the settings state as it changes (saved with Save Settings).
+    connect(outputs_, &QSpinBox::valueChanged, this, [this] { storeOptions(); });
+    connect(prefix_, &QLineEdit::textChanged, this, [this] { storeOptions(); });
+    connect(outputDir_, &QLineEdit::textChanged, this, [this] { storeOptions(); });
+    connect(strategy_, &QComboBox::currentIndexChanged, this, [this] { storeOptions(); });
+    connect(rules_, &QPlainTextEdit::textChanged, this, [this] { storeOptions(); });
+    for (auto* c : {autoOutputs_, merge_, light_, translatePrevis_, patch_, patchOnly_})
+        connect(c, &QCheckBox::toggled, this, [this] { storeOptions(); });
     loadOptions();
 }
+
+namespace {
+
+std::vector<fo4mx::AllocationRule> parseRules(const QString& text)
+{
+    std::vector<fo4mx::AllocationRule> rules;
+    for (const auto& line : text.split('\n', Qt::SkipEmptyParts)) {
+        auto parts = line.split('=');
+        if (parts.size() == 2)
+            rules.push_back({ss(parts[0].trimmed()), parts[1].trimmed().toInt()});
+    }
+    return rules;
+}
+
+std::string prefixFrom(const QString& text)
+{
+    return ss(text.trimmed().isEmpty() ? QString("Dummy_Plugin_") : text.trimmed());
+}
+
+} // namespace
 
 void CompilationPage::updateStrategyNote()
 {
@@ -507,16 +530,26 @@ void CompilationPage::updateInstallNote()
 
 void CompilationPage::loadOptions()
 {
+    loading_ = true;
     const auto& c = app_->config().compile;
     outputs_->setValue(std::clamp(c.outputCount, fo4mx::CompileOptions::kMinOutputs, fo4mx::CompileOptions::kMaxOutputs));
     autoOutputs_->setChecked(c.autoOutputs);
     outputs_->setEnabled(!c.autoOutputs);
-    prefix_->setText(qs(c.outputPrefix));
+    // Text that already says the same is left as typed (a rule being written, spaces).
+    if (prefixFrom(prefix_->text()) != c.outputPrefix)
+        prefix_->setText(qs(c.outputPrefix));
     strategy_->setCurrentIndex(strategy_->findData(int(c.strategy)));
-    QStringList rules;
-    for (const auto& r : c.rules)
-        rules << qs(r.pattern) + "=" + QString::number(r.output);
-    rules_->setPlainText(rules.join("\n"));
+    const auto shown = parseRules(rules_->toPlainText());
+    const bool sameRules = shown.size() == c.rules.size() &&
+                           std::equal(shown.begin(), shown.end(), c.rules.begin(), [](const auto& a, const auto& b) {
+                               return a.pattern == b.pattern && a.output == b.output;
+                           });
+    if (!sameRules) {
+        QStringList rules;
+        for (const auto& r : c.rules)
+            rules << qs(r.pattern) + "=" + QString::number(r.output);
+        rules_->setPlainText(rules.join("\n"));
+    }
     rules_->setEnabled(c.strategy == AllocationStrategy::UserDefined);
     updateStrategyNote();
     updateInstallNote();
@@ -526,29 +559,28 @@ void CompilationPage::loadOptions()
     patchOnly_->setChecked(c.patchOnly);
     patch_->setChecked(c.buildPatch || c.patchOnly);
     patch_->setEnabled(!c.patchOnly);
-    outputDir_->setText(toQString(app_->config().exportOptions.outputDirectory));
+    if (toPath(outputDir_->text().trimmed()) != app_->config().exportOptions.outputDirectory)
+        outputDir_->setText(toQString(app_->config().exportOptions.outputDirectory));
+    loading_ = false;
 }
 
 void CompilationPage::storeOptions()
 {
+    if (loading_)
+        return;
     auto& c = app_->config().compile;
     c.outputCount = outputs_->value();
     c.autoOutputs = autoOutputs_->isChecked();
-    c.outputPrefix = ss(prefix_->text().trimmed().isEmpty() ? "Dummy_Plugin_" : prefix_->text().trimmed());
+    c.outputPrefix = prefixFrom(prefix_->text());
     c.strategy = static_cast<AllocationStrategy>(strategy_->currentData().toInt());
-    c.rules.clear();
-    for (const auto& line : rules_->toPlainText().split('\n', Qt::SkipEmptyParts)) {
-        auto parts = line.split('=');
-        if (parts.size() == 2)
-            c.rules.push_back({ss(parts[0].trimmed()), parts[1].trimmed().toInt()});
-    }
+    c.rules = parseRules(rules_->toPlainText());
     c.mergeCompatible = merge_->isChecked();
     c.lightOutputsWhenPossible = light_->isChecked();
     c.translatePrevis = translatePrevis_->isChecked();
     c.patchOnly = patchOnly_->isChecked();
     c.buildPatch = c.patchOnly || patch_->isChecked();
     app_->config().exportOptions.outputDirectory = toPath(outputDir_->text().trimmed());
-    app_->saveSettings();
+    app_->settingsEdited();
 }
 
 void CompilationPage::updateButtons()
@@ -566,6 +598,7 @@ void CompilationPage::updateButtons()
 
 void CompilationPage::refresh()
 {
+    loadOptions();
     QSqlDatabase db = app_->readDb();
     const QString patchName = meta("patch_name");
     outputsModel_->setNumberColumns({1, 2, 3});

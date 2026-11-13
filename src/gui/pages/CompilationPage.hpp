@@ -29,6 +29,8 @@ public:
     void refresh() override;
 
 private:
+    // The options shown come from the shared settings state (AppController::config()), and each change
+    // is written back to it at once, so nothing is lost when another page is shown.
     void loadOptions();
     void updateStrategyNote();
     void updateInstallNote();
@@ -66,6 +68,7 @@ private:
     QTreeView* assetsView_;
     GroupedSqlModel* assetsModel_;
     QTextBrowser* trace_;
+    bool loading_ = false; // loadOptions() is setting the controls: no write-back
 };
 
 } // namespace gui

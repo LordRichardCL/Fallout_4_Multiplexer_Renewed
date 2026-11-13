@@ -8,6 +8,7 @@
 #include <QStringList>
 
 #include <atomic>
+#include <filesystem>
 #include <functional>
 #include <memory>
 
@@ -25,9 +26,16 @@ public:
     explicit AppController(QObject* parent = nullptr);
     ~AppController() override;
 
+    // The application's settings state, shared by every page. Pages write option changes here as they
+    // are made (and call settingsEdited()), so they survive navigating between pages; saveSettings()
+    // persists them and survives a restart. Pages show what is here, never keep their own copy.
     fo4mx::PipelineConfig& config() { return config_; }
     void loadSettings();
+    // Persists the whole settings state (QSettings) and applies it to the pipeline.
     void saveSettings();
+    // A page changed the settings state without saving it: marks it unsaved.
+    void settingsEdited();
+    bool hasUnsavedSettings() const { return unsaved_; }
 
     fo4mx::Pipeline* pipeline() { return pipeline_.get(); }
     bool busy() const { return busy_; }
@@ -105,13 +113,23 @@ signals:
     void taskFinished(const QString& task, bool ok, const QString& message);
     void dataChanged();
     void logMessage(int level, const QString& text);
+    // The settings state was loaded, saved or reset: pages show it again.
     void settingsChanged();
+    // Whether the settings state has changes that are not saved yet.
+    void unsavedSettingsChanged(bool unsaved);
 
 private:
     void runTask(const QString& name, std::function<QString(fo4mx::ProgressSink&)> work);
     void ensurePipeline(bool fresh);
 
+    // The pipeline's configuration from the settings state. The results database is the saved one:
+    // a path typed on the Settings page takes effect when saved.
+    fo4mx::PipelineConfig pipelineConfig() const;
+    void setUnsaved(bool unsaved);
+
     fo4mx::PipelineConfig config_;
+    std::filesystem::path activeDatabase_; // the saved results database (what readDb() opens)
+    bool unsaved_ = false;
     std::unique_ptr<fo4mx::Pipeline> pipeline_;
     std::unique_ptr<QtProgress> progress_;
     QThread* worker_ = nullptr;

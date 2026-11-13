@@ -40,6 +40,9 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
     cfg.exportOptions.outputDirectory = gui::toPath(args.value("out"));
     cfg.compile.outputCount = 10;
     cfg.compile.autoMerge = args.isSet("auto-merge");
+    // Applies the install and results database given (tasks use the settings state; the database in use
+    // is the saved one), as the run tasks' own save did before.
+    controller.saveSettings();
 
     QDir outDir(args.value("screenshots"));
     outDir.mkpath(".");

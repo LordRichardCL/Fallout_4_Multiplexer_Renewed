@@ -19,8 +19,10 @@ public:
     void refresh() override;
 
 private:
+    // load() shows the shared settings state; store() writes the controls back to it as they change
+    // (Save Settings persists it).
     void load();
-    void save();
+    void store();
     void updateVisibility();
     void reloadProfiles();
     QWidget* pathRow(QLineEdit*& edit, bool directory, const QString& placeholder);
@@ -47,6 +49,7 @@ private:
     QWidget* mo2Rows_;
     QWidget* vortexRows_;
     QLineEdit* vortexDownloads_;
+    bool loading_ = false; // load() is setting the controls: no write-back
 };
 
 } // namespace gui

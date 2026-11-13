@@ -189,6 +189,19 @@ void MainWindow::closeEvent(QCloseEvent* e)
         }
         app_->cancel();
     }
+    if (app_->hasUnsavedSettings()) {
+        // Changed settings are kept while the app runs; ask before they are lost.
+        auto answer = QMessageBox::question(
+            this, "Unsaved settings",
+            "Some settings have changed and are not saved. Save them before quitting?",
+            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+        if (answer == QMessageBox::Cancel) {
+            e->ignore();
+            return;
+        }
+        if (answer == QMessageBox::Save)
+            app_->saveSettings();
+    }
     e->accept();
 }
 

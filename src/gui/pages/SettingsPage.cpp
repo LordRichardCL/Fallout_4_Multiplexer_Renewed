@@ -46,7 +46,7 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     l->setSpacing(12);
 
     auto* setupBtn = makeButton("Open Setup Screen");
-    auto* saveBtn = makeButton("Save Settings", "Primary");
+    auto* saveBtn = makeSaveSettingsButton();
     l->addWidget(makePageHeader("Settings", "Where your game and mods are, and how analysis behaves.", {setupBtn, saveBtn}));
 
     auto* installBox = new QGroupBox("Installation");
@@ -242,7 +242,21 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     l->addWidget(status_);
     l->addStretch();
 
-    connect(saveBtn, &QPushButton::clicked, this, [this] { save(); });
+    connect(app_, &AppController::unsavedSettingsChanged, this, [this](bool unsaved) {
+        status_->setText(unsaved ? "Some settings are not saved yet: they are kept while you move between pages; "
+                                   "Save Settings keeps them after a restart."
+                                 : "Settings saved. Run Scan to apply installation changes.");
+    });
+    // Every option is written to the settings state as it changes.
+    for (auto* e : {mo2Path_, gamePath_, pluginsFile_, iniDir_, vortexDownloads_, database_, reports_})
+        connect(e, &QLineEdit::textChanged, this, [this] { store(); });
+    connect(profile_, &QComboBox::currentTextChanged, this, [this] { store(); });
+    connect(language_, &QComboBox::currentTextChanged, this, [this] { store(); });
+    connect(runtime_, &QComboBox::currentIndexChanged, this, [this] { store(); });
+    connect(excluded_, &QPlainTextEdit::textChanged, this, [this] { store(); });
+    for (auto* c : {creationClub_, allTypes_, recorder_, archiveLoader_})
+        connect(c, &QCheckBox::toggled, this, [this] { store(); });
+    connect(threads_, &QSpinBox::valueChanged, this, [this] { store(); });
     connect(setupBtn, &QPushButton::clicked, this, [this] {
         SetupDialog setup(app_, this);
         if (setup.exec() == QDialog::Accepted)
@@ -270,7 +284,10 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
         load();
         status_->setText("Reset complete. Run Scan to start again.");
     });
-    connect(group, &QButtonGroup::buttonToggled, this, [this] { updateVisibility(); });
+    connect(group, &QButtonGroup::buttonToggled, this, [this] {
+        updateVisibility();
+        store();
+    });
     connect(mo2Path_, &QLineEdit::editingFinished, this, [this] { reloadProfiles(); });
     connect(detect, &QPushButton::clicked, this, [this] {
         if (auto p = fo4mx::platform::detectGamePath())
@@ -323,16 +340,40 @@ void SettingsPage::updateVisibility()
     vortexRows_->setVisible(vortex_->isChecked());
 }
 
-void SettingsPage::refresh() {}
+void SettingsPage::refresh()
+{
+    load();
+}
+
+namespace {
+
+// Sets a line edit's text unless it already says the same, so what is being typed is left alone.
+void showPath(QLineEdit* e, const std::filesystem::path& p)
+{
+    if (toPath(e->text().trimmed()) != p)
+        e->setText(toQString(p));
+}
+
+std::vector<std::string> excludedFrom(const QString& text)
+{
+    std::vector<std::string> out;
+    for (const auto& line : text.split('\n', Qt::SkipEmptyParts))
+        if (!line.trimmed().isEmpty())
+            out.push_back(ss(line.trimmed()));
+    return out;
+}
+
+} // namespace
 
 void SettingsPage::load()
 {
+    loading_ = true;
     const auto& c = app_->config();
     const auto& in = c.install;
     mo2_->setChecked(in.kind == InstallKind::ModOrganizer2);
     vortex_->setChecked(in.kind == InstallKind::Vortex);
     standalone_->setChecked(in.kind == InstallKind::Standalone);
-    mo2Path_->setText(toQString(in.mo2Path));
+    showPath(mo2Path_, in.mo2Path);
     reloadProfiles();
     if (!in.mo2Profile.empty()) {
         int idx = profile_->findText(qs(in.mo2Profile));
@@ -340,25 +381,32 @@ void SettingsPage::load()
             profile_->addItem(qs(in.mo2Profile));
         profile_->setCurrentText(qs(in.mo2Profile));
     }
-    gamePath_->setText(toQString(in.gamePath));
-    pluginsFile_->setText(toQString(in.pluginsFile));
-    iniDir_->setText(toQString(in.iniDirectory));
-    vortexDownloads_->setText(toQString(in.vortexDownloads));
-    language_->setCurrentText(qs(in.language));
+    if (in.mo2Profile.empty())
+        profile_->setCurrentIndex(0);
+    showPath(gamePath_, in.gamePath);
+    showPath(pluginsFile_, in.pluginsFile);
+    showPath(iniDir_, in.iniDirectory);
+    showPath(vortexDownloads_, in.vortexDownloads);
+    if (ss(language_->currentText().trimmed()) != in.language)
+        language_->setCurrentText(qs(in.language));
     runtime_->setCurrentIndex(runtime_->findData(int(in.runtime)));
-    excluded_->setPlainText(app_->excludedPlugins().join("\n"));
+    if (excludedFrom(excluded_->toPlainText()) != c.analysis.excludedPlugins)
+        excluded_->setPlainText(app_->excludedPlugins().join("\n"));
     creationClub_->setChecked(c.analysis.compileCreationClub);
     recorder_->setChecked(c.diagnosticRecorder);
     archiveLoader_->setChecked(c.f4seArchiveLoader);
     allTypes_->setChecked(c.conflicts.analyseAllRecordTypes);
     threads_->setValue(static_cast<int>(c.scan.threads));
-    database_->setText(toQString(c.databasePath));
-    reports_->setText(toQString(c.reportDirectory));
+    showPath(database_, c.databasePath);
+    showPath(reports_, c.reportDirectory);
     updateVisibility();
+    loading_ = false;
 }
 
-void SettingsPage::save()
+void SettingsPage::store()
 {
+    if (loading_)
+        return;
     auto& c = app_->config();
     auto& in = c.install;
     in.kind = mo2_->isChecked() ? InstallKind::ModOrganizer2 : vortex_->isChecked() ? InstallKind::Vortex : InstallKind::Standalone;
@@ -371,25 +419,17 @@ void SettingsPage::save()
     in.vortexDownloads = toPath(vortexDownloads_->text().trimmed());
     in.language = ss(language_->currentText().trimmed());
     in.runtime = static_cast<fo4mx::RuntimeProfile>(runtime_->currentData().toInt());
-    c.analysis.excludedPlugins.clear();
-    for (const auto& line : excluded_->toPlainText().split('\n', Qt::SkipEmptyParts))
-        if (!line.trimmed().isEmpty())
-            c.analysis.excludedPlugins.push_back(ss(line.trimmed()));
+    c.analysis.excludedPlugins = excludedFrom(excluded_->toPlainText());
     c.analysis.compileCreationClub = creationClub_->isChecked();
     c.diagnosticRecorder = recorder_->isChecked();
     c.f4seArchiveLoader = archiveLoader_->isChecked();
-    if (app_->pipeline()) {
-        app_->pipeline()->config().diagnosticRecorder = c.diagnosticRecorder;
-        app_->pipeline()->config().f4seArchiveLoader = c.f4seArchiveLoader;
-    }
     c.conflicts.analyseAllRecordTypes = allTypes_->isChecked();
     c.scan.threads = static_cast<unsigned>(threads_->value());
+    // The results database in use changes when saved (AppController::saveSettings).
     if (!database_->text().trimmed().isEmpty())
         c.databasePath = toPath(database_->text().trimmed());
     c.reportDirectory = toPath(reports_->text().trimmed());
-    app_->saveSettings();
-    app_->reopenDatabase();
-    status_->setText("Settings saved. Run Scan to apply installation changes.");
+    app_->settingsEdited();
 }
 
 } // namespace gui

@@ -1,7 +1,9 @@
 #pragma once
 
 #include "AppController.hpp"
+#include "widgets/Widgets.hpp"
 
+#include <QPushButton>
 #include <QSqlQuery>
 #include <QVariant>
 #include <QWidget>
@@ -20,6 +22,23 @@ signals:
 
 protected:
     AppController* app_;
+
+    // A "Save Settings" button for a page with options: saves the whole settings state (the same as
+    // the Settings page's button) and shows when there are unsaved changes.
+    QPushButton* makeSaveSettingsButton()
+    {
+        auto* b = makeButton("Save Settings", "Primary");
+        auto show = [b](bool unsaved) {
+            b->setText(unsaved ? "Save Settings \u2022" : "Save Settings");
+            b->setToolTip(unsaved ? "Some settings have changed and are not saved yet. Changes are kept while you "
+                                    "move between pages; saving keeps them after a restart."
+                                  : "All settings are saved.");
+        };
+        show(app_->hasUnsavedSettings());
+        connect(app_, &AppController::unsavedSettingsChanged, b, show);
+        connect(b, &QPushButton::clicked, app_, &AppController::saveSettings);
+        return b;
+    }
 
     QVariant scalar(const QString& sql, const QVariantList& binds = {})
     {

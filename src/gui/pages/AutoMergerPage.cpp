@@ -32,7 +32,7 @@ AutoMergerPage::AutoMergerPage(AppController* app, QWidget* parent) : Page(app, 
     txt_ = makeButton("Export TXT");
     l->addWidget(makePageHeader("Advanced Users Auto-Merger",
                                 "Compiles plugins that scripts and configs refer to by name, and relinks those files.",
-                                {analyse_, html_, json_, txt_}));
+                                {analyse_, html_, json_, txt_, makeSaveSettingsButton()}));
 
     auto* intro = new QLabel(
         "<b>For advanced users.</b> Plugins whose file names appear in scripts (.pex) or config files (MCM, "
@@ -74,14 +74,19 @@ AutoMergerPage::AutoMergerPage(AppController* app, QWidget* parent) : Page(app, 
     split->setStretchFactor(1, 3);
     l->addWidget(split, 1);
 
+    // Written to the settings state at once (saved with Save Settings), so it is kept across pages.
     connect(enabled_, &QCheckBox::toggled, this, [this](bool on) {
+        if (app_->config().compile.autoMerge == on)
+            return; // shown from the settings state, not changed
         app_->config().compile.autoMerge = on;
-        if (app_->pipeline())
+        if (app_->pipeline() && !app_->busy())
             app_->pipeline()->config().compile.autoMerge = on;
-        app_->saveSettings();
+        app_->settingsEdited();
         summary_->setText(on ? "Enabled. Run Analyse to see which plugins can be relinked."
                              : "Off. Plugins named in scripts or configs stay in the load order.");
     });
+    connect(app_, &AppController::settingsChanged, this,
+            [this] { enabled_->setChecked(app_->config().compile.autoMerge); });
     connect(analyse_, &QPushButton::clicked, app_, &AppController::runAnalyse);
     connect(chips_, &FilterChips::changed, this, [this] { refresh(); });
     connect(html_, &QPushButton::clicked, this, [this] { exportReport("html"); });
