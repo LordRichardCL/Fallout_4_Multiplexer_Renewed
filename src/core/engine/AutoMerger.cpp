@@ -49,6 +49,10 @@ bool isText(const std::string& path)
     return false;
 }
 
+constexpr size_t kMaxPath = 259;     // Windows MAX_PATH without the terminator
+constexpr size_t kRunNameSlack = 6;  // "Multiplexer Output DDMMYY HHMMSS (n).tmp" vs the pending folder's name
+constexpr const char* kTempSuffix = ".fo4mx-new";
+
 uint64_t hashOf(const std::vector<uint8_t>& b)
 {
     return fnv1a64(b.data(), b.size());
@@ -517,6 +521,26 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
 
     std::vector<RelinkFile*> formIdInis;
     std::map<std::string, std::string> gateTargets; // lowercase target -> config (RobCo gates)
+    // Windows limits a path to 259 characters (MAX_PATH), for this app's writes and the game's reads.
+    // The room left for a Data-relative path: in the output folder (an export's folder name can be a
+    // few characters longer than the pending one's, and copies are written with a temporary suffix)
+    // and in the game's Data folder, whichever is less.
+    const size_t pathRoom = [&] {
+        auto length = [](const std::filesystem::path& p) {
+            std::error_code ec;
+            auto abs = std::filesystem::absolute(p, ec);
+            return pathToUtf8((ec ? p : abs).lexically_normal()).size();
+        };
+        size_t used = length(outputDir) + 1 + kRunNameSlack + std::string(kTempSuffix).size();
+        if (!session.install.dataPath.empty())
+            used = std::max(used, length(session.install.dataPath) + 1);
+        return used < kMaxPath ? kMaxPath - used : size_t(0);
+    }();
+    auto tooLong = [&](const std::string& rel) {
+        return rel + ": the path is " + std::to_string(rel.size()) + " characters inside the Data folder, more than "
+               "the " + std::to_string(pathRoom) + " Windows leaves under the output folder or the game's Data "
+               "folder (259 in all); choose a shorter Output folder";
+    };
     // A failed check of an earlier round of this compilation: it stays on record while the file is not
     // planned (its plugins are kept out); when this round plans the file, it becomes a note.
     std::vector<std::string> earlier(report.files.size());
@@ -843,6 +867,14 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                     stem.resize(dot);
                 const std::string output = primaryOf(gate->plugin);
                 f.target = dir + "Multiplexer - " + stem + "\\" + output + ".ini";
+                // Too long for Windows with the plugin's name: a short folder name made from it instead.
+                if (f.target.size() > pathRoom) {
+                    const auto lower = toLower(stem);
+                    f.target = dir + "Multiplexer - " + hex64(fnv1a64(lower.data(), lower.size())).substr(8) + "\\" +
+                               output + ".ini";
+                }
+                if (f.target.size() > pathRoom)
+                    throw std::runtime_error(tooLong(f.target));
                 auto [it, added] = gateTargets.emplace(toLower(f.target), f.path);
                 if (!added)
                     throw std::runtime_error(f.target + " would hold both " + it->second + " and " + f.path);
@@ -851,6 +883,8 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
             }
             if (f.changes.empty())
                 continue; // every reference left as it was: no copy needed
+            if (!gate && f.path.size() > pathRoom)
+                throw std::runtime_error(tooLong(f.path));
             for (const auto& c : f.changes)
                 if (!outputSet.count(toLower(c.after.substr(0, c.after.find_first_of(" |")))))
                     throw std::runtime_error(c.after + " is not an output of this build");
@@ -919,7 +953,7 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
     for (auto* f : planned) {
         const auto target = below(outputDir, f->written_path());
         auto tmp = target;
-        tmp += ".fo4mx-new";
+        tmp += kTempSuffix;
         try {
             std::error_code ec;
             if (fs::exists(target, ec)) {
@@ -932,7 +966,8 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
                 std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
                 out.write(reinterpret_cast<const char*>(f->output.data()), static_cast<std::streamsize>(f->output.size()));
                 if (!out)
-                    throw std::runtime_error("could not be written");
+                    throw std::runtime_error("could not be written to " + pathToUtf8(tmp) + " (" +
+                                             std::to_string(pathToUtf8(tmp).size()) + " characters)");
             }
             staged.emplace_back(tmp, target);
             if (hashOf(readFile(tmp)) != f->outputHash)
@@ -1010,7 +1045,7 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
         fs::remove(manifest, ec);
     } else {
         auto tmp = manifest;
-        tmp += ".fo4mx-new";
+        tmp += kTempSuffix;
         {
             std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
             out << "# Scripts and configs rewritten by the Advanced Users Auto-Merger. They override the originals,\n"

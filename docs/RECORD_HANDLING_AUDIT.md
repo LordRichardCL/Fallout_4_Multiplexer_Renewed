@@ -940,3 +940,13 @@ After compiling, the versions in plugins that stay load first and the written ve
 - **Identical results.** A cell whose merged result equals the version that stays used to be skipped as an ITM. For a cell that is wrong when a compiled version supplies a list (the game would fall back to the version that stays and lose it) or is partial. Such a cell is now written, and the inheritance pass fills or guards it.
 
 Each list taken from an earlier version is reported ("Cell Inheritance", Info). Tests cover: omitted lists, present-but-empty lists, a version with its own lists, a partial version over a compiled full version and over a compiled partial one, a partial version over versions that stay, a partial earlier version (its lists never become current), and lists supplied only by a plugin that stays.
+
+## Relinked copies and Windows path length
+
+In the owner's build, the export's Auto-Merger step failed with "could not be written" for a RobCo config of "Dr. Phibbs Neuro-Atomic Limbs - Institute Expeditionary Suit.esp". The copy's path was `…\Multiplexer Output <date>.tmp\Data\f4se\plugins\robco_patcher\constructibleobject\exo\outfitworkbench\Multiplexer - dr. phibbs neuro-atomic limbs - institute expeditionary suit\Dummy_Plugin_01.esp.ini.fo4mx-new`, past Windows' 259 characters. Relinking is all or nothing, so no copy was written.
+
+**Fix.** The plan works out how much room a Data-relative path has: 259, minus the larger of the output folder's length (plus a few characters for the export folder's final name and the temporary suffix) and the game's Data folder's length.
+
+- When `Multiplexer - <plugin>` does not fit, a RobCo copy's folder is `Multiplexer - <8 hex digits>` instead (a hash of the plugin's name). `Multiplexer_Relinked.tsv` still names the file.
+- A copy whose path does not fit even then fails at plan time. Only its plugin stays in the load order, and the compilation runs again, instead of the whole relink failing after export.
+- A failed write now names the path and its length.

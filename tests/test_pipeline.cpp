@@ -4526,6 +4526,60 @@ TEST(robco_config_named_after_a_compiled_plugin_follows_the_output)
     CHECK(manifest.find("Multiplexer - mods\\" + kw->outputPlugin + ".ini") != std::string::npos);
 }
 
+// Windows limits paths to 259 characters. A RobCo config named after a plugin with a long name gets a
+// short folder name when "Multiplexer - <plugin>" would not fit under the output folder; when even that
+// does not fit, its plugin stays in the load order (planned, not failed at export: owner's build, a
+// Dr. Phibbs plugin's config made the whole relink fail).
+TEST(robco_config_with_a_long_path_gets_a_short_folder_or_keeps_its_plugin)
+{
+    namespace fs = std::filesystem;
+    const std::string plugin = "Dr Phibbs Neuro-Atomic Limbs - Institute Expeditionary Suit.esp";
+    const std::string stem = "dr phibbs neuro-atomic limbs - institute expeditionary suit";
+    const std::string dir = "f4se\\plugins\\robco_patcher\\constructibleobject\\exo\\outfitworkbench\\";
+    const std::string out = "Dummy_Plugin_01.esp.ini";
+    const size_t longRel = dir.size() + 14 + stem.size() + 1 + out.size();
+    const size_t shortRel = dir.size() + 14 + 8 + 1 + out.size();
+    // An output folder leaving `room` characters for Data-relative paths (see AutoMerger::plan).
+    auto outputFor = [&](const fs::path& root, size_t room) {
+        const size_t pending = 259 - 17 - room; // run name slack and temporary suffix
+        const fs::path base = fs::absolute(root / "O");
+        const size_t fixed = pathToUtf8(base).size() + 1 + std::string("Multiplexer Output (newest export)/Data").size() + 1;
+        return base / std::string(pending - fixed, 'p');
+    };
+    auto run = [&](const char* name, size_t room, bool expectShort) {
+        auto root = referenceInstall(name);
+        auto data = root / "Game" / "Data";
+        writePlugin(data / plugin, {"Fallout4.esm"}, {record("KYWD", 0x01000812, {zs("EDID", "Phibbs_Keyword")})});
+        writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*" + plugin + "\n");
+        writeFile(data / "F4SE" / "Plugins" / "RobCo_Patcher" / "constructibleObject" / "eXo" / "OutfitWorkbench" /
+                      (plugin + ".ini"),
+                  "filterByKeyword=" + plugin + "|812:Fallout4.esm|800\n");
+        auto cfg = configFor(root);
+        cfg.compile.autoMerge = true;
+        cfg.exportOptions.outputDirectory = outputFor(root, room);
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        const auto& s = p.session();
+        const bool compiled = p.compiledOutput()->isCompiled(s.findPlugin(plugin)->index);
+        if (!expectShort) {
+            CHECK(!compiled);
+            const auto it = s.autoRetained.find(toLower(plugin));
+            CHECK(it != s.autoRetained.end() && it->second.find("the path is") != std::string::npos);
+            return;
+        }
+        CHECK(compiled);
+        auto result = p.exportOutputs();
+        CHECK_EQ(p.validation()->errors, uint64_t(0));
+        const auto manifest = slurpFile(result.directory / AutoMerger::kManifest);
+        CHECK(manifest.find("Multiplexer - " + stem) == std::string::npos);
+        CHECK(manifest.find("Multiplexer - ") != std::string::npos);
+    };
+    run("robcolongshort", (shortRel + longRel) / 2, true);
+    run("robcolongout", shortRel - 5, false);
+}
+
 // 11. Export is a transaction: when a copy cannot be written, the export fails and is never the
 //     latest; rollback removes every copy. Every export writes into a folder of its own, so a file in
 //     an earlier export never stands in the way of a new one, and is never changed by it.
