@@ -4544,6 +4544,8 @@ TEST(robco_config_with_a_long_path_gets_a_short_folder_or_keeps_its_plugin)
         const size_t pending = 259 - 17 - room; // run name slack and temporary suffix
         const fs::path base = fs::absolute(root / "O");
         const size_t fixed = pathToUtf8(base).size() + 1 + std::string("Multiplexer Output (newest export)/Data").size() + 1;
+        if (fixed + 1 > pending)
+            return fs::path(); // the temporary folder is too deep for this room (Windows runners)
         return base / std::string(pending - fixed, 'p');
     };
     auto run = [&](const char* name, size_t room, bool expectShort) {
@@ -4557,6 +4559,10 @@ TEST(robco_config_with_a_long_path_gets_a_short_folder_or_keeps_its_plugin)
         auto cfg = configFor(root);
         cfg.compile.autoMerge = true;
         cfg.exportOptions.outputDirectory = outputFor(root, room);
+        if (cfg.exportOptions.outputDirectory.empty()) {
+            std::printf("  skipped (room %zu): the temporary folder is too deep\n", room);
+            return;
+        }
         Pipeline p(cfg);
         p.scan();
         p.analyse();
