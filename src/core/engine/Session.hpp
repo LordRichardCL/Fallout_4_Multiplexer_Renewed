@@ -1,6 +1,7 @@
 #pragma once
 
 #include "assets/AssetIndex.hpp"
+#include "engine/EarlierBuilds.hpp"
 #include "esp/FormId.hpp"
 #include "esp/PluginFile.hpp"
 #include "esp/PluginHeader.hpp"
@@ -46,6 +47,15 @@ inline constexpr const char* kArchiveLoaderTag = "Archive loader";
 
 // The suffix that hides a plugin from the game: "Example.esp.ghost" is the plugin Example.esp, not loaded.
 inline constexpr std::string_view kGhostSuffix = ".ghost";
+
+// An output of an earlier build found in the load order (enabled or not).
+struct EarlierBuild {
+    std::string output;
+    bool active = false;                  // enabled in plugins.txt
+    std::string source;                   // where the list of plugins it compiled was read; empty: none found
+    std::vector<std::string> switchedOff; // plugins it compiled, installed and switched off: read as sources
+    bool known() const { return !source.empty(); }
+};
 
 struct PluginInfo {
     PluginIndex index = kInvalidPlugin;
@@ -253,6 +263,11 @@ public:
     // Plugins compiled by the last build (lowercase). After switching over they are disabled, or
     // hidden behind an archive loader; scans still treat them as active sources in their position.
     std::unordered_set<std::string> reactivate;
+    // Records of earlier builds (export folders, the database), set before the scan; the list installed
+    // with the outputs is read by the scan itself.
+    std::vector<BuildRecord> buildRecords;
+    // Every output of an earlier build in the load order (this app's plugins), with what it compiled.
+    std::vector<EarlierBuild> earlierBuilds;
 
     BuildCache* cache = nullptr; // optional, owned by the pipeline
     std::vector<std::vector<bool>> masterClosure; // [plugin][master], see computeMasterClosure

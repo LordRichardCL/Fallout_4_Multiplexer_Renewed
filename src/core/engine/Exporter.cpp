@@ -593,6 +593,18 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
                formatFormId(m.objectId).substr(2) + "\t" + m.sig.str() + "\t" + m.editorId + "\n";
     writeText(r.formMap, map);
 
+    // What this build compiled, installed with its outputs: the next build reads the plugins in it as
+    // sources while they are switched off, wherever this export folder ends up.
+    {
+        std::vector<std::string> outputs, compiled;
+        for (const auto& op : c.outputs)
+            if (!op.records.empty())
+                outputs.push_back(op.name);
+        for (auto pi : c.compiledPlugins)
+            compiled.push_back(session.plugins[pi].name);
+        writeText(r.directory / earlier::kCompiledListFile, earlier::formatCompiledList(outputs, compiled));
+    }
+
     // Archive loaders: an empty ESL plugin with the compiled plugin's name, so the game keeps
     // loading that plugin's archives at exactly the same priority. The records are in the outputs.
     {
@@ -656,6 +668,18 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
     for (auto pi : c.compiledPlugins)
         if (!c.hasArchiveLoader(pi))
             disable += session.plugins[pi].name + "\n";
+    {
+        // Compiled by an earlier build, switched off since, and kept in the load order by this one.
+        std::vector<std::string> enable;
+        for (const auto& p : session.plugins)
+            if (p.reactivated && !c.isCompiled(p.index))
+                enable.push_back(p.name);
+        if (!enable.empty()) {
+            disable += "# Enable these: an earlier build compiled them, this build keeps them in the load order\n";
+            for (const auto& n : enable)
+                disable += "# " + n + "\n";
+        }
+    }
     if (!c.archiveLoaders.empty()) {
         disable += "# Keep these enabled: the output mod replaces them with archive loaders\n";
         for (auto pi : c.archiveLoaders)

@@ -25,6 +25,9 @@ struct DeploymentCheck {
     std::vector<std::string> archiveLoaderNotLoaded;
     // Compiled plugins enabled in the plugins.txt on disk right now (they must be disabled).
     std::vector<std::string> stillEnabled;
+    // Plugins an earlier build compiled that this build keeps in the load order, switched off in that
+    // plugins.txt: the game would not load them (Apply to Game enables them).
+    std::vector<std::string> stillDisabled;
     size_t fullPluginsAfter = 0;  // active full plugins once compiled plugins are off and outputs on
     size_t lightPluginsAfter = 0; // active light plugins (ESL, ESL-flagged) at the same point
     std::vector<std::string> blockers; // reasons nothing may be switched over

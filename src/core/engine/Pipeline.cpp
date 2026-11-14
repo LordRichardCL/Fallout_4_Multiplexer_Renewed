@@ -120,12 +120,28 @@ void Pipeline::scan(ProgressSink& progress)
 
     progress.stage("Scan");
     openDatabase();
+    std::optional<BuildRecord> fromDatabase;
     if (db_)
-        if (auto build = db::DatabaseWriter(*db_).loadSnapshot("build"); build && build->isBuild)
-            for (const auto& name : build->compiledPlugins)
+        if (auto build = db::DatabaseWriter(*db_).loadSnapshot("build"); build && build->isBuild) {
+            BuildRecord r;
+            r.source = "the results database (last build)";
+            for (const auto& name : build->compiledPlugins) {
                 session_->reactivate.insert(toLower(name));
+                r.compiled.push_back(name);
+            }
+            for (const auto& o : build->outputs)
+                r.outputs.push_back(o.name);
+            if (!r.outputs.empty())
+                fromDatabase = std::move(r);
+        }
     spdlog::info("Reading {} configuration", installKindName(config_.install.kind));
     session_->install = resolveInstall(config_.install);
+    // What earlier builds compiled, so their outputs in the load order can be matched with it: every
+    // finished export (newest first), then the database. The list installed with the outputs is read
+    // by the scan and comes before these.
+    session_->buildRecords = earlier::recordsFromExports(outputLocation());
+    if (fromDatabase)
+        session_->buildRecords.push_back(std::move(*fromDatabase));
     for (const auto& name : config_.analysis.excludedPlugins)
         session_->userRetained.insert(toLower(name));
 
@@ -317,6 +333,55 @@ void Pipeline::refreshEligibility()
     if (db_)
         db::DatabaseWriter(*db_).updatePlugins(*session_);
 }
+
+namespace {
+
+// Outputs of earlier builds in the load order, and the plugins they compiled that are switched off.
+void reportEarlierBuilds(const Session& session, ValidationReport& v)
+{
+    auto sample = [](const std::vector<std::string>& names) {
+        std::string t;
+        for (size_t i = 0; i < names.size() && i < 30; ++i)
+            t += (i ? ", " : "") + names[i];
+        if (names.size() > 30)
+            t += ", ... and " + std::to_string(names.size() - 30) + " more";
+        return t;
+    };
+    // Installed plugins switched off in plugins.txt that no earlier build's record accounts for.
+    std::vector<std::string> unaccounted;
+    for (const auto& p : session.plugins)
+        if (!p.active && !p.generated && !p.implicit && !p.ghosted && p.error.empty())
+            unaccounted.push_back(p.name);
+    for (const auto& b : session.earlierBuilds) {
+        const std::string what = b.output + (b.active ? " (enabled)" : " (switched off)") +
+                                 " is the output of an earlier build";
+        if (b.known() && !b.switchedOff.empty()) {
+            v.fail(Severity::Info, "Earlier Build",
+                   what + ". " + std::to_string(b.switchedOff.size()) +
+                       " plugin(s) it compiled are switched off in plugins.txt; they are read as sources in their "
+                       "place in the load order, so this build does not leave them out (from " + b.source + "): " +
+                       sample(b.switchedOff),
+                   b.output);
+        } else if (b.known()) {
+            v.fail(Severity::Info, "Earlier Build",
+                   what + "; every plugin it compiled is enabled again (from " + b.source + ")", b.output);
+        } else if (!unaccounted.empty()) {
+            v.fail(Severity::Error, "Earlier Build",
+                   what + ", but the list of plugins it compiled was not found (no " + earlier::kCompiledListFile +
+                       " installed with it, no export folder holding it, nothing in the results database). Plugins it "
+                       "compiled that are still switched off would be read as uninstalled and left out of this build. "
+                       "Switch them back on (they are in that build's Multiplexer_DisablePlugins.txt), or remove " +
+                       b.output + " from the game if it is no longer used, then scan again. Switched off now: " +
+                       sample(unaccounted),
+                   b.output);
+        } else {
+            v.fail(Severity::Info, "Earlier Build",
+                   what + "; no installed plugin is switched off, so nothing it compiled can be missing", b.output);
+        }
+    }
+}
+
+} // namespace
 
 bool Pipeline::compile(ProgressSink& progress)
 {
@@ -528,6 +593,7 @@ bool Pipeline::compile(ProgressSink& progress)
                                      "safely: " + reason),
                           p ? p->name : key);
     }
+    reportEarlierBuilds(*session_, *validation_);
     if (autoMerge_)
         for (const auto& f : autoMerge_->files) {
             if (f.validation.empty())

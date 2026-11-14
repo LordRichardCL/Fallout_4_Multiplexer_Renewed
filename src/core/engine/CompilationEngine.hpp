@@ -33,7 +33,9 @@ struct CompileOptions {
     int outputCount = 20;
     // Automatic: the fewest output plugins whose master lists fit (outputCount is then the result).
     bool autoOutputs = false;
-    std::string outputPrefix = "Dummy_Plugin_";
+    // Output plugins are <prefix>01.esp, <prefix>02.esp, ...; the user may choose another prefix.
+    static constexpr const char* kDefaultOutputPrefix = "Dummy_Plugin_";
+    std::string outputPrefix = kDefaultOutputPrefix;
     AllocationStrategy strategy = AllocationStrategy::Balanced;
     std::vector<AllocationRule> rules;
     bool mergeCompatible = true;

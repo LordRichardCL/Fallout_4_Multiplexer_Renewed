@@ -49,6 +49,7 @@ add_library(fo4mx_core STATIC
     engine/Mo2Support.cpp
     engine/Normalizer.cpp
     engine/OutputRuns.cpp
+    engine/EarlierBuilds.cpp
     engine/Pipeline.cpp
     engine/PluginScanner.cpp
     engine/PluginSummary.cpp

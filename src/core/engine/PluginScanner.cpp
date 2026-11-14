@@ -1,6 +1,7 @@
 #include "engine/PluginScanner.hpp"
 
 #include "engine/BuildCache.hpp"
+#include "engine/EarlierBuilds.hpp"
 #include "engine/ParallelFor.hpp"
 #include "esp/PluginFile.hpp"
 #include "util/Compression.hpp"
@@ -183,6 +184,8 @@ void PluginScanner::discoverPlugins(Session& session, ProgressSink& progress)
         p.generated = true;
         p.active = false;
     }
+    // Outputs of earlier builds in the load order: the plugins they compiled are still sources.
+    earlier::apply(session, session.buildRecords);
     // Plugins the last build compiled are still sources, in their recorded position.
     for (auto& p : session.plugins)
         if (!p.active && !p.generated && p.error.empty() && session.reactivate.count(p.key)) {

@@ -92,7 +92,16 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     outputsRow->addStretch();
     connect(autoOutputs_, &QCheckBox::toggled, outputs_, [this](bool on) { outputs_->setEnabled(!on); });
     form->addRow("Output plugins", outputsRow);
-    form->addRow("Name prefix", prefix_);
+    prefix_->setPlaceholderText(QString("Default: %1").arg(fo4mx::CompileOptions::kDefaultOutputPrefix));
+    auto* prefixDefault = makeButton("Default");
+    prefixDefault->setToolTip(QString("Use the default name prefix, %1 (outputs %101.esp, %102.esp, …)")
+                                  .arg(fo4mx::CompileOptions::kDefaultOutputPrefix));
+    connect(prefixDefault, &QPushButton::clicked, this,
+            [this] { prefix_->setText(fo4mx::CompileOptions::kDefaultOutputPrefix); });
+    auto* prefixRow = new QHBoxLayout;
+    prefixRow->addWidget(prefix_, 1);
+    prefixRow->addWidget(prefixDefault);
+    form->addRow("Name prefix", prefixRow);
     form->addRow("Output folder", dirRow);
     outputs_->setToolTip(QString(
         "The most output plugins the compiler may create (%1 to %2). It fills them in order and starts a new one only "
@@ -102,7 +111,10 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "masters for the worldspace output (254 minus this number).")
                              .arg(fo4mx::CompileOptions::kMinOutputs)
                              .arg(fo4mx::CompileOptions::kMaxOutputs));
-    prefix_->setToolTip("Output plugins are named <prefix>01.esp, <prefix>02.esp, …");
+    prefix_->setToolTip(QString("Output plugins are named <prefix>01.esp, <prefix>02.esp, … The default is %1; "
+                                "any other prefix works the same. After changing it, the earlier build's outputs keep "
+                                "their old names: remove them from the game once the new build is switched on.")
+                            .arg(fo4mx::CompileOptions::kDefaultOutputPrefix));
     outputDir_->setToolTip(
         "The folder that holds the exports. By default \"Multiplexer Output\" next to the game. Every export gets "
         "a folder of its own in it, \"Multiplexer Output DDMMYY HHMMSS\": its Data folder holds everything the game "
@@ -474,7 +486,7 @@ std::vector<fo4mx::AllocationRule> parseRules(const QString& text)
 
 std::string prefixFrom(const QString& text)
 {
-    return ss(text.trimmed().isEmpty() ? QString("Dummy_Plugin_") : text.trimmed());
+    return ss(text.trimmed().isEmpty() ? QString(fo4mx::CompileOptions::kDefaultOutputPrefix) : text.trimmed());
 }
 
 } // namespace

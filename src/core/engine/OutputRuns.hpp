@@ -72,6 +72,9 @@ bool setLatest(const Run& run);
 // export, otherwise the newest finished export by the date and time in its name.
 std::optional<std::filesystem::path> latestRun(const Location& location);
 
+// Every finished export folder under `location`, newest first (by the date and time in its name).
+std::vector<std::filesystem::path> finishedRuns(const Location& location);
+
 // The folder of an export where its plugins are.
 std::filesystem::path dataDir(const std::filesystem::path& runFolder, Layout layout);
 

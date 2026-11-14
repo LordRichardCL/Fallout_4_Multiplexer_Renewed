@@ -193,6 +193,16 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
             if (enabled.count(p.key) && !c.hasArchiveLoader(pi))
                 d.stillEnabled.push_back(p.name);
         }
+        for (const auto& p : session.plugins)
+            if (p.reactivated && !c.isCompiled(p.index) && !enabled.count(p.key))
+                d.stillDisabled.push_back(p.name);
+        if (!d.stillDisabled.empty())
+            d.warnings.push_back(std::to_string(d.stillDisabled.size()) +
+                                 " plugin(s) an earlier build compiled stay in the load order with this build but are "
+                                 "switched off in " + pathToUtf8(session.install.pluginsFile.filename()) +
+                                 " (first: " + d.stillDisabled.front() +
+                                 "): enable them (Apply to Game does; they are listed under \"Enable these\" in "
+                                 "Multiplexer_DisablePlugins.txt), or the game leaves them out");
         if (!d.stillEnabled.empty())
             d.warnings.push_back(std::to_string(d.stillEnabled.size()) +
                                  " compiled plugin(s) are still enabled in " +

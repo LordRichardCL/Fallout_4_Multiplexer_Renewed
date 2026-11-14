@@ -1448,6 +1448,130 @@ TEST(rescan_after_switching_over_reads_the_original_load_order)
     CHECK(p.changes().status != BuildStatus::RequiresRebuild);
 }
 
+// The database is not the only record of what a build compiled: an earlier build's outputs in the load
+// order are matched with the list installed with them (Multiplexer_CompiledPlugins.txt), the export
+// folders (also those written before that list existed), and an output nothing accounts for stops the
+// compilation instead of leaving its switched-off plugins out.
+TEST(earlier_builds_switched_off_plugins_stay_sources_without_the_database)
+{
+    namespace fs = std::filesystem;
+    auto root = buildInstall("earlierbuilds");
+    auto cfg = configFor(root);
+    std::vector<std::string> compiled;
+    fs::path runData;
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        for (auto pi : p.compiledOutput()->compiledPlugins)
+            compiled.push_back(p.session().plugins[pi].name);
+        auto result = p.exportOutputs();
+        runData = result.directory;
+        CHECK(fs::exists(runData / earlier::kCompiledListFile));
+        auto list = earlier::readCompiledList(runData / earlier::kCompiledListFile);
+        CHECK(list.has_value());
+        CHECK_EQ(list->compiled.size(), compiled.size());
+        CHECK(!list->outputs.empty());
+        // Installed by hand (the package's Data folder copied into the game's), switched over.
+        for (const auto& e : fs::directory_iterator(runData))
+            if (e.is_regular_file())
+                fs::copy_file(e.path(), root / "Game" / "Data" / e.path().filename(), fs::copy_options::overwrite_existing);
+        fs::copy_file(result.pluginsTxt, root / "plugins.txt", fs::copy_options::overwrite_existing);
+    }
+    CHECK(!compiled.empty());
+    auto checkSources = [&](Pipeline& p, const std::string& from) {
+        p.scan();
+        for (const auto& name : compiled) {
+            const auto* pl = p.session().findPlugin(name);
+            CHECK(pl && pl->active && pl->reactivated);
+        }
+        CHECK_EQ(p.session().earlierBuilds.size(), size_t(1));
+        const auto& b = p.session().earlierBuilds.front();
+        CHECK(b.active);
+        CHECK(b.known());
+        CHECK(b.source.find(from) != std::string::npos);
+        CHECK_EQ(b.switchedOff.size(), compiled.size());
+        p.analyse();
+        CHECK(p.compile());
+        bool reported = false;
+        for (const auto& is : p.validation()->issues)
+            reported |= is.category == "Earlier Build" && is.severity == Severity::Info &&
+                        is.message.find("are read as sources") != std::string::npos;
+        CHECK(reported);
+    };
+    // The database is gone: the list installed with the outputs says what they compiled.
+    {
+        auto c = cfg;
+        c.databasePath = root / "fresh1.sqlite";
+        Pipeline p(c);
+        checkSources(p, earlier::kCompiledListFile);
+    }
+    // An export written before the list existed: its Multiplexer_DisablePlugins.txt and Data folder.
+    fs::remove(root / "Game" / "Data" / earlier::kCompiledListFile);
+    fs::remove(runData / earlier::kCompiledListFile);
+    {
+        auto c = cfg;
+        c.databasePath = root / "fresh2.sqlite";
+        Pipeline p(c);
+        checkSources(p, "Multiplexer_DisablePlugins.txt");
+    }
+    // Nothing records what the installed output compiled: compiling stops instead of leaving them out.
+    fs::remove_all(root / "Output");
+    {
+        auto c = cfg;
+        c.databasePath = root / "fresh3.sqlite";
+        Pipeline p(c);
+        p.scan();
+        CHECK_EQ(p.session().earlierBuilds.size(), size_t(1));
+        CHECK(!p.session().earlierBuilds.front().known());
+        p.analyse();
+        CHECK(!p.compile());
+        bool blocked = false;
+        for (const auto& is : p.validation()->issues)
+            blocked |= is.category == "Earlier Build" && is.severity == Severity::Error &&
+                       is.message.find("list of plugins it compiled was not found") != std::string::npos;
+        CHECK(blocked);
+    }
+}
+
+TEST(plugins_an_earlier_build_compiled_and_this_one_keeps_must_be_enabled)
+{
+    namespace fs = std::filesystem;
+    auto root = buildInstall("earlierkept");
+    auto cfg = configFor(root);
+    cfg.exportOptions.outputDirectory = root / "Game" / "Data";
+    std::string kept;
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        CHECK(!p.compiledOutput()->compiledPlugins.empty());
+        kept = p.session().plugins[p.compiledOutput()->compiledPlugins.front()].name;
+        auto result = p.exportOutputs();
+        fs::copy_file(result.pluginsTxt, root / "plugins.txt", fs::copy_options::overwrite_existing);
+    }
+    // A compiled plugin is kept in the load order by the next build (the user excludes it); it is still
+    // switched off.
+    auto c = cfg;
+    c.analysis.excludedPlugins = {kept};
+    Pipeline p(c);
+    p.scan();
+    CHECK(p.session().findPlugin(kept)->reactivated);
+    p.analyse();
+    CHECK(p.compile());
+    auto result = p.exportOutputs();
+    std::ifstream in(result.disableList);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(text.find("# Enable these") != std::string::npos);
+    CHECK(text.find("# " + kept) != std::string::npos);
+    // The proposed plugins.txt enables it.
+    std::ifstream pin(result.pluginsTxt);
+    std::string proposed((std::istreambuf_iterator<char>(pin)), std::istreambuf_iterator<char>());
+    CHECK(proposed.find("*" + kept) != std::string::npos);
+}
+
 TEST(references_broken_in_the_source_are_written_as_none)
 {
     auto root = buildInstall("brokensource");

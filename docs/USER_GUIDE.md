@@ -128,7 +128,7 @@ Open **Compilation**:
 
 - **Output plugins**: the most output plugins the compiler may create (1 to 64), or **Automatic**: the fewest output plugins whose master lists all fit (each plugin can have at most 254 masters), tried from 1 upwards; the number used is shown after Compile. Fewer outputs take fewer load order slots, each being larger.
   With a fixed number: It fills them in order and starts a new one only when the current one holds its share of the records (at least 2 MB), so a small load order uses fewer; unused ones are not written. Every output that is not ESL-flagged takes one of Fallout 4's **254 full plugin slots**, shared with the plugins that stay enabled; validation stops the export if the total passes 254 (and warns above 240). Outputs master each other, so the worldspace output has 254 minus this number of masters left for the plugins it needs. There is no benefit in more outputs than the load order needs: raise it when outputs grow very large (100 MB and more) or the worldspace output runs out of masters.
-- **Name prefix**: `Dummy_Plugin_` by default (outputs are `<prefix>01.esp`, `<prefix>02.esp`, …).
+- **Name prefix**: `Dummy_Plugin_` by default (outputs are `<prefix>01.esp`, `<prefix>02.esp`, …). Any other prefix works the same; **Default** puts `Dummy_Plugin_` back. After changing it, the earlier build's outputs keep their old names: remove them from the game once the new build is switched on (they are recognised as outputs, never read as sources).
 - **Record allocation** decides how records are spread over the outputs; it does not change what the game sees. In every strategy a record goes into the same or a later output than the new records it references, cells, worldspaces and quests with dialogue go together into the last outputs, and a record keeps the output it had in the previous build when `Multiplexer_FormMap.tsv` is in the output folder (so saves keep working).
 
   | Strategy | What it does | Good for | Trade-off |
@@ -197,6 +197,7 @@ Files for you and for the next build (the game does not read them; nothing needs
 | File | Purpose |
 |---|---|
 | `Multiplexer_FormMap.tsv` | every old → new FormID; read by the next compilation to keep the same FormIDs (save compatibility) |
+| `Multiplexer_CompiledPlugins.txt` | the outputs and the plugins this build compiled; the next build reads those plugins as sources while they are switched off |
 | `Multiplexer_Archives.ini` | a copy of the archive line **Apply to Game** writes into `Fallout4Custom.ini`; the game does not read this file itself |
 | `Multiplexer_RegisteredArchives.txt` | archives Apply to Game added to the INI, so the next build compares with the load order as it was |
 | `Multiplexer_ArchiveWinners.tsv`, `Multiplexer_Voices.tsv`, `Multiplexer_FaceGen.tsv`, `Multiplexer_Relinked.tsv`, `Multiplexer_Previs.tsv` | what each copy above is and where it came from; the next export removes copies no longer needed, and the next scan does not mistake them for mod files |
@@ -206,7 +207,7 @@ Files for you and for the next build (the game does not read them; nothing needs
 **Cell inheritance:** a cell override without previs (XPRI) or precombine (XCRI) lists does not clear an earlier version's lists, and a partial cell (flag 0x4000) takes the fields it omits from earlier versions. When the version written omits a list that an earlier version in a compiled plugin has, or is partial with an earlier compiled version, compiling would change what the cell inherits, so the plugins compiling that cell stay in the load order ("Cell Inheritance" in the report). Earlier versions in plugins that stay load as before and keep nothing out.
 | `Multiplexer_ArchivePriority.txt` | only when loose copies are off: files whose winning archive would change |
 | `Multiplexer_ArchiveLoaders.txt` | MO2: which compiled plugins have an archive loader |
-| `Multiplexer_DisablePlugins.txt`, `Multiplexer_plugins.txt` | plugins to disable, and a proposed `plugins.txt` (for Vortex and manual installs) |
+| `Multiplexer_DisablePlugins.txt`, `Multiplexer_plugins.txt` | plugins to disable (and, under "Enable these", plugins an earlier build compiled that this one keeps), and a proposed `plugins.txt` (for Vortex and manual installs) |
 | `Multiplexer Reports/` | all reports (HTML + JSON) |
 
 Then:
@@ -288,7 +289,17 @@ CELL, WRLD, REFR, ACHR, LAND and the placed hazards, projectiles, missiles and a
 
 ## Rebuilding after switching over
 
-You do not need to switch back to the original load order to rebuild. Scans recognise the app's own files: Dummy plugins and patches are never read as sources, an archive loader is looked through to the original plugin underneath it, and plugins the last build compiled count as active sources in their original position even though they are disabled now. **Changes** and **Rebuild** therefore work straight from the switched-over load order.
+You do not need to switch back to the original load order to rebuild. Scans recognise the app's own files: Dummy plugins and patches are never read as sources, an archive loader is looked through to the original plugin underneath it, and plugins an earlier build compiled count as active sources in their original position even though they are disabled now. **Changes** and **Rebuild** therefore work straight from the switched-over load order.
+
+What an earlier build compiled is not only kept in the results database (which a new version of the app clears, and **Reset to Fresh State** deletes). Every output of an earlier build in the load order, enabled or not and under whatever name prefix it was built, is matched with a record of the plugins it compiled:
+
+1. `Multiplexer_CompiledPlugins.txt`, installed with the outputs (it is in the package's `Data` folder);
+2. the export folders in the Output folder (also exports written before that file existed: their `Multiplexer_DisablePlugins.txt` and the plugins in their `Data` folder);
+3. the results database.
+
+The plugins it compiled that are switched off are read as sources, and the Validation Report lists them under **Earlier Build**. When an earlier output is in the load order but nothing records what it compiled, while installed plugins are switched off, compiling stops with an **Earlier Build** error instead of leaving those plugins out: switch them back on (they are in that build's `Multiplexer_DisablePlugins.txt`), or remove the old output from the game if it is no longer used, then scan again.
+
+A plugin an earlier build compiled that this build keeps in the load order must be switched on again: **Apply to Game** does it, `Multiplexer_DisablePlugins.txt` lists it under "Enable these", and the switch-over check warns while it is still off.
 
 ## Starting fresh
 

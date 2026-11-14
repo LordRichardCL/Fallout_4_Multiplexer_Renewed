@@ -246,7 +246,7 @@ void AppController::loadSettings()
     auto& c = config_.compile;
     c.outputCount = s.value("compile/outputCount", 20).toInt();
     c.autoOutputs = s.value("compile/autoOutputs", false).toBool();
-    c.outputPrefix = ss(s.value("compile/prefix", "Dummy_Plugin_").toString());
+    c.outputPrefix = ss(s.value("compile/prefix", fo4mx::CompileOptions::kDefaultOutputPrefix).toString());
     c.strategy = static_cast<AllocationStrategy>(s.value("compile/strategy", int(AllocationStrategy::Balanced)).toInt());
     c.mergeCompatible = s.value("compile/merge", true).toBool();
     c.lightOutputsWhenPossible = s.value("compile/light", false).toBool();

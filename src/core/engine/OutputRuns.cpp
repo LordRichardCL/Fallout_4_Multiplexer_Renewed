@@ -229,6 +229,22 @@ std::optional<fs::path> latestRun(const Location& location)
     return best;
 }
 
+std::vector<fs::path> finishedRuns(const Location& location)
+{
+    std::vector<std::pair<std::pair<std::string, int>, fs::path>> found;
+    std::error_code ec;
+    if (location.layout == Layout::GameData || !fs::is_directory(location.root, ec))
+        return {};
+    for (const auto& e : fs::directory_iterator(location.root, ec))
+        if (isFinishedRun(e.path()))
+            found.push_back({sortKey(pathToUtf8(e.path().filename())), e.path()});
+    std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    std::vector<fs::path> out;
+    for (auto& f : found)
+        out.push_back(std::move(f.second));
+    return out;
+}
+
 CleanupResult cleanupRuns(const Location& location, size_t keep, bool removeUnfinished)
 {
     CleanupResult out;
