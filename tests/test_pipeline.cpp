@@ -3102,6 +3102,66 @@ TEST(dialogue_compiles_in_its_quest_and_topic)
         CHECK(checkLayout(PluginFile::load(f), true).problems.empty());
 }
 
+// A topic's TIFC counts the responses written under it in each plugin. The sources count all three
+// of their responses; the output writes only the two new ones (the base responses are unchanged), so
+// the copied TIFC is wrong for the output; the plan sets it, so
+// the written-content check after export (which compares the files with the plan) finds no difference.
+TEST(compiled_topic_counts_the_responses_written_under_it)
+{
+    auto root = buildInstall("topiccount");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "QBase.esm", {"Fallout4.esm"},
+                {record("QUST", 0x01000800, {zs("EDID", "BaseQuest")}),
+                 record("DIAL", 0x01000801, {zs("EDID", "BaseTopic"), u32("TIFC", 2)}),
+                 record("INFO", 0x01000802, {zs("NAM1", "Hello.")}),
+                 record("INFO", 0x01000803, {zs("NAM1", "Bye.")})},
+                ESM);
+    writePlugin(data / "ModA.esp", {"Fallout4.esm", "QBase.esm"},
+                {record("QUST", 0x01000800, {zs("EDID", "BaseQuest")}),
+                 record("DIAL", 0x01000801, {zs("EDID", "BaseTopic"), u32("TIFC", 3)}),
+                 record("INFO", 0x01000802, {zs("NAM1", "Hello.")}),
+                 record("INFO", 0x01000803, {zs("NAM1", "Bye.")}),
+                 record("INFO", 0x02000810, {zs("NAM1", "Line A.")})});
+    writePlugin(data / "ModB.esp", {"Fallout4.esm", "QBase.esm"},
+                {record("QUST", 0x01000800, {zs("EDID", "BaseQuest")}),
+                 record("DIAL", 0x01000801, {zs("EDID", "BaseTopic"), u32("TIFC", 3)}),
+                 record("INFO", 0x01000802, {zs("NAM1", "Hello.")}),
+                 record("INFO", 0x01000803, {zs("NAM1", "Bye.")}),
+                 record("INFO", 0x02000810, {zs("NAM1", "Line B.")})});
+    writeFile(root / "plugins.txt", "*QBase.esm\n*ModA.esp\n*ModB.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"QBase.esm"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    OutputSet out(result.pluginFiles);
+    std::map<std::string, std::vector<const OutputSet::Rec*>> topics; // plugin -> DIALs
+    for (const auto& r : out.records)
+        if (r.record.signature() == Signature("DIAL"))
+            topics[r.plugin].push_back(&r);
+    size_t lines = 0;
+    for (const auto& r : out.records)
+        if (r.record.signature() == Signature("INFO"))
+            ++lines;
+    CHECK(lines >= 2);
+    for (const auto& [plugin, dials] : topics)
+        for (const auto* d : dials) {
+            uint32_t written = 0;
+            for (const auto& r : out.records)
+                if (r.plugin == plugin && r.placement.kind == Placement::Kind::TopicChild &&
+                    out.resolve(r, r.placement.parent) == out.identity(*d))
+                    ++written;
+            const auto* tifc = d->record.find(Signature("TIFC"));
+            CHECK(tifc != nullptr);
+            if (tifc)
+                CHECK_EQ(loadLE<uint32_t>(tifc->data.data()), written);
+        }
+}
+
 // An archive written without a name table (Archive2 -nostrings) is read: its files are matched by
 // the game's hashes to the paths other archives and loose files give them.
 TEST(archives_without_names_are_matched_by_hash)

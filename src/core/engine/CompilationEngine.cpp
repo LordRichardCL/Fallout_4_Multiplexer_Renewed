@@ -22,6 +22,7 @@
 #include <set>
 #include <sstream>
 #include <tuple>
+#include <unordered_map>
 
 #include <spdlog/spdlog.h>
 
@@ -1648,6 +1649,24 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             }
             op.built.push_back(std::move(rec));
             op.placements.push_back(placement);
+        }
+        // TIFC, a topic's response count, is the number of responses written under it in this plugin (as
+        // the Creation Kit and xEdit keep it), not the winning version's count. The writer sets the same
+        // value; doing it here keeps the written-content check comparing like with like.
+        {
+            std::unordered_map<uint32_t, uint32_t> responses;
+            for (const auto& pl : op.placements)
+                if (pl.kind == Placement::Kind::TopicChild)
+                    ++responses[pl.parent];
+            for (auto& r : op.built) {
+                if (r.signature() != Signature("DIAL"))
+                    continue;
+                auto it = responses.find(r.header.formId);
+                auto* tifc = r.find(Signature("TIFC"));
+                if (it == responses.end() || !tifc || tifc->data.size() != 4)
+                    continue;
+                std::memcpy(tifc->data.data(), &it->second, 4);
+            }
         }
         // SEQ: as zEdit and xEdit build it.
         op.seqFormIds.clear();

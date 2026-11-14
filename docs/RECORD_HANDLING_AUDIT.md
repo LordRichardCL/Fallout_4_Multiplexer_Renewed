@@ -961,3 +961,7 @@ The writer put a topic's responses in the order they were added, and copied the 
 - The writer orders each topic's responses so that one whose PNAM names another response in the same group comes after it. This is a stable order, and responses without such a PNAM keep their place.
 - TIFC is set to the number of responses written under the topic in that plugin.
 - A test covers both.
+
+**Follow-up: TIFC is set in the plan.** The first version of this fix corrected TIFC only in the writer, and the plan kept the copied count. The written-content check after export compares the files on disk with the plan, so it rejected the export. The owner's next report showed 147 Export errors ("DIAL … on disk does not match what was compiled: subrecord (TIFC) differs from the plan"). The check worked as intended: the export failed closed and nothing was installed. The compiler now sets each written topic's TIFC to the number of responses placed under it in that output, so the plan and the file agree. The writer's correction remains as a safeguard. A pipeline test compiles responses from two plugins into one topic whose source count differs from the written count, and requires a clean export with the correct TIFC. That test fails with the same error when the plan fix is removed.
+
+That report also shows how often this happened: in that build, 147 topics would otherwise have been written with a response count that did not match their responses.
