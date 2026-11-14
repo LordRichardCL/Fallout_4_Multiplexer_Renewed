@@ -950,3 +950,14 @@ In the owner's build, the export's Auto-Merger step failed with "could not be wr
 - When `Multiplexer - <plugin>` does not fit, a RobCo copy's folder is `Multiplexer - <8 hex digits>` instead (a hash of the plugin's name). `Multiplexer_Relinked.tsv` still names the file.
 - A copy whose path does not fit even then fails at plan time. Only its plugin stays in the load order, and the compilation runs again, instead of the whole relink failing after export.
 - A failed write now names the path and its length.
+
+## Topic responses in PNAM order, TIFC counted (crash in INFO loading)
+
+One launch of the owner's 501-plugin build crashed during play (Buffout 4: `EXCEPTION_ACCESS_VIOLATION` while loading dialogue responses). On the stack were topic `002041BE` (Fallout4.esm), Fallout4.esm's response `0008BA6A` (overridden in the output), and RED.esp's new response `096FBC`, written to Dummy_Plugin_01.esp as `004BDD`. The next launch of the same build ran without a crash.
+
+The writer put a topic's responses in the order they were added, and copied the topic's TIFC (response count) from the winning version. With several compiled plugins in one topic, a response can be written before the response its PNAM (previous INFO) names. xEdit's changelog says the game resolves PNAM when it loads the response, and xEdit sorts responses by PNAM before saving for that reason.
+
+**Fix.**
+- The writer orders each topic's responses so that one whose PNAM names another response in the same group comes after it. This is a stable order, and responses without such a PNAM keep their place.
+- TIFC is set to the number of responses written under the topic in that plugin.
+- A test covers both.

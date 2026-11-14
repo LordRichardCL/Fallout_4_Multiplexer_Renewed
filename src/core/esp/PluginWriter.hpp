@@ -39,6 +39,9 @@ private:
         Record record;
         Placement placement;
     };
+    // The INFOs of one topic group, each after the INFO its PNAM (previous INFO) names when that one is in
+    // the group too, otherwise in the given order.
+    static std::vector<const Entry*> orderByPreviousInfo(const std::vector<const Entry*>& infos);
     PluginHeader header_;
     std::vector<Entry> records_;
 };

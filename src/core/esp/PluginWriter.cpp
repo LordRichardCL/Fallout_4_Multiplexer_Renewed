@@ -5,6 +5,10 @@
 #include "util/Text.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <unordered_map>
 #include <fstream>
 #include <map>
 
@@ -13,6 +17,36 @@ namespace fo4mx {
 const std::vector<Signature>& PluginWriter::topLevelOrder()
 {
     return RecordCatalogue::get().groupOrder();
+}
+
+std::vector<const PluginWriter::Entry*> PluginWriter::orderByPreviousInfo(const std::vector<const Entry*>& in)
+{
+    std::unordered_map<uint32_t, size_t> index;
+    for (size_t i = 0; i < in.size(); ++i)
+        index.emplace(in[i]->record.header.formId, i);
+    std::vector<size_t> previous(in.size(), SIZE_MAX);
+    for (size_t i = 0; i < in.size(); ++i)
+        if (const auto* p = in[i]->record.find(Signature("PNAM")); p && p->data.size() >= 4) {
+            uint32_t id = 0;
+            std::memcpy(&id, p->data.data(), 4);
+            if (auto it = index.find(id); it != index.end() && it->second != i)
+                previous[i] = it->second;
+        }
+    std::vector<const Entry*> out;
+    out.reserve(in.size());
+    std::vector<uint8_t> state(in.size(), 0); // 0 not placed, 1 placing, 2 placed
+    std::function<void(size_t)> place = [&](size_t i) {
+        if (state[i])
+            return; // placed, or a cycle: the given order decides
+        state[i] = 1;
+        if (previous[i] != SIZE_MAX)
+            place(previous[i]);
+        state[i] = 2;
+        out.push_back(in[i]);
+    };
+    for (size_t i = 0; i < in.size(); ++i)
+        place(i);
+    return out;
 }
 
 void PluginWriter::addRecord(Record record, Placement placement)
@@ -133,12 +167,32 @@ std::vector<uint8_t> PluginWriter::build(bool compressLargeRecords)
     };
 
     auto writeTopic = [&](const Entry* e) { // a topic and its responses
-        writeRecord(e);
         auto it = topicChildren.find(e->record.header.formId);
-        if (it == topicChildren.end())
+        if (it == topicChildren.end()) {
+            writeRecord(e);
             return;
+        }
+        // The game resolves an INFO's previous INFO (PNAM) when it loads the INFO, so one that points to
+        // another INFO of this group must come after it (xEdit sorts them the same way when it saves).
+        // Otherwise the order is kept as added.
+        const auto infos = orderByPreviousInfo(it->second);
+        // TIFC is the number of responses the topic has in this plugin: the ones written here.
+        if (const auto* tifc = e->record.find(Signature("TIFC")); tifc && tifc->data.size() == 4) {
+            uint32_t count = 0;
+            std::memcpy(&count, tifc->data.data(), 4);
+            if (count != infos.size()) {
+                Entry fixed = *e;
+                const uint32_t n = static_cast<uint32_t>(infos.size());
+                std::memcpy(fixed.record.find(Signature("TIFC"))->data.data(), &n, 4);
+                writeRecord(&fixed);
+            } else {
+                writeRecord(e);
+            }
+        } else {
+            writeRecord(e);
+        }
         size_t tg = open(e->record.header.formId, GroupType::TopicChildren);
-        for (const auto* info : it->second) // order matters to the game: as added
+        for (const auto* info : infos)
             writeRecord(info);
         close(tg);
     };

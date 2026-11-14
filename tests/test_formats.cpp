@@ -1,5 +1,6 @@
 #include "util/Zip.hpp"
 #include <cstdio>
+#include <cstring>
 #include "Fixtures.hpp"
 #include "papyrus/Pex.hpp"
 #include "Test.hpp"
@@ -281,6 +282,37 @@ TEST(nested_groups_round_trip)
     }
     CHECK(infoOrder == (std::vector<uint32_t>{0x01000832, 0x01000831})); // topic responses keep their order
     CHECK(again.build() == image);
+}
+
+// The game resolves an INFO's previous INFO (PNAM) when it loads the INFO: one that names another INFO of
+// the same topic group is written after it (a compiled topic can hold one plugin's override of a response
+// whose PNAM names another plugin's new response, owner's crash in INFO loading). TIFC, the topic's
+// response count, is the number written.
+TEST(topic_responses_follow_their_previous_info_and_tifc_counts_them)
+{
+    using K = Placement::Kind;
+    PluginWriter w;
+    w.setHeader(fixtureHeader());
+    w.addRecord(record("DIAL", 0x00000830, {zs("EDID", "Topic"), u32("TIFC", 1)}), {});
+    w.addRecord(record("INFO", 0x00000831, {u32("PNAM", 0x01000900)}), {K::TopicChild, 0x00000830, false});
+    w.addRecord(record("INFO", 0x01000901, {}), {K::TopicChild, 0x00000830, false}); // no PNAM: keeps its place
+    w.addRecord(record("INFO", 0x01000900, {u32("PNAM", 0x00000500)}), {K::TopicChild, 0x00000830, false});
+    const auto image = w.build();
+    auto f = PluginFile::fromBytes(image);
+    std::vector<uint32_t> order;
+    uint32_t tifc = 0;
+    f.forEachRecord([&](const RecordLocation& loc) {
+        if (loc.header.signature == Signature("INFO"))
+            order.push_back(loc.header.formId);
+        if (loc.header.signature == Signature("DIAL")) {
+            auto rec = f.recordAt(loc.offset);
+            if (const auto* t = rec.find(Signature("TIFC")))
+                std::memcpy(&tifc, t->data.data(), 4);
+        }
+        return true;
+    });
+    CHECK(order == (std::vector<uint32_t>{0x01000900, 0x00000831, 0x01000901}));
+    CHECK_EQ(tifc, 3u);
 }
 
 // A record that cannot be placed stops the build: nothing is written.
