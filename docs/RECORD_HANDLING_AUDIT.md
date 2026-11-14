@@ -922,9 +922,21 @@ The build after the Clean precombine fix compiled 484 plugins with no errors, bu
    - user choices where changes compete, and round-trip checks of the written patch;
    - research first, with every decision traced to a source.
    Its first deliverable is an assessment and a research report, before any large change. The cell configuration merge (2) and the placed-record contracts (1) are narrow early cases of it.
-5. **Cell inheritance, computed instead of kept out (requested).** In the latest build the Cell Inheritance guard kept out 19 plugins: 16 omit a list, 3 are partial cells. PJM's previsbine guide documents what the game does as it reads each cell version in load order:
-   - a non-partial version's record flags, PCMB and VISI become current, even when blank;
-   - its XCRI and XPRI become current only when present and not empty;
-   - a partial version (flag 0x4000) changes none of these.
-   The compiler can apply these rules to the cell's whole chain, as it loads today, and write the result: the winner's record with the lists and timestamps the game would end up with. The guard then keeps out only what this cannot express. Tests: omitted and empty lists, partial versions, and chains mixing compiled plugins with plugins that stay.
+5. **Cell inheritance, computed instead of kept out.** Done: see "Cell inheritance computed" below.
 6. **Clean precombines:** test whether an empty placeholder plugin with the same name (as for the archive loaders) loads `<plugin> - Geometry.csg`, so that such plugins can compile.
+
+## Cell inheritance computed (replaces the keep-out guard)
+
+The guard kept out 19 plugins in the latest full build. The compiler now applies the rules from PJM's previsbine guide to each written cell's whole chain, as it loads today:
+
+- a non-partial version's record flags, PCMB and VISI become current, even when blank;
+- its XPRI and XCRI become current only when present and not empty (XCRI: a mesh or a reference counted);
+- a partial version (flag 0x4000) changes none of these.
+
+After compiling, the versions in plugins that stay load first and the written version loads last.
+
+- **Written version not partial.** Its flags, PCMB and VISI are current, as today. For each list, the version that supplies it today is found. When that is a compiled version (it leaves the load order), its list is copied into the written cell, in the source's field order, and translated like every other field. When it is the written version itself, or a version that stays, nothing changes. If no version supplies a list today but a version that stays loads after the written one (a forced winner), the written cell cannot clear it, so the chain is kept out.
+- **Written version partial.** It changes none of these values, so the versions under it must give the game what they give it today. That holds when the last full version under it, and every version after that, stay in the load order, and each list's supplier is the same with and without the compiled versions. Otherwise the cell's chain stays out ("Cell Inheritance", error).
+- **Identical results.** A cell whose merged result equals the version that stays used to be skipped as an ITM. For a cell that is wrong when a compiled version supplies a list (the game would fall back to the version that stays and lose it) or is partial. Such a cell is now written, and the inheritance pass fills or guards it.
+
+Each list taken from an earlier version is reported ("Cell Inheritance", Info). Tests cover: omitted lists, present-but-empty lists, a version with its own lists, a partial version over a compiled full version and over a compiled partial one, a partial version over versions that stay, a partial earlier version (its lists never become current), and lists supplied only by a plugin that stays.

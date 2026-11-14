@@ -12,7 +12,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <optional>
 #include <map>
@@ -130,6 +132,44 @@ std::vector<FormMapping> CompilationEngine::readFormMap(const std::filesystem::p
 namespace {
 // Cell record flag "Partial Form": fields the record omits are taken from earlier versions.
 constexpr uint32_t kCellPartialFlag = 0x00004000;
+
+// A cell's XPRI (index 0) or XCRI (1) that becomes current when a non-partial version has it: present
+// and not empty (XCRI: a mesh or a reference counted).
+bool cellListNonEmpty(const Subrecord* sub, int list)
+{
+    if (!sub)
+        return false;
+    if (list == 0)
+        return !sub->data.empty();
+    if (sub->data.size() < 8)
+        return false;
+    uint32_t meshes = 0, refs = 0;
+    std::memcpy(&meshes, sub->data.data(), 4);
+    std::memcpy(&refs, sub->data.data() + 4, 4);
+    return meshes != 0 || refs != 0;
+}
+
+// Whether a cell must be written although the result equals the version that stays: a compiled
+// version is partial, or supplies a list the game uses today (see "Cell inheritance").
+bool cellInheritanceNeedsRecord(Session& session, std::span<const RecordInstance> inst,
+                                const std::vector<uint8_t>& compiled)
+{
+    static const Signature lists[2] = {Signature("XPRI"), Signature("XCRI")};
+    for (const auto& r : inst)
+        if (compiled[r.plugin] && (r.flags & kCellPartialFlag))
+            return true;
+    for (int l = 0; l < 2; ++l)
+        for (size_t i = inst.size(); i-- > 0;) {
+            if (inst[i].flags & kCellPartialFlag)
+                continue;
+            if (cellListNonEmpty(session.loadRecord(inst[i]).find(lists[l]), l)) {
+                if (compiled[inst[i].plugin])
+                    return true;
+                break;
+            }
+        }
+    return false;
+}
 
 
 // A cell's previs (XPRI) and combined (XCRI) reference lists are sorted by FormID (xEdit keeps them
@@ -531,7 +571,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 for (size_t i = inst.size(); i-- > 0;) {
                     if (out.compiledFlag_[inst[i].plugin])
                         continue;
-                    if (m.equalsInstance[i]) {
+                    if (m.equalsInstance[i] &&
+                        !(inst[0].signature == sig::CELL && cellInheritanceNeedsRecord(session, inst, out.compiledFlag_))) {
                         mergeIssues[ci].push_back({Severity::Info, "Identical", "", inst[0].key, {}});
                         return;
                     }
@@ -698,6 +739,159 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
     // ---- Precombines and previs --------------------------------------------------
     std::set<FormKey> previsCells; // cells whose precombine or previs data keeps a plugin out
+
+    // Cell inheritance (PJM's previsbine guide). As the game reads each version of a cell in load order:
+    // a non-partial version's record flags, PCMB and VISI become current, even when blank; its XPRI and
+    // XCRI become current only when present and not empty; a partial version (flag 0x4000) changes none
+    // of these. Compiling removes the compiled versions and puts the written one last, so the lists the
+    // game ends up with are worked out from the whole chain as it loads today and written into the
+    // record. What cannot be written that way (a partial version written with compiled versions under
+    // it) keeps the cell's chain out: an error on the cell keeps every compiled plugin in it.
+    {
+        Normalizer cellNorm(session);
+        const Signature lists[2] = {Signature("XPRI"), Signature("XCRI")};
+        const auto nonEmpty = cellListNonEmpty;
+        auto fieldIndex = [&](const FieldSet& set, Signature sig) -> int {
+            for (size_t i = 0; i < set.fields.size(); ++i) {
+                if (set.fields[i].sig == sig)
+                    return static_cast<int>(i);
+                for (const auto& sub : set.fields[i].subs)
+                    if (sub.sig == sig)
+                        return static_cast<int>(i);
+            }
+            return -1;
+        };
+        for (auto& e : out.records) {
+            if (e.sig != sig::CELL)
+                continue;
+            const auto* g = session.findGroup(e.key);
+            if (!g)
+                continue;
+            const auto chain = session.instances(*g);
+            size_t w = chain.size();
+            for (size_t i = chain.size(); i-- > 0;)
+                if (chain[i].plugin == e.winner) {
+                    w = i;
+                    break;
+                }
+            if (w == chain.size())
+                continue;
+            // Compiled versions besides the one written leave the load order; without any, the cell
+            // loads as it does today (the versions that stay, then the written one).
+            bool removes = false;
+            for (size_t i = 0; i < chain.size(); ++i)
+                removes |= i != w && out.isCompiled(chain[i].plugin);
+            if (!removes)
+                continue;
+            auto isPartial = [&](size_t i) { return (chain[i].flags & kCellPartialFlag) != 0; };
+            auto stays = [&](size_t i) { return !out.isCompiled(chain[i].plugin); };
+            std::vector<std::optional<Record>> loaded(chain.size());
+            auto rec = [&](size_t i) -> const Record& {
+                if (!loaded[i])
+                    loaded[i] = session.loadRecord(chain[i]);
+                return *loaded[i];
+            };
+            // The version whose list l is current after reading versions [0, end) that pass `use`.
+            auto supplier = [&](int l, size_t end, const std::function<bool(size_t)>& use) -> int {
+                for (size_t i = end; i-- > 0;)
+                    if (use(i) && !isPartial(i) && nonEmpty(rec(i).find(lists[l]), l))
+                        return static_cast<int>(i);
+                return -1;
+            };
+            const auto all = [](size_t) { return true; };
+            std::string problem;
+            std::vector<std::string> inherited;
+            try {
+                if (!isPartial(w)) {
+                    // Written non-partial and last: its flags, PCMB and VISI are current, as today. Each list
+                    // is the one current today; the versions that stay load before it.
+                    for (int l = 0; l < 2 && problem.empty(); ++l) {
+                        const int from = supplier(l, w + 1, all);
+                        if (from < 0) {
+                            // None today; a version that stays and loads after the written one (a forced
+                            // winner) would supply one, and no list in the written record can clear it.
+                            for (size_t i = w + 1; i < chain.size(); ++i)
+                                if (stays(i) && !isPartial(i) && nonEmpty(rec(i).find(lists[l]), l))
+                                    problem = session.pluginName(chain[i].plugin) + "'s version has " +
+                                              lists[l].str() + ", which the version written cannot clear";
+                            continue;
+                        }
+                        // The written version's own list, or one from a version that stays: it loads before
+                        // the written one and stays current, as today.
+                        if (static_cast<size_t>(from) == w || stays(static_cast<size_t>(from)))
+                            continue;
+                        // A compiled version supplies it today and leaves the load order: take it from there.
+                        FieldSet source = splitFields(cellNorm.normalize(chain[from]), session.defs);
+                        const int si = fieldIndex(source, lists[l]);
+                        if (si < 0) {
+                            problem = "the " + lists[l].str() + " of " + session.pluginName(chain[from].plugin) +
+                                      "'s version could not be read";
+                            continue;
+                        }
+                        Field taken = source.fields[static_cast<size_t>(si)];
+                        if (int di = fieldIndex(e.fields, lists[l]); di >= 0) {
+                            e.fields.fields[static_cast<size_t>(di)] = std::move(taken);
+                        } else {
+                            // After the field that precedes it in the source version, else at the end.
+                            size_t pos = e.fields.fields.size();
+                            for (int p = si; p-- > 0;) {
+                                const auto key = source.fields[static_cast<size_t>(p)].key;
+                                auto it = std::find_if(e.fields.fields.begin(), e.fields.fields.end(),
+                                                       [&](const Field& f) { return f.key == key; });
+                                if (it != e.fields.fields.end()) {
+                                    pos = static_cast<size_t>(it - e.fields.fields.begin()) + 1;
+                                    break;
+                                }
+                            }
+                            e.fields.fields.insert(e.fields.fields.begin() + static_cast<std::ptrdiff_t>(pos),
+                                                   std::move(taken));
+                        }
+                        inherited.push_back(lists[l].str() + " from " + session.pluginName(chain[from].plugin));
+                    }
+                } else {
+                    // Written partial: it changes none of these, so the versions under it must give the game
+                    // what they give it today. The last non-partial version before it, and everything after
+                    // that, must stay; earlier compiled versions only matter through the lists.
+                    int base = -1;
+                    for (size_t i = w; i-- > 0;)
+                        if (!isPartial(i)) {
+                            base = static_cast<int>(i);
+                            break;
+                        }
+                    if (base < 0) {
+                        problem = "is a partial cell (flag 0x4000) with no full version under it";
+                    } else {
+                        for (size_t i = static_cast<size_t>(base); i < chain.size() && problem.empty(); ++i)
+                            if (i != w && !stays(i))
+                                problem = "is a partial cell (flag 0x4000), which takes the fields it omits from "
+                                          "earlier versions, and " + session.pluginName(chain[i].plugin) +
+                                          "'s version, which it would take them from, would leave the load order";
+                        for (int l = 0; l < 2 && problem.empty(); ++l)
+                            if (supplier(l, w, all) != supplier(l, w, stays))
+                                problem = "is a partial cell (flag 0x4000), and the " + lists[l].str() +
+                                          " current under it today comes from a version that would leave the load order";
+                    }
+                }
+            } catch (const std::exception& ex) {
+                problem = std::string("cannot be compared with its earlier versions (") + ex.what() + ")";
+            }
+            if (!problem.empty()) {
+                previsCells.insert(e.key);
+                addIssue(Severity::Error, "Cell Inheritance",
+                         session.formLabel(e.key) + " as written from " + session.pluginName(e.winner) + ": " +
+                             problem + "; compiling would change what the cell inherits, so the plugins compiling "
+                             "the cell stay",
+                         e.key, session.pluginName(e.winner));
+            } else if (!inherited.empty()) {
+                e.size = estimateSize(e.fields);
+                addIssue(Severity::Info, "Cell Inheritance",
+                         session.formLabel(e.key) + " is written from " + session.pluginName(e.winner) +
+                             ", which omits its lists; written with the ones the game uses today: " +
+                             join(inherited, ", "),
+                         e.key, session.pluginName(e.winner));
+            }
+        }
+    }
     // Previs (XPRI): a new reference listed there is in a previs file (.uvd), which holds its FormID in
     // the numbering of the plugin whose cell record wins. A cell's own previs file is translated into
     // the output's numbering when the cell is written (P2b, "Previs Numbering" below), or keeps the
@@ -750,71 +944,6 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                          " compile with new FormIDs: the precombined meshes hold no FormIDs and are found by the "
                          "cell, which keeps its FormID; XCRI is rewritten so each stays combined into its mesh",
                      e.key, session.pluginName(e.winner));
-    }
-
-    // Cell inheritance. A cell override without XPRI or XCRI does not clear an earlier version's lists
-    // (tools that clear them add an empty one), and a partial cell (flag 0x4000) takes the fields it
-    // omits from earlier versions. Which version supplies them in game is not established, so when the
-    // version written omits a list an earlier version in a compiled plugin has (that plugin would leave
-    // the load order), or is partial with an earlier compiled version, the cell's chain stays out: an
-    // error on the cell keeps every compiled plugin in it (fail closed). Earlier versions in plugins
-    // that stay load as they do today, so they keep nothing out.
-    for (const auto& e : out.records) {
-        if (e.sig != sig::CELL)
-            continue;
-        bool writtenHas[2] = {false, false};
-        const Signature lists[2] = {Signature("XPRI"), Signature("XCRI")};
-        for (const auto& f : e.fields.fields)
-            for (const auto& sub : f.subs)
-                for (int l = 0; l < 2; ++l)
-                    writtenHas[l] |= sub.sig == lists[l];
-        const bool partial = (e.fields.flags() & kCellPartialFlag) != 0;
-        if (!partial && writtenHas[0] && writtenHas[1])
-            continue;
-        const auto* g = session.findGroup(e.key);
-        if (!g)
-            continue;
-        const auto chain = session.instances(*g);
-        size_t written = chain.size();
-        for (size_t i = chain.size(); i-- > 0;)
-            if (chain[i].plugin == e.winner) {
-                written = i;
-                break;
-            }
-        if (written == chain.size())
-            continue;
-        std::set<PluginIndex> named;
-        for (size_t i = 0; i < written; ++i) {
-            const PluginIndex p = chain[i].plugin;
-            if (!out.isCompiled(p) || p == e.winner || named.count(p))
-                continue;
-            std::string what;
-            if (partial) {
-                what = "is a partial cell (flag 0x4000), which takes the fields it omits from earlier versions";
-            } else {
-                try {
-                    const Record earlier = session.loadRecord(chain[i]);
-                    for (int l = 0; l < 2; ++l)
-                        if (!writtenHas[l] && earlier.find(lists[l])) {
-                            what = "omits " + lists[l].str() + ", which " + session.pluginName(p) +
-                                   "'s version has: an override without it does not clear it in game";
-                            break;
-                        }
-                } catch (const std::exception& ex) {
-                    what = std::string("cannot be compared with an earlier version (") + ex.what() + ")";
-                }
-            }
-            if (what.empty())
-                continue;
-            named.insert(p);
-            previsCells.insert(e.key);
-            addIssue(Severity::Error, "Cell Inheritance",
-                     session.formLabel(e.key) + " as written from " + session.pluginName(e.winner) + " " + what +
-                         "; compiling would remove " + session.pluginName(p) +
-                         "'s version from the load order and change what the cell inherits, so the plugins "
-                         "compiling the cell stay",
-                     e.key, session.pluginName(p));
-        }
     }
 
     // New cells (W4). Precombined meshes and previs files are found by the cell's defining plugin and

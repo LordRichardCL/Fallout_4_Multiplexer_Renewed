@@ -2688,21 +2688,25 @@ TEST(previs_translation_can_be_turned_off)
     CHECK(!std::filesystem::exists(result.directory / "Multiplexer_Previs.tsv"));
 }
 
-// Cell inheritance: a cell override without XPRI/XCRI does not clear an earlier version's lists, and
-// a partial cell (flag 0x4000) takes omitted fields from earlier versions. When the version written
-// omits a list that an earlier version in a compiled plugin has, or is partial with an earlier
-// compiled version, compiling would remove what it inherits: the cell's compiled plugins stay (the
-// chain is kept out). An earlier version in a plugin that stays (here Base.esm, excluded) loads as
-// today, so nothing is kept out.
+// Cell inheritance (PJM's previsbine guide): as the game reads each version of a cell, a non-partial
+// version's flags, PCMB and VISI become current, its XPRI/XCRI only when present and not empty, and a
+// partial version (flag 0x4000) changes none of these. The compiler works out the lists the game uses
+// today from the whole chain and writes them into the cell; only what that cannot express (a partial
+// version over a compiled version it would take its fields from) keeps the cell's chain out.
 namespace {
 struct InheritResult {
     bool earlierCompiled = false;
     bool laterCompiled = false;
-    bool reported = false; // a Cell Inheritance issue in the final round
-    std::string retained;  // why ModP.esp was kept out
+    bool reported = false;  // a Cell Inheritance issue in the final round
+    bool inherited = false; // an Info issue: lists written from an earlier version
+    bool writtenXpri = false, writtenXcri = false; // the written cell has non-empty lists
+    std::string retained;   // why ModP.esp was kept out
 };
 
-InheritResult compileInheritance(const char* name, bool earlierHasLists, uint32_t laterFlags, bool laterHasLists)
+// Base.esm (stays) -> ModP.esp -> ModL.esp, each with a version of the cell. `lists`: 0 none,
+// 1 non-empty XPRI and XCRI, 2 present but empty.
+InheritResult compileInheritance(const char* name, int baseLists, int earlierLists, uint32_t earlierFlags,
+                                 int laterLists, uint32_t laterFlags, bool excludeEarlier = false)
 {
     auto root = buildInstall(name);
     auto data = root / "Game" / "Data";
@@ -2714,23 +2718,28 @@ InheritResult compileInheritance(const char* name, bool earlierHasLists, uint32_
     storeLE<uint32_t>(xcri.data() + 8, 0xABCDEF01);
     storeLE<uint32_t>(xcri.data() + 12, 0x01000804);
     storeLE<uint32_t>(xcri.data() + 16, 0xABCDEF01);
-    auto cell = [&](bool lists, uint32_t flags) {
+    auto cell = [&](int lists, uint32_t flags) {
         std::vector<Subrecord> subs{zs("EDID", "Lab")};
-        if (lists) {
+        if (lists == 1) {
             subs.push_back(raw("XPRI", xpri));
             subs.push_back(raw("XCRI", xcri));
+        } else if (lists == 2) {
+            subs.push_back(raw("XPRI", {}));
+            subs.push_back(raw("XCRI", std::vector<uint8_t>(8, 0)));
         }
         return record("CELL", 0x01000803, subs, flags);
     };
     writePlugin(data / "Base.esm", {"Fallout4.esm"},
-                {cell(true, 0), record("REFR", 0x01000804, {zs("EDID", "Desk"), u32("NAME", 0x800)})}, ESM);
+                {cell(baseLists, 0), record("REFR", 0x01000804, {zs("EDID", "Desk"), u32("NAME", 0x800)})}, ESM);
     writePlugin(data / "ModP.esp", {"Fallout4.esm", "Base.esm"},
-                {cell(earlierHasLists, 0), record("KYWD", 0x02000800, {zs("EDID", "EarlierOwn")})});
+                {cell(earlierLists, earlierFlags), record("KYWD", 0x02000800, {zs("EDID", "EarlierOwn")})});
     writePlugin(data / "ModL.esp", {"Fallout4.esm", "Base.esm"},
-                {cell(laterHasLists, laterFlags), record("KYWD", 0x02000800, {zs("EDID", "LaterOwn")})});
+                {cell(laterLists, laterFlags), record("KYWD", 0x02000800, {zs("EDID", "LaterOwn")})});
     writeFile(root / "plugins.txt", "*Base.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n*ModL.esp\n");
     auto cfg = configFor(root);
     cfg.analysis.excludedPlugins = {"Base.esm"};
+    if (excludeEarlier)
+        cfg.analysis.excludedPlugins.push_back("ModP.esp");
     Pipeline p(cfg);
     p.scan();
     p.analyse();
@@ -2741,35 +2750,96 @@ InheritResult compileInheritance(const char* name, bool earlierHasLists, uint32_
     const auto* out = p.compiledOutput();
     r.earlierCompiled = out->isCompiled(s.findPlugin("ModP.esp")->index);
     r.laterCompiled = out->isCompiled(s.findPlugin("ModL.esp")->index);
-    for (const auto& i : out->issues)
+    for (const auto& i : out->issues) {
         r.reported |= i.category == "Cell Inheritance";
+        r.inherited |= i.category == "Cell Inheritance" && i.severity == Severity::Info;
+    }
     if (s.autoRetained.count("modp.esp"))
         r.retained = s.autoRetained.at("modp.esp");
+    // The cell as written (when it is).
+    for (const auto& e : out->records)
+        if (e.sig == Signature("CELL"))
+            for (const auto& f : e.fields.fields)
+                for (const auto& sub : f.subs) {
+                    if (sub.sig == Signature("XPRI") && !sub.refs.empty())
+                        r.writtenXpri = true;
+                    if (sub.sig == Signature("XCRI") && sub.bytes.size() >= 8 && sub.bytes[0] != 0)
+                        r.writtenXcri = true;
+                }
     return r;
 }
 } // namespace
 
-TEST(cell_override_omitting_previs_lists_keeps_its_chain_out)
+TEST(cell_override_omitting_previs_lists_is_written_with_the_inherited_ones)
 {
-    const auto r = compileInheritance("inheritomit", true, 0, false);
-    CHECK(!r.earlierCompiled);
-    CHECK(!r.laterCompiled);
-    CHECK(r.retained.find("omits XPRI") != std::string::npos);
+    // ModL omits the lists that ModP (compiled, leaving the load order) supplies today.
+    const auto r = compileInheritance("inheritomit", 0, 1, 0, 0, 0);
+    CHECK(r.earlierCompiled);
+    CHECK(r.laterCompiled);
+    CHECK(r.inherited);
+    CHECK(r.writtenXpri);
+    CHECK(r.writtenXcri);
 }
 
-TEST(partial_cell_override_keeps_its_chain_out)
+TEST(cell_override_with_empty_previs_lists_keeps_the_inherited_ones)
 {
-    // The partial override carries its own lists, so only the partial flag is at issue.
-    const auto r = compileInheritance("inheritpartial", false, 0x4000, true);
+    // Present but empty lists do not become current: ModP's stay current today.
+    const auto r = compileInheritance("inheritempty", 0, 1, 0, 2, 0);
+    CHECK(r.earlierCompiled);
+    CHECK(r.laterCompiled);
+    CHECK(r.inherited);
+    CHECK(r.writtenXpri);
+    CHECK(r.writtenXcri);
+}
+
+TEST(cell_override_with_its_own_lists_needs_nothing_inherited)
+{
+    const auto r = compileInheritance("inheritown", 0, 1, 0, 1, 0);
+    CHECK(r.earlierCompiled);
+    CHECK(r.laterCompiled);
+    CHECK(!r.reported);
+    CHECK(r.writtenXpri);
+}
+
+TEST(partial_cell_over_a_compiled_full_version_keeps_its_chain_out)
+{
+    // ModL is partial; the full version under it is ModP's, which compiling would remove.
+    const auto r = compileInheritance("inheritpartial", 0, 0, 0, 1, 0x4000);
     CHECK(!r.earlierCompiled);
     CHECK(!r.laterCompiled);
     CHECK(r.retained.find("partial cell") != std::string::npos);
 }
 
+TEST(partial_cell_over_a_compiled_partial_version_keeps_its_chain_out)
+{
+    const auto r = compileInheritance("inheritpartial2", 1, 1, 0x4000, 0, 0x4000);
+    CHECK(!r.earlierCompiled);
+    CHECK(!r.laterCompiled);
+    CHECK(r.retained.find("partial cell") != std::string::npos);
+}
+
+TEST(partial_cell_over_versions_that_stay_compiles)
+{
+    // ModP stays (excluded); the partial ModL loads over it as today.
+    const auto r = compileInheritance("inheritpartialstays", 1, 0, 0, 0, 0x4000, true);
+    CHECK(!r.earlierCompiled);
+    CHECK(r.laterCompiled);
+    CHECK(!r.reported);
+}
+
+TEST(partial_earlier_version_changes_no_lists)
+{
+    // ModP is partial with lists: they never became current. Base's (it stays) are, and still are.
+    const auto r = compileInheritance("inheritpartialearlier", 1, 1, 0x4000, 0, 0);
+    CHECK(r.earlierCompiled);
+    CHECK(r.laterCompiled);
+    CHECK(!r.inherited); // Base.esm supplies them and stays
+}
+
 TEST(cell_inheritance_from_plugins_that_stay_compiles)
 {
     // Only Base.esm (excluded, so it stays) has the lists the written version omits.
-    const auto r = compileInheritance("inheritstays", false, 0, false);
+    const auto r = compileInheritance("inheritstays", 1, 0, 0, 0, 0);
     CHECK(r.earlierCompiled);
     CHECK(r.laterCompiled);
     CHECK(!r.reported);
