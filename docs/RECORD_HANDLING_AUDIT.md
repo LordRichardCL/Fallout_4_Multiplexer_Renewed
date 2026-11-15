@@ -1002,3 +1002,21 @@ The keep-out in "Sim Settlements 2 add-on packs never registered once compiled" 
 The Dundee packs set no `sAddonFilename`, so nothing ties them to their plugin. They did not register in the owner's session because their AddonPack quests are not Start Game Enabled in the game as it is: the output carries the winning version of those quests (flags 0, an `LCLD` story event on one), which differs from the packs' own (Start Game Enabled + Run Once, `0x0011`). StoryWealth-SS2AddOnsDelayed.esp, which delays SS2 add-ons, is the plugin that does this, so the same happens without a build.
 
 So: a pack without `sAddonFilename` compiles as any plugin. A pack whose `sAddonFilename` names its own plugin stays out under the existing "script property in a record" rule (Compatibility Required). The planned rewrite: point that property at the output plugin, so the check finds the config where it now lives. Several packs in one output sharing the name is harmless, because registration is per config record.
+
+## SS2 add-on configs: sAddonFilename rewritten to the output
+
+The rewrite planned in the correction above is done. In the reference scan, a script string is Safe (`SS2 add-on config file name`) when all of these hold:
+- the script is `SimSettlementsV2:MiscObjects:AddonPackConfiguration`;
+- the property is `sAddonFilename`;
+- the value names the plugin being scanned;
+- the record is one that plugin adds itself.
+
+Any other plugin name in a script property stays Compatibility Required, as before. When such a plugin is compiled, the compiler replaces that one string in the config's VMAD with the output plugin's name before the record enters the plan, so the written-content check compares like with like. It reports this as "Script Property" (Info).
+
+VMAD stores counts, never byte sizes or offsets, so the string may change length; everything else, including data after the scripts (a quest's fragments), is copied unchanged. Names are compared without case and without the trailing NUL some tools write. The replacement only happens when the value is the expected one.
+
+SS2's check is `GetFormFromFile(GetLoadOrderAgnosticFormID(config.GetFormID()), sAddonFilename) == config`. With the output named, it finds the config where it now lives. Registration is per config record, so several packs in one output sharing the name is harmless.
+
+Tests:
+- the old script-property test now checks the whole path: the plugin compiles, the exported config names the output, the other properties are unchanged, the export's written-content check has no errors, and a plugin named in another plugin's string array is still kept out;
+- a unit test checks the replacement: only the named script's property, only on a matching value, bytes after it kept. This test found that the first version did not read the property names of other scripts, which put the reader out of step.

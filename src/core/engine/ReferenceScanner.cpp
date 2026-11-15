@@ -81,6 +81,7 @@ enum class Fact {
     FormIdIniUnknown,    // bcr\<plugin>.ini with lines that are not "[section]" or "key=<FormID>"
     OtherFileName,       // any other file named after the plugin
     RecordScriptString,  // a script property in a plugin's record holds the file name (VMAD string)
+    Ss2AddonFilename,    // a Sim Settlements 2 add-on config's sAddonFilename naming its own plugin
     PluginIni,           // Data\<plugin>.ini: read by the game only while that plugin is active
     PrecombineGeometry,  // <plugin> - Geometry.csg, <plugin>.cdx: "clean" precombines' shared geometry
 };
@@ -207,6 +208,12 @@ Rule rule(Fact f)
                 "a record's script property holds the plugin's file name: its scripts can look records up in that "
                 "file (Sim Settlements 2 add-on configs check GetFormFromFile(own FormID, this name) and reject "
                 "the add-on when it does not match), so the plugin must keep its name"};
+    case Fact::Ss2AddonFilename:
+        return {K::PluginName, C::Safe, ReferenceScanner::kSs2AddonFilename,
+                "a Sim Settlements 2 add-on config's sAddonFilename names the plugin that defines the config: SS2 "
+                "registers the pack only when GetFormFromFile(the config's own FormID, that name) returns the "
+                "config, and uses the name for nothing else (SS2Main's bytecode). The compiler writes the output "
+                "plugin's name there, where the config then is; when it cannot, the plugin stays in the load order"};
     }
     return {K::Unknown, C::Unknown, "", ""};
 }
@@ -1316,13 +1323,25 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                                             strnlen(reinterpret_cast<const char*>(s.data.data()), s.data.size()));
                                 break;
                             }
-                        for (const auto& value : layout.scriptPluginNames) {
-                            auto it = names.find(toLower(value));
+                        auto key = [](std::string v) {
+                            while (!v.empty() && v.back() == '\0')
+                                v.pop_back();
+                            return toLower(v);
+                        };
+                        for (const auto& ss : layout.scriptStrings) {
+                            const std::string& value = ss.value;
+                            auto it = names.find(key(value));
                             if (it == names.end())
                                 continue;
+                            // The add-on config of the plugin that defines the record (its own name, in a
+                            // record the plugin itself adds): the compiler rewrites it.
+                            const bool ownConfig = key(ss.script) == "simsettlementsv2:miscobjects:addonpackconfiguration" &&
+                                                   key(ss.property) == "saddonfilename" && it->second == p.index &&
+                                                   (loc.header.formId >> 24) == p.header.masters.size();
                             char id[16];
                             std::snprintf(id, sizeof(id), "%08X", loc.header.formId);
-                            auto r = make(Fact::RecordScriptString, it->second, p.key, "Plugin record", value,
+                            auto r = make(ownConfig ? Fact::Ss2AddonFilename : Fact::RecordScriptString, it->second,
+                                          p.key, "Plugin record", value,
                                           sig.str() + " " + (edid.empty() ? std::string() : edid + " ") + "[" + id + "]");
                             r.source = p.sourceMod;
                             perPlugin[i].push_back(std::move(r));

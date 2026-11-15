@@ -395,13 +395,17 @@ private:
         std::string ext = v.substr(v.size() - 4);
         for (auto& c : ext)
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (ext == ".esp" || ext == ".esm" || ext == ".esl")
+        if (ext == ".esp" || ext == ".esm" || ext == ".esl") {
             out_.scriptPluginNames.push_back(v);
+            out_.scriptStrings.push_back({script_, property_, v});
+        }
     }
 
     void vmadProperty(BinaryReader& r, uint32_t i, int16_t version, int16_t objFormat, int depth)
     {
-        r.readWString(); // name
+        std::string name = r.readWString();
+        if (depth == 0)
+            property_ = std::move(name);
         uint8_t type = r.read<uint8_t>();
         if (version >= 4)
             r.skip(1); // status
@@ -410,7 +414,8 @@ private:
 
     void vmadScript(BinaryReader& r, uint32_t i, int16_t version, int16_t objFormat)
     {
-        r.readWString(); // script name
+        script_ = r.readWString();
+        property_.clear();
         if (version >= 4)
             r.skip(1); // status
         uint16_t props = r.read<uint16_t>();
@@ -905,6 +910,8 @@ private:
     bool inPerkEffect_ = false;
     uint8_t perkEffectType_ = 0;
     uint8_t epft_ = 0;
+    std::string script_;   // VMAD: the script being read
+    std::string property_; // VMAD: its top-level property being read
     uint8_t epFunction_ = 0;
 };
 
@@ -915,6 +922,118 @@ DecodedLayout decodeLayout(const RecordDefinitions& defs, Signature record, cons
     DecodedLayout out;
     Decoder(defs, record, subs, out).run();
     return out;
+}
+
+
+namespace {
+
+std::string scriptNameKey(std::string v)
+{
+    while (!v.empty() && v.back() == '\0')
+        v.pop_back();
+    for (auto& c : v)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return v;
+}
+
+// Skips one VMAD value; for a string, reports where its length prefix starts.
+void skipVmadValue(BinaryReader& r, uint8_t type, int16_t version, int16_t objFormat, int depth, size_t* stringAt)
+{
+    if (depth > 8)
+        throw FormatError("VMAD nesting too deep");
+    auto property = [&](int d) {
+        r.readWString();
+        const uint8_t t = r.read<uint8_t>();
+        if (version >= 4)
+            r.skip(1);
+        skipVmadValue(r, t, version, objFormat, d, nullptr);
+    };
+    switch (type) {
+    case 0: break;
+    case 1: r.skip(8); break;
+    case 2:
+        if (stringAt)
+            *stringAt = r.position();
+        r.readWString();
+        break;
+    case 3:
+    case 4: r.skip(4); break;
+    case 5: r.skip(1); break;
+    case 7: {
+        const uint32_t members = r.read<uint32_t>();
+        for (uint32_t m = 0; m < members; ++m)
+            property(depth + 1);
+        break;
+    }
+    case 11: r.skip(static_cast<size_t>(r.read<uint32_t>()) * 8); break;
+    case 12: {
+        const uint32_t n = r.read<uint32_t>();
+        for (uint32_t k = 0; k < n; ++k)
+            r.readWString();
+        break;
+    }
+    case 13:
+    case 14: r.skip(static_cast<size_t>(r.read<uint32_t>()) * 4); break;
+    case 15: r.skip(r.read<uint32_t>()); break;
+    case 17: {
+        const uint32_t n = r.read<uint32_t>();
+        for (uint32_t k = 0; k < n; ++k) {
+            const uint32_t members = r.read<uint32_t>();
+            for (uint32_t m = 0; m < members; ++m)
+                property(depth + 1);
+        }
+        break;
+    }
+    default: throw FormatError("unsupported script property type " + std::to_string(type));
+    }
+}
+
+} // namespace
+
+std::optional<std::vector<uint8_t>> replaceScriptString(std::span<const uint8_t> vmad, std::string_view script,
+                                                        std::string_view property, std::string_view expected,
+                                                        const std::string& replacement)
+{
+    if (replacement.size() > 0xFFFF)
+        return std::nullopt;
+    try {
+        BinaryReader r(vmad);
+        const int16_t version = r.read<int16_t>();
+        const int16_t objFormat = r.read<int16_t>();
+        const uint16_t scripts = r.read<uint16_t>();
+        const std::string wantScript = scriptNameKey(std::string(script));
+        const std::string wantProperty = scriptNameKey(std::string(property));
+        const std::string wantValue = scriptNameKey(std::string(expected));
+        for (uint16_t si = 0; si < scripts; ++si) {
+            const bool inScript = scriptNameKey(r.readWString()) == wantScript;
+            if (version >= 4)
+                r.skip(1);
+            const uint16_t props = r.read<uint16_t>();
+            for (uint16_t pi = 0; pi < props; ++pi) {
+                const std::string propertyName = r.readWString(); // always read: it moves the reader
+                const bool inProperty = inScript && scriptNameKey(propertyName) == wantProperty;
+                const uint8_t type = r.read<uint8_t>();
+                if (version >= 4)
+                    r.skip(1);
+                size_t at = SIZE_MAX;
+                skipVmadValue(r, type, version, objFormat, 0, &at);
+                if (!inProperty || type != 2 || at == SIZE_MAX)
+                    continue;
+                const size_t len = static_cast<size_t>(vmad[at] | (vmad[at + 1] << 8));
+                const std::string value(reinterpret_cast<const char*>(vmad.data() + at + 2), len);
+                if (scriptNameKey(value) != wantValue)
+                    return std::nullopt;
+                std::vector<uint8_t> out(vmad.begin(), vmad.begin() + static_cast<std::ptrdiff_t>(at));
+                out.push_back(static_cast<uint8_t>(replacement.size() & 0xFF));
+                out.push_back(static_cast<uint8_t>(replacement.size() >> 8));
+                out.insert(out.end(), replacement.begin(), replacement.end());
+                out.insert(out.end(), vmad.begin() + static_cast<std::ptrdiff_t>(at + 2 + len), vmad.end());
+                return out;
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    return std::nullopt;
 }
 
 } // namespace fo4mx

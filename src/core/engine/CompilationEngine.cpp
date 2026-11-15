@@ -1,4 +1,5 @@
 #include "engine/CompilationEngine.hpp"
+#include "esp/FieldDecoder.hpp"
 #include "engine/PrevisCheck.hpp"
 
 #include "assets/AssetScanner.hpp"
@@ -1646,6 +1647,25 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                              session.formLabel(e.key) + " is not in the same output as its cell or worldspace " +
                                  session.formLabel(e.parent),
                              e.key, op.name);
+            }
+            // A Sim Settlements 2 add-on config added by a compiled plugin names that plugin in its
+            // sAddonFilename; SS2 registers the pack only when GetFormFromFile(the config's own FormID,
+            // that name) returns the config, which now lives in this output: name the output instead.
+            if (e.isNew && out.isCompiled(e.key.origin)) {
+                const std::string own = session.pluginName(e.key.origin);
+                for (auto& sr : rec.subrecords) {
+                    if (sr.signature != Signature("VMAD"))
+                        continue;
+                    if (auto nv = replaceScriptString(sr.data, "SimSettlementsV2:MiscObjects:AddonPackConfiguration",
+                                                      "sAddonFilename", own, op.name)) {
+                        sr.data = std::move(*nv);
+                        addIssue(Severity::Info, "Script Property",
+                                 session.formLabel(e.key) + ": the Sim Settlements 2 add-on config's sAddonFilename "
+                                 "now names " + op.name + " instead of " + own +
+                                     ", where the config is, so SS2 registers the pack",
+                                 e.key, own);
+                    }
+                }
             }
             op.built.push_back(std::move(rec));
             op.placements.push_back(placement);

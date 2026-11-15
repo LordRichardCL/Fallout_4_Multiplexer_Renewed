@@ -30,6 +30,7 @@ public:
     // Context of a RobCo Patcher config named <plugin>.ini: RobCo applies it only while that plugin is
     // loaded, so the Auto-Merger writes it again under the output's name.
     static constexpr const char* kRobCoGate = "RobCo Patcher gate";
+    static constexpr const char* kSs2AddonFilename = "SS2 add-on config file name";
     // Fills Session::nameReferences.
     static void scan(Session& session, const ReferenceScanOptions& options, ProgressSink& progress = nullProgress());
 

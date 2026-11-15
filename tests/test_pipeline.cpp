@@ -6750,6 +6750,10 @@ TEST(sim_settlements_add_on_pack_without_a_file_name_compiles)
     CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
 }
 
+// A Sim Settlements 2 add-on config's sAddonFilename naming its own plugin: SS2 registers the pack only
+// when GetFormFromFile(the config's own FormID, that name) is the config (SS2Main's bytecode), so the
+// compiler writes the output's name there, where the config then is, and the plugin compiles. Any other
+// plugin name in a script property (here ModT, in a string array) still keeps that plugin out.
 TEST(references_script_property_in_a_record_keeps_the_plugin)
 {
     auto root = referenceInstall("refvmadstring");
@@ -6777,26 +6781,98 @@ TEST(references_script_property_in_a_record_keeps_the_plugin)
     writePlugin(data / "ModS.esp", {"Fallout4.esm"},
                 {record("KYWD", 0x01000812, {zs("EDID", "ModS_Keyword")}),
                  record("MISC", 0x01000813, {zs("EDID", "ModS_AddonConfig"), Subrecord(Signature("VMAD"), w.take())})});
-    for (bool autoMerge : {false, true}) {
-        auto cfg = configFor(root);
-        cfg.compile.autoMerge = autoMerge;
-        Pipeline p(cfg);
-        p.scan();
-        p.analyse();
-        const auto& s = p.session();
-        auto refs = referencesOf(s, "ModS.esp");
-        CHECK_EQ(refs.size(), size_t(1));
-        if (!refs.empty()) {
-            CHECK_EQ(refs[0]->cls, ReferenceClass::CompatibilityRequired);
-            CHECK_EQ(refs[0]->context, std::string("script property in a record"));
-            CHECK(refs[0]->location.find("ModS_AddonConfig") != std::string::npos);
-        }
-        CHECK_EQ(referencesOf(s, "ModT.esp").size(), size_t(1)); // from the string array
-        CHECK(s.findPlugin("ModS.esp")->eligibility != Eligibility::Eligible);
-        CHECK(s.findPlugin("ModT.esp")->eligibility != Eligibility::Eligible);
-        CHECK(p.compile());
-        CHECK(!p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    auto refs = referencesOf(s, "ModS.esp");
+    CHECK_EQ(refs.size(), size_t(1));
+    if (!refs.empty()) {
+        CHECK_EQ(refs[0]->cls, ReferenceClass::Safe);
+        CHECK_EQ(refs[0]->context, std::string(ReferenceScanner::kSs2AddonFilename));
+        CHECK(refs[0]->location.find("ModS_AddonConfig") != std::string::npos);
     }
+    auto modT = referencesOf(s, "ModT.esp"); // from the string array
+    CHECK_EQ(modT.size(), size_t(1));
+    if (!modT.empty())
+        CHECK_EQ(modT[0]->cls, ReferenceClass::CompatibilityRequired);
+    CHECK(s.findPlugin("ModT.esp")->eligibility != Eligibility::Eligible);
+    CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+    CHECK(p.compile());
+    CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0)); // the written-content check agrees with the plan
+    OutputSet out(result.pluginFiles);
+    const auto* config = out.byEditorId("ModS_AddonConfig");
+    CHECK(config != nullptr);
+    if (!config)
+        return;
+    const auto* vmad = config->record.find(Signature("VMAD"));
+    CHECK(vmad != nullptr);
+    if (!vmad)
+        return;
+    const auto layout = decodeLayout(RecordDefinitions::get(), Signature("MISC"), config->record.subrecords);
+    std::map<std::string, std::string> values;
+    for (const auto& ss : layout.scriptStrings)
+        values[ss.property] = ss.value;
+    CHECK_EQ(values["sAddonFilename"], config->plugin); // the output plugin's own name
+    CHECK_EQ(values["Requires"], std::string("ModT.esp"));
+    const std::string text(vmad->data.begin(), vmad->data.end());
+    CHECK(text.find("not a plugin name") != std::string::npos);
+    CHECK(text.find("ModS.esp") == std::string::npos);
+    bool noted = false;
+    for (const auto& i : p.compiledOutput()->issues)
+        noted |= i.category == "Script Property" && i.message.find("sAddonFilename") != std::string::npos;
+    CHECK(noted);
+}
+
+// The replacement itself: only the named script's property, only when its value matches (a trailing NUL
+// and letter case aside), and the bytes after it are kept.
+TEST(vmad_script_string_is_replaced_in_place)
+{
+    BinaryWriter w;
+    w.write<int16_t>(6);
+    w.write<int16_t>(2);
+    w.write<uint16_t>(2);
+    w.writeWString("Other:Script");
+    w.write<uint8_t>(0);
+    w.write<uint16_t>(1);
+    w.writeWString("sAddonFilename");
+    w.write<uint8_t>(2);
+    w.write<uint8_t>(1);
+    w.writeWString("ModS.esp");
+    w.writeWString(std::string("SimSettlementsV2:MiscObjects:AddonPackConfiguration") + '\0');
+    w.write<uint8_t>(0);
+    w.write<uint16_t>(2);
+    w.writeWString("MyItems");
+    w.write<uint8_t>(11);
+    w.write<uint8_t>(1);
+    w.write<uint32_t>(1);
+    w.write<uint16_t>(0);
+    w.write<int16_t>(-1);
+    w.write<uint32_t>(0x01000801);
+    w.writeWString("SADDONFILENAME");
+    w.write<uint8_t>(2);
+    w.write<uint8_t>(1);
+    w.writeWString("mods.esp");
+    w.write<uint32_t>(0xDEADBEEF); // data after the scripts (a quest's fragments): kept
+    const auto vmad = w.take();
+    const auto script = "SimSettlementsV2:MiscObjects:AddonPackConfiguration";
+    auto out = replaceScriptString(vmad, script, "sAddonFilename", "ModS.esp", "Dummy_Plugin_01.esp");
+    CHECK(out.has_value());
+    if (out) {
+        const std::string t(out->begin(), out->end());
+        CHECK(t.find("Dummy_Plugin_01.esp") != std::string::npos);
+        CHECK(t.find("ModS.esp") != std::string::npos); // the other script's property is not touched
+        CHECK(t.find("mods.esp") == std::string::npos);
+        CHECK_EQ(out->size(), vmad.size() + std::string("Dummy_Plugin_01.esp").size() - std::string("mods.esp").size());
+        CHECK_EQ(loadLE<uint32_t>(out->data() + out->size() - 4), 0xDEADBEEFu);
+    }
+    CHECK(!replaceScriptString(vmad, script, "sAddonFilename", "Other.esp", "X.esp").has_value()); // value differs
+    CHECK(!replaceScriptString(vmad, "No:Such", "sAddonFilename", "ModS.esp", "X.esp").has_value());
 }
 
 // Fallout 4 reads SResourceArchiveList2 into a 1,024-byte buffer: a longer value is cut and every archive
