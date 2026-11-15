@@ -733,6 +733,17 @@ DefinitionCheck ValidationEngine::checkDefinitions(Session& session, const std::
                    label + ": candidate not confirmed: " + join(problems, "; ") + ". It stays out of compilation");
         }
     }
+    // Candidate types with no record anywhere in the load order: nothing to confirm them with. Said
+    // explicitly, so a missing line is never mistaken for a check that was not run.
+    for (const auto& e : session.defs.catalogue().entries()) {
+        if (session.defs.strategy(e.sig) != MergeStrategy::Candidate || out.recordsByType.count(e.sig))
+            continue;
+        v.fail(Severity::Info, "Definitions",
+               e.sig.str() + " (" + session.defs.recordName(e.sig) +
+                   "): candidate not present in your load order (no records in any plugin, the base game "
+                   "included), so it cannot be confirmed. It stays out of compilation; a plugin that contains "
+                   "one is kept in the load order");
+    }
     if (groupLayouts)
         checkGroupLayouts(session, out, progress, threads);
     spdlog::info("Definition check: {} record types, {} subrecord layouts, {} warnings", out.recordsByType.size(),

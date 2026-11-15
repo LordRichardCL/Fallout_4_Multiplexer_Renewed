@@ -1894,6 +1894,51 @@ TEST(candidate_types_are_checked_but_not_compiled)
     CHECK(rejected);
 }
 
+// PBAR, PBEA, PCON and PFLA are the last Candidates: xEdit gives them the same layout as the placed
+// types that compile (its ReferenceRecord), but marks it a guess, and no real load order has had one.
+// A plugin that places one stays in the load order; the definition check reports the types it finds
+// and says explicitly which ones are in no plugin at all.
+TEST(placed_barrier_beam_cone_flame_stay_candidates)
+{
+    const auto& d = RecordDefinitions::get();
+    for (const char* t : {"PBAR", "PBEA", "PCON", "PFLA"}) {
+        CHECK(d.strategy(Signature::fromString(t)) == MergeStrategy::Candidate);
+        CHECK(!d.isCompilable(Signature::fromString(t)));
+        CHECK(d.hasLayout(Signature::fromString(t)));
+    }
+    auto root = buildInstall("placedcandidates");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "World.esm", {"Fallout4.esm"}, {record("CELL", 0x01000803, {zs("EDID", "Vault")})}, ESM);
+    writePlugin(data / "ModP.esp", {"Fallout4.esm", "World.esm"},
+                {record("CELL", 0x01000803, {zs("EDID", "Vault")}),
+                 record("PBAR", 0x02000800, {u32("NAME", 0x800), raw("DATA", std::vector<uint8_t>(24, 0))})});
+    writeFile(root / "plugins.txt", "*World.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto* modP = p.session().findPlugin("ModP.esp");
+    CHECK_EQ(modP->eligibility, Eligibility::Ineligible);
+    CHECK(std::any_of(modP->reasons.begin(), modP->reasons.end(), [](const std::string& r) {
+        return r.find("not yet compiled") != std::string::npos;
+    }));
+
+    auto check = p.checkDefinitions();
+    bool pbarFound = false;
+    std::set<std::string> absent;
+    for (const auto& is : check.report.issues) {
+        pbarFound |= is.message.find("PBAR (Placed Barrier): candidate confirmed") == 0;
+        for (const char* t : {"PBAR", "PBEA", "PCON", "PFLA"})
+            if (is.message.rfind(t, 0) == 0 && is.message.find("candidate not present in your load order") !=
+                                                   std::string::npos)
+                absent.insert(t);
+    }
+    CHECK(pbarFound); // found and decoded, so reported (confirmation alone does not compile it)
+    CHECK(absent == std::set<std::string>({"PBEA", "PCON", "PFLA"}));
+    CHECK(!d.isCompilable(Signature("PBAR")));
+}
+
 // Winner strategy: compiled, every FormID rewritten, the winning version taken whole.
 TEST(winner_types_compile_the_winning_version_whole)
 {

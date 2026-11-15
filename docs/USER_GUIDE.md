@@ -287,7 +287,7 @@ Mods change the world by **editing existing objects** (moving a vanilla rock, di
 - **What keeps a plugin out:** plugin-named folders the game uses that cannot move (LOD billboards, LooksMenu overlays: see *Filename references*); a new cell with precombine or previs data. The plugin's reason says which.
 - **Saves:** new references, cells and worldspaces get new FormIDs, so a game saved with the original plugins loses them. Start a new game.
 
-CELL, WRLD, REFR, ACHR, LAND and the placed hazards, projectiles, missiles and arrows were confirmed by a real load order (1,366 plugins rebuilt by the Group Layout check) and are compiled. PBAR, PBEA, PCON and PFLA did not occur in it and stay Candidates. A Group Layout difference in a later definition check is reported, and keeps any world type that is still a Candidate out.
+CELL, WRLD, REFR, ACHR, LAND and the placed hazards, projectiles, missiles and arrows were confirmed by a real load order (1,366 plugins rebuilt by the Group Layout check) and are compiled. PBAR, PBEA, PCON and PFLA did not occur in it (not even in the base game or DLC) and stay Candidates: a plugin that contains one stays in the load order, and the Definition Check says "candidate not present in your load order" for each that no plugin has. Why they are not promoted on xEdit's layout alone: [PLACED_RECORDS_PBAR_PBEA_PCON_PFLA.md](PLACED_RECORDS_PBAR_PBEA_PCON_PFLA.md). A Group Layout difference in a later definition check is reported, and keeps any world type that is still a Candidate out.
 
 ## Rebuilding after switching over
 

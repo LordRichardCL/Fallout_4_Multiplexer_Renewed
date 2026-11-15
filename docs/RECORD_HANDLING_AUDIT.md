@@ -895,7 +895,7 @@ The build after the Clean precombine fix compiled 484 plugins with no errors, bu
 
 ## Planned work (agreed order)
 
-1. **PBAR, PBEA, PCON, PFLA:** finish the evidence gate for each (definition check and group layout on a load order that has them); promote only those whose layout and reference rewriting are confirmed. The owner's working model is in `docs/specs/PLACED_RECORDS_PBAR_PBEA_PCON_PFLA.txt`:
+1. **PBAR, PBEA, PCON, PFLA:** researched (`docs/PLACED_RECORDS_PBAR_PBEA_PCON_PFLA.md`). xEdit's layout for them is shared with the confirmed placed types but marked a guess in its source, and the owner's whole load order (base game and DLC included) has none of them, so they stay Candidates with automatic merging disabled; the Definition Check now says explicitly when a Candidate type is in no plugin. Originally: finish the evidence gate for each (definition check and group layout on a load order that has them); promote only those whose layout and reference rewriting are confirmed. The owner's working model is in `docs/specs/PLACED_RECORDS_PBAR_PBEA_PCON_PFLA.txt`:
    - each placed record is its own record with its own override chain;
    - the parent cell is context, not identity;
    - moving a record to another cell or changing its persistence is structural;
