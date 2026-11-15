@@ -201,3 +201,45 @@ TEST(merge_repeating_master_edit_is_itm)
     CHECK_EQ(r.analysis.itms[0], size_t(2));
     CHECK_EQ(r.analysis.changers.size(), size_t(1));
 }
+
+// A record can hold the same packed array (or list) in separate runs, each part of the structure
+// around it: RACE has a TTEC colour list in every tint template. Splitting and joining must keep
+// each run in its own place. (They were gathered into the first run: every tint colour of the race
+// ended up in its first template, the others had none, and the player's face was drawn dark.)
+TEST(separate_runs_of_a_packed_array_keep_their_place)
+{
+    auto colours = [](std::vector<std::pair<FormKey, uint8_t>> entries) {
+        NormSub s = scalar("TTEC", std::vector<uint8_t>(entries.size() * 14, 0));
+        for (size_t i = 0; i < entries.size(); ++i) {
+            s.bytes[i * 14 + 8] = entries[i].second; // template index
+            s.refs.emplace_back(static_cast<uint32_t>(i * 14), entries[i].first);
+        }
+        return s;
+    };
+    NormRecord r;
+    r.key = K(0, 0x13746);
+    r.sig = Signature("RACE");
+    r.subs.push_back(scalar("EDID", {'H', 0}));
+    r.subs.push_back(scalar("TETI", {0x14, 0, 0xB1, 0x04}));
+    r.subs.push_back(scalar("TTGP", {'G', 0}));
+    r.subs.push_back(colours({{K(0, 0xE6E16), 1}, {K(0, 0xE6E17), 2}}));
+    r.subs.push_back(scalar("TTED", {0, 0, 0, 0}));
+    r.subs.push_back(scalar("TETI", {0x14, 0, 0xB2, 0x04}));
+    r.subs.push_back(scalar("TTGP", {'S', 0}));
+    r.subs.push_back(colours({{K(5, 0x800), 3}}));
+    r.subs.push_back(scalar("TTED", {0, 0, 0, 0}));
+    auto set = splitFields(r, RecordDefinitions::get());
+    auto joined = joinFields(set);
+    CHECK_EQ(joined.size(), r.subs.size());
+    for (size_t i = 0; i < std::min(joined.size(), r.subs.size()); ++i) {
+        CHECK(joined[i].sig == r.subs[i].sig);
+        CHECK(joined[i].bytes == r.subs[i].bytes);
+        CHECK(joined[i].refs == r.subs[i].refs);
+    }
+    // Merging versions that agree leaves it as it was.
+    auto merged = MergeEngine::merge({set, set});
+    auto again = joinFields(merged.fields);
+    CHECK_EQ(again.size(), r.subs.size());
+    for (size_t i = 0; i < std::min(again.size(), r.subs.size()); ++i)
+        CHECK(again[i].bytes == r.subs[i].bytes);
+}

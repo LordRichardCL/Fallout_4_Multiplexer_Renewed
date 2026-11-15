@@ -160,6 +160,20 @@ FieldSet splitFields(const NormRecord& rec, const RecordDefinitions& defs)
     std::map<Signature, bool> sawCount;
 
     std::map<std::string, int> occurrences;
+    // A packed array or repeated list is one field only while its subrecords follow each other. A
+    // record can hold several separate runs of the same signature, each belonging to the structure
+    // around it (RACE: a TTEC colour list in every tint template); each run is its own field, written
+    // back in its own place. The first run keeps the plain key, so records with one run are unchanged.
+    auto continuingRun = [&](const std::string& base) -> Field* {
+        if (set.fields.empty())
+            return nullptr;
+        Field& last = set.fields.back();
+        return last.key == base || last.key.rfind(base + "#", 0) == 0 ? &last : nullptr;
+    };
+    auto runKey = [&](const std::string& base) {
+        const int occ = occurrences[base]++;
+        return occ ? base + "#" + std::to_string(occ) : base;
+    };
     const auto& subs = rec.subs;
     size_t i = 0;
     while (i < subs.size()) {
@@ -202,11 +216,10 @@ FieldSet splitFields(const NormRecord& rec, const RecordDefinitions& defs)
         const FieldDef& def = defs.field(rec.sig, s.sig);
         // Arrays with a header (arrayStart) stay whole: their items do not start at offset 0.
         if (def.merge != MergeMode::Scalar && def.isPackedArray() && def.arrayStart == 0) {
-            std::string key = "array:" + s.sig.str();
-            Field* existing = set.find(key);
+            Field* existing = continuingRun("array:" + s.sig.str());
             if (!existing) {
                 Field f;
-                f.key = key;
+                f.key = runKey("array:" + s.sig.str());
                 f.label = s.sig.str();
                 f.shape = FieldShape::PackedArray;
                 f.sig = s.sig;
@@ -225,11 +238,10 @@ FieldSet splitFields(const NormRecord& rec, const RecordDefinitions& defs)
         }
 
         if (def.isRepeatedList()) {
-            std::string key = "list:" + s.sig.str();
-            Field* existing = set.find(key);
+            Field* existing = continuingRun("list:" + s.sig.str());
             if (!existing) {
                 Field f;
-                f.key = key;
+                f.key = runKey("list:" + s.sig.str());
                 f.label = s.sig.str() + " list";
                 f.shape = FieldShape::RepeatedList;
                 f.sig = s.sig;
