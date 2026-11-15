@@ -2696,6 +2696,67 @@ TEST(previs_file_is_translated_into_the_output_numbering)
     CHECK(Exporter::archiveWinnerCopies(result.directory).count("vis\\fallout4.esm\\00000805.uvd") == 1);
 }
 
+// Previs follow-up 3: an ID in a source previs file that points to no record today (a record its plugin
+// does not contain, or a master index past its master list) finds nothing in the game now. It is given an
+// ID that finds nothing in the output either, instead of keeping the cell's plugins out: in the owner's
+// build one such ID in Vault111Cryo's file kept about a dozen plugins out. Each distinct ID gets its own,
+// above every record the output holds; real records are translated as before.
+TEST(previs_ids_that_point_to_no_record_are_mapped_to_nothing)
+{
+    auto root = buildInstall("previsnowhere");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "MastX.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000800, {zs("EDID", "XRef")})});
+    std::vector<uint8_t> xpri(4);
+    storeLE<uint32_t>(xpri.data(), 0x01000800);
+    writePlugin(data / "ModW.esp", {"Fallout4.esm", "MastX.esp"},
+                {record("CELL", 0x00000805, {zs("EDID", "VanillaCell"), raw("XPRI", xpri)}),
+                 record("REFR", 0x02000800, {zs("EDID", "NewPrevisRef"), u32("NAME", 0x800)})});
+    std::filesystem::create_directories(data / "Vis" / "Fallout4.esm");
+    // a real record of MastX, ModW's own missing record 999 (twice), and master index 09 (ModW has 2 masters)
+    writeFile(data / "Vis" / "Fallout4.esm" / "00000805.uvd",
+              previsBytes({0x01000800, 0x02000999, 0x09000001, 0x02000999}));
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*MastX.esp\n*ModW.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"MastX.esp"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto& s = p.session();
+    const auto* out = p.compiledOutput();
+    CHECK(out->isCompiled(s.findPlugin("ModW.esp")->index)); // no longer kept out
+    CHECK_EQ(out->previsFiles.size(), size_t(1));
+    if (out->previsFiles.empty())
+        return;
+    const auto& pf = out->previsFiles[0];
+    CHECK_EQ(pf.formIds, size_t(4));
+    const int o = out->records[out->indexByKey.at(pf.cell)].output;
+    const auto& op = out->outputs[size_t(o)];
+    bool ok = true;
+    const uint32_t xref = out->translate(s, FormKey{s.findPlugin("MastX.esp")->index, 0x800}, o, &ok);
+    CHECK(ok);
+    const uint32_t a = loadLE<uint32_t>(pf.bytes.data() + 0x150);
+    const uint32_t b = loadLE<uint32_t>(pf.bytes.data() + 0x154);
+    const uint32_t c = loadLE<uint32_t>(pf.bytes.data() + 0x158);
+    const uint32_t d = loadLE<uint32_t>(pf.bytes.data() + 0x15C);
+    CHECK_EQ(a, xref);
+    CHECK_EQ(b, d);   // the same missing ID gets the same replacement
+    CHECK(b != c);    // distinct missing IDs get distinct ones
+    uint32_t maxNew = 0;
+    for (uint32_t ri : op.records)
+        if (out->records[ri].isNew)
+            maxNew = std::max(maxNew, out->records[ri].objectId);
+    for (uint32_t v : {b, c}) {
+        CHECK_EQ(v >> 24, uint32_t(op.masterNames.size())); // the output's own range
+        CHECK((v & 0xFFFFFF) > maxNew);                       // above every record it holds
+    }
+    bool noted = false;
+    for (const auto& i : out->issues)
+        noted |= i.category == "Previs Numbering" && i.message.find("point to no record today") != std::string::npos;
+    CHECK(noted);
+}
+
 // Translate previs files off (for comparing in game): the same plugins compile, nothing is written,
 // and the report says the original file is used.
 TEST(previs_translation_can_be_turned_off)

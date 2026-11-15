@@ -34,6 +34,11 @@ struct PrevisTranslation {
     std::string numbering; // today's winning plugin
     size_t formIds = 0;
     size_t changed = 0;
+    // IDs that point to no record today (a master index past the plugin's master list, or a record that
+    // exists in no plugin): the game finds nothing for them now, so each is given an ID that finds nothing
+    // in the output either (its own range, above every record it holds) instead of refusing the file.
+    size_t nowhere = 0;
+    std::vector<std::string> nowhereExamples; // the first few, for the report
 };
 PrevisTranslation translatePrevis(Session& session, const CompiledOutput& out, const EmittedRecord& cell);
 

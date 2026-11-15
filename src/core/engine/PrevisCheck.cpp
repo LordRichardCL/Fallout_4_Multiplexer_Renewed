@@ -7,6 +7,7 @@
 #include "util/Text.hpp"
 
 #include <cstdio>
+#include <map>
 #include <set>
 #include <vector>
 
@@ -83,12 +84,49 @@ PrevisTranslation translatePrevis(Session& session, const CompiledOutput& out, c
         return t;
     }
     const auto& numbering = session.plugins[winner->plugin];
+    // Unused IDs in the output's own range, for IDs that point to no record today: above every new record
+    // the output holds, one per distinct ID of this file, so the file's ID table keeps its distinct entries.
+    const auto& op = out.outputs.at(static_cast<size_t>(e.output));
+    uint32_t nextUnused = 0x800;
+    for (uint32_t ri : op.records) {
+        const auto& r = out.records[ri];
+        if (r.isNew && r.objectId >= nextUnused)
+            nextUnused = r.objectId + 1;
+    }
+    const uint32_t ownIndex = static_cast<uint32_t>(op.masterNames.size());
+    const uint32_t maxObject = op.light ? 0xFFFu : 0xFFFFFFu;
+    std::map<uint32_t, uint32_t> nowhereIds; // raw -> ID that finds nothing in the output
     for (uint32_t i = 0; i < file.ids.size(); ++i) {
         const uint32_t raw = file.ids[i];
         if (PrevisFile::isCombinedObject(raw))
             continue;
         ++t.formIds;
         const FormKey k = session.resolve(numbering, raw);
+        const bool pointsNowhere = !k.valid() ? (raw & 0xFFFFFFu) != 0 : session.winner(k) == nullptr;
+        if (pointsNowhere) {
+            auto [it, fresh] = nowhereIds.emplace(raw, 0);
+            if (fresh) {
+                if (nextUnused > maxObject) {
+                    t.ok = false;
+                    t.problem = "its FormID " + hex8(raw) + " points to no record today, and " +
+                                out.outputName(e.output) + " has no unused ID left to give it";
+                    return t;
+                }
+                it->second = makeRawFormId(ownIndex, nextUnused++);
+                ++t.nowhere;
+                if (t.nowhereExamples.size() < 3)
+                    t.nowhereExamples.push_back(hex8(raw) + " (" +
+                                                (k.valid() ? session.formLabel(k) + " in " + session.pluginName(k.origin)
+                                                           : std::string("master index past ") + t.numbering +
+                                                                 "'s master list") +
+                                                ")");
+            }
+            if (it->second != raw) {
+                storeLE<uint32_t>(t.bytes.data() + file.idOffset + 4 * size_t(i), it->second);
+                ++t.changed;
+            }
+            continue;
+        }
         bool ok = k.valid();
         const uint32_t now = ok ? out.translate(session, k, e.output, &ok) : 0;
         if (!ok) {

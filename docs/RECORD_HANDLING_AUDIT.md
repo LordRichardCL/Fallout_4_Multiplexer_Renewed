@@ -913,7 +913,7 @@ The build after the Clean precombine fix compiled 484 plugins with no errors, bu
 3. **Previs follow-ups:**
    - Settle in game whether translating .uvd files is needed at all.
    - Accept .uvd files with no IDs.
-   - Map IDs that point to records that no longer exist instead of refusing them.
+   - Map IDs that point to records that no longer exist instead of refusing them. **Done** (see "Previs IDs that point to no record" below).
 4. **Compatibility patch analysis (requested; later).** The owner's specification is in `docs/specs/COMPATIBILITY_PATCH_ANALYSIS.txt`. It covers:
    - change provenance across the whole override chain: what each plugin changed, and which changes survive, are lost, compete or could coexist;
    - element identity that does not depend on list position;
@@ -984,3 +984,9 @@ The owner compared a Papyrus log without a build (with a new addon installed) ag
 - **The compiled add-on packs never registered.** Those packs are DundeeStoryWealthOutpostPack, DundeeStoryWealthCityPlansPack01 and 02, and StoryWealth-SRD-PlayerHome-CityPlan. SS2 processed and version-checked every pack that stayed in the load order; the four compiled ones appear nowhere in its log, so their city plans would never be offered. Their AddonPackConfiguration records (each the first record, xx000800, of its plugin) and AddonPack quests were written correctly: byte for byte as the source except for the relinked FormIDs. So the registration depends on the pack's own plugin, at run time, in a way no file scan can see, and the Auto-Merger let the plugins compile because nothing named them.
 
 **Fix.** A plugin with a QUST or MISC record whose scripts (VMAD) include `SimSettlementsV2:quests:AddonPack` or `SimSettlementsV2:MiscObjects:AddonPackConfiguration` is an SS2 add-on pack: a Compatibility Required reference that keeps it in the load order. The match ignores a trailing NUL some tools write into the script name (the Dundee packs do), and it looks anywhere in the VMAD, so a pack whose AddonPack script is not the first is still found. Plugins with other scripts are not affected. Tests: a pack without any plugin name in its properties stays, a plugin with another script compiles, and the existing add-on config test now finds both the name in its property and the pack itself.
+
+## Previs IDs that point to no record (previs follow-up 3)
+
+In the owner's addon build, about a dozen plugins were kept out by one ID: Vault111Cryo's previs file (`vis\fallout4.esm\000016d8.uvd`), read in MAIM Redux - ELFX Patch.esp's numbering, holds `03032FD1`, which names a record that plugin does not contain. The translator refused the file, so every plugin that touched the cell stayed in the load order: BloodFixes, the MAIM patches, tloverseershandbook, StoryWealth-eXoteriorPatch, Backpacks of the Commonwealth and others. CovenantHQ01 and NatickBanksExt did the same to further plugins.
+
+Such an ID finds nothing in the game today. The translator now gives each distinct one an ID in the output's own range, above every new record the output holds, so it finds nothing in the output either and the file keeps its distinct entries. The same raw ID gets the same replacement within a file. A light output with no unused ID left still refuses. IDs of records that exist but cannot be expressed in the output (for example a master's record the output does not master) still keep the cell's plugins out, as before. The file's "Previs Numbering" line counts the mapped IDs and names the first three. A test covers a real ID, a missing record (twice) and a master index past the master list. It fails without the change.

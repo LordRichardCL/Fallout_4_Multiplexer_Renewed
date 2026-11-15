@@ -1734,7 +1734,12 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                          t.path + " (" + session.formLabel(e.key) + "): " + std::to_string(t.changed) + " of " +
                              std::to_string(t.formIds) + " FormIDs translated from " + t.numbering +
                              "'s numbering into " + out.outputName(e.output) +
-                             "'s, which now holds the cell's winning record; the translated copy is written loose",
+                             "'s, which now holds the cell's winning record; the translated copy is written loose" +
+                             (t.nowhere ? "; " + std::to_string(t.nowhere) +
+                                              " of them point to no record today (e.g. " + join(t.nowhereExamples, ", ") +
+                                              ") and were given IDs that point to no record in the output either, "
+                                              "so the game finds nothing for them, as now"
+                                        : std::string()),
                          e.key, t.numbering);
                 PrevisRewrite r;
                 r.path = t.path;
