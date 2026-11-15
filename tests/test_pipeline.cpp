@@ -6653,6 +6653,58 @@ TEST(relinked_configs_must_win_before_switching_over)
 // configs: SS2 checks GetFormFromFile(the config's FormID, that name) and rejects the add-on when it
 // does not match). Compiling would leave the name pointing at a plugin that is switched off: kept out,
 // with or without the Auto-Merger. A name in a string array counts the same; other strings do not.
+// A Sim Settlements 2 add-on pack stays in the load order even when no script property names its plugin
+// (the Dundee StoryWealth packs): SS2 registers each pack through its own plugin while the game runs, and in
+// the owner's build no compiled pack was ever processed by SS2. The script name may end with a NUL, as those
+// packs write it; a plugin with other scripts is not affected.
+TEST(sim_settlements_add_on_packs_stay_in_the_load_order)
+{
+    auto root = referenceInstall("refss2pack");
+    auto data = root / "Game" / "Data";
+    auto vmad = [](const std::string& script, const std::string& prop) {
+        BinaryWriter w;
+        w.write<int16_t>(6);
+        w.write<int16_t>(2);
+        w.write<uint16_t>(1);
+        w.writeWString(script);
+        w.write<uint8_t>(0);
+        w.write<uint16_t>(1);
+        w.writeWString(prop);
+        w.write<uint8_t>(1); // object
+        w.write<uint8_t>(1);
+        w.write<uint16_t>(0);
+        w.write<int16_t>(-1);
+        w.write<uint32_t>(0x01000801);
+        return Subrecord(Signature("VMAD"), w.take());
+    };
+    writePlugin(data / "ModS.esp", {"Fallout4.esm"},
+                {record("MISC", 0x01000800,
+                        {zs("EDID", "SWC_AddonConfig"),
+                         vmad(std::string("SimSettlementsV2:MiscObjects:AddonPackConfiguration") + '\0',
+                              std::string("MyItems") + '\0')}),
+                 record("FLST", 0x01000801, {zs("EDID", "SWC_CPList")})});
+    writePlugin(data / "ModT.esp", {"Fallout4.esm"},
+                {record("MISC", 0x01000800, {zs("EDID", "Other"), vmad("SomeMod:Script", "Target")}),
+                 record("FLST", 0x01000801, {zs("EDID", "OtherList")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModS.esp\n*ModT.esp\n");
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    auto refs = referencesOf(s, "ModS.esp");
+    CHECK_EQ(refs.size(), size_t(1));
+    if (!refs.empty()) {
+        CHECK_EQ(refs[0]->cls, ReferenceClass::CompatibilityRequired);
+        CHECK_EQ(refs[0]->context, std::string("Sim Settlements 2 add-on pack"));
+    }
+    CHECK(s.findPlugin("ModS.esp")->eligibility != Eligibility::Eligible);
+    CHECK(referencesOf(s, "ModT.esp").empty());
+    CHECK(p.compile());
+    CHECK(!p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
+}
+
 TEST(references_script_property_in_a_record_keeps_the_plugin)
 {
     auto root = referenceInstall("refvmadstring");
@@ -6688,11 +6740,19 @@ TEST(references_script_property_in_a_record_keeps_the_plugin)
         p.analyse();
         const auto& s = p.session();
         auto refs = referencesOf(s, "ModS.esp");
-        CHECK_EQ(refs.size(), size_t(1));
-        if (!refs.empty()) {
-            CHECK_EQ(refs[0]->cls, ReferenceClass::CompatibilityRequired);
-            CHECK_EQ(refs[0]->context, std::string("script property in a record"));
-            CHECK(refs[0]->location.find("ModS_AddonConfig") != std::string::npos);
+        CHECK_EQ(refs.size(), size_t(2)); // the name in the property, and the SS2 add-on pack itself
+        const PluginReference* prop = nullptr;
+        const PluginReference* pack = nullptr;
+        for (const auto* r : refs)
+            (r->context == "script property in a record" ? prop : pack) = r;
+        CHECK(prop && pack);
+        if (prop) {
+            CHECK_EQ(prop->cls, ReferenceClass::CompatibilityRequired);
+            CHECK(prop->location.find("ModS_AddonConfig") != std::string::npos);
+        }
+        if (pack) {
+            CHECK_EQ(pack->cls, ReferenceClass::CompatibilityRequired);
+            CHECK_EQ(pack->context, std::string("Sim Settlements 2 add-on pack"));
         }
         CHECK_EQ(referencesOf(s, "ModT.esp").size(), size_t(1)); // from the string array
         CHECK(s.findPlugin("ModS.esp")->eligibility != Eligibility::Eligible);
