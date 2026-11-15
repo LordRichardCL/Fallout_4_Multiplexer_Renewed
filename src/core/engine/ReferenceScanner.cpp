@@ -81,7 +81,6 @@ enum class Fact {
     FormIdIniUnknown,    // bcr\<plugin>.ini with lines that are not "[section]" or "key=<FormID>"
     OtherFileName,       // any other file named after the plugin
     RecordScriptString,  // a script property in a plugin's record holds the file name (VMAD string)
-    Ss2AddonPack,        // the plugin is a Sim Settlements 2 add-on pack (AddonPack quest / addon config script)
     PluginIni,           // Data\<plugin>.ini: read by the game only while that plugin is active
     PrecombineGeometry,  // <plugin> - Geometry.csg, <plugin>.cdx: "clean" precombines' shared geometry
 };
@@ -208,12 +207,6 @@ Rule rule(Fact f)
                 "a record's script property holds the plugin's file name: its scripts can look records up in that "
                 "file (Sim Settlements 2 add-on configs check GetFormFromFile(own FormID, this name) and reject "
                 "the add-on when it does not match), so the plugin must keep its name"};
-    case Fact::Ss2AddonPack:
-        return {K::PluginName, C::CompatibilityRequired, "Sim Settlements 2 add-on pack",
-                "the plugin is a Sim Settlements 2 add-on pack (an AddonPack quest or AddonPackConfiguration "
-                "script). SS2 finds and registers each pack through its own plugin while the game runs; compiled "
-                "into an output, the pack never registers and its plans are never offered (seen in SS2's log: "
-                "every pack that stayed was processed, no compiled one was), so the plugin must stay"};
     }
     return {K::Unknown, C::Unknown, "", ""};
 }
@@ -1281,28 +1274,6 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             if (p.active && !p.generated && p.error.empty() && !p.baseGame)
                 scan.push_back(p.index);
         std::vector<std::vector<PluginReference>> perPlugin(scan.size());
-        std::vector<char> ss2Found(scan.size(), 0); // one finding per plugin is enough
-        auto containsNoCase = [](std::span<const uint8_t> d, std::string_view needle) {
-            if (d.size() < needle.size())
-                return false;
-            for (size_t i = 0; i + needle.size() <= d.size(); ++i) {
-                size_t k = 0;
-                while (k < needle.size() &&
-                       std::tolower(static_cast<unsigned char>(d[i + k])) == std::tolower(static_cast<unsigned char>(needle[k])))
-                    ++k;
-                if (k == needle.size())
-                    return true;
-            }
-            return false;
-        };
-        // The record's scripts (VMAD) name an SS2 add-on pack script. Matched anywhere in VMAD, so a pack whose
-        // script is not the first is still found (fail closed); some tools end the name with a NUL, which the
-        // match ignores.
-        auto ss2Script = [&](const std::vector<uint8_t>& v) {
-            const std::span<const uint8_t> d(v.data(), v.size());
-            return containsNoCase(d, "SimSettlementsV2:quests:AddonPack") ||
-                   containsNoCase(d, "SimSettlementsV2:MiscObjects:AddonPackConfiguration");
-        };
         auto hasPluginExtension = [](std::span<const uint8_t> d) {
             for (size_t i = 0; i + 4 <= d.size(); ++i) {
                 if (d[i] != '.' || (d[i + 1] | 0x20) != 'e' || (d[i + 2] | 0x20) != 's')
@@ -1332,27 +1303,11 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                             inflated = Record::decompress(loc.header, loc.rawData);
                             data = inflated;
                         }
-                        const bool ss2Pack = (sig == Signature("QUST") || sig == Signature("MISC")) &&
-                                             (containsNoCase(data, "SimSettlementsV2:quests:AddonPack") ||
-                                              containsNoCase(data, "SimSettlementsV2:MiscObjects:AddonPackConfiguration"));
-                        if (!ss2Pack && !hasPluginExtension(data))
+                        if (!hasPluginExtension(data))
                             return true;
                         const auto subs = Record::parseSubrecords(data);
                         if (std::none_of(subs.begin(), subs.end(), [](const Subrecord& s) { return s.signature == Signature("VMAD"); }))
                             return true;
-                        if (ss2Pack && !ss2Found[i]) {
-                            for (const auto& sr : subs)
-                                if (sr.signature == Signature("VMAD") && ss2Script(sr.data)) {
-                                    char id[16];
-                                    std::snprintf(id, sizeof(id), "%08X", loc.header.formId);
-                                    auto r = make(Fact::Ss2AddonPack, p.index, p.key, "Plugin record", p.name,
-                                                  sig.str() + " [" + id + "]");
-                                    r.source = p.sourceMod;
-                                    perPlugin[i].push_back(std::move(r));
-                                    ss2Found[i] = true;
-                                    break;
-                                }
-                        }
                         const auto layout = decodeLayout(session.defs, sig, subs);
                         std::string edid;
                         for (const auto& s : subs)
