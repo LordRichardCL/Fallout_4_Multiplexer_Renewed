@@ -7,6 +7,7 @@ namespace fo4mx::diagnostics {
 
 constexpr const char* kRecorderDllName = "MultiplexerDiagnosticRecorder.dll";
 constexpr const char* kRecorderFolderName = "Diagnostic Recorder";
+constexpr const char* kRecorderZipName = "Multiplexer Diagnostic Recorder.zip";
 
 // The optional Diagnostic Recorder, ready to install: written beside the output package (never into
 // its Data folder, so installing the package never installs the recorder):

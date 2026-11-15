@@ -9,7 +9,7 @@ namespace fo4mx::diagnostics {
 namespace fs = std::filesystem;
 
 namespace {
-const char* kZipName = "Multiplexer Diagnostic Recorder.zip";
+const char* kZipName = kRecorderZipName;
 const char* kInstructionsName = "Multiplexer Diagnostic Recorder - Install.txt";
 } // namespace
 

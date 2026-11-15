@@ -301,6 +301,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         // Vortex / Mod Organizer 2: the package first.
         QCheckBox* copyZip = nullptr;
         QCheckBox* enableMod = nullptr;
+        QCheckBox* copyRecorder = nullptr;
         if (preview.vortex || preview.mo2) {
             const QString manager = preview.vortex ? "Vortex" : "Mod Organizer 2";
             auto* box = new QGroupBox("1. The package in " + manager);
@@ -348,11 +349,34 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                 where->setStyleSheet("color: palette(placeholder-text);");
                 bl->addWidget(where);
             }
+            // The Diagnostic Recorder (when this export prepared it): into the same downloads folder, to be
+            // installed as its own mod.
+            const bool downloadsUsable = !preview.downloadsFolder.isEmpty() && preview.downloadsProblem.isEmpty();
+            if (preview.recorderAvailable && downloadsUsable) {
+                copyRecorder = new QCheckBox("Also copy the Diagnostic Recorder (Multiplexer Diagnostic Recorder.zip) to " +
+                                             manager + "'s downloads folder");
+                copyRecorder->setChecked(true);
+                bl->addWidget(copyRecorder);
+                auto* rnote = new QLabel(QString("Install it as its own mod, like the package. It records what the game "
+                                                 "loads for the reports and changes nothing in the game.") +
+                                         (preview.recorderInDownloads ? " The copy already there is replaced (backed up "
+                                                                        "first)."
+                                                                      : ""));
+                rnote->setWordWrap(true);
+                rnote->setStyleSheet("color: palette(placeholder-text);");
+                bl->addWidget(rnote);
+            } else if (preview.recorderAvailable) {
+                auto* rnote = new QLabel("The Diagnostic Recorder is ready to install: " + preview.recorderZipPath);
+                rnote->setWordWrap(true);
+                rnote->setTextInteractionFlags(Qt::TextSelectableByMouse);
+                bl->addWidget(rnote);
+            }
             auto* steps = new QLabel(
                 preview.vortex
-                    ? "In Vortex: install and enable the package from the Downloads page (restart Vortex if it is not "
-                      "listed), let it win every file conflict and Deploy. Then close Vortex and press Apply to Game "
-                      "again to switch your load order over."
+                    ? QString("In Vortex: install and enable the package from the Downloads page (restart Vortex if it "
+                              "is not listed)%1, let it win every file conflict and Deploy. Then close Vortex and press "
+                              "Apply to Game again to switch your load order over.")
+                          .arg(preview.recorderAvailable ? " and the Diagnostic Recorder" : "")
                     : "In Mod Organizer 2: install the package from the Downloads tab (or Install a new mod from an "
                       "archive), enable it and keep it at the bottom of the left pane. Then close Mod Organizer 2 and "
                       "press Apply to Game again to switch your load order over. Your mods stay enabled.");
@@ -395,12 +419,17 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         }
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
         auto* go = buttons->addButton("Apply", QDialogButtonBox::AcceptRole);
-        auto updateGo = [&] { go->setEnabled(preview.ready || (copyZip && copyZip->isChecked())); };
+        auto updateGo = [&] {
+            go->setEnabled(preview.ready || (copyZip && copyZip->isChecked()) ||
+                           (copyRecorder && copyRecorder->isChecked()));
+        };
         if (enableMod)
             connect(enableMod, &QCheckBox::toggled, &dlg, updateGo);
         updateGo();
         if (copyZip)
             connect(copyZip, &QCheckBox::toggled, &dlg, updateGo);
+        if (copyRecorder)
+            connect(copyRecorder, &QCheckBox::toggled, &dlg, updateGo);
         v->addWidget(buttons);
         connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -411,6 +440,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         choice.ghost = ghost && ghost->isChecked();
         choice.copyZip = copyZip && copyZip->isChecked();
         choice.enableOutputMod = enableMod && enableMod->isChecked();
+        choice.copyRecorder = copyRecorder && copyRecorder->isChecked();
         if (choice.copyZip && preview.zipInDownloads) {
             QMessageBox ask(QMessageBox::Question, "Multiplexer Output.zip is already there",
                             "An archive named Multiplexer Output.zip is already in the downloads folder.\n\n"

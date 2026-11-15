@@ -629,6 +629,8 @@ fo4mx::ApplyOptions applyOptions(const fo4mx::Session& s, const AppController::A
             o.zipTo = fo4mx::vortex::uniqueName(folder, name);
         }
     }
+    if (choice.copyRecorder && !folder.empty() && !result.recorderZip.empty())
+        o.recorderZipTo = folder / result.recorderZip.filename(); // one copy: an older one is replaced
     if (choice.enableOutputMod && kind == fo4mx::InstallKind::ModOrganizer2)
         o.enableOutputMod = fo4mx::mo2::outputModName(s, result.packageRoot); // the export's own folder
     return o;
@@ -672,6 +674,8 @@ bool AppController::previewApply(ApplyPreview* preview, QString* message)
         std::error_code ec;
         preview->zipAvailable = !result.zipPath.empty() && std::filesystem::is_regular_file(result.zipPath, ec);
         preview->zipPath = toQString(result.zipPath);
+        preview->recorderAvailable = !result.recorderZip.empty();
+        preview->recorderZipPath = toQString(result.recorderZip);
         if (isMo2) {
             const auto out = pipeline_->exportResult()->packageRoot; // the export's own folder
             const auto mod = fo4mx::mo2::outputModName(s, out);
@@ -704,6 +708,8 @@ bool AppController::previewApply(ApplyPreview* preview, QString* message)
                     preview->downloadsNote = qs(fo4mx::join(fc.notes, "; "));
                 preview->zipInDownloads = preview->zipAvailable &&
                                           std::filesystem::exists(folder / result.zipPath.filename(), ec);
+                preview->recorderInDownloads = !result.recorderZip.empty() &&
+                                               std::filesystem::exists(folder / result.recorderZip.filename(), ec);
             }
         }
 
@@ -776,6 +782,8 @@ bool AppController::applyToProfile(const ApplyChoice& choice, QString* message)
             QStringList why;
             if (!plan.zipProblem.empty())
                 why << "  \u2022 " + qs(plan.zipProblem);
+            if (!plan.recorderZipProblem.empty())
+                why << "  \u2022 Diagnostic Recorder: " + qs(plan.recorderZipProblem);
             why << bullet(plan.check.blockers);
             *message = "Nothing was changed:\n" + why.join("\n");
             return false;
@@ -791,7 +799,11 @@ bool AppController::applyToProfile(const ApplyChoice& choice, QString* message)
             if (op.kind == fo4mx::FileTransaction::Kind::Rename)
                 ++ghosted;
             else if (op.kind == fo4mx::FileTransaction::Kind::Copy)
-                done << "  \u2022 copied the package to " + toQString(op.target);
+                done << (op.target.filename() == fo4mx::diagnostics::kRecorderZipName
+                             ? "  \u2022 copied the Diagnostic Recorder to " + toQString(op.target) +
+                                   "\n    Install it in your mod manager like the package (enable it and deploy); "
+                                   "it records what the game loads and changes nothing in the game."
+                             : "  \u2022 copied the package to " + toQString(op.target));
             else
                 done << "  \u2022 " + toQString(op.target);
         }

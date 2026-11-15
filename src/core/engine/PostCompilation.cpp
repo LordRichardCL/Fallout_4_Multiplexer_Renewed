@@ -6,6 +6,7 @@
 #include "engine/Mo2Support.hpp"
 #include "engine/OutputRuns.hpp"
 #include "engine/Session.hpp"
+#include "diagnostics/RecorderPackage.hpp"
 #include "util/FileTransaction.hpp"
 #include "util/Text.hpp"
 #include "vfs/GameInstall.hpp"
@@ -55,6 +56,55 @@ bool isLight(const PluginInfo& p)
 bool staysActive(const PluginInfo& p, const CompiledOutput& c)
 {
     return p.active && !p.generated && (!c.isCompiled(p.index) || c.hasArchiveLoader(p.index));
+}
+
+// The outputs in the order they must load: the compiled-state outputs as written, the patch last.
+std::vector<std::string> outputLoadOrder(const CompiledOutput& c)
+{
+    std::vector<std::string> out;
+    for (bool patch : {false, true})
+        for (const auto& op : c.outputs)
+            if (!op.records.empty() && op.patch == patch)
+                out.push_back(op.name);
+    return out;
+}
+
+// After switching over: every enabled plugin must load before the outputs, which load in their own
+// order (the patch last). The build decided each record's winner on that assumption; a mod manager
+// or LOOT sort that moves an output earlier lets the plugins after it win again.
+void loadOrderAfterSwitch(const Session& session, const CompiledOutput& c, const std::vector<PluginListEntry>& entries,
+                          DeploymentCheck& d)
+{
+    const auto outputs = outputLoadOrder(c);
+    if (outputs.empty())
+        return;
+    std::vector<size_t> at(outputs.size(), SIZE_MAX);
+    for (size_t i = 0; i < entries.size(); ++i)
+        for (size_t k = 0; k < outputs.size(); ++k)
+            if (entries[i].active && iequals(entries[i].name, outputs[k]))
+                at[k] = i;
+    for (size_t pos : at)
+        if (pos == SIZE_MAX)
+            return; // not switched over yet: Apply to Game puts them at the end
+    const size_t first = *std::min_element(at.begin(), at.end());
+    for (size_t i = first + 1; i < entries.size(); ++i) {
+        if (!entries[i].active || std::find(at.begin(), at.end(), i) != at.end())
+            continue;
+        const auto* p = session.findPlugin(toLower(entries[i].name));
+        if (p && c.hasArchiveLoader(p->index))
+            continue; // an empty archive loader: it has no records to win with
+        d.loadAfterOutputs.push_back(entries[i].name);
+    }
+    d.outputsOutOfOrder = !std::is_sorted(at.begin(), at.end());
+    if (!d.loadAfterOutputs.empty())
+        d.warnings.push_back(std::to_string(d.loadAfterOutputs.size()) + " enabled plugin(s) load after " + outputs.front() +
+                             " (first: " + d.loadAfterOutputs.front() +
+                             "). The outputs must load after every other plugin, or the plugins after them win "
+                             "records this build decided otherwise. A re-sort (LOOT, Vortex's Sort Now) moved them: "
+                             "Apply to Game puts them back at the end and leaves everything else in your order");
+    if (d.outputsOutOfOrder)
+        d.warnings.push_back("The outputs are not in their own order (" + join(outputs, ", ") +
+                             "; " + outputs.back() + " last): Apply to Game puts them back");
 }
 
 } // namespace
@@ -203,6 +253,7 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
                                  " (first: " + d.stillDisabled.front() +
                                  "): enable them (Apply to Game does; they are listed under \"Enable these\" in "
                                  "Multiplexer_DisablePlugins.txt), or the game leaves them out");
+        loadOrderAfterSwitch(session, c, parsePluginsTxt(slurp(session.install.pluginsFile)), d);
         if (!d.stillEnabled.empty())
             d.warnings.push_back(std::to_string(d.stillEnabled.size()) +
                                  " compiled plugin(s) are still enabled in " +
@@ -246,44 +297,80 @@ std::string PostCompilation::instructions(const Session& session, const Compilat
         t += "\n";
     }
 
-    t += "Steps\n-----\n";
+    // Steps, numbered in one sequence: the manager's own steps, then those every setup shares.
+    std::vector<std::string> steps;
     switch (kind) {
     case InstallKind::ModOrganizer2:
-        t += "1. Install the package as a mod: in Mod Organizer 2, Install a new mod from an archive and pick\n"
-             "   \"Multiplexer Output.zip\" (Apply to Game can copy it into MO2's downloads folder first). Keep it at\n"
-             "   the bottom of the left pane so it wins every file conflict. If your output folder is itself a\n"
-             "   folder in MO2's mods folder, Apply to Game can enable that mod for you instead.\n"
-             "2. Close Mod Organizer 2 (it rewrites the profile's plugins.txt and modlist.txt when it closes).\n"
-             "3. In Multiplexer, Compilation page: Apply to Game. It disables the compiled plugins in the profile,\n"
-             "   enables the outputs at the end and keeps the compiled mods' archives loading (backups first).\n"
-             "   The mods themselves stay enabled: their meshes, textures and scripts are still used.\n";
+        steps = {"Install the package as a mod: in Mod Organizer 2, Install a new mod from an archive and pick\n"
+                 "   \"Multiplexer Output.zip\" (Apply to Game can copy it into MO2's downloads folder first). Keep it at\n"
+                 "   the bottom of the left pane so it wins every file conflict. If your output folder is itself a\n"
+                 "   folder in MO2's mods folder, Apply to Game can enable that mod for you instead.",
+                 "Close Mod Organizer 2 (it rewrites the profile's plugins.txt and modlist.txt when it closes).",
+                 "In Multiplexer, Compilation page: Apply to Game. It disables the compiled plugins in the profile,\n"
+                 "   enables the outputs at the end and keeps the compiled mods' archives loading (backups first).\n"
+                 "   The mods themselves stay enabled: their meshes, textures and scripts are still used."};
         break;
     case InstallKind::Vortex:
-        t += "1. In Multiplexer, Compilation page: Apply to Game. With your Vortex downloads folder set (Settings),\n"
-             "   it copies \"Multiplexer Output.zip\" there; or drag the zip onto Vortex's Mods page yourself.\n"
-             "2. In Vortex: install and enable the package, let it win every file conflict (load after all other\n"
-             "   mods) and Deploy. Do not disable the original mods: their files are still used.\n"
-             "3. Close Vortex.\n"
-             "4. In Multiplexer: Apply to Game again. Once the outputs are deployed and Vortex is closed, it disables\n"
-             "   the compiled plugins in plugins.txt, enables the outputs at the end and keeps the compiled mods'\n"
-             "   archives loading (every file backed up first).\n"
-             "5. Start Vortex and check its Plugins page: the plugins in Multiplexer_DisablePlugins.txt are disabled\n"
-             "   and the outputs enabled. Do not enable the compiled plugins again.\n"
-             "   (Without Multiplexer: disable the listed plugins and enable the outputs in Vortex's Plugins page.)\n";
+        steps = {"In Multiplexer, Compilation page: Apply to Game. With your Vortex downloads folder set (Settings),\n"
+                 "   it copies \"Multiplexer Output.zip\" there; or drag the zip onto Vortex's Mods page yourself.",
+                 "In Vortex: install and enable the package, let it win every file conflict (load after all other\n"
+                 "   mods) and Deploy. Do not disable the original mods: their files are still used.",
+                 "Close Vortex.",
+                 "In Multiplexer: Apply to Game again. Once the outputs are deployed and Vortex is closed, it disables\n"
+                 "   the compiled plugins in plugins.txt, enables the outputs at the end and keeps the compiled mods'\n"
+                 "   archives loading (every file backed up first).",
+                 "Start Vortex and check its Plugins page: the plugins in Multiplexer_DisablePlugins.txt are disabled\n"
+                 "   and the outputs enabled, at the end of the list. Do not enable the compiled plugins again.\n"
+                 "   (Without Multiplexer: disable the listed plugins and enable the outputs in Vortex's Plugins page.)"};
         break;
     case InstallKind::Standalone:
-        t += "1. Extract \"Multiplexer Output.zip\" into the game folder (its Data folder merges with the game's),\n"
-             "   or copy the contents of this export's Data folder into the game's Data folder.\n"
-             "2. In Multiplexer, Compilation page: Apply to Game. After a summary and your confirmation it disables\n"
-             "   the compiled plugins in plugins.txt, enables the outputs at the end and keeps the compiled mods'\n"
-             "   archives loading. Every file is backed up first.\n"
-             "3. Optional, in the same step: ghost the compiled plugins (rename Example.esp to Example.esp.ghost) so\n"
-             "   no tool enables them again by accident.\n";
+        steps = {"Extract \"Multiplexer Output.zip\" into the game folder (its Data folder merges with the game's),\n"
+                 "   or copy the contents of this export's Data folder into the game's Data folder.",
+                 "In Multiplexer, Compilation page: Apply to Game. After a summary and your confirmation it disables\n"
+                 "   the compiled plugins in plugins.txt, enables the outputs at the end and keeps the compiled mods'\n"
+                 "   archives loading. Every file is backed up first.",
+                 "Optional, in the same step: ghost the compiled plugins (rename Example.esp to Example.esp.ghost) so\n"
+                 "   no tool enables them again by accident."};
         break;
     }
-    t += "4. Keep the original mods installed: only their plugins are switched off; meshes, textures, archives,\n"
-         "   scripts and sounds are still used.\n"
-         "5. Start a new game. Saves made before switching refer to the old plugins.\n\n";
+    if (!r.recorderZip.empty())
+        steps.push_back(std::string("Optional: install the Diagnostic Recorder (\"") + diagnostics::kRecorderZipName +
+                        "\" in Diagnostic Recorder\\)\n"
+                        "   as its own mod" +
+                        (kind == InstallKind::Standalone ? std::string(" or by hand (see its Install.txt)")
+                                                         : std::string(" (Apply to Game can copy it into the downloads folder too)")) +
+                        ". It records what the game\n   loads, for the reports; it changes nothing in the game.");
+    steps.push_back("Keep the original mods installed: only their plugins are switched off; meshes, textures, archives,\n"
+                    "   scripts and sounds are still used.");
+    steps.push_back("Start a new game. Saves made before switching refer to the old plugins. Restart the game first if\n"
+                    "   you loaded a save in this session: a new game started after loading a save keeps some of it.");
+    t += "Steps\n-----\n";
+    for (size_t i = 0; i < steps.size(); ++i)
+        t += std::to_string(i + 1) + ". " + steps[i] + "\n";
+    t += "\n";
+
+    t += "Load order\n----------\n";
+    t += "The outputs load after every other plugin, in this order, with the patch last:\n";
+    for (const auto& name : r.outputPlugins)
+        t += "  " + pathToUtf8(name.filename()) + "\n";
+    t += "Leave every other plugin where your mod manager or LOOT sorted it; only the outputs move. The build\n"
+         "decided which version of each record wins with the outputs loading last: a plugin loading after them\n"
+         "wins again, and can undo what the build merged. Apply to Game puts them at the end of plugins.txt (and\n"
+         "loadorder.txt, where there is one) and changes nothing else.\n";
+    switch (kind) {
+    case InstallKind::Vortex:
+        t += "A later Sort Now (LOOT) in Vortex can move them. Check that they are still last on the Plugins page,\n"
+             "or run Apply to Game again; Multiplexer warns about it on its next check.\n\n";
+        break;
+    case InstallKind::ModOrganizer2:
+        t += "A later Sort (LOOT) in Mod Organizer 2 can move them. Check that they are still last in the right pane,\n"
+             "or run Apply to Game again; Multiplexer warns about it on its next check.\n\n";
+        break;
+    case InstallKind::Standalone:
+        t += "A LOOT sort can move them: run Apply to Game again afterwards; Multiplexer warns about it on its next\n"
+             "check.\n\n";
+        break;
+    }
 
     t += "Undoing it\n----------\n";
     t += "- Every file this app changes is backed up beside it as <file>.multiplexer-backup-<date>-<time>; copy a\n"
@@ -394,6 +481,18 @@ ApplyPlan PostCompilation::planApply(FileTransaction& tx, const Session& session
         else {
             tx.copy(result.zipPath, o.zipTo, "the package, for Vortex to install", o.replaceZip);
             plan.copiesZip = true;
+        }
+    }
+    // The Diagnostic Recorder beside it, when asked for: installed the same way, as its own mod.
+    if (!o.recorderZipTo.empty()) {
+        std::error_code ec;
+        if (result.recorderZip.empty() || !fs::is_regular_file(result.recorderZip, ec))
+            plan.recorderZipProblem = "this export did not prepare the Diagnostic Recorder (Settings: Diagnostic "
+                                      "Recorder, then export again)";
+        else {
+            tx.copy(result.recorderZip, o.recorderZipTo, "the Diagnostic Recorder, for the mod manager to install",
+                    fs::exists(o.recorderZipTo, ec));
+            plan.copiesRecorderZip = true;
         }
     }
     if (!plan.check.blockers.empty())

@@ -77,12 +77,16 @@ public:
         QString downloadsProblem;   // why it cannot be used (empty: usable)
         QString downloadsNote;
         bool zipInDownloads = false; // a file of the same name is already there
+        bool recorderAvailable = false; // this export prepared the Diagnostic Recorder's zip
+        QString recorderZipPath;
+        bool recorderInDownloads = false; // an older copy is there (it is replaced, backed up)
     };
     struct ApplyChoice {
         bool ghost = false;
         bool copyZip = false;
         bool replaceZip = false; // the archive is already in the downloads folder: replace it (else keep both)
         bool enableOutputMod = false; // MO2: enable the output mod in the profile
+        bool copyRecorder = false;    // also copy the Diagnostic Recorder's zip to the downloads folder
     };
     bool previewApply(ApplyPreview* preview, QString* message);
     bool applyToProfile(const ApplyChoice& choice, QString* message);

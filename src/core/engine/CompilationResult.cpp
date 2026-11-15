@@ -4,6 +4,7 @@
 #include "engine/Exporter.hpp"
 #include "engine/Session.hpp"
 #include "engine/ValidationEngine.hpp"
+#include "diagnostics/RecorderPackage.hpp"
 #include "util/Text.hpp"
 
 #include <unordered_set>
@@ -86,6 +87,12 @@ CompilationResult makeCompilationResult(const Session& session, const CompiledOu
         r.dataFolder = exported->directory;
         r.zipPath = exported->zipPath;
         r.disableList = exported->disableList;
+        if (!exported->recorderFolder.empty()) {
+            std::error_code ec;
+            const auto zip = exported->recorderFolder / diagnostics::kRecorderZipName;
+            if (std::filesystem::is_regular_file(zip, ec))
+                r.recorderZip = zip;
+        }
     } else {
         r.errors.push_back("the outputs were not exported");
     }

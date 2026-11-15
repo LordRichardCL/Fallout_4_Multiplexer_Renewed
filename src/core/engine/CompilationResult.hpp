@@ -26,6 +26,7 @@ struct CompilationResult {
     std::filesystem::path dataFolder;                 // "Multiplexer Output\Data"
     std::filesystem::path zipPath;                    // "Multiplexer Output.zip", when written
     std::filesystem::path disableList;                // Multiplexer_DisablePlugins.txt
+    std::filesystem::path recorderZip;                // the Diagnostic Recorder's zip, when this export prepared it
 
     std::vector<Plugin> selected; // active plugins in scope (not base game, Creation Club or generated)
     std::vector<Plugin> included; // compiled into the outputs

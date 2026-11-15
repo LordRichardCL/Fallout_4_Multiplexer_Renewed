@@ -28,6 +28,11 @@ struct DeploymentCheck {
     // Plugins an earlier build compiled that this build keeps in the load order, switched off in that
     // plugins.txt: the game would not load them (Apply to Game enables them).
     std::vector<std::string> stillDisabled;
+    // Once switched over: enabled plugins that load after an output in that plugins.txt (a re-sort by
+    // the mod manager or LOOT moved the outputs), and whether the outputs are out of their own order.
+    // The build decided every record's winner with the outputs loading last, the patch last of all.
+    std::vector<std::string> loadAfterOutputs;
+    bool outputsOutOfOrder = false;
     size_t fullPluginsAfter = 0;  // active full plugins once compiled plugins are off and outputs on
     size_t lightPluginsAfter = 0; // active light plugins (ESL, ESL-flagged) at the same point
     std::vector<std::string> blockers; // reasons nothing may be switched over
@@ -50,6 +55,9 @@ struct ApplyOptions {
     bool managerRunning = false; // the mod manager (Vortex) is running right now (the caller checks)
     std::filesystem::path zipTo; // copy the package zip here (a full file path); empty: no copy
     bool replaceZip = false;     // zipTo exists and the user chose to replace it (it is backed up)
+    // The Diagnostic Recorder's zip (when this export prepared it) into the same downloads folder, so
+    // the mod manager installs it like the package. An older copy of the same name is replaced (backed up).
+    std::filesystem::path recorderZipTo;
     // Mod Organizer 2: enable this mod (the output folder inside MO2's mods folder) in the profile.
     std::string enableOutputMod;
 };
@@ -59,6 +67,8 @@ struct ApplyPlan {
     DeploymentCheck check;
     bool copiesZip = false;
     std::string zipProblem; // why the zip is not copied although it was asked for
+    bool copiesRecorderZip = false;
+    std::string recorderZipProblem; // why the recorder's zip is not copied although it was asked for
     std::vector<GhostCheck> ghosts; // every compiled plugin, whether or not ghosting was asked for
     bool writesLoadOrder = false;   // plugins.txt (MO2 profile or Standalone) is part of the plan
     bool enablesMod = false;        // MO2: the output mod is enabled in modlist.txt

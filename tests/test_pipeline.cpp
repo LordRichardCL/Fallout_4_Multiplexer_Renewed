@@ -33,6 +33,7 @@
 #include <memory>
 #include <regex>
 #include <set>
+#include <cctype>
 #include <sstream>
 
 using namespace fo4mx;
@@ -5291,6 +5292,128 @@ TEST(standalone_apply_refuses_until_the_outputs_are_installed)
     for (const auto& g : plan.ghosts)
         CHECK(!g.ok());
     CHECK_EQ(slurp(b.root / "plugins.txt"), before);
+}
+
+// The outputs load after every other plugin (the build decided each record's winner that way). Apply
+// to Game puts them at the end and leaves the rest in its order; a later re-sort that moves an output
+// earlier is reported, and Apply to Game puts it back. The guide numbers its steps in one sequence and
+// says where the outputs belong.
+TEST(outputs_load_last_and_a_resort_that_moves_them_is_reported)
+{
+    auto b = buildAndExport("deploy_loadorder");
+    Pipeline p(b.cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    p.exportOutputs();
+    installOutputs(p, b.root);
+    auto r = resultOf(p);
+    std::vector<std::string> outputs;
+    for (const auto& f : p.exportResult()->pluginFiles)
+        outputs.push_back(pathToUtf8(f.filename()));
+    CHECK(!outputs.empty());
+
+    auto apply = [&] {
+        FileTransaction tx("Apply to Game");
+        auto plan = PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, p.exportResult()->directory,
+                                               false);
+        CHECK(plan.check.blockers.empty());
+        tx.apply();
+    };
+    apply();
+    auto entries = parsePluginsTxt(slurp(b.root / "plugins.txt"));
+    CHECK(entries.size() >= outputs.size());
+    for (size_t k = 0; k < outputs.size(); ++k) // the outputs, last, in their order
+        CHECK(iequals(entries[entries.size() - outputs.size() + k].name, outputs[k]));
+    auto d = PostCompilation::check(p.session(), *p.compiledOutput(), r);
+    CHECK(d.loadAfterOutputs.empty());
+    CHECK(!d.outputsOutOfOrder);
+
+    // A re-sort moves the outputs before a kept plugin.
+    {
+        std::string moved = "# sorted\n";
+        for (const auto& o : outputs)
+            moved += "*" + o + "\n";
+        for (const auto& e : entries) {
+            bool isOutput = false;
+            for (const auto& o : outputs)
+                isOutput = isOutput || iequals(e.name, o);
+            if (!isOutput)
+                moved += (e.active ? "*" : "") + e.name + "\n";
+        }
+        writeFile(b.root / "plugins.txt", moved);
+    }
+    d = PostCompilation::check(p.session(), *p.compiledOutput(), r);
+    CHECK(!d.loadAfterOutputs.empty());
+    CHECK(std::find(d.loadAfterOutputs.begin(), d.loadAfterOutputs.end(), std::string("ModC.esp")) !=
+          d.loadAfterOutputs.end());
+    bool warned = false;
+    for (const auto& w : d.warnings)
+        warned = warned || w.find("load after") != std::string::npos;
+    CHECK(warned);
+    // Apply to Game puts them back at the end.
+    apply();
+    entries = parsePluginsTxt(slurp(b.root / "plugins.txt"));
+    for (size_t k = 0; k < outputs.size(); ++k)
+        CHECK(iequals(entries[entries.size() - outputs.size() + k].name, outputs[k]));
+    CHECK(PostCompilation::check(p.session(), *p.compiledOutput(), r).loadAfterOutputs.empty());
+
+    // The guide: steps numbered 1, 2, 3, ... once, and a Load order section naming the outputs.
+    const auto guide = PostCompilation::instructions(p.session(), r, d);
+    CHECK(guide.find("Load order\n----------") != std::string::npos);
+    for (const auto& o : outputs)
+        CHECK(guide.find("  " + o + "\n") != std::string::npos);
+    const auto steps = guide.substr(guide.find("Steps\n"), guide.find("Load order\n") - guide.find("Steps\n"));
+    int expected = 1;
+    std::istringstream lines(steps);
+    for (std::string line; std::getline(lines, line);)
+        if (!line.empty() && std::isdigit(static_cast<unsigned char>(line[0]))) {
+            CHECK_EQ(std::stoi(line), expected);
+            ++expected;
+        }
+    CHECK(expected > 3);
+}
+
+// With the Diagnostic Recorder prepared, Apply to Game can copy its zip into the mod manager's downloads
+// folder beside the package (one copy: an older one is replaced, backed up), and the guide mentions it.
+TEST(apply_copies_the_diagnostic_recorder_to_the_downloads_folder)
+{
+    auto b = buildAndExport("deploy_recorder");
+    writeFile(b.root / "app" / "MultiplexerDiagnosticRecorder.dll", "MZ dll");
+    b.cfg.diagnosticRecorder = true;
+    b.cfg.diagnosticRecorderDll = b.root / "app" / "MultiplexerDiagnosticRecorder.dll";
+    Pipeline p(b.cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    p.exportOutputs();
+    auto r = resultOf(p);
+    CHECK(!r.recorderZip.empty());
+    CHECK(std::filesystem::is_regular_file(r.recorderZip));
+    const auto downloads = b.root / "downloads";
+    std::filesystem::create_directories(downloads);
+    writeFile(downloads / "Multiplexer Diagnostic Recorder.zip", "older");
+
+    ApplyOptions o;
+    o.switchLoadOrder = false;
+    o.recorderZipTo = downloads / "Multiplexer Diagnostic Recorder.zip";
+    FileTransaction tx("Apply to Game");
+    auto plan = PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, p.exportResult()->directory, o);
+    CHECK(plan.copiesRecorderZip);
+    CHECK(plan.recorderZipProblem.empty());
+    tx.apply();
+    CHECK(slurp(downloads / "Multiplexer Diagnostic Recorder.zip") == slurp(r.recorderZip));
+    CHECK_EQ(countBackups(downloads, "Multiplexer Diagnostic Recorder.zip"), size_t(1));
+    const auto guide = PostCompilation::instructions(p.session(), r, plan.check);
+    CHECK(guide.find("Diagnostic Recorder") != std::string::npos);
+
+    // Without the recorder prepared, asking for it changes nothing and says why.
+    auto none = r;
+    none.recorderZip.clear();
+    FileTransaction tx2("Apply to Game");
+    plan = PostCompilation::planApply(tx2, p.session(), *p.compiledOutput(), none, p.exportResult()->directory, o);
+    CHECK(!plan.copiesRecorderZip);
+    CHECK(!plan.recorderZipProblem.empty());
 }
 
 TEST(standalone_apply_switches_plugins_txt_and_ghosts_on_request)
