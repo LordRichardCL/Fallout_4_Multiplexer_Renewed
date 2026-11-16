@@ -45,6 +45,11 @@ struct CompileOptions {
     // guard still keeps out what cannot be translated), but no translated copy is written, so the game
     // reads the original file. For comparing the two in game.
     bool translatePrevis = true;
+    // Cell configuration merge (off by default; PJM's "Fix only Cell Config Conflicts"): a written cell
+    // keeps the winner's precombine and previs data and takes the last real change of each
+    // configuration field (lighting, location, encounter zone, music, water, regions...) from the
+    // versions loading today, instead of the winner's version of all of them.
+    bool mergeCellConfig = false;
     // No longer used: values in undescribed data are never rewritten because they look like FormIDs
     // (kept so older settings load). Undescribed data must be proved safe to move, or is not compiled.
     bool rewriteHeuristicReferences = false;

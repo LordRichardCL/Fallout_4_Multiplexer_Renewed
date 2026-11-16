@@ -2981,6 +2981,123 @@ TEST(cell_inheritance_from_plugins_that_stay_compiles)
     CHECK(!r.reported);
 }
 
+namespace {
+struct CellConfigResult {
+    bool lightingFromP = false;  // XCLL is ModP's
+    bool locationFromP = false;  // XLCN names Base's location
+    bool publicArea = false;     // DATA flag Public Area (bit 5)
+    bool offLimits = false;      // record flag Off Limits (bit 17)
+    size_t regions = 0;          // XCLR entries
+    bool winnerPrevis = false;   // ModL's XPRI kept
+    bool reported = false;       // a "Cell Configuration" line
+};
+
+// Base.esm (stays) defines the cell, two regions and a location. ModP.esp changes its lighting, location,
+// Public Area, Off Limits and adds a region; ModL.esp, the winner, repeats Base's values and has previs
+// data. Both compile.
+CellConfigResult compileCellConfig(const char* name, bool merge)
+{
+    auto root = buildInstall(name);
+    auto data = root / "Game" / "Data";
+    std::vector<uint8_t> xcllBase(92, 0), xcllP(92, 0);
+    xcllP[0] = 0x11; // another ambient colour
+    std::vector<uint8_t> xpri(4);
+    storeLE<uint32_t>(xpri.data(), 0x01000804);
+    auto cell = [&](const std::vector<uint8_t>& xcll, uint16_t dataFlags, bool location, std::vector<uint32_t> regions,
+                    bool previs, uint32_t flags) {
+        std::vector<Subrecord> subs{zs("EDID", "Lab")};
+        std::vector<uint8_t> d(2);
+        storeLE<uint16_t>(d.data(), dataFlags);
+        subs.push_back(raw("DATA", d));
+        subs.push_back(raw("XCLL", xcll));
+        if (!regions.empty())
+            subs.push_back(formIds("XCLR", regions));
+        if (location)
+            subs.push_back(u32("XLCN", 0x01000806));
+        if (previs)
+            subs.push_back(raw("XPRI", xpri));
+        return record("CELL", 0x01000803, subs, flags);
+    };
+    writePlugin(data / "Base.esm", {"Fallout4.esm"},
+                {cell(xcllBase, 0x0001, false, {0x01000807}, false, 0),
+                 record("REFR", 0x01000804, {zs("EDID", "Desk"), u32("NAME", 0x800)}),
+                 record("LCTN", 0x01000806, {zs("EDID", "LabLocation")}),
+                 record("REGN", 0x01000807, {zs("EDID", "RegionA")}),
+                 record("REGN", 0x01000808, {zs("EDID", "RegionB")})},
+                ESM);
+    writePlugin(data / "ModP.esp", {"Fallout4.esm", "Base.esm"},
+                {cell(xcllP, 0x0021, true, {0x01000807, 0x01000808}, false, 1u << 17),
+                 record("KYWD", 0x02000800, {zs("EDID", "EarlierOwn")})});
+    writePlugin(data / "ModL.esp", {"Fallout4.esm", "Base.esm"},
+                {cell(xcllBase, 0x0001, false, {0x01000807}, true, 0),
+                 record("KYWD", 0x02000800, {zs("EDID", "LaterOwn")})});
+    writeFile(root / "plugins.txt", "*Base.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n*ModL.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"Base.esm"};
+    cfg.compile.mergeCellConfig = merge;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CellConfigResult r;
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto& s = p.session();
+    const auto* out = p.compiledOutput();
+    CHECK(out->isCompiled(s.findPlugin("ModP.esp")->index));
+    CHECK(out->isCompiled(s.findPlugin("ModL.esp")->index));
+    const PluginIndex base = s.findPlugin("Base.esm")->index;
+    for (const auto& i : out->issues)
+        r.reported |= i.category == "Cell Configuration";
+    for (const auto& e : out->records) {
+        if (e.sig != Signature("CELL"))
+            continue;
+        r.offLimits = (e.fields.flags() & (1u << 17)) != 0;
+        for (const auto& f : e.fields.fields) {
+            for (const auto& sub : f.subs) {
+                if (sub.sig == Signature("XCLL") && !sub.bytes.empty())
+                    r.lightingFromP = sub.bytes[0] == 0x11;
+                if (sub.sig == Signature("XLCN"))
+                    r.locationFromP = !sub.refs.empty() && sub.refs[0].second == FormKey{base, 0x806};
+                if (sub.sig == Signature("DATA") && sub.bytes.size() >= 2)
+                    r.publicArea = (loadLE<uint16_t>(sub.bytes.data()) & 0x20) != 0;
+                if (sub.sig == Signature("XPRI") && !sub.refs.empty())
+                    r.winnerPrevis = true;
+            }
+            if (f.sig == Signature("XCLR"))
+                r.regions = f.isList() ? f.items.size() : 0;
+        }
+    }
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0)); // the written-content check agrees with the plan
+    (void)result;
+    return r;
+}
+} // namespace
+
+// Cell configuration merge (optional): the winner's previs data stays, each configuration field takes
+// its last real change (a version repeating the defining plugin's value is not one), regions are the
+// union, flags bit by bit. Off: the winner's version as it is.
+TEST(cell_configuration_merge_takes_the_last_real_change)
+{
+    const auto on = compileCellConfig("cellconfigon", true);
+    CHECK(on.lightingFromP);
+    CHECK(on.locationFromP);
+    CHECK(on.publicArea);
+    CHECK(on.offLimits);
+    CHECK_EQ(on.regions, size_t(2));
+    CHECK(on.winnerPrevis);
+    CHECK(on.reported);
+
+    const auto off = compileCellConfig("cellconfigoff", false);
+    CHECK(!off.lightingFromP);
+    CHECK(!off.locationFromP);
+    CHECK(!off.publicArea);
+    CHECK(!off.offLimits);
+    CHECK_EQ(off.regions, size_t(1));
+    CHECK(off.winnerPrevis);
+    CHECK(!off.reported);
+}
+
 // The guard: when a previs file holds a FormID the output cannot express (here a record of MastQ, a
 // master of ModW that nothing written refers to), the cell would lose that object in game. ModW stays
 // in the load order, so the cell keeps today's record and file.

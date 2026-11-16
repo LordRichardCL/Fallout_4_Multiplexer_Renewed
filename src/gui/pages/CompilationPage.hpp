@@ -49,6 +49,7 @@ private:
     QCheckBox* merge_;
     QCheckBox* light_;
     QCheckBox* translatePrevis_;
+    QCheckBox* mergeCellConfig_;
     QCheckBox* patch_;
     QCheckBox* patchOnly_;
     QLineEdit* outputDir_;

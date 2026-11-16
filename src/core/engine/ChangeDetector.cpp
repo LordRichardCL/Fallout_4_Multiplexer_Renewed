@@ -530,6 +530,8 @@ uint64_t ChangeDetector::settingsHash(const CompileOptions& c, const std::vector
                     // Translated previs files are export output: switching this changes what is written.
                     // Only "off" is added, so a build made with the default keeps its hash.
                     (c.translatePrevis ? "" : "|noprevistranslation") +
+                    // The merged cell configuration changes the written cells; only "on" is added.
+                    (c.mergeCellConfig ? "|mergecellconfig" : "") +
                     "|" + c.patchName + "|" + runtimeName;
     for (const auto& r : c.rules)
         s += "|" + toLower(r.pattern) + "=" + std::to_string(r.output);

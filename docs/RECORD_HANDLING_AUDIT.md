@@ -900,7 +900,7 @@ The build after the Clean precombine fix compiled 484 plugins with no errors, bu
    - the parent cell is context, not identity;
    - moving a record to another cell or changing its persistence is structural;
    - every field gets a merge contract (identity, parent rules, field classes, FormID references, validation, automatic-merge level), filled in from xEdit's definitions and real plugin data, not from guesses at what the abbreviations mean.
-2. **Cell configuration merge (requested; optional setting, off by default).** Like PJM's FO4CheckPrevisbines option 4 ("Fix only Cell Config Conflicts"): the written cell keeps the winner's precombine and previs data, and brings forward the last real change of each configuration field from earlier versions.
+2. **Cell configuration merge (requested; optional setting, off by default).** CELL records written to outputs: **done** (see "Cell configuration merge" below). Still to do: WRLD, and cells whose winner stays (Multiplexer_Patch.esp). Like PJM's FO4CheckPrevisbines option 4 ("Fix only Cell Config Conflicts"): the written cell keeps the winner's precombine and previs data, and brings forward the last real change of each configuration field from earlier versions.
    - **Fields brought forward.**
      - CELL: MHDT, EDID, XCLL, XLCN, XCMO, XEZN, XCAS, XCIM, XGDR, XCCM, XCWT, XWCU, XCLW, XILW, LTMP, and XCLR (regions, the union of every version's list).
      - CELL flags: No LOD Water, Show Sky, Use Sky Lighting, Distance LOD Only, Has Water, Sunlight Shadows, Can Travel From Here, Player Followers Can't Travel Here, Public Area, Hand Changed, Can't Wait, Off Limits.
@@ -1048,3 +1048,20 @@ Tests:
 Both fail without the change.
 
 Previs follow-up 1 remains: settle in game whether translating .uvd files is needed at all. That needs the owner to compare America Rising 2 cells in a build with "Translate previs files" turned off against one with it on.
+
+## Cell configuration merge (cells in outputs)
+
+New option `mergeCellConfig` (Compilation page "Merge cell configuration", CLI `--merge-cell-config`), off by default, so builds made without it are unchanged. It runs after cell inheritance, for each CELL the build writes to an output. It skips:
+- cells whose written version is partial (flag 0x4000);
+- cells the inheritance guard keeps out;
+- cells with a single version.
+
+Over the versions that load today up to the written one (partial versions supply nothing):
+- **Fields** MHDT, EDID, XCLL, XLCN, XCMO, XEZN, XCAS, XCIM, XGDR, XCCM, XCWT, XWCU (with XWCN), XCLW, XILW and LTMP take the last version whose value is set and differs from the defining plugin's (`chain[0]`). If that is the written version itself, nothing changes. A field the written version lacks is inserted after the field before it in the source version, as cell inheritance does.
+- **XCLR** (regions): the written version's list plus every region another version lists, without duplicates and skipping null entries.
+- **CELL DATA flags**, bit by bit (xEdit's FO4 definition): Has Water (1), Can't Travel From Here (2), No LOD Water (3), Public Area (5), Hand Changed (6), Show Sky (7), Use Sky Lighting (8), Sunlight Shadows (11), Distant LOD only (12), Player Followers Can't Travel Here (13).
+- **Record header flags**: Off Limits (17) and Can't Wait (19). Bit numbers are from xEdit's `wbDefinitionsFO4.pas` CELL definition, which also lists No Pre Vis (7), Persistent (10), Partial Form (14) and Compressed (18). Those four are never changed.
+
+Never touched: PCMB, XCRI, XPRI, VISI, RVIS and the record's identity. Values are compared on their normalized form (bytes with FormIDs as FormKeys), so the same record written in two plugins' numbering counts as equal. Each cell changed gets one "Cell Configuration" Info line naming each field and the plugin it came from. A cell whose versions cannot be compared gets a Warning and is written as it was.
+
+Test `cell_configuration_merge_takes_the_last_real_change` has three versions of a cell: Base.esm, which stays and defines it; ModP.esp; and ModL.esp, the winner. ModP changes lighting, location, Public Area and Off Limits, and adds a region. ModL repeats Base's values and has previs data. With the option on, the written cell has ModP's changes, both regions and ModL's XPRI. With it off, it is ModL's version as it is. Both exports pass the written-content check.

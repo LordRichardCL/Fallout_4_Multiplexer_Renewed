@@ -193,7 +193,14 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "compile: this setting only decides whether translated copies are written. The checks still run, and a "
         "previs file that cannot be translated keeps its cell's plugins out. Turn off only to compare the two in "
         "game.");
-    for (auto* c : {merge_, light_, translatePrevis_}) {
+    mergeCellConfig_ = new QCheckBox("Merge cell configuration (lighting, location, water, regions...)");
+    mergeCellConfig_->setToolTip(
+        "A cell several mods change keeps the winning mod's precombine and previs data, and takes the last real "
+        "change of each configuration field from the others: lighting, lighting template, location, encounter "
+        "zone, music, acoustic space, image space, god rays, water, regions and the cell's flags. Like "
+        "FO4CheckPrevisbines' \"Fix only Cell Config Conflicts\". Off: the winning mod's version is written as "
+        "it is. Every field taken is listed in the report (Cell Configuration).");
+    for (auto* c : {merge_, light_, translatePrevis_, mergeCellConfig_}) {
         c->setStyleSheet("QCheckBox { spacing: 8px; }");
         ml->addWidget(c);
     }
@@ -496,7 +503,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     connect(outputDir_, &QLineEdit::textChanged, this, [this] { storeOptions(); });
     connect(strategy_, &QComboBox::currentIndexChanged, this, [this] { storeOptions(); });
     connect(rules_, &QPlainTextEdit::textChanged, this, [this] { storeOptions(); });
-    for (auto* c : {autoOutputs_, merge_, light_, translatePrevis_, patch_, patchOnly_})
+    for (auto* c : {autoOutputs_, merge_, light_, translatePrevis_, mergeCellConfig_, patch_, patchOnly_})
         connect(c, &QCheckBox::toggled, this, [this] { storeOptions(); });
     loadOptions();
 }
@@ -598,6 +605,7 @@ void CompilationPage::loadOptions()
     merge_->setChecked(c.mergeCompatible);
     light_->setChecked(c.lightOutputsWhenPossible);
     translatePrevis_->setChecked(c.translatePrevis);
+    mergeCellConfig_->setChecked(c.mergeCellConfig);
     patchOnly_->setChecked(c.patchOnly);
     patch_->setChecked(c.buildPatch || c.patchOnly);
     patch_->setEnabled(!c.patchOnly);
@@ -619,6 +627,7 @@ void CompilationPage::storeOptions()
     c.mergeCompatible = merge_->isChecked();
     c.lightOutputsWhenPossible = light_->isChecked();
     c.translatePrevis = translatePrevis_->isChecked();
+    c.mergeCellConfig = mergeCellConfig_->isChecked();
     c.patchOnly = patchOnly_->isChecked();
     c.buildPatch = c.patchOnly || patch_->isChecked();
     app_->config().exportOptions.outputDirectory = toPath(outputDir_->text().trimmed());

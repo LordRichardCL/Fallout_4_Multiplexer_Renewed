@@ -894,6 +894,232 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             }
         }
     }
+    // Cell configuration merge (optional, PJM's FO4CheckPrevisbines "Fix only Cell Config Conflicts"): a
+    // written cell keeps the winner's precombine and previs data and takes the last real change of each
+    // configuration field from the versions loading today. A change is a version whose value is set and
+    // differs from the defining plugin's; a version only repeating that value is not one. Regions are
+    // the union of every version's list. Never touched: PCMB, XCRI, XPRI, VISI, RVIS, the No Pre Vis
+    // flag and the record's identity. Partial cells, and cells the inheritance guard keeps out, as they are.
+    if (options.mergeCellConfig) {
+        Normalizer cfgNorm(session);
+        static const Signature kConfigSigs[] = {Signature("EDID"), Signature("MHDT"), Signature("XCLL"),
+                                                Signature("XLCN"), Signature("XCMO"), Signature("XEZN"),
+                                                Signature("XCAS"), Signature("XCIM"), Signature("XGDR"),
+                                                Signature("XCCM"), Signature("XCWT"), Signature("XWCU"),
+                                                Signature("XCLW"), Signature("XILW"), Signature("LTMP")};
+        // xEdit's CELL DATA flags: Has Water, Can't Travel From Here, No LOD Water, Public Area, Hand
+        // Changed, Show Sky, Use Sky Lighting, Sunlight Shadows, Distant LOD only, Player Followers Can't
+        // Travel Here. Record flags: Off Limits (17), Can't Wait (19); never No Pre Vis (7).
+        constexpr uint16_t kDataBits = (1u << 1) | (1u << 2) | (1u << 3) | (1u << 5) | (1u << 6) | (1u << 7) |
+                                       (1u << 8) | (1u << 11) | (1u << 12) | (1u << 13);
+        constexpr uint32_t kRecordBits = (1u << 17) | (1u << 19);
+        auto sameSubs = [](const std::vector<NormSub>& a, const std::vector<NormSub>& b) {
+            if (a.size() != b.size())
+                return false;
+            for (size_t i = 0; i < a.size(); ++i)
+                if (a[i].sig != b[i].sig || a[i].bytes != b[i].bytes || a[i].refs != b[i].refs)
+                    return false;
+            return true;
+        };
+        auto sameField = [&](const Field* a, const Field* b) {
+            if (!a || !b)
+                return a == b;
+            if (!sameSubs(a->subs, b->subs) || a->items.size() != b->items.size())
+                return false;
+            for (size_t i = 0; i < a->items.size(); ++i)
+                if (!sameSubs(a->items[i].subs, b->items[i].subs))
+                    return false;
+            return true;
+        };
+        auto blank = [](const Field* f) {
+            if (!f)
+                return true;
+            auto subsBlank = [](const std::vector<NormSub>& subs) {
+                for (const auto& s : subs) {
+                    for (const auto& [off, k] : s.refs)
+                        if (k.valid())
+                            return false;
+                    for (uint8_t b : s.bytes)
+                        if (b != 0)
+                            return false;
+                }
+                return true;
+            };
+            if (!subsBlank(f->subs))
+                return false;
+            for (const auto& it : f->items)
+                if (!subsBlank(it.subs))
+                    return false;
+            return true;
+        };
+        auto bySig = [](FieldSet& set, Signature sig) -> Field* {
+            for (auto& f : set.fields) {
+                if (f.sig == sig)
+                    return &f;
+                for (const auto& s : f.subs)
+                    if (s.sig == sig)
+                        return &f;
+            }
+            return nullptr;
+        };
+        auto u16Of = [](const Field* f) -> uint16_t {
+            return f && !f->subs.empty() && f->subs[0].bytes.size() >= 2 ? loadLE<uint16_t>(f->subs[0].bytes.data())
+                                                                          : 0;
+        };
+        for (auto& e : out.records) {
+            if (e.sig != sig::CELL || previsCells.count(e.key))
+                continue;
+            const auto* g = session.findGroup(e.key);
+            if (!g)
+                continue;
+            const auto chain = session.instances(*g);
+            size_t w = chain.size();
+            for (size_t i = chain.size(); i-- > 0;)
+                if (chain[i].plugin == e.winner) {
+                    w = i;
+                    break;
+                }
+            if (w == chain.size() || w == 0 || (chain[w].flags & kCellPartialFlag))
+                continue;
+            std::vector<std::string> taken;
+            try {
+                // The versions loading today up to the written one; partial versions supply nothing here.
+                std::vector<FieldSet> versions;
+                std::vector<PluginIndex> from;
+                for (size_t i = 0; i <= w; ++i) {
+                    if (i > 0 && (chain[i].flags & kCellPartialFlag))
+                        continue;
+                    versions.push_back(splitFields(cfgNorm.normalize(chain[i]), session.defs));
+                    from.push_back(chain[i].plugin);
+                }
+                const size_t last = versions.size() - 1; // the written version
+                auto& base = versions.front();
+                for (const Signature sig : kConfigSigs) {
+                    const Field* baseField = bySig(base, sig);
+                    int change = -1;
+                    for (size_t v = versions.size(); v-- > 1;) {
+                        const Field* f = bySig(versions[v], sig);
+                        if (!blank(f) && !sameField(f, baseField)) {
+                            change = static_cast<int>(v);
+                            break;
+                        }
+                    }
+                    if (change < 0 || static_cast<size_t>(change) == last)
+                        continue;
+                    const Field* src = bySig(versions[static_cast<size_t>(change)], sig);
+                    Field* dst = bySig(e.fields, sig);
+                    if (sameField(src, dst))
+                        continue;
+                    if (dst) {
+                        *dst = *src;
+                    } else {
+                        // After the field that precedes it in the version it comes from, else at the end.
+                        const auto& sf = versions[static_cast<size_t>(change)].fields;
+                        size_t pos = e.fields.fields.size();
+                        for (size_t p = static_cast<size_t>(src - sf.data()); p-- > 0;) {
+                            auto it = std::find_if(e.fields.fields.begin(), e.fields.fields.end(),
+                                                   [&](const Field& f) { return f.key == sf[p].key; });
+                            if (it != e.fields.fields.end()) {
+                                pos = static_cast<size_t>(it - e.fields.fields.begin()) + 1;
+                                break;
+                            }
+                        }
+                        e.fields.fields.insert(e.fields.fields.begin() + static_cast<std::ptrdiff_t>(pos), *src);
+                    }
+                    taken.push_back(sig.str() + " from " + session.pluginName(from[static_cast<size_t>(change)]));
+                }
+                // Regions: every region any version lists, the written version's first.
+                {
+                    Field* dst = bySig(e.fields, Signature("XCLR"));
+                    std::set<std::string> sources;
+                    size_t added = 0;
+                    for (size_t v = 0; v < last; ++v) {
+                        const Field* f = bySig(versions[v], Signature("XCLR"));
+                        if (!f || !f->isList())
+                            continue;
+                        if (!dst) {
+                            // The written version lists none: start from this version's field.
+                            Field copy = *f;
+                            copy.items.clear();
+                            e.fields.fields.push_back(std::move(copy));
+                            dst = &e.fields.fields.back();
+                        }
+                        if (!dst->isList())
+                            break;
+                        for (const auto& item : f->items) {
+                            const bool real = !item.subs.empty() && !item.subs[0].refs.empty() &&
+                                              item.subs[0].refs[0].second.valid();
+                            const bool listed = std::any_of(dst->items.begin(), dst->items.end(),
+                                                            [&](const ListItem& d) { return sameSubs(d.subs, item.subs); });
+                            if (real && !listed) {
+                                dst->items.push_back(item);
+                                ++added;
+                                sources.insert(session.pluginName(from[v]));
+                            }
+                        }
+                    }
+                    if (added)
+                        taken.push_back("XCLR (" + std::to_string(added) + " region(s)) from " +
+                                        join(std::vector<std::string>(sources.begin(), sources.end()), ", "));
+                }
+                // Flags, bit by bit: the last version whose bit differs from the defining plugin's.
+                auto mergeBits = [&](uint32_t mask, auto get, auto set, const char* what) {
+                    const uint32_t baseValue = get(base);
+                    uint32_t value = get(versions[last]);
+                    std::set<std::string> sources;
+                    for (uint32_t bit = 0; bit < 32; ++bit) {
+                        const uint32_t m = 1u << bit;
+                        if (!(mask & m))
+                            continue;
+                        for (size_t v = versions.size(); v-- > 1;)
+                            if ((get(versions[v]) & m) != (baseValue & m)) {
+                                if (v != last && (value & m) != (get(versions[v]) & m)) {
+                                    value = (value & ~m) | (get(versions[v]) & m);
+                                    sources.insert(session.pluginName(from[v]));
+                                }
+                                break;
+                            }
+                    }
+                    if (!sources.empty() && set(value))
+                        taken.push_back(std::string(what) + " from " +
+                                        join(std::vector<std::string>(sources.begin(), sources.end()), ", "));
+                };
+                mergeBits(
+                    kDataBits, [&](FieldSet& s) -> uint32_t { return u16Of(bySig(s, Signature("DATA"))); },
+                    [&](uint32_t v) {
+                        Field* d = bySig(e.fields, Signature("DATA"));
+                        if (!d || d->subs.empty() || d->subs[0].bytes.size() < 2)
+                            return false;
+                        storeLE<uint16_t>(d->subs[0].bytes.data(), static_cast<uint16_t>(v));
+                        return true;
+                    },
+                    "DATA flags");
+                mergeBits(
+                    kRecordBits, [&](FieldSet& s) -> uint32_t { return s.flags(); },
+                    [&](uint32_t v) {
+                        Field* f = e.fields.find("@flags");
+                        if (!f || f->subs.empty() || f->subs[0].bytes.size() < 4)
+                            return false;
+                        storeLE<uint32_t>(f->subs[0].bytes.data(), v);
+                        return true;
+                    },
+                    "record flags (Off Limits, Can't Wait)");
+            } catch (const std::exception& ex) {
+                addIssue(Severity::Warning, "Cell Configuration",
+                         session.formLabel(e.key) + ": its versions could not be compared (" + ex.what() +
+                             "); written from " + session.pluginName(e.winner) + " as it is",
+                         e.key, session.pluginName(e.winner));
+                continue;
+            }
+            if (!taken.empty()) {
+                e.size = estimateSize(e.fields);
+                addIssue(Severity::Info, "Cell Configuration",
+                         session.formLabel(e.key) + " is written from " + session.pluginName(e.winner) +
+                             " with the last change of each configuration field: " + join(taken, ", "),
+                         e.key, session.pluginName(e.winner));
+            }
+        }
+    }
     // Previs (XPRI): a new reference listed there is in a previs file (.uvd), which holds its FormID in
     // the numbering of the plugin whose cell record wins. A cell's own previs file is translated into
     // the output's numbering when the cell is written (P2b, "Previs Numbering" below), or keeps the
