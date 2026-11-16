@@ -381,6 +381,24 @@ bool contentCandidate(const std::string& p, const ReferenceScanOptions& o)
         (iendsWith(p, ".ini") || iendsWith(p, ".json") || iendsWith(p, ".txt") || iendsWith(p, ".toml") ||
          iendsWith(p, ".xml")))
         return true;
+    // Tool configs elsewhere in Data: Spell/Perk/Item Distributor (Data\*_DISTR.ini), Base Object
+    // Swapper (Data\*_SWAP.ini) and tools reading their own folder (Pip-Boy Tabs, Perk Framework...).
+    // They name records as "0x800~Plugin.esp" or "Plugin.esp|800"; the game's own folders hold none.
+    // Other files in Data itself (mod manager lists, readmes) are not configs, and this app's own
+    // reports name every plugin.
+    if (o.configs && isDataRootToolConfig(p))
+        return true;
+    if (o.configs && p.find('\\') != std::string::npos &&
+        (iendsWith(p, ".ini") || iendsWith(p, ".json") || iendsWith(p, ".toml"))) {
+        static constexpr const char* kAssetRoots[] = {"multiplexer reports\\", "tools\\",
+            "meshes\\", "textures\\", "materials\\", "sound\\", "music\\", "strings\\", "interface\\", "scripts\\",
+            "vis\\", "lodsettings\\", "video\\", "seq\\", "terrain\\", "lod\\", "distantlod\\", "shadersfx\\",
+            "programs\\", "fomod\\", "bcr\\", "f4se\\", "mcm\\"};
+        for (const char* root : kAssetRoots)
+            if (istartsWith(p, root))
+                return false;
+        return true;
+    }
     return o.binaries && istartsWith(p, "f4se\\plugins\\") && iendsWith(p, ".dll");
 }
 
@@ -409,7 +427,9 @@ std::vector<ReferenceScanner::Mention> ReferenceScanner::mentions(std::string_vi
             size_t digits = q;
             while (digits < text.size() && digits - q < 8 && std::isxdigit(static_cast<unsigned char>(text[digits])))
                 ++digits;
-            const bool longer = digits < text.size() && std::isxdigit(static_cast<unsigned char>(text[digits]));
+            // The FormID ends the word: "Plugin.esp|ActorTypeNPC" (a SPID filter) is not FormID AC.
+            const bool longer = digits < text.size() && (std::isalnum(static_cast<unsigned char>(text[digits])) ||
+                                                         text[digits] == '_');
             if (digits > q && !longer) {
                 m.pair = true;
                 m.idBegin = q;
@@ -417,8 +437,9 @@ std::vector<ReferenceScanner::Mention> ReferenceScanner::mentions(std::string_vi
                 m.formId = static_cast<uint32_t>(std::stoul(std::string(text.substr(q, digits - q)), nullptr, 16));
             }
         }
-        // "0x<FormID>:Plugin.esp" (X-Cell and other configs): the FormID written before the name.
-        if (!m.pair && at >= 4 && text[at - 1] == ':') {
+        // "0x<FormID>:Plugin.esp" (X-Cell and other configs) or "0x<FormID>~Plugin.esp" (Spell/Perk/Item
+        // Distributor, Base Object Swapper): the FormID written before the name.
+        if (!m.pair && at >= 4 && (text[at - 1] == ':' || text[at - 1] == '~')) {
             size_t digits = at - 1;
             while (digits > 0 && at - 1 - digits < 8 && std::isxdigit(static_cast<unsigned char>(text[digits - 1])))
                 --digits;

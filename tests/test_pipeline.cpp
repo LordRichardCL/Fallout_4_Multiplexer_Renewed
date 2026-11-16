@@ -4303,6 +4303,71 @@ TEST(references_reverse_pairs_and_settlement_blueprints)
     CHECK(p.session().findPlugin("ModS.esp")->eligibility == Eligibility::Eligible);
 }
 
+// 6e2. Tool configs outside F4SE\Plugins and MCM: Spell/Perk/Item Distributor (Data\*_DISTR.ini) and
+//      Base Object Swapper (Data\*_SWAP.ini) write "0x<FormID>~Plugin.esp", tools such as Pip-Boy Tabs
+//      read their own folder. They were not scanned, so a compiled plugin's records named there were
+//      looked up in a disabled plugin (True Damage's NPC perk was never given out). A SPID filter
+//      after the name ("ModS.esp|ActorTypeNPC") is not a FormID.
+TEST(references_tool_configs_in_data_are_rewritten)
+{
+    auto spid = ReferenceScanner::inspect(kNames, "mods_distr.ini",
+                                          bytesOf("; comment\nPerk = 0x812~ModS.esp|ActorTypeNPC|NONE|NONE\n"));
+    CHECK_EQ(spid.size(), size_t(1));
+    if (!spid.empty()) {
+        CHECK_EQ(spid[0].cls, ReferenceClass::Rewritable);
+        CHECK(spid[0].hasFormId && spid[0].formId == 0x812u);
+    }
+    auto filter = ReferenceScanner::inspect(kNames, "other_distr.ini",
+                                            bytesOf("Spell = SomeSpell|ModS.esp|ActorTypeNPC\n"));
+    CHECK_EQ(filter.size(), size_t(1));
+    if (!filter.empty())
+        CHECK(!filter[0].hasFormId);
+
+    auto root = referenceInstall("reftoolconfigs");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModS.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000812, {zs("EDID", "ModS_Keyword")})});
+    writeFile(data / "ModS_DISTR.ini", "Perk = 0x812~ModS.esp|NONE|NONE\nSpell = 0x2F1F~Fallout4.esm\n");
+    writeFile(data / "ModS_SWAP.ini", "[Forms]\n0x2F1F~Fallout4.esm|0x812~ModS.esp\n");
+    writeFile(data / "PipboyTabs" / "ModSTab.ini", "FirstList ModS.esp|812\n");
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto refs = referencesOf(p.session(), "ModS.esp");
+    CHECK_EQ(refs.size(), size_t(3));
+    for (const auto* r : refs)
+        CHECK_EQ(r->cls, ReferenceClass::Rewritable);
+    CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+    CHECK(p.compile());
+    auto result = p.exportOutputs();
+    const FormMapping* moved = nullptr;
+    for (const auto& mp : p.compiledOutput()->mappings)
+        if (iequals(mp.sourcePlugin, "ModS.esp") && mp.sourceObjectId == 0x812)
+            moved = &mp;
+    CHECK(moved != nullptr);
+    if (!moved)
+        return;
+    char hex[16];
+    std::snprintf(hex, sizeof(hex), "%X", moved->objectId);
+    const std::string id = hex;
+    const auto distr = result.directory / "mods_distr.ini";
+    CHECK(std::filesystem::exists(distr));
+    if (std::filesystem::exists(distr)) {
+        const auto text = slurpFile(distr);
+        CHECK(text.find("Perk = 0x" + id + "~" + moved->outputPlugin + "|NONE|NONE") != std::string::npos);
+        CHECK(text.find("Spell = 0x2F1F~Fallout4.esm") != std::string::npos);
+    }
+    const auto swap = result.directory / "mods_swap.ini";
+    CHECK(std::filesystem::exists(swap));
+    if (std::filesystem::exists(swap))
+        CHECK(slurpFile(swap).find("0x2F1F~Fallout4.esm|0x" + id + "~" + moved->outputPlugin) != std::string::npos);
+    const auto tab = result.directory / "pipboytabs" / "modstab.ini";
+    CHECK(std::filesystem::exists(tab));
+    if (std::filesystem::exists(tab))
+        CHECK(slurpFile(tab).find("FirstList " + moved->outputPlugin + "|" + id) != std::string::npos);
+}
+
 // 6f. A workbench whose base object is a record of a compiled plugin: the blueprint stores that base
 //     as a bare number, so the copy is not written and the plugin stays.
 TEST(references_settlement_workbench_with_a_moving_base)

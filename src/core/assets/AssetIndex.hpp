@@ -14,6 +14,26 @@ namespace fo4mx {
 
 class VirtualFileSystem;
 
+// Tool configs read from the Data folder itself: Spell/Perk/Item Distributor (*_DISTR.ini) and Base
+// Object Swapper (*_SWAP.ini). The only Data-root files the asset index holds; they name records.
+inline bool isDataRootToolConfig(const std::string& name)
+{
+    auto ends = [&](const char* suffix) {
+        const size_t n = std::char_traits<char>::length(suffix);
+        if (name.size() <= n || name.find('\\') != std::string::npos)
+            return false;
+        for (size_t i = 0; i < n; ++i) {
+            char c = name[name.size() - n + i];
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+            if (c != suffix[i])
+                return false;
+        }
+        return true;
+    };
+    return ends("_distr.ini") || ends("_swap.ini");
+}
+
 enum class AssetType : uint8_t {
     Texture,
     Mesh,

@@ -14,7 +14,7 @@ namespace fo4mx {
 
 struct ReferenceScanOptions {
     bool scripts = true; // .pex and .psc
-    bool configs = true; // INI, JSON, TOML, XML, TXT under F4SE\Plugins and MCM
+    bool configs = true; // INI, JSON, TOML, XML, TXT under F4SE\Plugins and MCM; INI, JSON, TOML in tool folders and Data\*_DISTR.ini / *_SWAP.ini
     bool binaries = true; // F4SE plugin DLLs
     bool paths = true;   // folders and file names
     bool records = true; // script properties (VMAD) in the plugins' own records

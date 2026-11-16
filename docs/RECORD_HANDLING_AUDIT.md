@@ -1020,3 +1020,17 @@ SS2's check is `GetFormFromFile(GetLoadOrderAgnosticFormID(config.GetFormID()), 
 Tests:
 - the old script-property test now checks the whole path: the plugin compiles, the exported config names the output, the other properties are unchanged, the export's written-content check has no errors, and a plugin named in another plugin's string array is still kept out;
 - a unit test checks the replacement: only the named script's property, only on a matching value, bytes after it kept. This test found that the first version did not read the property names of other scripts, which put the reader out of step.
+
+## Tool configs outside F4SE\Plugins and MCM
+
+Found in build `161126 190218`: Spell/Perk/Item Distributor (SPID) logged `Perk [0x1] (True Damage.esp) FAIL - formID doesn't exist` for `TD_PERK_NPC` and `TD_PERK_Vertibird`. Both records exist, but True Damage.esp was compiled and disabled, so the perks were not given to NPCs. The reference scan read configs only under `F4SE\Plugins` and `MCM`. SPID reads `Data\*_DISTR.ini` and Base Object Swapper reads `Data\*_SWAP.ini`; neither file was scanned, so nothing kept the plugin or rewrote the line.
+
+The scan now also reads:
+- `Data\*_DISTR.ini` and `Data\*_SWAP.ini`. The asset index keeps these two Data-root patterns, so they can be found and relinked. Other Data-root files (mod manager lists such as Vortex's deployment JSON, readmes) are not configs and are left alone.
+- INI, JSON and TOML files in any other folder, except the game's own asset folders, `Tools\`, `fomod\`, `bcr\` (handled by name) and this app's `Multiplexer Reports\`. This covers tools that read a folder of their own, such as Pip-Boy Tabs.
+
+The written form `0x<FormID>~Plugin.esp` (SPID, Base Object Swapper) is now a FormID pair, like X-Cell's `0x<FormID>:Plugin.esp`. Each pair is rewritten to the output plugin and the record's new FormID. A plain mention without a FormID stays Unknown and keeps the plugin.
+
+A FormID written after the name must also end the word. Before this change, the SPID filter `True Damage.esp|ActorTypeNPC` would have been read as FormID `AC`.
+
+Test: `references_tool_configs_in_data_are_rewritten` covers a SPID line with filters, a SWAP line and a tool-folder INI. All three are rewritten in the export, and lines naming other plugins are unchanged.

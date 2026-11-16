@@ -177,8 +177,8 @@ void AssetScanner::scan(Session& session, const AssetScanOptions& options, Progr
     const uint32_t looseBase = 1'000'000;
     for (uint32_t fi = 0; fi < vfs.files().size(); ++fi) {
         const auto& f = vfs.files()[fi];
-        if (f.relativePath.find('\\') == std::string::npos)
-            continue; // Data root: plugins, archives, ini files
+        if (f.relativePath.find('\\') == std::string::npos && !isDataRootToolConfig(f.relativePath))
+            continue; // Data root: plugins, archives, ini files (tool configs naming records are kept)
         std::string key = normalizeAssetPath(f.relativePath);
         if (istartsWith(key, "fomod\\"))
             continue;
