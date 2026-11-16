@@ -2757,6 +2757,35 @@ TEST(previs_ids_that_point_to_no_record_are_mapped_to_nothing)
     CHECK(noted);
 }
 
+// Previs follow-up 2: a previs file with no IDs (no ID table, offset 0) reads the same in any
+// numbering, so the cell's plugins compile and the original file is used unchanged (Diamond City's
+// 00000FE1 kept three plugins out).
+TEST(previs_file_without_ids_needs_no_translation)
+{
+    auto root = buildInstall("previsempty");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModW.esp", {"Fallout4.esm"},
+                {record("CELL", 0x00000805, {zs("EDID", "VanillaCell")}),
+                 record("REFR", 0x01000800, {zs("EDID", "NewRef"), u32("NAME", 0x800)})});
+    std::filesystem::create_directories(data / "Vis" / "Fallout4.esm");
+    std::vector<uint8_t> empty(0x150, 0);
+    storeLE<uint32_t>(empty.data(), 0xD6000012);
+    storeLE<uint32_t>(empty.data() + 0x08, uint32_t(empty.size()));
+    writeFile(data / "Vis" / "Fallout4.esm" / "00000805.uvd", std::string(empty.begin(), empty.end()));
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModW.esp\n");
+    auto cfg = configFor(root);
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto* out = p.compiledOutput();
+    CHECK(out->isCompiled(p.session().findPlugin("ModW.esp")->index));
+    CHECK(out->previsFiles.empty()); // nothing to translate: the original is used
+    for (const auto& [plugin, why] : p.session().autoRetained)
+        CHECK(why.find("not recognised") == std::string::npos);
+}
+
 // Translate previs files off (for comparing in game): the same plugins compile, nothing is written,
 // and the report says the original file is used.
 TEST(previs_translation_can_be_turned_off)

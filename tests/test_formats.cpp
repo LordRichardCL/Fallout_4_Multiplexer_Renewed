@@ -755,4 +755,12 @@ TEST(previs_file_id_table_is_read_from_its_header)
     broken[0] = 0;
     CHECK(!readPrevisFile(broken).recognised);
     CHECK(!readPrevisFile(std::vector<uint8_t>(16, 0)).recognised);
+
+    // No IDs and no ID table (offset 0), as Diamond City's 00000FE1: nothing to read in a numbering.
+    std::vector<uint8_t> empty(0x150, 0);
+    storeLE<uint32_t>(empty.data(), 0xD6000012);
+    storeLE<uint32_t>(empty.data() + 0x08, uint32_t(empty.size()));
+    auto e = readPrevisFile(empty);
+    CHECK(e.recognised);
+    CHECK(e.ids.empty());
 }

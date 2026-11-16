@@ -22,6 +22,12 @@ PrevisFile readPrevisFile(std::span<const uint8_t> b)
     }
     f.idCount = loadLE<uint32_t>(b.data() + 0x40);
     f.idOffset = loadLE<uint32_t>(b.data() + 0x50);
+    // No IDs: the file has no ID table (offset 0) and nothing read in a plugin's numbering, so it reads
+    // the same whichever plugin holds the cell (Diamond City's 00000FE1).
+    if (f.idCount == 0) {
+        f.recognised = true;
+        return f;
+    }
     if (f.idOffset < kHeaderSize || f.idOffset % 4 != 0 || f.idCount > (b.size() - f.idOffset) / 4) {
         f.problem = "its ID table (" + std::to_string(f.idCount) + " IDs at offset " + std::to_string(f.idOffset) +
                     ") does not fit in the file";

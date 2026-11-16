@@ -912,7 +912,7 @@ The build after the Clean precombine fix compiled 484 plugins with no errors, bu
    - **Reporting:** each brought-forward field is listed, with the plugin it came from.
 3. **Previs follow-ups:**
    - Settle in game whether translating .uvd files is needed at all.
-   - Accept .uvd files with no IDs.
+   - Accept .uvd files with no IDs. **Done** (see "Previs files with no IDs" below).
    - Map IDs that point to records that no longer exist instead of refusing them. **Done** (see "Previs IDs that point to no record" below).
 4. **Compatibility patch analysis (requested; later).** The owner's specification is in `docs/specs/COMPATIBILITY_PATCH_ANALYSIS.txt`. It covers:
    - change provenance across the whole override chain: what each plugin changed, and which changes survive, are lost, compete or could coexist;
@@ -1034,3 +1034,17 @@ The written form `0x<FormID>~Plugin.esp` (SPID, Base Object Swapper) is now a Fo
 A FormID written after the name must also end the word. Before this change, the SPID filter `True Damage.esp|ActorTypeNPC` would have been read as FormID `AC`.
 
 Test: `references_tool_configs_in_data_are_rewritten` covers a SPID line with filters, a SWAP line and a tool-folder INI. All three are rewritten in the export, and lines naming other plugins are unchanged.
+
+## Previs files with no IDs (previs follow-up 2)
+
+In every recent build, Diamond City's previs file (`vis\fallout4.esm\00000fe1.uvd`) kept three plugins in the load order: DiamondCity-PreVis.esp, DiamondCityAmbience.esl and StoryWealthLocation-DiamondCity.esp. The reported cause was "its layout is not recognised (its ID table (0 IDs at offset 0) does not fit in the file)". The file is valid: its header lists no IDs and has no ID table, so the offset is 0.
+
+The reader now accepts a file whose ID count is 0, whatever its table offset. Such a file has nothing read in a plugin's numbering, so it reads the same whichever plugin holds the cell. The translator finds nothing to change and writes no copy, so the game uses the original file. A file that lists IDs still needs a table that fits in the file.
+
+Tests:
+- the format test reads an empty file as recognised with no IDs;
+- a pipeline test compiles the plugin that holds a cell whose previs file is empty, and checks that no copy is written.
+
+Both fail without the change.
+
+Previs follow-up 1 remains: settle in game whether translating .uvd files is needed at all. That needs the owner to compare America Rising 2 cells in a build with "Translate previs files" turned off against one with it on.
