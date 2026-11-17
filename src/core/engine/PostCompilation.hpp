@@ -3,6 +3,7 @@
 #include "engine/CompilationResult.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,29 @@ struct CompiledOutput;
 
 // What the game's load order looks like once this build is switched on, checked before anything
 // in the user's setup changes.
+// The game's archive limit for archives that arrive through the INI list (the F4SE archive loader's list).
+// The game keeps 256 archives per index, one index for general and one for texture archives; a limit
+// raiser replaces that storage. Tested in game (1.10.163, Nov 2026): with more than 256 of a type through
+// the list, Daytripper 4's ExtendedArchiveLimit froze the game at the main menu (inside
+// BSResource::Archive2::Index::AddDataFile); BSA Limit Expander loaded the same list.
+struct ArchiveLimitStatus {
+    size_t general = 0;  // general archives registered from the lists, the game's own included
+    size_t textures = 0; // texture archives, the same way
+    bool overLimit = false;
+    bool bsaLimitExpander = false; // BSALimitExpander.dll in F4SE\Plugins
+    bool daytripper = false;       // Daytripper4.dll in F4SE\Plugins
+    bool daytripperLimit = false;  // its ExtendedArchiveLimit is on (the default; off only when its INI says so)
+    std::string daytripperSetting; // the INI line that decided it, if any
+    std::string blocker;           // why switching over must wait (empty: nothing)
+    std::string warning;
+};
+
+// Classifies the archive list (one name per entry, in the order the loader supplies it) and finds the
+// limit raisers. locate(name) returns the file F4SE would load from Data\F4SE\Plugins, or an empty
+// path. The game's own lists (Fallout4.ini) add 9 general and 9 texture archives before this one.
+ArchiveLimitStatus archiveLimitStatus(const std::vector<std::string>& list,
+                                      const std::function<std::filesystem::path(const std::string&)>& locate);
+
 struct DeploymentCheck {
     // Outputs the game cannot see yet: not in its Data folder (under Mod Organizer 2: in no enabled
     // mod of the profile, overwrite or Data), or different from the package's copy.
@@ -35,6 +59,7 @@ struct DeploymentCheck {
     bool outputsOutOfOrder = false;
     size_t fullPluginsAfter = 0;  // active full plugins once compiled plugins are off and outputs on
     size_t lightPluginsAfter = 0; // active light plugins (ESL, ESL-flagged) at the same point
+    ArchiveLimitStatus archiveLimits;  // with the F4SE archive loader: the list against the game's archive limit
     std::vector<std::string> blockers; // reasons nothing may be switched over
     std::vector<std::string> warnings;
 };

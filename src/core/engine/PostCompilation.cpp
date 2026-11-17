@@ -109,6 +109,67 @@ void loadOrderAfterSwitch(const Session& session, const CompiledOutput& c, const
 
 } // namespace
 
+ArchiveLimitStatus archiveLimitStatus(const std::vector<std::string>& list,
+                                      const std::function<std::filesystem::path(const std::string&)>& locate)
+{
+    // The game's own lists in Fallout4.ini register before SResourceArchiveList2: Startup, Shaders,
+    // Interface, Voices, Meshes, MeshesExtra, Misc, Sounds and Materials, and Textures1-9.
+    constexpr size_t kGameGeneral = 9, kGameTextures = 9, kPerIndex = 256;
+    ArchiveLimitStatus st;
+    st.general = kGameGeneral;
+    st.textures = kGameTextures;
+    for (const auto& name : list) {
+        const auto l = toLower(name);
+        // "<plugin> - Textures.ba2", "- Textures2.ba2", ...: texture archives by the game's naming.
+        (l.find(" - textures") != std::string::npos ? st.textures : st.general) += 1;
+    }
+    st.overLimit = st.general > kPerIndex || st.textures > kPerIndex;
+    st.bsaLimitExpander = !locate("BSALimitExpander.dll").empty();
+    st.daytripper = !locate("Daytripper4.dll").empty();
+    if (st.daytripper) {
+        st.daytripperLimit = true; // on unless its settings say otherwise
+        for (const char* ini : {"Daytripper4.ini", "Daytripper4.toml", "Daytripper.ini"}) {
+            const auto path = locate(ini);
+            if (path.empty())
+                continue;
+            std::ifstream in(path, std::ios::binary);
+            std::string line;
+            while (std::getline(in, line)) {
+                auto text = line;
+                if (const auto c = text.find_first_of(";#"); c != std::string::npos)
+                    text.erase(c);
+                const auto eq = text.find('=');
+                if (eq == std::string::npos || toLower(text.substr(0, eq)).find("extendedarchivelimit") == std::string::npos)
+                    continue;
+                std::string v = toLower(text.substr(eq + 1));
+                v.erase(std::remove_if(v.begin(), v.end(), [](char ch) { return ch == ' ' || ch == '\t' || ch == '\r' || ch == '"'; }),
+                        v.end());
+                st.daytripperLimit = !(v == "0" || v == "false" || v == "off" || v == "no");
+                st.daytripperSetting = ini + std::string(": ") + trim(line);
+            }
+            break;
+        }
+    }
+    if (!st.overLimit)
+        return st;
+    const std::string counts = std::to_string(st.general) + " general and " + std::to_string(st.textures) +
+                               " texture archives come through the archive list (with the game's own); the game holds "
+                               "256 of each without an archive limit raiser";
+    if (st.bsaLimitExpander && st.daytripperLimit)
+        st.blocker = counts + ". BSA Limit Expander and Daytripper 4's ExtendedArchiveLimit are both on and replace the "
+                              "same game function: turn ExtendedArchiveLimit off in Daytripper 4's settings" +
+                     (st.daytripperSetting.empty() ? std::string() : " (" + st.daytripperSetting + ")");
+    else if (st.daytripperLimit)
+        st.blocker = counts + ". Daytripper 4's ExtendedArchiveLimit froze the game at the main menu with such a list "
+                              "(tested on 1.10.163): install BSA Limit Expander and turn ExtendedArchiveLimit off in "
+                              "Daytripper 4's settings";
+    else if (!st.bsaLimitExpander)
+        st.warning = counts + ", and no limit raiser this app recognises is installed (it knows BSA Limit Expander, which "
+                              "works with such a list): without one the game freezes or crashes at the main menu. "
+                              "Install BSA Limit Expander, unless another raiser already works with this list";
+    return st;
+}
+
 DeploymentCheck PostCompilation::check(const Session& session, const CompiledOutput& c, const CompilationResult& result,
                                        const std::string& assumeEnabledMod)
 {
@@ -165,6 +226,34 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
             d.blockers.push_back(what);
         }
     }
+
+    // More than the game's 256 archives of a type through the list needs a limit raiser that copes.
+    if (c.f4seArchiveLoader && !result.dataFolder.empty())
+        if (auto manifest = findPathCaseInsensitive(result.dataFolder,
+                                                    std::string("F4SE\\Plugins\\") + Exporter::kArchiveManifest);
+            !manifest.empty()) {
+            std::vector<std::string> list;
+            std::ifstream in(manifest, std::ios::binary);
+            std::string line;
+            while (std::getline(in, line)) {
+                line = trim(line);
+                if (!line.empty() && line[0] != '#' && line[0] != ';')
+                    list.push_back(line);
+            }
+            auto locate = [&](const std::string& name) -> fs::path {
+                if (!session.install.dataPath.empty())
+                    if (auto p = findPathCaseInsensitive(session.install.dataPath, "F4SE\\Plugins\\" + name); !p.empty())
+                        return p;
+                if (const auto* f = session.vfs.find(toLower("f4se\\plugins\\" + name)))
+                    return session.vfs.winnerPath(*f);
+                return {};
+            };
+            d.archiveLimits = archiveLimitStatus(list, locate);
+            if (!d.archiveLimits.blocker.empty())
+                d.blockers.push_back(d.archiveLimits.blocker);
+            if (!d.archiveLimits.warning.empty())
+                d.warnings.push_back(d.archiveLimits.warning);
+        }
 
     // The Auto-Merger's rewritten scripts and MCM configs: the copy the game loads must be ours. Under
     // Vortex the original mod's file can win the conflict, and MCM then looks for "Plugin.esl|F99" in a

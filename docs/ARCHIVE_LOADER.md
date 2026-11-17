@@ -135,6 +135,22 @@ Breaker and X-Cell's ArchiveLimits all replace the same function. With a list of
 texture archives, use BSA Limit Expander (or another raiser shown to work with this list) and turn the others
 off.
 
+**What the app checks.** With the archive loader in use, the switch-over check (Apply to Game and
+`Multiplexer_Instructions.txt`) counts the list's general and texture archives, plus the game's own 9 of each
+from `Fallout4.ini` (a name with ` - Textures` is a texture archive), and looks in `Data\F4SE\Plugins` (under
+Mod Organizer 2, its virtual Data) for the limit raisers when either count is over 256:
+
+| Found | Result |
+|---|---|
+| BSA Limit Expander, Daytripper 4's ExtendedArchiveLimit off or no Daytripper 4 | nothing to say |
+| Daytripper 4 with ExtendedArchiveLimit on, no BSA Limit Expander | **blocked**: it froze the game with such a list |
+| both | **blocked**: they replace the same game function; turn ExtendedArchiveLimit off |
+| neither | warning: install BSA Limit Expander (another raiser the app does not know may already work) |
+
+Daytripper 4's ExtendedArchiveLimit counts as on (its default) unless `Daytripper4.ini` (or `.toml`) has a
+line whose key contains `ExtendedArchiveLimit` set to `0`, `false`, `off` or `no`; the line found is quoted
+in the message. Lists within the limit are not checked.
+
 ## Checked so far
 
 In the game (1.10.163): with a 25,345-character list the setting was found in the executable's data and

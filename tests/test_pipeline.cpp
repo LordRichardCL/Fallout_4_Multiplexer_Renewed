@@ -7210,6 +7210,68 @@ TEST(references_precombine_geometry_keeps_the_plugin)
 // The F4SE archive loader: the archive list is no longer limited to the 1,023 characters the game reads.
 // Export ships the DLL and the full list in the package; Apply writes the whole list; switching over waits
 // until the loader is installed. Without the DLL, or on another game version, the limit applies as before.
+// The game's 256 archives per index, for archives that come through the list: which limit raiser is
+// installed decides whether switching over may go ahead (Daytripper 4's ExtendedArchiveLimit froze the
+// game at the main menu with such a list; BSA Limit Expander loaded it).
+TEST(archive_list_over_the_limit_needs_a_raiser_that_copes)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "fo4mx_test_limits";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    auto locate = [&](const std::string& name) {
+        auto p = dir / name;
+        return std::filesystem::exists(p) ? p : std::filesystem::path();
+    };
+    std::vector<std::string> small{"Fallout4 - Animations.ba2", "ModA - Main.ba2", "ModA - Textures.ba2"};
+    std::vector<std::string> big{"Fallout4 - Animations.ba2"};
+    for (int i = 0; i < 250; ++i) {
+        big.push_back("Mod" + std::to_string(i) + " - Main.ba2");
+        big.push_back("Mod" + std::to_string(i) + " - Textures.ba2");
+    }
+
+    // Within the limit: nothing to say, whatever is installed.
+    auto st = archiveLimitStatus(small, locate);
+    CHECK(!st.overLimit);
+    CHECK(st.blocker.empty() && st.warning.empty());
+    CHECK_EQ(st.general, size_t(9 + 2));
+    CHECK_EQ(st.textures, size_t(9 + 1));
+
+    // Over it (260 general, 259 texture with the game's own) and no raiser: a warning.
+    st = archiveLimitStatus(big, locate);
+    CHECK(st.overLimit);
+    CHECK_EQ(st.general, size_t(9 + 251));
+    CHECK_EQ(st.textures, size_t(9 + 250));
+    CHECK(st.blocker.empty());
+    CHECK(st.warning.find("BSA Limit Expander") != std::string::npos);
+
+    // Daytripper 4 alone, ExtendedArchiveLimit on by default: blocked.
+    writeFile(dir / "Daytripper4.dll", "MZ");
+    st = archiveLimitStatus(big, locate);
+    CHECK(st.daytripper && st.daytripperLimit);
+    CHECK(st.blocker.find("froze the game at the main menu") != std::string::npos);
+
+    // With BSA Limit Expander too: still blocked, the two replace the same function.
+    writeFile(dir / "BSALimitExpander.dll", "MZ");
+    writeFile(dir / "Daytripper4.ini", "[Patches]\nExtendedArchiveLimit = true ; on\n");
+    st = archiveLimitStatus(big, locate);
+    CHECK(st.bsaLimitExpander && st.daytripperLimit);
+    CHECK(st.blocker.find("turn ExtendedArchiveLimit off") != std::string::npos);
+    CHECK(st.blocker.find("Daytripper4.ini") != std::string::npos);
+
+    // ExtendedArchiveLimit turned off: BSA Limit Expander alone, nothing to say.
+    writeFile(dir / "Daytripper4.ini", "[Patches]\r\nbExtendedArchiveLimit=0\r\n");
+    st = archiveLimitStatus(big, locate);
+    CHECK(st.daytripper && !st.daytripperLimit);
+    CHECK(st.blocker.empty() && st.warning.empty());
+
+    // Daytripper off and no BSA Limit Expander: the warning again.
+    std::filesystem::remove(dir / "BSALimitExpander.dll");
+    st = archiveLimitStatus(big, locate);
+    CHECK(st.blocker.empty());
+    CHECK(!st.warning.empty());
+    std::filesystem::remove_all(dir);
+}
+
 TEST(archive_loader_lifts_the_list_limit)
 {
     auto root = buildInstall("archiveloader");
