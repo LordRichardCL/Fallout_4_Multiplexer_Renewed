@@ -471,10 +471,9 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     });
     connect(openFolder_, &QPushButton::clicked, this, [this] {
         auto* p = app_->pipeline();
-        if (p && p->exportResult())
-            QDesktopServices::openUrl(QUrl::fromLocalFile(toQString(p->exportResult()->packageRoot.empty()
-                                                                        ? p->exportResult()->directory
-                                                                        : p->exportResult()->packageRoot)));
+        if (const auto src = p ? p->applySource() : fo4mx::Pipeline::ApplySource{})
+            QDesktopServices::openUrl(QUrl::fromLocalFile(
+                toQString(src.exported->packageRoot.empty() ? src.exported->directory : src.exported->packageRoot)));
     });
     connect(app_, &AppController::taskStarted, this, [this](const QString& task) {
         if (task != "Check")
@@ -643,8 +642,10 @@ void CompilationPage::updateButtons()
     compile_->setEnabled(!busy);
     export_->setEnabled(!busy && valid);
     export_->setToolTip(valid ? "" : "Compile first; export is blocked while critical validation errors exist.");
-    apply_->setEnabled(!busy && p && p->exportResult().has_value());
-    openFolder_->setEnabled(p && p->exportResult().has_value());
+    // Apply works on this session's export, or on the last build reopened after a scan (verified).
+    const bool applicable = p && p->applySource();
+    apply_->setEnabled(!busy && applicable);
+    openFolder_->setEnabled(applicable);
 }
 
 void CompilationPage::refresh()
@@ -733,6 +734,27 @@ void CompilationPage::refresh()
                                    formatCount(meta("validation_pre-export_checks").toLongLong()),
                                    meta("validation_pre-export_warnings"), meta("validation_pre-export_errors"),
                                    patchText + incremental));
+    }
+    // The last build after a restart: reopened (verified) or why not.
+    if (auto* p = app_->pipeline(); p && !p->compiledOutput()) {
+        if (const auto* rb = p->restoredBuild())
+            summary_->setText(summary_->text().toHtmlEscaped() +
+                              QString("<br>Last build reopened: <b>%1</b> (%2 compiled plugins, %3 outputs). Its files and "
+                                      "the load order still match it, so Apply to Game is available without compiling "
+                                      "again.%4")
+                                  .arg(QString::fromStdString(rb->run).toHtmlEscaped())
+                                  .arg(rb->compiled.compiledPlugins.size())
+                                  .arg(rb->compiled.outputs.size())
+                                  .arg(rb->notes.empty() ? QString()
+                                                         : QString(" %1 change(s) since then do not affect it.")
+                                                               .arg(rb->notes.size())));
+        else if (!p->restoreProblem().empty())
+            summary_->setText(summary_->text().toHtmlEscaped() + "<br>" +
+                              QString::fromStdString(p->restoreProblem()).toHtmlEscaped() +
+                              (p->restoreDetails().empty()
+                                   ? QString()
+                                   : " (first: " + QString::fromStdString(p->restoreDetails().front()).toHtmlEscaped() +
+                                         ")"));
     }
     updateButtons();
 }

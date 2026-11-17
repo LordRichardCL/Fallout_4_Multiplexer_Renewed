@@ -127,6 +127,11 @@ struct OutputPlugin {
     // Start-game-enabled quests the game must find in seq\<plugin>.seq: new ones, and overrides that
     // make a quest start with the game when its defining plugin does not (FormIDs as written here).
     std::vector<uint32_t> seqFormIds;
+    // A build reopened from its export (Multiplexer_Build.json): the records are not in memory, but the
+    // plugin on disk holds them (newRecords and overrides say how many).
+    bool restoredWritten = false;
+    // Whether this output holds records (is written and switched on).
+    bool hasRecords() const { return !records.empty() || restoredWritten; }
 };
 
 struct FormMapping {
@@ -187,7 +192,12 @@ struct CompiledOutput {
     size_t mergesReused = 0;   // override chains restored from the build cache
     size_t mergesComputed = 0; // override chains merged in this compilation
     size_t containers = 0;     // cells and worldspaces copied to hold compiled references
-    bool empty() const { return records.empty(); }
+    // Reopened from an export after a restart (no records in memory): enough to switch the load order
+    // over (Apply to Game), never to export again.
+    bool restored = false;
+    bool empty() const { return records.empty() && !restored; }
+    // Marks compiledPlugins as compiled for isCompiled() (a restored build; pluginCount: Session::plugins).
+    void markCompiled(size_t pluginCount);
     bool isCompiled(PluginIndex p) const;
     bool hasArchiveLoader(PluginIndex p) const;
     std::string outputName(int index) const { return outputs.at(static_cast<size_t>(index)).name; }

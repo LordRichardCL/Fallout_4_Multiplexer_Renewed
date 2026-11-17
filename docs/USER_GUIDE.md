@@ -250,6 +250,28 @@ The comparison is always with your load order **as it was before this app change
 
 If validation finds records that cannot be written safely, for example a FormID in data the app does not fully understand, the app does **not** block the whole export. It keeps those records' plugins in the load order (or leaves those records out of the patch) and compiles again. The **Validation** page lists every plugin it kept out under **Kept Out Automatically**, with the reason. The **Plugins** page shows them as *Retained*. Only errors that cannot be traced to a plugin or record still block export.
 
+### After restarting the app
+
+The compiled build is held in memory, so after a restart there is nothing to export again; but **Apply to
+Game** does not need it. Every export records what switching over needs in `Multiplexer_Build.json`: the
+compiled plugins, the outputs with their size and content hash, the archive list, the settings and a snapshot
+of the load order at export. After a **Scan**, the app reopens the latest finished export when:
+
+- every output plugin (and the archive loader with its list, when used) is still in the export, byte for byte
+  as written;
+- the load order and the compilation settings still match the build (the same comparison as the change check;
+  changes that do not affect the build, such as an unrelated mod, are allowed and counted);
+- every plugin it compiled is still found.
+
+The Compilation page then says *Last build reopened: <export>*, and **Apply to Game** and **Open Output
+Folder** work on it. **Export Plugins** still needs a compilation (the records are not in memory). When the
+export does not fit, the page says why (with the first change found) and you compile again. Exports made by
+earlier versions of the app have no `Multiplexer_Build.json` and are not reopened.
+
+The app clears its results database and build cache when the app itself is updated (merged records from an
+older version must not be reused). The reopened build does not depend on them: it is checked against its own
+`Multiplexer_Build.json`.
+
 ## Checking the record definitions
 
 Every **Analyse** also checks the **Candidate** record types (described but not compiled yet) against your load order, and the Validation Report (Definitions category) says for each whether your files confirm it. Send that report to the developer: confirmed types are switched on in the next version. The full check below also covers the compiled types and the group layout.

@@ -64,7 +64,7 @@ std::vector<std::string> outputLoadOrder(const CompiledOutput& c)
     std::vector<std::string> out;
     for (bool patch : {false, true})
         for (const auto& op : c.outputs)
-            if (!op.records.empty() && op.patch == patch)
+            if (op.hasRecords() && op.patch == patch)
                 out.push_back(op.name);
     return out;
 }
@@ -191,7 +191,7 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
         ++(isLight(p) ? d.lightPluginsAfter : d.fullPluginsAfter);
     }
     for (const auto& op : c.outputs)
-        if (!op.records.empty())
+        if (op.hasRecords())
             ++(op.light ? d.lightPluginsAfter : d.fullPluginsAfter);
     if (d.fullPluginsAfter > kMaxFullPlugins)
         d.blockers.push_back(std::to_string(d.fullPluginsAfter) + " full plugins would be active; Fallout 4 has " +

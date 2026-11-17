@@ -44,6 +44,14 @@ bool CompiledOutput::isCompiled(PluginIndex p) const
     return p < compiledFlag_.size() && compiledFlag_[p];
 }
 
+void CompiledOutput::markCompiled(size_t pluginCount)
+{
+    compiledFlag_.assign(pluginCount, 0);
+    for (auto p : compiledPlugins)
+        if (p < compiledFlag_.size())
+            compiledFlag_[p] = 1;
+}
+
 bool CompiledOutput::hasArchiveLoader(PluginIndex p) const
 {
     return std::find(archiveLoaders.begin(), archiveLoaders.end(), p) != archiveLoaders.end();

@@ -117,6 +117,9 @@ void Pipeline::scan(ProgressSink& progress)
     compiled_.reset();
     validation_.reset();
     exported_.reset();
+    restored_.reset();
+    restoreProblem_.clear();
+    restoreDetails_.clear();
 
     progress.stage("Scan");
     openDatabase();
@@ -239,6 +242,158 @@ void Pipeline::scan(ProgressSink& progress)
                                       ChangeDetector::settingsHash(*session_, effective, config_.analysis.excludedPlugins));
         w.writeChanges(changes_);
     }
+    try {
+        restoreLastBuild();
+    } catch (const std::exception& e) {
+        restored_.reset();
+        restoreProblem_ = std::string("The last build could not be reopened: ") + e.what();
+        spdlog::warn("{}", restoreProblem_);
+    }
+}
+
+Pipeline::ApplySource Pipeline::applySource() const
+{
+    ApplySource a;
+    if (compiled_ && exported_) {
+        a.compiled = &*compiled_;
+        a.exported = &*exported_;
+        a.validation = validation_ ? &*validation_ : nullptr;
+    } else if (restored_) {
+        a.compiled = &restored_->compiled;
+        a.exported = &restored_->exported;
+        a.restored = true;
+    }
+    return a;
+}
+
+bool Pipeline::restoreLastBuild()
+{
+    restored_.reset();
+    restoreProblem_.clear();
+    restoreDetails_.clear();
+    if (!session_ || !session_->scanned)
+        return false;
+    const auto location = outputLocation();
+    if (location.layout == output::Layout::GameData)
+        return false; // written straight into Data: no export folder to reopen
+    const auto latest = output::latestRun(location);
+    if (!latest)
+        return false; // never exported
+    const std::string run = pathToUtf8(latest->filename());
+    auto refuse = [&](std::string why) {
+        restoreProblem_ = "The last build (" + run + ") was not reopened: " + std::move(why);
+        spdlog::info("{}", restoreProblem_);
+        for (const auto& d : restoreDetails_)
+            spdlog::info("  {}", d);
+        return false;
+    };
+    std::error_code ec;
+    if (!std::filesystem::exists(*latest / buildrecord::kFile, ec))
+        return refuse("it was exported by an earlier version of this app, which did not record what Apply to Game "
+                      "needs. Compile and export again");
+    buildrecord::Record rec;
+    try {
+        rec = buildrecord::read(*latest);
+    } catch (const std::exception& e) {
+        return refuse(e.what());
+    }
+    if (std::filesystem::exists(*latest / kBuildFailedMarker, ec))
+        return refuse("the export did not finish successfully");
+
+    // 1. The load order and settings: the same comparison as the change check, against the build's own
+    //    snapshot (the results database may have been cleared since).
+    auto report = finishChangeReport(rec.snapshot, ChangeDetector::capture(*session_), currentSettingsHash());
+    if (rec.settingsHash != currentSettingsHash() && report.status != BuildStatus::RequiresRebuild) {
+        report.reasons.push_back("Compilation settings changed");
+        report.status = BuildStatus::RequiresRebuild;
+    }
+    if (report.status == BuildStatus::RequiresRebuild) {
+        for (const auto& r : report.reasons)
+            restoreDetails_.push_back(r);
+        for (const auto& i : report.items)
+            if (i.affectsBuild && restoreDetails_.size() < 50)
+                restoreDetails_.push_back(i.category + " " + i.kind + ": " + i.name +
+                                          (i.detail.empty() ? std::string() : " (" + i.detail + ")"));
+        return refuse("the load order or the settings changed since it was built. Compile again");
+    }
+
+    // 2. Its own files: every output exactly as written, and the archive loader when used.
+    RestoredBuild rb;
+    rb.run = run;
+    auto at = [&](const std::string& rel) { return rel.empty() ? std::filesystem::path() : *latest / rel; };
+    for (const auto& o : rec.outputs) {
+        const auto file = at(o.file);
+        if (file.empty() || !std::filesystem::is_regular_file(file, ec)) {
+            restoreDetails_.push_back(o.name + ": missing");
+            continue;
+        }
+        if (std::filesystem::file_size(file, ec) != o.size || buildrecord::hashFile(file).value_or(0) != o.hash) {
+            restoreDetails_.push_back(o.name + ": changed since it was exported");
+            continue;
+        }
+        rb.exported.pluginFiles.push_back(file);
+    }
+    for (const auto& f : rec.archiveLoaderFiles)
+        if (!std::filesystem::is_regular_file(at(f), ec))
+            restoreDetails_.push_back(f + ": missing");
+    if (!restoreDetails_.empty())
+        return refuse("its files are missing or were changed. Compile and export again");
+
+    // 3. The compiled plugins, as this scan knows them.
+    for (const auto& name : rec.compiled) {
+        const auto* p = session_->findPlugin(name);
+        if (!p) {
+            restoreDetails_.push_back(name + ": not in the load order");
+            continue;
+        }
+        rb.compiled.compiledPlugins.push_back(p->index);
+    }
+    for (const auto& name : rec.archiveLoaders)
+        if (const auto* p = session_->findPlugin(name))
+            rb.compiled.archiveLoaders.push_back(p->index);
+    if (!restoreDetails_.empty())
+        return refuse("plugins it compiled are no longer found. Compile again");
+
+    rb.compiled.options = config_.compile;
+    rb.compiled.restored = true;
+    rb.compiled.f4seArchiveLoader = rec.f4seArchiveLoader;
+    rb.compiled.archivesToRegister = rec.archivesToRegister;
+    rb.compiled.markCompiled(session_->plugins.size());
+    int index = 0;
+    for (const auto& o : rec.outputs) {
+        OutputPlugin op;
+        op.index = index++;
+        op.name = o.name;
+        op.light = o.light;
+        op.patch = o.patch;
+        op.newRecords = o.newRecords;
+        op.overrides = o.overrides;
+        op.restoredWritten = true;
+        rb.compiled.outputs.push_back(std::move(op));
+    }
+    auto& e = rb.exported;
+    e.packageRoot = *latest;
+    e.directory = rec.directory.empty() ? *latest : at(rec.directory);
+    e.zipPath = at(rec.zip);
+    if (!e.zipPath.empty() && !std::filesystem::is_regular_file(e.zipPath, ec))
+        e.zipPath.clear();
+    e.disableList = at(rec.disableList);
+    e.recorderFolder = at(rec.recorderFolder);
+    for (const auto& f : rec.archiveLoaderFiles)
+        e.archiveLoaderFiles.push_back(at(f));
+    for (const auto& f : rec.loaderPlugins)
+        e.archiveLoaders.push_back(at(f));
+    e.runName = run;
+    e.outputRoot = location.root;
+    e.latestRecorded = true;
+    if (report.status == BuildStatus::ChangesDetected)
+        for (const auto& i : report.items)
+            if (rb.notes.size() < 50)
+                rb.notes.push_back(i.category + " " + i.kind + ": " + i.name);
+    restored_ = std::move(rb);
+    spdlog::info("Reopened the last build ({}): {} compiled plugins, {} outputs, verified; Apply to Game is available",
+                 run, restored_->compiled.compiledPlugins.size(), restored_->compiled.outputs.size());
+    return true;
 }
 
 DefinitionCheck Pipeline::checkDefinitions(const std::vector<Signature>& types, ProgressSink& progress)
@@ -1020,11 +1175,25 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         result.latestRecorded = output::setLatest(*run);
     }
     exported_ = result;
+    restored_.reset();
+    restoreProblem_.clear();
+    restoreDetails_.clear();
+    // This build becomes the reference state for change detection, in the results database and in the
+    // export itself (Multiplexer_Build.json: what reopening it after a restart needs).
+    auto buildSnapshot = ChangeDetector::capture(*session_);
+    ChangeDetector::addBuild(buildSnapshot, *session_, *compiled_, result, currentSettingsHash());
+    if (!result.runName.empty()) {
+        try {
+            buildrecord::write(result.packageRoot.empty() ? result.directory : result.packageRoot,
+                               buildrecord::make(*session_, *compiled_, result, buildSnapshot, currentSettingsHash()));
+        } catch (const std::exception& e) {
+            spdlog::warn("Could not write {}: {} (the build cannot be reopened after a restart)", buildrecord::kFile,
+                         e.what());
+        }
+    }
     if (db_) {
-        // This build becomes the reference state for change detection.
         db::DatabaseWriter w(*db_);
-        auto snapshot = ChangeDetector::capture(*session_);
-        ChangeDetector::addBuild(snapshot, *session_, *compiled_, result, currentSettingsHash());
+        auto snapshot = buildSnapshot;
         w.saveSnapshot("build", snapshot);
         changes_ = ChangeReport{};
         changes_.status = BuildStatus::UpToDate;

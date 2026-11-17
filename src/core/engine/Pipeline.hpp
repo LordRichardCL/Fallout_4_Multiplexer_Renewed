@@ -4,6 +4,7 @@
 #include "db/Database.hpp"
 #include "engine/AssetTracer.hpp"
 #include "engine/AutoMerger.hpp"
+#include "engine/BuildRecord.hpp"
 #include "engine/BuildCache.hpp"
 #include "engine/ChangeDetector.hpp"
 #include "engine/CompilationEngine.hpp"
@@ -118,6 +119,26 @@ public:
     // Re-evaluate eligibility after the user changes exclusions (no rescan needed).
     void refreshEligibility();
 
+    // The latest finished export, reopened after a scan when it still fits (restoreLastBuild): enough to
+    // Apply it without compiling again. Null when there is none, or it does not fit (restoreProblem says
+    // why, restoreDetails lists what changed).
+    const RestoredBuild* restoredBuild() const { return restored_ ? &*restored_ : nullptr; }
+    const std::string& restoreProblem() const { return restoreProblem_; }
+    const std::vector<std::string>& restoreDetails() const { return restoreDetails_; }
+    // Checks the latest finished export against the scanned load order and its own files, and reopens it
+    // when everything still matches (scan() calls it). Returns whether a build was reopened.
+    bool restoreLastBuild();
+
+    // The build Apply to Game works on: this session's compiled and exported build, else the reopened one.
+    struct ApplySource {
+        const CompiledOutput* compiled = nullptr;
+        const ExportResult* exported = nullptr;
+        const ValidationReport* validation = nullptr;
+        bool restored = false;
+        explicit operator bool() const { return compiled && exported; }
+    };
+    ApplySource applySource() const;
+
 private:
     // This app's own files that stay open while it runs (results database, build cache): never moved
     // to an output backup and never packaged, even when they sit in the output folder.
@@ -147,6 +168,9 @@ private:
     mutable std::optional<ValidationReport> reportValidation_;
     std::vector<ArchivePriorityChange> archiveChanges_;
     std::optional<ExportResult> exported_;
+    std::optional<RestoredBuild> restored_;
+    std::string restoreProblem_;
+    std::vector<std::string> restoreDetails_;
     std::optional<AutoMergeReport> autoMerge_;
     std::unique_ptr<BuildCache> cache_;
     AssetTrace assetTrace_;

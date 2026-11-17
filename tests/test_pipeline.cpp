@@ -7,6 +7,7 @@
 #include "engine/CompilationResult.hpp"
 #include "engine/Exporter.hpp"
 #include "engine/Pipeline.hpp"
+#include "engine/BuildRecord.hpp"
 #include "engine/PostCompilation.hpp"
 #include "engine/VortexSupport.hpp"
 #include "engine/Mo2Support.hpp"
@@ -5602,6 +5603,97 @@ size_t listed(const std::string& pluginsTxt, const std::string& name)
 }
 
 } // namespace
+
+// After a restart (a new session, its results database cleared, as when the app itself is updated) a
+// scan reopens the latest export when its files and the load order still match it, and Apply to Game
+// works on it without compiling again. It is reopened after switching over too. An output changed on
+// disk, or a changed source plugin, keeps it closed and says why.
+TEST(last_build_reopens_after_a_restart_and_applies)
+{
+    auto b = buildAndExport("restore_build");
+    std::filesystem::path exported;
+    {
+        Pipeline p(b.cfg);
+        p.scan();
+        CHECK(!p.restoredBuild()); // never exported
+        p.analyse();
+        CHECK(p.compile());
+        p.exportOutputs();
+        exported = p.exportResult()->packageRoot;
+        CHECK(std::filesystem::exists(exported / buildrecord::kFile));
+        installOutputs(p, b.root);
+    }
+    std::filesystem::remove(b.cfg.databasePath);
+
+    Pipeline q(b.cfg);
+    q.scan();
+    CHECK(!q.compiledOutput());
+    const auto* rb = q.restoredBuild();
+    CHECK(rb != nullptr);
+    if (!rb) {
+        std::printf("    %s\n", q.restoreProblem().c_str());
+        for (const auto& d : q.restoreDetails())
+            std::printf("      %s\n", d.c_str());
+        return;
+    }
+    CHECK(rb->compiled.restored);
+    CHECK(!rb->compiled.compiledPlugins.empty());
+    const auto src = q.applySource();
+    CHECK(src.restored);
+    CHECK(src.exported->packageRoot == exported);
+    auto r = makeCompilationResult(q.session(), src.compiled, src.exported, src.validation);
+    CHECK(r.success);
+    CHECK(!r.included.empty());
+    {
+        FileTransaction tx("test");
+        auto plan = PostCompilation::planApply(tx, q.session(), *src.compiled, r, src.exported->outputRoot, false);
+        for (const auto& bl : plan.check.blockers)
+            std::printf("    blocker: %s\n", bl.c_str());
+        CHECK(plan.check.blockers.empty());
+        CHECK(!tx.empty());
+        tx.apply();
+    }
+    const std::string txt = slurp(b.root / "plugins.txt");
+    CHECK(activeIn(txt, src.compiled->outputs.front().name));
+    for (const auto& inc : r.included)
+        CHECK(!activeIn(txt, inc.name));
+
+    // Switched over: still reopened (the compiled plugins count as the build's sources).
+    {
+        Pipeline q2(b.cfg);
+        q2.scan();
+        CHECK(q2.restoredBuild() != nullptr);
+        if (!q2.restoredBuild())
+            std::printf("    %s\n", q2.restoreProblem().c_str());
+    }
+
+    // An output changed after export: not reopened.
+    const auto output = exported / src.exported->directory.lexically_relative(exported) /
+                        src.compiled->outputs.front().name;
+    const std::string original = slurp(output);
+    writeFile(output, original + "x");
+    {
+        Pipeline q3(b.cfg);
+        q3.scan();
+        CHECK(!q3.restoredBuild());
+        CHECK(q3.restoreProblem().find("changed") != std::string::npos);
+        CHECK(!q3.applySource());
+    }
+    writeFile(output, original);
+
+    // A compiled plugin changed since: not reopened, and the reason is listed.
+    const auto modA = b.root / "Game" / "Data" / "ModA.esp";
+    std::string modBytes = slurp(modA);
+    modBytes.push_back('\0');
+    writeFile(modA, modBytes);
+    {
+        Pipeline q4(b.cfg);
+        q4.scan();
+        CHECK(!q4.restoredBuild());
+        CHECK(q4.restoreProblem().find("changed since it was built") != std::string::npos);
+        CHECK(!q4.restoreDetails().empty());
+    }
+}
 
 TEST(standalone_apply_refuses_until_the_outputs_are_installed)
 {

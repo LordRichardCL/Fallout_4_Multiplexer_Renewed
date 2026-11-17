@@ -659,14 +659,16 @@ bool managerIsRunning(const fo4mx::Session& s)
 
 bool AppController::previewApply(ApplyPreview* preview, QString* message)
 {
-    if (!pipeline_ || !pipeline_->compiledOutput() || !pipeline_->exportResult()) {
-        *message = "Compile and export first.";
+    const auto src = pipeline_ ? pipeline_->applySource() : fo4mx::Pipeline::ApplySource{};
+    if (!src) {
+        *message = pipeline_ && !pipeline_->restoreProblem().empty()
+                       ? qs(pipeline_->restoreProblem())
+                       : QString("Compile and export first (or scan, to reopen the last build).");
         return false;
     }
     const auto& s = pipeline_->session();
     try {
-        const auto result = fo4mx::makeCompilationResult(s, pipeline_->compiledOutput(), &*pipeline_->exportResult(),
-                                                         pipeline_->validation());
+        const auto result = fo4mx::makeCompilationResult(s, src.compiled, src.exported, src.validation);
         const bool isVortex = s.install.config.kind == fo4mx::InstallKind::Vortex;
         const bool isMo2 = s.install.config.kind == fo4mx::InstallKind::ModOrganizer2;
         *preview = ApplyPreview{};
@@ -679,7 +681,7 @@ bool AppController::previewApply(ApplyPreview* preview, QString* message)
         preview->recorderAvailable = !result.recorderZip.empty();
         preview->recorderZipPath = toQString(result.recorderZip);
         if (isMo2) {
-            const auto out = pipeline_->exportResult()->packageRoot; // the export's own folder
+            const auto out = src.exported->packageRoot; // the export's own folder
             const auto mod = fo4mx::mo2::outputModName(s, out);
             preview->outputMod = qs(mod);
             preview->outputModEnabled = !mod.empty() && fo4mx::mo2::modEnabled(s.install.profilePath, mod);
@@ -716,8 +718,7 @@ bool AppController::previewApply(ApplyPreview* preview, QString* message)
         }
 
         fo4mx::FileTransaction tx("Apply to Game (preview)");
-        const auto plan = fo4mx::PostCompilation::planApply(tx, s, *pipeline_->compiledOutput(), result,
-                                                            pipeline_->exportResult()->outputRoot,
+        const auto plan = fo4mx::PostCompilation::planApply(tx, s, *src.compiled, result, src.exported->outputRoot,
                                                             applyOptions(s, previewChoice(*preview), result, config_,
                                                                          preview->managerRunning));
         const auto& d = plan.check;
@@ -764,21 +765,22 @@ bool AppController::previewApply(ApplyPreview* preview, QString* message)
 
 bool AppController::applyToProfile(const ApplyChoice& choice, QString* message)
 {
-    if (!pipeline_ || !pipeline_->compiledOutput() || !pipeline_->exportResult()) {
-        *message = "Compile and export first.";
+    const auto src = pipeline_ ? pipeline_->applySource() : fo4mx::Pipeline::ApplySource{};
+    if (!src) {
+        *message = pipeline_ && !pipeline_->restoreProblem().empty()
+                       ? qs(pipeline_->restoreProblem())
+                       : QString("Compile and export first (or scan, to reopen the last build).");
         return false;
     }
     auto& s = pipeline_->session();
     try {
-        const auto result = fo4mx::makeCompilationResult(s, pipeline_->compiledOutput(), &*pipeline_->exportResult(),
-                                                         pipeline_->validation());
+        const auto result = fo4mx::makeCompilationResult(s, src.compiled, src.exported, src.validation);
         const bool isVortex = s.install.config.kind == fo4mx::InstallKind::Vortex;
         const bool isMo2 = s.install.config.kind == fo4mx::InstallKind::ModOrganizer2;
         const bool running = managerIsRunning(s);
         // One transaction: zip copy, load order, INI, notes and ghosting change together or not at all.
         fo4mx::FileTransaction tx("Apply to Game");
-        const auto plan = fo4mx::PostCompilation::planApply(tx, s, *pipeline_->compiledOutput(), result,
-                                                            pipeline_->exportResult()->outputRoot,
+        const auto plan = fo4mx::PostCompilation::planApply(tx, s, *src.compiled, result, src.exported->outputRoot,
                                                             applyOptions(s, choice, result, config_, running));
         if (tx.empty()) {
             QStringList why;
