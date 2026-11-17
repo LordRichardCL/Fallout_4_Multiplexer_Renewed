@@ -1281,15 +1281,22 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     for (auto& e : out.records) {
         auto nullBroken = [&](NormSub& s) {
             for (auto& [off, k] : s.refs) {
+                // What the source plugin stored here, before resolution: shown so the report says
+                // exactly what the plugin contained.
+                const auto* stored = s.rawAt(off);
+                const std::string evidence =
+                    stored && stored->plugin < session.plugins.size()
+                        ? " (" + session.pluginName(stored->plugin) + " stores " + formatFormId(stored->value) + ")"
+                        : std::string();
                 bool badMaster = !k.valid() && k.objectId != 0;
                 bool missing = k.valid() && out.compiledFlag_[k.origin] && !out.indexByKey.count(k) && !session.exists(k);
                 if (!badMaster && !missing)
                     continue;
                 addIssue(Severity::Warning, "Broken in Source",
                          session.formLabel(e.key) + " (" + s.sig.str() + ") refers to " +
-                             (badMaster ? "FormID " + formatFormId(k.objectId) + " with a master index past its master list"
+                             (badMaster ? "FormID " + formatFormId(k.objectId) + " whose master is missing"
                                         : formatFormId(k.objectId) + " in " + session.pluginName(k.origin)) +
-                             ", which does not exist; the game reads it as none, so it is written as none",
+                             evidence + ", which does not exist; the game reads it as none, so it is written as none",
                          e.key, session.pluginName(e.winner));
                 out.issues.back().cause = diagnosis::missingReference(session, e.winner, badMaster ? FormKey{} : k,
                                                                       badMaster ? k.objectId : 0);

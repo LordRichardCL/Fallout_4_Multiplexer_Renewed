@@ -180,16 +180,19 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
             else
                 v.fail(Severity::Error, "Broken FormIDs", label + " has an invalid FormID " + fid, op.name, fid);
 
-            // Decoding notes are about the source record: name the plugin they come from. A FormID
-            // past the source's master list reads as none in game and is written as none (Broken in
-            // Source reports it with its cause), so the output is correct: Info.
+            // Decoding notes are about the source record. A FormID past a source's master list names
+            // that plugin itself (as in xEdit); the note names the plugin that stores it (any version of
+            // the record, not only the winner). The output writes the resolved record through its own
+            // master list, so it is Info; a record that does not exist is reported under Broken in Source.
             for (const auto& is : e.issues) {
-                const bool badMaster = is.message.find("master index beyond the master list") != std::string::npos;
+                const bool badMaster = is.message.find("past its master list") != std::string::npos;
                 const std::string source = e.winner != kInvalidPlugin ? session.pluginName(e.winner) : op.name;
                 if (badMaster)
                     v.fail(Severity::Info, "Record Decoding",
-                           label + " " + is.sub.str() + ": in " + source + ", " + is.message +
-                               "; the game reads it as none, and " + op.name + " writes it as none",
+                           label + " " + is.sub.str() + ": " + is.message +
+                               (is.message.find("that record exists") != std::string::npos
+                                    ? "; " + op.name + " points to that record"
+                                    : std::string()),
                            source, fid);
                 else
                     v.fail(is.severity == Severity::Error ? Severity::Error : is.severity, "Record Decoding",

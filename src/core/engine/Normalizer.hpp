@@ -21,8 +21,32 @@ struct NormSub {
     // they have in `origin`'s master list; whether that holds in an output is proved at validation.
     std::vector<std::pair<uint32_t, uint32_t>> opaque;
     PluginIndex origin = kInvalidPlugin; // plugin whose master list the raw bytes use (invalid: mixed)
+    // The 32-bit value the source plugin stored at each reference offset (refs), before resolution: the
+    // evidence of what the plugin contained, for diagnostics only. Output never writes these: an output
+    // FormID is always derived from the resolved key and the output's own master list, because the same
+    // raw value can name a different plugin there. Not part of equality: two versions that name the same
+    // record through different master lists are the same reference.
+    struct RawRef {
+        uint32_t offset = 0;
+        uint32_t value = 0;                  // exactly as stored
+        PluginIndex plugin = kInvalidPlugin; // whose master list it is written in (arrays can mix plugins)
+        bool operator<(const RawRef& o) const { return offset < o.offset; }
+        bool operator==(const RawRef&) const = default;
+    };
+    std::vector<RawRef> rawRefs; // sorted by offset
+    const RawRef* rawAt(uint32_t offset) const
+    {
+        for (const auto& r : rawRefs)
+            if (r.offset == offset)
+                return &r;
+        return nullptr;
+    }
 
-    bool operator==(const NormSub&) const = default;
+    bool operator==(const NormSub& o) const
+    {
+        return sig == o.sig && bytes == o.bytes && refs == o.refs && softRefs == o.softRefs &&
+               heuristic == o.heuristic && opaque == o.opaque && origin == o.origin;
+    }
 };
 
 // Equality that also treats soft references as equal when they resolve to the

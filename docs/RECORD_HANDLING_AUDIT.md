@@ -1067,3 +1067,48 @@ Over the versions that load today up to the written one (partial versions supply
 Never touched: PCMB, XCRI, XPRI, VISI, RVIS and the record's identity. Values are compared on their normalized form (bytes with FormIDs as FormKeys), so the same record written in two plugins' numbering counts as equal. Each cell changed gets one "Cell Configuration" Info line naming each field and the plugin it came from. A cell whose versions cannot be compared gets a Warning and is written as it was.
 
 Test `cell_configuration_merge_takes_the_last_real_change` has three versions of a cell: Base.esm, which stays and defines it; ModP.esp; and ModL.esp, the winner. ModP changes lighting, location, Public Area and Off Limits, and adds a region. ModL repeats Base's values and has previs data. With the option on, the written cell has ModP's changes, both regions and ModL's XPRI. ModL has no region list, so the merged list is added, and the test checks that it and the location come before XPRI, as in the sources. With the option off, the cell is ModL's version as it is. Both exports pass the written-content check.
+
+## FormIDs past the master list; raw source values (17 Nov 2026)
+
+Reported: `just59WA_PerkCertifikateWaterMaster1 [BOOK]` INAM, "FormID 050026F5 uses a master index beyond the
+master list; the game reads it as none, and Dummy_Plugin_03.esp writes it as none", attributed to
+CollectorsAsylumPatch.esp.
+
+**What the files hold.** just59_Wasteland-Architect-Add03.esp has 4 masters (00-03); its own records are
+04xxxxxx (BOOK 040026FC, STAT 040026F5), but its INAM, YNAM and FIMD are written with index 05. The two
+patches store valid references to the same record (CollectorsAsylumComplexSorter.esp 080026F5, master 08;
+CollectorsAsylumPatch.esp 0E0026F5, master 0E).
+
+**What an index past the master list means.** xEdit, `Core/wbImplementation.pas`,
+`TwbFile.FileFileIDtoLoadOrderFileID`: an index below the master count is that master; anything else is the
+file itself (`GetResolvedLoadOrderFileID`). Fallout 4 uses this simple layout (not the "complex" FileID of later
+games). `Session::resolve` reads it the same way, so 050026F5 in just59 is just59's own STAT 0026F5, which
+exists; xEdit shows it as `[STAT:8B0026F5]` in all three plugins. The output was already right: Dummy_Plugin_03's
+book points INAM to its copy of that STAT (E60019DC), YNAM and FIMD likewise. Only the note was wrong: it
+claimed "reads as none / writes as none" for every such FormID, and named the record's winner instead of the
+plugin that stores the value. Not verified in game; xEdit models the engine and the app follows xEdit.
+
+**Changes.**
+- The note says what the plugin stores and what it reads as: "FormID 050026F5 in just59_…esp uses master index
+  05, past its master list (4 masters): it is read as that plugin's own record 0026F5, as xEdit reads it, and
+  that record exists; Dummy_Plugin_03.esp points to that record". When the own record does not exist the note
+  says so, and the reference is handled as a missing record (Broken in Source).
+- Every described reference keeps the 32-bit value its source plugin stored, with that plugin
+  (`NormSub::rawRefs`: offset, value, plugin), through packed-array split and join and the build cache
+  (format 8). It is evidence only: output FormIDs are always derived from the resolved record and the
+  output's own master list, never copied from the raw value (the same index can name another plugin there).
+  It is not part of equality, so merges compare references as before.
+- Broken in Source messages show the stored value: "… refers to 00894A in T-60 Equipment.esp
+  (StrengthInSteel_MPAM-T60E.esp stores 0E00894A), which does not exist …".
+
+Test: `formid_past_the_master_list_names_the_plugin_itself` (a 1-master plugin storing 02000800 for its own
+keyword): the output points to the keyword's copy (not 0, not another master), an ordinary own reference and a
+Fallout4.esm reference are unchanged, the raw value and its plugin survive compilation, the note is correct,
+and a past-the-list value whose own record does not exist shows its raw value under Broken in Source.
+
+**Open: references to records that do not exist are written as none.** The Rewrite stage (since bfa7ecd)
+writes a reference whose master is missing, or to a record a compiled plugin does not contain, as none, with a
+Broken in Source warning (250 in build 171126 210605, for example three keywords of Armor_Power_T60_Torso from
+StrengthInSteel_T60E/MPAM, which point to object IDs above FFF in the ESL-flagged T-60 Equipment.esp). Whether
+the game reads those as none is not verified (xEdit cannot resolve them). Changing the default to keep such
+plugins out, with writing none as an explicit opt-in, is pending a decision.

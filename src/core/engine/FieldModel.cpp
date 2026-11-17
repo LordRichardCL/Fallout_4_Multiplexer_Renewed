@@ -47,6 +47,9 @@ std::vector<ListItem> splitPacked(const NormSub& s, uint16_t stride)
         for (const auto& [off, key] : s.softRefs)
             if (off >= e && off < e + stride)
                 el.softRefs.emplace_back(off - e, key);
+        for (const auto& r : s.rawRefs)
+            if (r.offset >= e && r.offset < e + stride)
+                el.rawRefs.push_back({r.offset - e, r.value, r.plugin});
         ListItem item;
         item.subs.push_back(std::move(el));
         items.push_back(std::move(item));
@@ -327,6 +330,8 @@ std::vector<NormSub> joinFields(const FieldSet& set)
                         joined.refs.emplace_back(base + off, key);
                     for (const auto& [off, key] : el.softRefs)
                         joined.softRefs.emplace_back(base + off, key);
+                    for (const auto& r : el.rawRefs)
+                        joined.rawRefs.push_back({base + r.offset, r.value, r.plugin});
                 }
             }
             out.push_back(std::move(joined));

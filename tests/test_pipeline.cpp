@@ -5695,6 +5695,80 @@ TEST(last_build_reopens_after_a_restart_and_applies)
     }
 }
 
+// A FormID whose master index is past its plugin's master list names the plugin itself (xEdit:
+// TwbFile.FileFileIDtoLoadOrderFileID). Modelled on just59_Wasteland-Architect-Add03.esp: 4 masters, own
+// records at 04, and INAM written as 050026F5 (its own STAT 0026F5). Own.esp here has 1 master, so its own
+// records are 01xxxxxx and 02000800 is past the list. The reference resolves to its own record and the
+// output points to that record's copy (never 0, never another master); the note names the plugin that
+// stores it, what it reads as, and keeps the source's value. A past-the-list FormID whose own record does
+// not exist keeps its raw value in the Broken in Source report. Valid references are unchanged.
+TEST(formid_past_the_master_list_names_the_plugin_itself)
+{
+    auto b = buildAndExport("past_masters", [](const std::filesystem::path& root) {
+        writePlugin(root / "Game" / "Data" / "Own.esp", {"Fallout4.esm"},
+                    {record("KYWD", 0x01000800, {zs("EDID", "OwnKeyword")}),
+                     record("FLST", 0x01000801,
+                            {zs("EDID", "OwnList"), u32("LNAM", 0x02000800), u32("LNAM", 0x01000800),
+                             u32("LNAM", 0x00000800)}),
+                     record("FLST", 0x01000802, {zs("EDID", "BrokenList"), u32("LNAM", 0x02000900)})});
+        writeFile(root / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*Own.esp\n");
+    });
+    Pipeline p(b.cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK(p.compiledOutput()->isCompiled(p.session().findPlugin("Own.esp")->index));
+    auto result = p.exportOutputs();
+    OutputSet out(result.pluginFiles);
+    const auto* kw = out.byEditorId("OwnKeyword");
+    const auto* list = out.byEditorId("OwnList");
+    CHECK(kw && list);
+    if (!kw || !list)
+        return;
+    std::vector<uint32_t> lnam;
+    for (const auto& sr : list->record.subrecords)
+        if (sr.signature == Signature("LNAM"))
+            lnam.push_back(*sr.as<uint32_t>());
+    CHECK_EQ(lnam.size(), size_t(3));
+    if (lnam.size() == 3) {
+        CHECK(lnam[0] != 0);                                      // not written as none
+        CHECK(out.resolve(*list, lnam[0]) == out.identity(*kw)); // its own record's copy
+        CHECK(out.resolve(*list, lnam[1]) == out.identity(*kw)); // the ordinary own reference: unchanged
+        CHECK(out.resolve(*list, lnam[2]) == std::make_pair(std::string("Fallout4.esm"), uint32_t(0x800)));
+    }
+
+    // The source's value survives resolution (diagnostics).
+    bool keptRaw = false;
+    const auto own = p.session().findPlugin("Own.esp")->index;
+    auto scan = [&](const NormSub& sub) {
+        for (const auto& r : sub.rawRefs)
+            keptRaw |= r.value == 0x02000800 && r.plugin == own;
+    };
+    for (const auto& e : p.compiledOutput()->records)
+        for (const auto& f : e.fields.fields) {
+            for (const auto& sub : f.subs)
+                scan(sub);
+            for (const auto& item : f.items)
+                for (const auto& sub : item.subs)
+                    scan(sub);
+        }
+    CHECK(keptRaw);
+
+    // The notes: what the plugin stores, what it reads as, and no "none".
+    bool note = false, broken = false;
+    for (const auto& is : p.validation()->issues) {
+        if (is.category == "Record Decoding" && is.message.find("02000800 in Own.esp uses master index 02") != std::string::npos) {
+            note = is.message.find("past its master list (1 masters)") != std::string::npos &&
+                   is.message.find("that record exists") != std::string::npos &&
+                   is.message.find("none") == std::string::npos;
+        }
+        if (is.category == "Broken in Source" && is.message.find("Own.esp stores 02000900") != std::string::npos)
+            broken = true;
+    }
+    CHECK(note);
+    CHECK(broken);
+}
+
 TEST(standalone_apply_refuses_until_the_outputs_are_installed)
 {
     auto b = buildAndExport("deploy_notinstalled");

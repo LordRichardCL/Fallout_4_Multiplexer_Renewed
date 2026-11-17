@@ -2,6 +2,7 @@
 
 #include "util/Text.hpp"
 
+#include <cstdio>
 #include <algorithm>
 
 namespace fo4mx {
@@ -76,12 +77,24 @@ NormRecord Normalizer::normalize(const Record& rec, PluginIndex plugin)
         uint32_t raw = loadLE<uint32_t>(s.bytes.data() + slot.offset);
         FormKey key;
         if (raw != 0) {
+            s.rawRefs.push_back({slot.offset, raw, plugin}); // the source's value, kept before resolution
             key = session_.resolve(p, raw);
             if (!key.valid())
                 key.objectId = raw; // keep the raw value for diagnostics
-            if (masterIndexOf(raw) > p.masters.size())
-                out.issues.push_back({Severity::Warning, s.sig,
-                                      "FormID " + formatFormId(raw) + " uses a master index beyond the master list"});
+            // An index past the master list names the plugin itself (xEdit, wbImplementation.pas
+            // TwbFile.FileFileIDtoLoadOrderFileID: an index below the master count is that master,
+            // anything else the file itself), so Session::resolve reads it as the plugin's own record.
+            if (masterIndexOf(raw) > p.masters.size()) {
+                char idx[8];
+                std::snprintf(idx, sizeof(idx), "%02X", masterIndexOf(raw));
+                out.issues.push_back(
+                    {Severity::Warning, s.sig,
+                     "FormID " + formatFormId(raw) + " in " + p.name + " uses master index " + idx +
+                         ", past its master list (" + std::to_string(p.masters.size()) +
+                         " masters): it is read as that plugin's own record " + formatFormId(objectIdOf(raw)) +
+                         ", as xEdit reads it, and that record " +
+                         (session_.exists(key) ? std::string("exists") : std::string("does not exist"))});
+            }
         } else {
             key = FormKey{kInvalidPlugin, 0};
         }
@@ -98,11 +111,14 @@ NormRecord Normalizer::normalize(const Record& rec, PluginIndex plugin)
         FormKey key = session_.resolve(p, raw);
         if (!session_.exists(key))
             continue;
+        s.rawRefs.push_back({slot.offset, raw, plugin});
         storeLE<uint32_t>(s.bytes.data() + slot.offset, 0);
         s.refs.emplace_back(slot.offset, key);
     }
-    for (auto& s : out.subs)
+    for (auto& s : out.subs) {
         std::sort(s.refs.begin(), s.refs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        std::sort(s.rawRefs.begin(), s.rawRefs.end());
+    }
 
     for (auto& s : out.subs)
         s.origin = plugin;

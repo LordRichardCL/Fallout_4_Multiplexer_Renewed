@@ -79,9 +79,11 @@ std::string forCategory(const std::string& category, const std::string& message)
     if (category == "Missing Masters" || category == "Missing Master")
         return "A plugin needs a master that is not installed, not enabled or loads after it. The game does not start "
                "with a missing master. Install or enable it, or move it above the plugin that needs it.";
-    if (category == "Record Decoding" && message.find("master index beyond") != std::string::npos)
-        return "The plugin stores a FormID whose master index is past its master list: a reference added in xEdit "
-               "without its master, or a load-order FormID saved by a tool. The game reads it as none.";
+    if (category == "Record Decoding" && message.find("past its master list") != std::string::npos)
+        return "The plugin stores a FormID whose master index is past its master list. Such an index names the "
+               "plugin itself (xEdit reads it the same way), so the reference is to the plugin's own record; usually "
+               "the plugin had more masters when the reference was made, or a tool wrote its own index wrongly. "
+               "Nothing is guessed: the output points to the same record.";
     if (category == "Record Decoding")
         return "Part of the record does not match the layout the app expects. That part is copied as it is and "
                "scanned for references instead of being decoded.";
