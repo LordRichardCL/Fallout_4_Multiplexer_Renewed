@@ -15,6 +15,13 @@
 // of the game's GetPrivateProfileStringA import). Anything else, and it changes nothing. Once the game
 // data is ready, the original value is put back. Everything it does is written to
 // Documents\My Games\Fallout4\F4SE\MultiplexerArchiveLoader.log.
+//
+// The log also traces the startup, to show when things happen rather than guess: every line has the
+// time since F4SEPlugin_Load; each archive the game opens is listed once (number, thread, and whether
+// it was opened before the list was supplied, from the list, or otherwise: base game, DLC, Creation
+// Club, plugins); the first plugin file the game opens and every F4SE message are noted; and a watchdog
+// thread writes what was last opened when the game opens no file for 20 seconds before its data is
+// ready, so a hang documents itself. Only the game's own file opens are seen (its import table).
 
 #include "../recorder/F4SEPluginAbi.hpp"
 
@@ -39,8 +46,8 @@
 
 namespace {
 
-constexpr std::uint32_t kVersion = f4se_abi::packVersion(1, 0, 1);
-constexpr const char* kVersionText = "1.0.1";
+constexpr std::uint32_t kVersion = f4se_abi::packVersion(1, 1, 0);
+constexpr const char* kVersionText = "1.1.0";
 constexpr const char* kKey = "sResourceArchiveList2";
 
 std::mutex g_lock;
@@ -54,6 +61,21 @@ std::vector<std::pair<char**, char*>> g_slots; // the setting objects supplied, 
 std::set<std::string> g_wanted; // the supplied archives (lower case)
 std::set<std::string> g_opened; // those opened after the swap
 f4se_abi::PluginHandle g_handle = f4se_abi::kPluginHandleInvalid;
+
+// Startup trace (g_traceLock; never held while calling log()).
+LARGE_INTEGER g_freq{}, g_start{};
+std::mutex g_traceLock;
+std::set<std::string> g_seenArchives;  // archives opened so far (lower case)
+unsigned g_archives = 0;               // distinct archives opened
+unsigned g_reopens = 0;                // further opens of an archive already opened
+std::string g_lastArchive;             // the last archive opened for the first time
+DWORD g_lastArchiveThread = 0;
+std::set<std::string> g_seenPlugins;   // plugin files (.esm/.esp/.esl) opened so far (lower case)
+std::string g_lastFile;                // the last file of any kind the game opened
+double g_lastActivity = -1;            // ms since load of the last file open (-1: none yet)
+std::atomic<bool> g_dataReady{false};
+std::atomic<bool> g_supplied{false};   // the full list has been supplied  // GameDataReady (plugins loaded) seen: the watchdog stops
+constexpr double kStallMs = 20000;     // no file opened for this long before data ready: write a note
 
 using GetPrivateProfileStringA_t = DWORD(WINAPI*)(LPCSTR, LPCSTR, LPCSTR, LPSTR, DWORD, LPCSTR);
 using CreateFileA_t = HANDLE(WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
@@ -80,19 +102,34 @@ std::string utf8(const std::wstring& w)
     return s;
 }
 
-void log(const std::string& text)
+// Milliseconds since F4SEPlugin_Load.
+double sinceLoad()
+{
+    if (!g_freq.QuadPart)
+        return 0;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    return static_cast<double>(now.QuadPart - g_start.QuadPart) * 1000.0 / static_cast<double>(g_freq.QuadPart);
+}
+
+// One line: wall-clock time, then seconds since F4SEPlugin_Load. Trace lines (one per archive) are not
+// flushed to disk one by one, which would slow the game's loading; Windows keeps written data even if
+// the game hangs or is ended, and the next flushed line writes them too.
+void log(const std::string& text, bool flush = true)
 {
     std::lock_guard<std::mutex> lock(g_lock);
     if (g_log == INVALID_HANDLE_VALUE)
         return;
     SYSTEMTIME t;
     GetLocalTime(&t);
-    char stamp[32];
-    std::snprintf(stamp, sizeof(stamp), "[%02u:%02u:%02u.%03u] ", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
+    char stamp[48];
+    std::snprintf(stamp, sizeof(stamp), "[%02u:%02u:%02u.%03u +%8.3fs] ", t.wHour, t.wMinute, t.wSecond,
+                  t.wMilliseconds, sinceLoad() / 1000.0);
     const std::string line = stamp + text + "\r\n";
     DWORD written = 0;
     WriteFile(g_log, line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
-    FlushFileBuffers(g_log);
+    if (flush)
+        FlushFileBuffers(g_log);
 }
 
 std::wstring knownFolder(REFKNOWNFOLDERID id)
@@ -329,6 +366,7 @@ void supplyTo(const std::vector<char**>& slots)
         g_slots.emplace_back(slot, *slot);
         InterlockedExchangePointer(reinterpret_cast<PVOID*>(slot), full);
     }
+    g_supplied.store(true);
     log("Supplied the full list to " + std::to_string(slots.size()) + " setting(s): " + std::to_string(g_full.size()) +
         " characters (the game held " + std::to_string(g_received.size()) + "), " + std::to_string(g_wanted.size()) +
         " archives");
@@ -425,23 +463,116 @@ std::string fileNameLower(const std::wstring& path)
     return lower(utf8(slash == std::wstring::npos ? path : path.substr(slash + 1)));
 }
 
+std::string extensionLower(const std::wstring& path)
+{
+    return path.size() < 4 ? std::string() : lower(utf8(path.substr(path.size() - 4)));
+}
+
 void beforeOpen(const std::wstring& path)
 {
-    if (path.size() < 4 || lower(utf8(path.substr(path.size() - 4))) != ".ba2")
+    if (extensionLower(path) != ".ba2")
         return;
-    if (!g_triggered.exchange(true))
+    if (!g_triggered.exchange(true)) {
+        log("Archive registration starts: the game opens its first archive, " + fileNameLower(path) + " (thread " +
+            std::to_string(GetCurrentThreadId()) + ")");
         supplyList();
+    }
+}
+
+// The startup trace: every archive once, the first plugin file, and the time of every open for the
+// watchdog. Written after the open, so a line means the game has the file.
+void traceOpen(const std::wstring& path, HANDLE h)
+{
+    if (g_dataReady.load())
+        return;
+    const std::string ext = extensionLower(path);
+    const std::string name = fileNameLower(path);
+    const bool archive = ext == ".ba2";
+    const bool plugin = ext == ".esm" || ext == ".esp" || ext == ".esl";
+    const DWORD thread = GetCurrentThreadId();
+    std::string line;
+    bool flush = false;
+    {
+        std::lock_guard<std::mutex> lock(g_traceLock);
+        g_lastActivity = sinceLoad();
+        g_lastFile = name;
+        if (archive) {
+            if (!g_seenArchives.insert(name).second) {
+                ++g_reopens;
+                return;
+            }
+            ++g_archives;
+            g_lastArchive = name;
+            g_lastArchiveThread = thread;
+            // "list": named in MultiplexerArchives.txt (opened by the game's own list loading); "not in the
+            // list": the game's own lists, DLC, Creation Club and plugins' archives.
+            const char* phase = !g_wanted.count(name) ? "not in the list"
+                                : g_supplied.load()    ? "list"
+                                                       : "list, NOT supplied";
+            line = "BA2 #" + std::to_string(g_archives) + "  " + name + "  thread " + std::to_string(thread) + "  [" +
+                   phase + "]" + (h == INVALID_HANDLE_VALUE ? "  (open failed)" : "");
+        } else if (plugin && h != INVALID_HANDLE_VALUE && g_seenPlugins.insert(name).second) {
+            const size_t n = g_seenPlugins.size();
+            if (n == 1) {
+                line = "First plugin file opened by the game: " + name + " (thread " + std::to_string(thread) + ", after " +
+                       std::to_string(g_archives) + " archives; archive registration is over)";
+                flush = true;
+            } else if (n % 250 == 0) {
+                line = std::to_string(n) + " plugin files opened, the last " + name;
+            }
+        }
+    }
+    if (!line.empty())
+        log(line, flush);
 }
 
 void afterOpen(const std::wstring& path, HANDLE h)
 {
-    if (h == INVALID_HANDLE_VALUE || g_slots.empty())
+    traceOpen(path, h);
+    if (h == INVALID_HANDLE_VALUE || !g_supplied.load())
         return;
     const std::string n = fileNameLower(path);
     if (g_wanted.count(n)) {
         std::lock_guard<std::mutex> lock(g_lock);
         g_opened.insert(n);
     }
+}
+
+// Writes what the game last opened when it opens nothing for kStallMs before its data is ready: at 20
+// seconds, then every minute while it lasts. A long plugin can take that long to read, so a note alone
+// is not a hang; one that keeps repeating after the last archive, with no plugin file opened, is.
+DWORD WINAPI watchdog(LPVOID)
+{
+    double noted = -1; // the activity time already reported
+    double next = kStallMs;
+    while (!g_dataReady.load()) {
+        Sleep(1000);
+        std::string line;
+        {
+            std::lock_guard<std::mutex> lock(g_traceLock);
+            if (g_lastActivity < 0)
+                continue;
+            if (g_lastActivity != noted) {
+                noted = g_lastActivity;
+                next = kStallMs;
+            }
+            const double quiet = sinceLoad() - g_lastActivity;
+            if (quiet < next)
+                continue;
+            next += 60000;
+            char head[96];
+            std::snprintf(head, sizeof(head), "Watchdog: no file opened for %.0f s. ", quiet / 1000.0);
+            line = std::string(head) + "Last archive: #" + std::to_string(g_archives) + " " +
+                   (g_lastArchive.empty() ? std::string("(none)") : g_lastArchive) + " (thread " +
+                   std::to_string(g_lastArchiveThread) + "); last file: " + g_lastFile + "; " +
+                   std::to_string(g_reopens) + " reopens; " +
+                   (g_seenPlugins.empty() ? "no plugin file opened yet: the game is still in archive registration"
+                                          : std::to_string(g_seenPlugins.size()) +
+                                                " plugin files opened: the game is reading plugins");
+        }
+        log(line);
+    }
+    return 0;
 }
 
 DWORD WINAPI onRead(LPCSTR app, LPCSTR key, LPCSTR def, LPSTR out, DWORD size, LPCSTR file)
@@ -543,11 +674,50 @@ bool wrapImport(const char* function, F wrapper, F& previous)
     return true;
 }
 
+const char* messageName(std::uint32_t type)
+{
+    using M = f4se_abi::F4SEMessagingInterface;
+    switch (type) {
+    case M::kPostLoad: return "PostLoad";
+    case M::kPostPostLoad: return "PostPostLoad";
+    case M::kPreLoadGame: return "PreLoadGame";
+    case M::kPostLoadGame: return "PostLoadGame";
+    case M::kPreSaveGame: return "PreSaveGame";
+    case M::kPostSaveGame: return "PostSaveGame";
+    case M::kDeleteGame: return "DeleteGame";
+    case M::kInputLoaded: return "InputLoaded";
+    case M::kNewGame: return "NewGame";
+    case M::kGameLoaded: return "GameLoaded";
+    case M::kGameDataReady: return "GameDataReady";
+    default: return "unknown";
+    }
+}
+
 void onMessage(f4se_abi::F4SEMessagingInterface::Message* msg)
 {
     try {
-        if (!msg || msg->type != f4se_abi::F4SEMessagingInterface::kGameDataReady || !msg->data)
+        if (!msg)
             return;
+        // Every F4SE message up to the first save activity, with the trace's counts at that moment.
+        if (msg->type <= f4se_abi::F4SEMessagingInterface::kGameDataReady &&
+            msg->type != f4se_abi::F4SEMessagingInterface::kPreSaveGame &&
+            msg->type != f4se_abi::F4SEMessagingInterface::kPostSaveGame) {
+            unsigned archives = 0, plugins = 0;
+            {
+                std::lock_guard<std::mutex> lock(g_traceLock);
+                archives = g_archives;
+                plugins = static_cast<unsigned>(g_seenPlugins.size());
+            }
+            std::string what = std::string("F4SE message ") + messageName(msg->type) + " (thread " +
+                               std::to_string(GetCurrentThreadId()) + "): " + std::to_string(archives) +
+                               " archives and " + std::to_string(plugins) + " plugin files opened so far";
+            if (msg->type == f4se_abi::F4SEMessagingInterface::kGameDataReady)
+                what += msg->data ? " (plugins loaded)" : " (sent before the plugins load)";
+            log(what);
+        }
+        if (msg->type != f4se_abi::F4SEMessagingInterface::kGameDataReady || !msg->data)
+            return;
+        g_dataReady.store(true);
         if (g_slots.empty()) {
             log("Game data ready: the list was not supplied");
             return;
@@ -619,7 +789,10 @@ __declspec(dllexport) bool F4SEPlugin_Load(const f4se_abi::F4SEInterface* f4se)
             g_log = CreateFileW((g_myGames + L"F4SE\\MultiplexerArchiveLoader.log").c_str(), GENERIC_WRITE,
                                 FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         }
-        log(std::string("MultiplexerArchiveLoader ") + kVersionText + " loaded");
+        QueryPerformanceFrequency(&g_freq);
+        QueryPerformanceCounter(&g_start);
+        log(std::string("MultiplexerArchiveLoader ") + kVersionText + " loaded (F4SEPlugin_Load, thread " +
+            std::to_string(GetCurrentThreadId()) + "); times after the clock are seconds since this line");
         // Only on the game version it was tested on: anywhere else it changes nothing.
         if (f4se->runtimeVersion != f4se_abi::packVersion(1, 10, 163)) {
             char v[32];
@@ -634,7 +807,11 @@ __declspec(dllexport) bool F4SEPlugin_Load(const f4se_abi::F4SEInterface* f4se)
         const bool w = wrapImport("CreateFileW", &onOpenW, g_prevOpenW);
         const bool a = wrapImport("CreateFileA", &onOpenA, g_prevOpenA);
         log(std::string("Watching the game's INI reads: ") + (r ? "yes" : "NO") + ", archive opens: " +
-            (w || a ? "yes" : "NO"));
+            (w || a ? "yes" : "NO") + " (Fallout4.exe imports GetPrivateProfileStringA, CreateFileW, CreateFileA)");
+        if (HANDLE t = CreateThread(nullptr, 0, watchdog, nullptr, 0, nullptr)) {
+            CloseHandle(t);
+            log("Watchdog started: it notes when the game opens no file for 20 s before its data is ready");
+        }
         g_handle = f4se->GetPluginHandle ? f4se->GetPluginHandle() : f4se_abi::kPluginHandleInvalid;
         if (auto* m = f4se->QueryInterface ? static_cast<f4se_abi::F4SEMessagingInterface*>(
                                                  f4se->QueryInterface(f4se_abi::kInterfaceMessaging))
