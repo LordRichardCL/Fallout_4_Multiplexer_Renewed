@@ -645,6 +645,9 @@ void CompilationPage::updateButtons()
     // Apply works on this session's export, or on the last build reopened after a scan (verified).
     const bool applicable = p && p->applySource();
     apply_->setEnabled(!busy && applicable);
+    apply_->setToolTip(applicable ? QString()
+                                  : QString("Export first, or after a restart Scan: the last export is reopened when it "
+                                            "still matches the load order."));
     openFolder_->setEnabled(applicable);
 }
 
@@ -735,8 +738,12 @@ void CompilationPage::refresh()
                                    meta("validation_pre-export_warnings"), meta("validation_pre-export_errors"),
                                    patchText + incremental));
     }
-    // The last build after a restart: reopened (verified) or why not.
-    if (auto* p = app_->pipeline(); p && !p->compiledOutput()) {
+    // The last build after a restart: reopened (verified) or why not. Reopening needs a scan.
+    if (auto* p = app_->pipeline(); !p || !p->scanned()) {
+        summary_->setText(summary_->text().toHtmlEscaped() +
+                          "<br>After a restart, <b>Scan</b> (Dashboard) first: the last export is reopened for Apply to "
+                          "Game when its files and the load order still match it, without compiling again.");
+    } else if (!p->compiledOutput()) {
         if (const auto* rb = p->restoredBuild())
             summary_->setText(summary_->text().toHtmlEscaped() +
                               QString("<br>Last build reopened: <b>%1</b> (%2 compiled plugins, %3 outputs). Its files and "

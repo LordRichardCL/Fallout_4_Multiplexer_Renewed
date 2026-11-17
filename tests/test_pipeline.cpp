@@ -7423,6 +7423,14 @@ TEST(archive_loader_lifts_the_list_limit)
     CHECK(manifest.find("UserArchive1000.ba2\n") != std::string::npos);
     CHECK(manifest.find("ModA - Main.ba2\n") != std::string::npos);
     CHECK(manifest.find("UserArchive1000.ba2\n") < manifest.find("ModA - Main.ba2\n")); // INI order, ours last
+    // The export's record names the loader's files where they are (not in the unfinished "<name>.tmp").
+    {
+        const auto rec = buildrecord::read(result.packageRoot);
+        CHECK(rec.f4seArchiveLoader);
+        CHECK_EQ(rec.archiveLoaderFiles.size(), size_t(2));
+        for (const auto& f : rec.archiveLoaderFiles)
+            CHECK(!f.empty() && std::filesystem::is_regular_file(result.packageRoot / f));
+    }
 
     // Apply writes the whole list, longer than the game reads: the loader supplies the rest.
     Exporter::applyArchiveIni(p.session(), *p.compiledOutput(), result.directory);

@@ -333,9 +333,17 @@ bool Pipeline::restoreLastBuild()
         }
         rb.exported.pluginFiles.push_back(file);
     }
-    for (const auto& f : rec.archiveLoaderFiles)
-        if (!std::filesystem::is_regular_file(at(f), ec))
-            restoreDetails_.push_back(f + ": missing");
+    // The F4SE archive loader and its list are always at Data\F4SE\Plugins in the export (exports made
+    // before this was recorded correctly listed them without a path).
+    const auto dataDir = rec.directory.empty() ? *latest : at(rec.directory);
+    std::vector<std::filesystem::path> loaderFiles;
+    if (rec.f4seArchiveLoader)
+        for (const char* name : {Exporter::kArchiveLoaderDll, Exporter::kArchiveManifest}) {
+            const auto f = dataDir / "F4SE" / "Plugins" / name;
+            if (!std::filesystem::is_regular_file(f, ec))
+                restoreDetails_.push_back(std::string("F4SE\\Plugins\\") + name + ": missing");
+            loaderFiles.push_back(f);
+        }
     if (!restoreDetails_.empty())
         return refuse("its files are missing or were changed. Compile and export again");
 
@@ -379,8 +387,7 @@ bool Pipeline::restoreLastBuild()
         e.zipPath.clear();
     e.disableList = at(rec.disableList);
     e.recorderFolder = at(rec.recorderFolder);
-    for (const auto& f : rec.archiveLoaderFiles)
-        e.archiveLoaderFiles.push_back(at(f));
+    e.archiveLoaderFiles = loaderFiles;
     for (const auto& f : rec.loaderPlugins)
         e.archiveLoaders.push_back(at(f));
     e.runName = run;
@@ -1166,7 +1173,7 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         for (auto* p : {&result.directory, &result.packageRoot, &result.zipPath, &result.formMap, &result.archiveIni,
                         &result.disableList, &result.pluginsTxt, &result.voiceManifest, &result.recorderFolder})
             rebase(*p, from, run->folder);
-        for (auto* list : {&result.pluginFiles, &result.archiveLoaders, &result.seqFiles})
+        for (auto* list : {&result.pluginFiles, &result.archiveLoaders, &result.seqFiles, &result.archiveLoaderFiles})
             for (auto& p : *list)
                 rebase(p, from, run->folder);
         if (autoMerge_)
