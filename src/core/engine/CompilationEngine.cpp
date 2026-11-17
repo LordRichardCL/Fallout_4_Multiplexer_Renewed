@@ -999,6 +999,16 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     pos = static_cast<size_t>(it - dst.fields.begin());
                     placed = true;
                 }
+            // Step past the written version's fields that xEdit puts before this one (as MergeEngine).
+            if (const int rank = subrecordRank(dst.sig, field.sig); rank >= 0)
+                while (pos < dst.fields.size() && std::none_of(sf.begin(), sf.end(), [&](const Field& f) {
+                           return f.key == dst.fields[pos].key;
+                       })) {
+                    const int here = subrecordRank(dst.sig, dst.fields[pos].sig);
+                    if (here < 0 || here >= rank)
+                        break;
+                    ++pos;
+                }
             return &*dst.fields.insert(dst.fields.begin() + static_cast<std::ptrdiff_t>(pos), field);
         };
         for (auto& e : out.records) {
