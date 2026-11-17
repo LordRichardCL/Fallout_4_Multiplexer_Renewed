@@ -1128,3 +1128,27 @@ lossy, each reference listed under Broken in Source.
 Test: `references_broken_in_the_source_keep_their_plugin_out_unless_written_as_null` (default: kept out with
 the stored value in the reason, nothing written for it, other plugins still compile; opt-in: written as null
 and reported); the past-the-master-list test checks both modes too.
+
+## xEdit "Check for Errors" on the outputs (17 Nov 2026)
+
+The user ran xEdit's check on Dummy_Plugin_01–04 and Multiplexer_Patch. Most reports are also present
+when xEdit loads the source plugins, so they come from the sources: localized string IDs in an
+unlocalized plugin (aSW Faction Addon patch), CONT NTRM after PRPS, trailing MO2F, face morph and
+light-radius warnings, NAVM unused data, VMAD property types. Two came from the app:
+
+- **A field a contributor adds was placed before the winner's own fields that xEdit puts ahead of
+  it.** In Minuteman hats (ARMO 000316D4), one plugin adds APPR after FNAM and the winner adds DAMA,
+  but the output had `FNAM APPR DAMA`. xEdit expects `... DATA FNAM DAMA CURV TNAM APPR OBTE ...`.
+  The merge now uses xEdit's member order for each record type, which `tools/gen_subrecord_order.py`
+  generates from wbDefinitionsFO4.pas into `src/core/esp/SubrecordOrder.inc`. When a field is
+  inserted, it steps past the winner's fields that come earlier in that order. Fields a version
+  already holds are never reordered.
+- **IPDS PNAM entries were joined into one subrecord.** xEdit defines the field as
+  `wbRArrayS(wbStructSK(PNAM, [0], [material, impact]))`, one 8-byte PNAM per entry. It was
+  described as a packed array, so a merged IPDS wrote one 16/24/… byte PNAM. PNAM is now a list keyed
+  by material, one subrecord per entry. The build cache format moved to 9.
+- **Merged keyed lists wrote the base entries twice** (found while testing the IPDS change). When a
+  keyed list was merged, `mergeList` started from the base items and then appended the merged items,
+  which include the base ones. In the reviewed outputs, 21 FACT records had duplicate XNAM relations;
+  NPC factions and perks use the same path. The merged list now holds only the merged items. The IPDS
+  test covers it.

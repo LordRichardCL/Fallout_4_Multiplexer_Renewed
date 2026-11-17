@@ -626,7 +626,11 @@ void buildOldGen(RecordDefinitions& d)
         .field("MDOB", formId())                               // menu display object
         .conditionRegion();
 
-    b.record("IPDS", "Impact Data Set", true).field("PNAM", structArray(8, {0, 4})); // material type, impact
+    // xEdit: wbRArrayS('Data', wbStructSK(PNAM, [0], ...)): one 8-byte PNAM (material type, impact)
+    // per entry, keyed by material.
+    FieldDef impactEntry = structAt({0, 4}, 8);
+    impactEntry.merge = MergeMode::Keyed;
+    b.record("IPDS", "Impact Data Set", true).field("PNAM", impactEntry);
 
     b.record("AORU", "Attraction Rule", true).field("AOR2", noRefs());
 

@@ -14,7 +14,7 @@ namespace fo4mx {
 
 namespace {
 
-constexpr uint32_t kFormatVersion = 8; // 8: raw source value of every described reference; // 7: Version Control Info of every record; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
+constexpr uint32_t kFormatVersion = 9; // 9: IPDS PNAM read per subrecord; 8: raw source value of every described reference; // 7: Version Control Info of every record; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
                                        // 4: record-level classification of types that are not merged;
                                        // 5: record placement (cells, worldspaces, topics)
 

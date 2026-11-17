@@ -24,6 +24,7 @@ add_library(fo4mx_core STATIC
     esp/Record.cpp
     esp/RecordCatalogue.cpp
     esp/RecordDefinitions.cpp
+    esp/SubrecordOrder.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/generated/RecordCatalogueData.cpp
     esp/StringTables.cpp
     ba2/Ba2Archive.cpp

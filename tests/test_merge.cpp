@@ -243,3 +243,67 @@ TEST(separate_runs_of_a_packed_array_keep_their_place)
     for (size_t i = 0; i < std::min(again.size(), r.subs.size()); ++i)
         CHECK(again[i].bytes == r.subs[i].bytes);
 }
+
+TEST(field_a_contributor_adds_takes_xedits_place_among_the_winners)
+{
+    // The winner adds DAMA after FNAM; another plugin adds APPR after FNAM. xEdit's ARMO order is
+    // ... DATA FNAM DAMA TNAM APPR ..., so APPR goes after DAMA, not straight after FNAM.
+    auto armor = [](std::vector<const char*> extra) {
+        NormRecord r;
+        r.key = K(0, 0x316D4);
+        r.sig = Signature("ARMO");
+        r.subs.push_back(scalar("EDID", {'H', 0}));
+        r.subs.push_back(scalar("DATA", std::vector<uint8_t>(12, 0)));
+        r.subs.push_back(scalar("FNAM", std::vector<uint8_t>(8, 0)));
+        for (const char* sig : extra) {
+            NormSub s = scalar(sig, std::vector<uint8_t>(8, 0));
+            if (std::string(sig) == "APPR") {
+                s.bytes.resize(4);
+                s.refs.emplace_back(0, K(0, 0x1234));
+            }
+            r.subs.push_back(s);
+        }
+        return splitFields(r, RecordDefinitions::get());
+    };
+    auto base = armor({});
+    auto appr = armor({"APPR"});
+    auto dama = armor({"DAMA"});
+    auto joined = joinFields(MergeEngine::merge({base, appr, dama}).fields);
+    std::vector<std::string> order;
+    for (const auto& s : joined)
+        order.push_back(s.sig.str());
+    CHECK((order == std::vector<std::string>{"EDID", "DATA", "FNAM", "DAMA", "APPR"}));
+}
+
+TEST(impact_data_set_entries_are_one_subrecord_each)
+{
+    auto impacts = [](std::vector<std::pair<uint32_t, uint32_t>> entries) {
+        NormRecord r;
+        r.key = K(0, 0x5FD76);
+        r.sig = Signature("IPDS");
+        r.subs.push_back(scalar("EDID", {'I', 0}));
+        for (auto [material, impact] : entries) {
+            NormSub s = scalar("PNAM", std::vector<uint8_t>(8, 0));
+            s.refs.emplace_back(0, K(0, material));
+            s.refs.emplace_back(4, K(0, impact));
+            r.subs.push_back(s);
+        }
+        return splitFields(r, RecordDefinitions::get());
+    };
+    auto base = impacts({{0x223D2, 0x5FD75}});
+    auto joined = joinFields(base);
+    CHECK_EQ(joined.size(), size_t(2));
+    // One plugin adds an entry for a second material, another changes the first one's impact.
+    auto added = impacts({{0x223D2, 0x5FD75}, {0x223D3, 0x800}});
+    auto changed = impacts({{0x223D2, 0x801}});
+    auto merged = joinFields(MergeEngine::merge({base, added, changed}).fields);
+    CHECK_EQ(merged.size(), size_t(3));
+    for (size_t i = 1; i < merged.size(); ++i) {
+        CHECK(merged[i].sig == Signature("PNAM"));
+        CHECK_EQ(merged[i].bytes.size(), size_t(8));
+    }
+    if (merged.size() == 3) {
+        CHECK(merged[1].refs[1].second == K(0, 0x801));
+        CHECK(merged[2].refs[0].second == K(0, 0x223D3));
+    }
+}

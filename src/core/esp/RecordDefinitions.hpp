@@ -201,4 +201,9 @@ public:
     void computeFingerprint();
 };
 
+// Where xEdit expects subrecord `sub` within a `record` (its position in xEdit's Fallout 4 definition,
+// tools/gen_subrecord_order.py), or -1 when the record type or the subrecord is not listed. Used to
+// place a field the written version lacks; never to reorder fields it holds.
+int subrecordRank(Signature record, Signature sub);
+
 } // namespace fo4mx

@@ -1,5 +1,7 @@
 #include "engine/MergeEngine.hpp"
 
+#include "esp/RecordDefinitions.hpp"
+
 #include <algorithm>
 #include <iterator>
 #include <map>
@@ -40,6 +42,24 @@ std::vector<std::string> unionKeys(const std::vector<FieldSet>& chain)
                 if (it != order.end()) {
                     pos = it + 1;
                     break;
+                }
+            }
+            // The winner's own fields between the predecessor and pos's successor may belong before
+            // this one in xEdit's order (a contributor adds APPR after FNAM; the winner has DAMA
+            // there): step past those so the written record keeps xEdit's order.
+            const int rank = subrecordRank(chain[c].sig, fs[i].sig);
+            if (rank >= 0) {
+                while (pos != order.end()) {
+                    const Field* here = nullptr;
+                    for (const auto& set : chain)
+                        if ((here = set.find(*pos)))
+                            break;
+                    if (!here || chain[c].find(*pos))
+                        break; // a field this contributor holds keeps its order
+                    const int hereRank = subrecordRank(chain[c].sig, here->sig);
+                    if (hereRank < 0 || hereRank >= rank)
+                        break;
+                    ++pos;
                 }
             }
             order.insert(pos, fs[i].key);
@@ -142,6 +162,7 @@ Field mergeList(const std::vector<const Field*>& values, const std::vector<size_
                 if (!present.count(k))
                     keyed.erase(k);
         }
+        result.items.clear(); // `keyed` holds the base items still present
         for (const auto& k : order) {
             auto it = keyed.find(k);
             if (it != keyed.end())
