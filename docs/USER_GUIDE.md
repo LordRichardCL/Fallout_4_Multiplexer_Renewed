@@ -271,7 +271,10 @@ of the load order at export. After a **Scan**, the app reopens the latest finish
 - every output plugin (and the archive loader with its list, when used) is still in the export, byte for byte
   as written;
 - the load order and the compilation settings still match the build (the same comparison as the change check;
-  changes that do not affect the build, such as an unrelated mod, are allowed and counted);
+  changes that do not affect the build, such as an unrelated mod, are allowed and counted). A re-sort (LOOT,
+  Vortex sorting on deploy) is checked record by record: plugins moving past plugins they share no record with
+  change nothing the build decided, so the build still reopens; if two plugins that edit the same record swap
+  places, it does not, and the page names them;
 - every plugin it compiled is still found.
 
 The Compilation page then says *Last build reopened: <export>*, and **Apply to Game** and **Open Output

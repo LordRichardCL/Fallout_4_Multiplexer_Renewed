@@ -5803,6 +5803,54 @@ TEST(formid_past_the_master_list_names_the_plugin_itself)
     CHECK(broken);
 }
 
+// A re-sort after the build (LOOT, the mod manager): a plugin that moves past plugins it shares no record
+// with changes nothing the build decided, so the build still reopens; two plugins that edit the same
+// record swapping places keeps it closed and names them.
+TEST(last_build_reopens_after_a_resort_unless_record_editors_swap)
+{
+    auto b = buildAndExport("restore_moves", [](const std::filesystem::path& root) {
+        writePlugin(root / "Game" / "Data" / "ModD.esp", {"Fallout4.esm"},
+                    {record("KYWD", 0x01000800, {zs("EDID", "ModD_Keyword")})});
+        writeFile(root / "plugins.txt", "# test\n*ModD.esp\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
+    });
+    {
+        Pipeline p(b.cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        p.exportOutputs();
+        installOutputs(p, b.root);
+    }
+    // ModD moves to the end: it shares no record with the plugins it passes.
+    writeFile(b.root / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModD.esp\n");
+    {
+        Pipeline q(b.cfg);
+        q.scan();
+        CHECK(q.restoredBuild() != nullptr);
+        if (!q.restoredBuild()) {
+            std::printf("    %s\n", q.restoreProblem().c_str());
+            for (const auto& d : q.restoreDetails())
+                std::printf("      %s\n", d.c_str());
+        }
+    }
+    // ModB and ModC both edit Pistol10mm: swapping them changes which version wins.
+    writeFile(b.root / "plugins.txt", "# test\n*ModD.esp\n*ModA.esp\n*ModC.esp\n*ModB.esp\n");
+    {
+        Pipeline q(b.cfg);
+        q.scan();
+        CHECK(!q.restoredBuild());
+        bool named = false;
+        for (const auto& d : q.restoreDetails())
+            named |= d.find("ModC.esp now loads before ModB.esp") != std::string::npos;
+        CHECK(named);
+        if (!named) {
+            std::printf("    %s\n", q.restoreProblem().c_str());
+            for (const auto& d : q.restoreDetails())
+                std::printf("      %s\n", d.c_str());
+        }
+    }
+}
+
 TEST(standalone_apply_refuses_until_the_outputs_are_installed)
 {
     auto b = buildAndExport("deploy_notinstalled");

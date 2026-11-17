@@ -31,6 +31,8 @@ const RecordDefinitions& definitions(const PipelineConfig& config)
     return config.definitions ? *config.definitions : RecordDefinitions::get(config.install.runtime);
 }
 
+std::vector<std::string> conflictingMoves(const Session& s, const std::vector<std::string>& oldOrder, size_t limit);
+
 } // namespace
 
 Pipeline::Pipeline(PipelineConfig config)
@@ -306,6 +308,27 @@ bool Pipeline::restoreLastBuild()
     if (rec.settingsHash != currentSettingsHash() && report.status != BuildStatus::RequiresRebuild) {
         report.reasons.push_back("Compilation settings changed");
         report.status = BuildStatus::RequiresRebuild;
+    }
+    // A re-sort (LOOT, the mod manager) moves plugins; only a move between plugins that edit the same
+    // record changes what the build decided. When moves are the only change, they are checked record by record.
+    if (report.status == BuildStatus::RequiresRebuild && rec.settingsHash == currentSettingsHash() &&
+        std::all_of(report.items.begin(), report.items.end(),
+                    [](const ChangeItem& i) { return !i.affectsBuild || (i.category == "Load Order" && i.kind == "Moved"); })) {
+        const auto conflicts = conflictingMoves(*session_, rec.snapshot.loadOrder, 20);
+        if (conflicts.empty()) {
+            size_t moved = 0;
+            for (auto& i : report.items)
+                if (i.affectsBuild) {
+                    i.affectsBuild = false;
+                    ++moved;
+                }
+            report.reasons.clear();
+            report.status = BuildStatus::ChangesDetected;
+            spdlog::info("{} plugins moved since the build; none now loads before a plugin it shares a record with, "
+                         "so the build still holds", moved);
+        } else {
+            report.reasons = conflicts;
+        }
     }
     if (report.status == BuildStatus::RequiresRebuild) {
         for (const auto& r : report.reasons)
@@ -978,6 +1001,47 @@ std::filesystem::path Pipeline::pendingOutputDirectory() const
 }
 
 namespace {
+
+// Pairs of plugins that edit the same record and whose order differs from `oldOrder` (active plugins at
+// the build): only such a move can change which version of a record wins. A move between plugins that
+// share no record changes nothing the build decided. Up to `limit` pairs, as "A before B (now after)".
+std::vector<std::string> conflictingMoves(const Session& s, const std::vector<std::string>& oldOrder, size_t limit)
+{
+    std::unordered_map<std::string, int> oldPos;
+    for (size_t i = 0; i < oldOrder.size(); ++i)
+        oldPos.emplace(toLower(oldOrder[i]), static_cast<int>(i));
+    std::vector<int> posOf(s.plugins.size(), -1);
+    for (const auto& p : s.plugins)
+        if (p.active)
+            if (auto it = oldPos.find(toLower(p.name)); it != oldPos.end())
+                posOf[p.index] = it->second;
+    std::set<std::pair<PluginIndex, PluginIndex>> pairs;
+    for (const auto& g : s.groups) {
+        if (g.size() < 2)
+            continue;
+        int maxOld = -1;
+        PluginIndex maxPlugin = kInvalidPlugin;
+        for (const auto& inst : s.instances(g)) { // in today's load order
+            const int op = inst.plugin < posOf.size() ? posOf[inst.plugin] : -1;
+            if (op < 0)
+                continue; // not in the build's load order (an output, or new since)
+            if (op < maxOld)
+                pairs.insert({maxPlugin, inst.plugin});
+            else {
+                maxOld = op;
+                maxPlugin = inst.plugin;
+            }
+        }
+        if (pairs.size() >= limit)
+            break;
+    }
+    std::vector<std::string> out;
+    for (const auto& [a, b] : pairs)
+        // `a` comes first in today's order but loaded after `b` at the build.
+        out.push_back(s.plugins[a].name + " now loads before " + s.plugins[b].name +
+                      " (they edit the same records; it loaded after it at the build)");
+    return out;
+}
 
 // After the export folder is renamed from "<name>.tmp" to "<name>": the same paths in the new place.
 void rebase(std::filesystem::path& p, const std::string& from, const std::filesystem::path& to)
