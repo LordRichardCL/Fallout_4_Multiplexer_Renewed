@@ -96,15 +96,44 @@ So the list is registered before every plugin's archives, through the game's INI
 plugin-archive step. Load order of the DLLs does not matter: the loader acts when the game opens its first
 archive, long after every DLL has loaded.
 
-### Open issue: hang with a long list (build `161126 223443`)
+### Hang with a long list and Daytripper 4's ExtendedArchiveLimit (resolved, 17 Nov 2026)
 
-With 681 archives supplied (699 registered from the list), the game stopped every time at the 1,104th
-archive it registered, whichever archive that was, with the compiled plugins on or off. With 341 supplied
-(359 from the list) it loaded and registered 2,105 archives in all; earlier builds with up to 422 from the
-list loaded. The total number of archives does not explain it. Not established: whether Daytripper 4's
-`ExtendedArchiveLimit` covers archives registered from the INI list as it does plugins' archives (its source
-is not published), or whether this is the engine's archive-index bug that *BA2 Archive Index Fix* (Nexus
-110922, 1.10.163) describes as a loading hang. The trace above is meant to settle it.
+**Symptom.** Build `161126 223443` and later: the game froze at the main menu (no GameDataReady) with the full
+list of 681 archives, with the compiled plugins switched over or not, and in the original load order too as
+soon as the loader supplied that list. Every such launch stopped at the 1,104th archive opened, whichever
+archive that was (Beast Hunter's, then KT_Framework's once Beast Hunter was off).
+
+**What the tests showed** (archives registered from the list, including the game's own base ones; only
+archives that opened are counted):
+
+| Launch | General | Textures | Result |
+|---|---|---|---|
+| half list | 198 | 161 | loads |
+| build of 16 Nov | 231 | 191 | loads |
+| 240 + 240 test list | 249 | 249 | loads |
+| full list | 382 | 317 | hangs |
+
+The total does not matter (the original load order opens 893 general and 767 texture archives, most of them
+through plugins); more than 256 of one type arriving through the list does.
+
+**Where it hung.** A ProcDump mini dump of the frozen game: the busy thread was at `Fallout4.exe+1B773F7`, in
+the archive index's name-table insert (`BSTSmallIndexScatterTable` insert, `+1B772F0`), called from
+`BSResource::Archive2::Index::AddDataFile` (`+1B767F0`, return address `+1B768AC`). Offsets for 1.10.163 as
+named by [BSALimitExpander](https://github.com/WirelessLan/BSALimitExpander); the index layout in
+[CommonLibF4](https://github.com/Ryan-rsm-McKenzie/commonlibf4) has fixed arrays of 256 archives and a one-byte
+archive number per file, one index for general archives and one for textures: the engine's limit. A limit
+raiser replaces that storage (BSALimitExpander and X-Cell's ArchiveLimits module hook `AddDataFile`).
+
+**Cause and fix.** Daytripper 4 (1.4.9) with `ExtendedArchiveLimit` on raises the limit for the archives
+plugins load, but its handling hung when more than 256 of a type came through the INI list. With
+`ExtendedArchiveLimit` turned off in Daytripper 4's INI and **BSA Limit Expander** (0.3.4) installed instead,
+the same build with the full list (382 + 317 through the list, 1,660 archives in all) reached the main menu
+and started a new game. Nothing in the loader or the build had to change.
+
+**Use one limit raiser only**: BSA Limit Expander, Daytripper 4's `ExtendedArchiveLimit`, Archive Limit
+Breaker and X-Cell's ArchiveLimits all replace the same function. With a list of more than 255 general or
+texture archives, use BSA Limit Expander (or another raiser shown to work with this list) and turn the others
+off.
 
 ## Checked so far
 
