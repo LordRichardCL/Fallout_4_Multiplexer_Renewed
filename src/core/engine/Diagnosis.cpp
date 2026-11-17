@@ -74,8 +74,10 @@ std::string forCategory(const std::string& category, const std::string& message)
                "The plugin simply stays in the load order as it is, so nothing is lost; it is compiled again once the "
                "field is understood.";
     if (category == "Broken in Source")
-        return "The reference was already broken in the mod itself. The game reads it as none, so the compiled "
-               "plugin behaves exactly like the original.";
+        return "The reference was already broken in the mod itself. It is written as null only because \"Write "
+               "broken references as null\" is on; how the game reads such a reference is not verified, so the "
+               "compiled plugin may differ from the original. Turn the option off to keep this plugin in the load "
+               "order unchanged instead.";
     if (category == "Missing Masters" || category == "Missing Master")
         return "A plugin needs a master that is not installed, not enabled or loads after it. The game does not start "
                "with a missing master. Install or enable it, or move it above the plugin that needs it.";

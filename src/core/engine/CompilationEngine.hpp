@@ -50,6 +50,12 @@ struct CompileOptions {
     // configuration field (lighting, location, encounter zone, music, water, regions...) from the
     // versions loading today, instead of the winner's version of all of them.
     bool mergeCellConfig = false;
+    // A reference that cannot be written faithfully (its master is missing, or it names a record a
+    // compiled plugin does not contain): by default the plugin that stores it is kept out of compilation,
+    // so it stays in the load order and the game reads its own data unchanged (fail closed). With this on
+    // (opt-in, lossy), such references are written as null (00000000) instead and the plugin compiles; the
+    // game's own reading of them is not verified, so this can lose data the original plugin had.
+    bool brokenReferencesAsNull = false;
     // No longer used: values in undescribed data are never rewritten because they look like FormIDs
     // (kept so older settings load). Undescribed data must be proved safe to move, or is not compiled.
     bool rewriteHeuristicReferences = false;
@@ -182,6 +188,14 @@ struct CompiledOutput {
     bool f4seArchiveLoader = false;
     std::vector<CompileIssue> issues;
     std::vector<PrevisRewrite> previsFiles; // translated previs files, written loose on export
+    // References that cannot be written faithfully, left unwritten (brokenReferencesAsNull off): the
+    // plugin that stores each is kept out and the compilation runs again (Pipeline).
+    struct BrokenReference {
+        FormKey record;                      // the record holding it
+        PluginIndex plugin = kInvalidPlugin; // the plugin that stores it (from the raw value), else the winner
+        std::string message;
+    };
+    std::vector<BrokenReference> brokenReferences;
     std::unordered_map<FormKey, uint32_t> indexByKey;
     size_t sourceRecords = 0;      // instances in compiled plugins
     size_t retainedWins = 0;       // overrides left to retained plugins

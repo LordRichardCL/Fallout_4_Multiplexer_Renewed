@@ -1275,9 +1275,10 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
     // ---- Rewrite (dependency extraction) ------------------------------------------
     progress.stage("Rewrite");
-    // References that are already broken in the source (a master index past the master list, or
-    // a record that exists nowhere in the load order) read as "none" in game. Write them as none
-    // instead of refusing the record: the compiled plugin then behaves exactly like the source.
+    // References that cannot be written faithfully: a master missing from the load order, or a record a
+    // compiled plugin does not contain. Nothing is guessed. By default the plugin that stores such a
+    // reference is kept out (fail closed: it stays in the load order and the game reads its own bytes);
+    // with brokenReferencesAsNull (opt-in, lossy) they are written as null and reported.
     for (auto& e : out.records) {
         auto nullBroken = [&](NormSub& s) {
             for (auto& [off, k] : s.refs) {
@@ -1292,11 +1293,21 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 bool missing = k.valid() && out.compiledFlag_[k.origin] && !out.indexByKey.count(k) && !session.exists(k);
                 if (!badMaster && !missing)
                     continue;
+                const std::string what =
+                    session.formLabel(e.key) + " (" + s.sig.str() + ") refers to " +
+                    (badMaster ? "FormID " + formatFormId(k.objectId) + " whose master is missing"
+                               : formatFormId(k.objectId) + " in " + session.pluginName(k.origin)) +
+                    evidence + ", which does not exist";
+                if (!options.brokenReferencesAsNull) {
+                    // Fail closed: the value is left as it is (it is never written), and the plugin that
+                    // stores it stays in the load order.
+                    PluginIndex holder = stored && stored->plugin < session.plugins.size() ? stored->plugin : e.winner;
+                    out.brokenReferences.push_back({e.key, holder, what});
+                    continue;
+                }
                 addIssue(Severity::Warning, "Broken in Source",
-                         session.formLabel(e.key) + " (" + s.sig.str() + ") refers to " +
-                             (badMaster ? "FormID " + formatFormId(k.objectId) + " whose master is missing"
-                                        : formatFormId(k.objectId) + " in " + session.pluginName(k.origin)) +
-                             evidence + ", which does not exist; the game reads it as none, so it is written as none",
+                         what + "; written as null because \"Write broken references as null\" is on (the "
+                                "game's own reading of it is not verified)",
                          e.key, session.pluginName(e.winner));
                 out.issues.back().cause = diagnosis::missingReference(session, e.winner, badMaster ? FormKey{} : k,
                                                                       badMaster ? k.objectId : 0);

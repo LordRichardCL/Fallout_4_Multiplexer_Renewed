@@ -625,6 +625,18 @@ bool Pipeline::compile(ProgressSink& progress)
         compiled_ = CompilationEngine::compile(*session_, options, progress);
         validation_ = ValidationEngine::validate(*session_, *compiled_, progress);
         size_t isolated = 0;
+        // References that cannot be written faithfully (fail closed, unless written as null on request):
+        // the plugin that stores each stays in the load order, so the game reads its own data unchanged.
+        for (const auto& br : compiled_->brokenReferences)
+            if (br.plugin < session_->plugins.size() && compiled_->isCompiled(br.plugin) &&
+                session_->autoRetained
+                    .emplace(session_->plugins[br.plugin].key,
+                             "Broken reference: " + br.message +
+                                 ". It stays in the load order, so the game reads its own data unchanged; to compile it "
+                                 "anyway with such references written as null (lossy), turn on \"Write broken "
+                                 "references as null\" (Compilation page, or --broken-references-as-null)")
+                    .second)
+                ++isolated;
         // Advanced Users Auto-Merger: plan and check the rewritten copies; a plugin whose copy fails a
         // check stays in the load order (fail closed) and the compilation runs again.
         if (autoMerge_)

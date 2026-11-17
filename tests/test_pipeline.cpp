@@ -1580,7 +1580,10 @@ TEST(plugins_an_earlier_build_compiled_and_this_one_keeps_must_be_enabled)
     CHECK(proposed.find("*" + kept) != std::string::npos);
 }
 
-TEST(references_broken_in_the_source_are_written_as_none)
+// References that cannot be written faithfully. Default (fail closed): the plugin that stores them stays in
+// the load order, with the stored value in the reason, and nothing is written for it. Opt-in
+// (brokenReferencesAsNull): written as null, the plugin compiles, each reported under Broken in Source.
+TEST(references_broken_in_the_source_keep_their_plugin_out_unless_written_as_null)
 {
     auto root = buildInstall("brokensource");
     // ModX refers to its own record 0x900, which it does not contain (deleted in an update), and
@@ -1591,6 +1594,24 @@ TEST(references_broken_in_the_source_are_written_as_none)
     writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModX.esp\n");
     auto cfg = configFor(root);
     cfg.databasePath.clear();
+    {
+        Pipeline d(cfg);
+        d.scan();
+        d.analyse();
+        CHECK(d.compile());
+        const auto* modX = d.session().findPlugin("ModX.esp");
+        CHECK(!d.compiledOutput()->isCompiled(modX->index)); // stays in the load order
+        auto it = d.session().autoRetained.find(modX->key);
+        CHECK(it != d.session().autoRetained.end());
+        if (it != d.session().autoRetained.end()) {
+            CHECK(it->second.rfind("Broken reference: ", 0) == 0);
+            CHECK(it->second.find("ModX.esp stores 01000900") != std::string::npos); // the stored value
+        }
+        CHECK(d.compiledOutput()->isCompiled(d.session().findPlugin("ModA.esp")->index)); // others still compile
+        OutputSet out(d.exportOutputs().pluginFiles);
+        CHECK(out.byEditorId("ModX_List") == nullptr); // nothing written for it
+    }
+    cfg.compile.brokenReferencesAsNull = true;
     Pipeline p(cfg);
     p.scan();
     p.analyse();
@@ -5713,6 +5734,19 @@ TEST(formid_past_the_master_list_names_the_plugin_itself)
                      record("FLST", 0x01000802, {zs("EDID", "BrokenList"), u32("LNAM", 0x02000900)})});
         writeFile(root / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*Own.esp\n");
     });
+    {
+        // Default: BrokenList's 02000900 names Own.esp's own record 000900, which does not exist, so
+        // Own.esp stays in the load order (fail closed), with the stored value in the reason.
+        Pipeline d(b.cfg);
+        d.scan();
+        d.analyse();
+        CHECK(d.compile());
+        const auto* own = d.session().findPlugin("Own.esp");
+        CHECK(!d.compiledOutput()->isCompiled(own->index));
+        auto it = d.session().autoRetained.find(own->key);
+        CHECK(it != d.session().autoRetained.end() && it->second.find("Own.esp stores 02000900") != std::string::npos);
+    }
+    b.cfg.compile.brokenReferencesAsNull = true; // compile it, to check the valid past-the-list reference
     Pipeline p(b.cfg);
     p.scan();
     p.analyse();

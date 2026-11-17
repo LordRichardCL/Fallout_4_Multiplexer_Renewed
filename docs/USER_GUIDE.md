@@ -250,6 +250,17 @@ The comparison is always with your load order **as it was before this app change
 
 If validation finds records that cannot be written safely, for example a FormID in data the app does not fully understand, the app does **not** block the whole export. It keeps those records' plugins in the load order (or leaves those records out of the patch) and compiles again. The **Validation** page lists every plugin it kept out under **Kept Out Automatically**, with the reason. The **Plugins** page shows them as *Retained*. Only errors that cannot be traced to a plugin or record still block export.
 
+### Broken references
+
+A reference the compiler cannot write faithfully (its master is not installed, or it names a record that its
+compiled plugin does not contain, typically a patch made for another version of a mod) is never guessed. By
+default the plugin that stores it is **kept out automatically** ("Broken reference: …", with the value the
+plugin stores) and stays in your load order unchanged, so the game reads it exactly as before. To compile such
+plugins anyway, turn on **Write broken references as null (lossy)** on the Compilation page: the references are
+then written as null and listed under *Broken in Source*. How the game itself reads them is not verified, so
+the compiled plugin can differ from the original; the better fix is a version of the plugin made for your
+version of its masters.
+
 ### After restarting the app
 
 The compiled build is held in memory, so after a restart there is nothing to export again; but **Apply to

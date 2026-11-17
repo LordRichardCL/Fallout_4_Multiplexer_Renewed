@@ -1106,9 +1106,25 @@ keyword): the output points to the keyword's copy (not 0, not another master), a
 Fallout4.esm reference are unchanged, the raw value and its plugin survive compilation, the note is correct,
 and a past-the-list value whose own record does not exist shows its raw value under Broken in Source.
 
-**Open: references to records that do not exist are written as none.** The Rewrite stage (since bfa7ecd)
-writes a reference whose master is missing, or to a record a compiled plugin does not contain, as none, with a
-Broken in Source warning (250 in build 171126 210605, for example three keywords of Armor_Power_T60_Torso from
-StrengthInSteel_T60E/MPAM, which point to object IDs above FFF in the ESL-flagged T-60 Equipment.esp). Whether
-the game reads those as none is not verified (xEdit cannot resolve them). Changing the default to keep such
-plugins out, with writing none as an explicit opt-in, is pending a decision.
+**References that cannot be written faithfully: kept out by default (fail closed).** Until now the Rewrite
+stage (since bfa7ecd) wrote a reference whose master is missing, or to a record a compiled plugin does not
+contain, as none, with a Broken in Source warning: 250 in build 171126 210605, for example three keywords of
+Armor_Power_T60_Torso from StrengthInSteel_T60E/MPAM, which point to object IDs above FFF in the ESL-flagged
+T-60 Equipment.esp. Whether the game reads those as none is not verified (xEdit cannot resolve them either).
+
+Copying the raw value instead is not faithful: its first byte is a position in the source plugin's master
+list and names another plugin in an output's list; the plugin of a missing master cannot be added (the game
+would not start); and a compiled plugin's records can no longer be referenced once it is switched off. A
+reference to a plugin that stays in the load order was already written exactly (same plugin and object ID,
+re-indexed), dangling or not.
+
+Now, by default, the plugin that **stores** such a reference (from its raw value; the winner when unknown) is
+kept out of compilation, so it stays in the load order and the game reads its own bytes unchanged: *Kept Out
+Automatically: Broken reference: … (X.esp stores 0E00894A) …*. Only that plugin, not every plugin editing the
+record; the compilation runs again without it. The opt-in **Write broken references as null** (Compilation
+page; CLI `--broken-references-as-null`; part of the settings hash) restores the earlier behaviour, labelled
+lossy, each reference listed under Broken in Source.
+
+Test: `references_broken_in_the_source_keep_their_plugin_out_unless_written_as_null` (default: kept out with
+the stored value in the reason, nothing written for it, other plugins still compile; opt-in: written as null
+and reported); the past-the-master-list test checks both modes too.

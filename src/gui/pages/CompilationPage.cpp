@@ -200,7 +200,14 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "zone, music, acoustic space, image space, god rays, water, regions and the cell's flags. Like "
         "FO4CheckPrevisbines' \"Fix only Cell Config Conflicts\". Off: the winning mod's version is written as "
         "it is. Every field taken is listed in the report (Cell Configuration).");
-    for (auto* c : {merge_, light_, translatePrevis_, mergeCellConfig_}) {
+    brokenAsNull_ = new QCheckBox("Write broken references as null (lossy)");
+    brokenAsNull_->setToolTip(
+        "A reference that cannot be written faithfully (its master is missing, or it names a record its compiled "
+        "plugin does not contain) is never guessed. Off (default): the plugin that stores it stays in the load "
+        "order, so the game reads its own data unchanged (Kept Out Automatically: Broken reference). On: such "
+        "references are written as null (00000000) and the plugin compiles; each is listed under Broken in "
+        "Source. The game's own reading of these references is not verified, so this can lose data.");
+    for (auto* c : {merge_, light_, translatePrevis_, mergeCellConfig_, brokenAsNull_}) {
         c->setStyleSheet("QCheckBox { spacing: 8px; }");
         ml->addWidget(c);
     }
@@ -502,7 +509,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     connect(outputDir_, &QLineEdit::textChanged, this, [this] { storeOptions(); });
     connect(strategy_, &QComboBox::currentIndexChanged, this, [this] { storeOptions(); });
     connect(rules_, &QPlainTextEdit::textChanged, this, [this] { storeOptions(); });
-    for (auto* c : {autoOutputs_, merge_, light_, translatePrevis_, mergeCellConfig_, patch_, patchOnly_})
+    for (auto* c : {autoOutputs_, merge_, light_, translatePrevis_, mergeCellConfig_, brokenAsNull_, patch_, patchOnly_})
         connect(c, &QCheckBox::toggled, this, [this] { storeOptions(); });
     loadOptions();
 }
@@ -605,6 +612,7 @@ void CompilationPage::loadOptions()
     light_->setChecked(c.lightOutputsWhenPossible);
     translatePrevis_->setChecked(c.translatePrevis);
     mergeCellConfig_->setChecked(c.mergeCellConfig);
+    brokenAsNull_->setChecked(c.brokenReferencesAsNull);
     patchOnly_->setChecked(c.patchOnly);
     patch_->setChecked(c.buildPatch || c.patchOnly);
     patch_->setEnabled(!c.patchOnly);
@@ -627,6 +635,7 @@ void CompilationPage::storeOptions()
     c.lightOutputsWhenPossible = light_->isChecked();
     c.translatePrevis = translatePrevis_->isChecked();
     c.mergeCellConfig = mergeCellConfig_->isChecked();
+    c.brokenReferencesAsNull = brokenAsNull_->isChecked();
     c.patchOnly = patchOnly_->isChecked();
     c.buildPatch = c.patchOnly || patch_->isChecked();
     app_->config().exportOptions.outputDirectory = toPath(outputDir_->text().trimmed());

@@ -95,6 +95,9 @@ Compile options:
                        checks run and the same plugins compile; for testing)
   --merge-cell-config  cells several plugins change take the last real change of each configuration
                        field (lighting, location, water, regions...) and keep the winner's previs data
+  --broken-references-as-null  write references that cannot be written faithfully (missing master,
+                       or a record a compiled plugin does not contain) as null and compile their
+                       plugin (lossy); default: that plugin stays in the load order
   --patch              also write Multiplexer_Patch.esp, merging conflicts between
                        plugins that stay in the load order (like a Bashed Patch)
   --patch-only         write only the patch; compile no plugins
@@ -136,7 +139,7 @@ struct Args {
 
 Args parseArgs(int argc, char** argv)
 {
-    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--merge-cell-config", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
+    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--merge-cell-config", "--broken-references-as-null", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
                                                    "--diagnostic-recorder", "--install", "--archive-loader",
                                                    "--values", "--tree", "--help", "--unfinished",
                                                    "--verbose", "-v"};
@@ -243,6 +246,7 @@ PipelineConfig makeConfig(const Args& a)
     c.lightOutputsWhenPossible = a.has("--light");
     c.translatePrevis = !a.has("--no-previs-translation");
     c.mergeCellConfig = a.has("--merge-cell-config");
+    c.brokenReferencesAsNull = a.has("--broken-references-as-null");
     c.patchOnly = a.has("--patch-only");
     c.autoMerge = a.has("--auto-merge");
     c.buildPatch = c.patchOnly || a.has("--patch");
