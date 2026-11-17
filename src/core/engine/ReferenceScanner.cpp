@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <unordered_map>
 #include <unordered_set>
 #include <atomic>
@@ -558,6 +559,39 @@ std::vector<uint8_t> ReferenceScanner::readOriginal(const Session& session, cons
             return bytes;
     }
     throw std::runtime_error("only the Auto-Merger's own copy provides this file");
+}
+
+std::string ReferenceScanner::originalSpelling(const Session& session, const AssetEntry& entry)
+{
+    const std::string& path = session.assets.path(entry);
+    const auto copy = session.relinkedCopies.find(path);
+    for (size_t slot = entry.sources.size(); slot-- > 0;) {
+        const auto& s = entry.sources[slot];
+        if (copy != session.relinkedCopies.end()) {
+            const auto bytes = session.assets.read(entry, slot, session.vfs);
+            const bool ours = copy->second == 0 ? slot + 1 == entry.sources.size()
+                                                : fnv1a64(bytes.data(), bytes.size()) == copy->second;
+            if (ours)
+                continue;
+        }
+        if (s.archive != kLooseFile || s.entry >= session.vfs.files().size())
+            return path;
+        // Folders stay as the index spells them (no tool matches them by case); the file name is
+        // read from the disk, as the VFS keeps the first spelling it saw rather than the author's.
+        const auto& f = session.vfs.files()[s.entry];
+        const auto slash = path.rfind('\\');
+        const std::string dir = path.substr(0, slash == std::string::npos ? 0 : slash + 1);
+        std::error_code ec;
+        const auto onDisk = session.vfs.physicalPath(f, s.slot);
+        const std::string want = path.substr(dir.size());
+        for (const auto& de : std::filesystem::directory_iterator(onDisk.parent_path(), ec)) {
+            const std::string name = pathToUtf8(de.path().filename());
+            if (toLower(name) == want)
+                return dir + name;
+        }
+        return path;
+    }
+    return path;
 }
 
 ReferenceScanner::PluginNames ReferenceScanner::pluginNames(const Session& session)

@@ -42,6 +42,10 @@ public:
     // (Session::relinkedCopies): the winning source that is not such a copy.
     static std::vector<uint8_t> readOriginal(const Session& session, const AssetEntry& entry,
                                              size_t maxBytes = 64u * 1024 * 1024);
+    // The index's (lowercase) path of that same source with its file name as spelled on disk, or
+    // the index's path unchanged when the source is in an archive or not on disk.
+    // Tools such as SPID and Base Object Swapper match "_DISTR"/"_SWAP" case-sensitively.
+    static std::string originalSpelling(const Session& session, const AssetEntry& entry);
 
     // References in one file's content (also used to re-check a transformed file).
     // `propertyReads` (scripts): every property the script reads and where the value goes, for

@@ -40,6 +40,12 @@ using namespace fo4mx;
 using namespace fo4mx::fixtures;
 
 namespace {
+// A relinked copy keeps its original's file name spelling: find it whatever its case.
+std::filesystem::path copyIn(const std::filesystem::path& dir, std::string_view relative)
+{
+    auto found = fo4mx::findPathCaseInsensitive(dir, relative);
+    return found.empty() ? dir / std::filesystem::path(std::string(relative)) : found;
+}
 
 constexpr uint32_t ESM = RecordFlags::Master;
 
@@ -2990,11 +2996,12 @@ struct CellConfigResult {
     size_t regions = 0;          // XCLR entries
     bool winnerPrevis = false;   // ModL's XPRI kept
     bool reported = false;       // a "Cell Configuration" line
+    bool fieldOrder = true;      // added fields in their place: XCLR and XLCN before XPRI, as in the sources
 };
 
 // Base.esm (stays) defines the cell, two regions and a location. ModP.esp changes its lighting, location,
 // Public Area, Off Limits and adds a region; ModL.esp, the winner, repeats Base's values and has previs
-// data. Both compile.
+// data and no region list. Both compile.
 CellConfigResult compileCellConfig(const char* name, bool merge)
 {
     auto root = buildInstall(name);
@@ -3029,7 +3036,7 @@ CellConfigResult compileCellConfig(const char* name, bool merge)
                 {cell(xcllP, 0x0021, true, {0x01000807, 0x01000808}, false, 1u << 17),
                  record("KYWD", 0x02000800, {zs("EDID", "EarlierOwn")})});
     writePlugin(data / "ModL.esp", {"Fallout4.esm", "Base.esm"},
-                {cell(xcllBase, 0x0001, false, {0x01000807}, true, 0),
+                {cell(xcllBase, 0x0001, false, {}, true, 0),
                  record("KYWD", 0x02000800, {zs("EDID", "LaterOwn")})});
     writeFile(root / "plugins.txt", "*Base.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModP.esp\n*ModL.esp\n");
     auto cfg = configFor(root);
@@ -3052,7 +3059,16 @@ CellConfigResult compileCellConfig(const char* name, bool merge)
         if (e.sig != Signature("CELL"))
             continue;
         r.offLimits = (e.fields.flags() & (1u << 17)) != 0;
+        bool previsSeen = false;
         for (const auto& f : e.fields.fields) {
+            for (const auto& sub : f.subs) {
+                if (sub.sig == Signature("XPRI"))
+                    previsSeen = true;
+                if (previsSeen && (sub.sig == Signature("XCLR") || sub.sig == Signature("XLCN")))
+                    r.fieldOrder = false;
+            }
+            if (previsSeen && f.sig == Signature("XCLR"))
+                r.fieldOrder = false;
             for (const auto& sub : f.subs) {
                 if (sub.sig == Signature("XCLL") && !sub.bytes.empty())
                     r.lightingFromP = sub.bytes[0] == 0x11;
@@ -3087,13 +3103,14 @@ TEST(cell_configuration_merge_takes_the_last_real_change)
     CHECK_EQ(on.regions, size_t(2));
     CHECK(on.winnerPrevis);
     CHECK(on.reported);
+    CHECK(on.fieldOrder);
 
     const auto off = compileCellConfig("cellconfigoff", false);
     CHECK(!off.lightingFromP);
     CHECK(!off.locationFromP);
     CHECK(!off.publicArea);
     CHECK(!off.offLimits);
-    CHECK_EQ(off.regions, size_t(1));
+    CHECK_EQ(off.regions, size_t(0));
     CHECK(off.winnerPrevis);
     CHECK(!off.reported);
 }
@@ -3807,7 +3824,7 @@ TEST(auto_merger_relinks_scripts_and_configs)
         std::ifstream in(path, std::ios::binary);
         return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     };
-    const std::string pexText = slurp(result.directory / "scripts" / "modsuser.pex");
+    const std::string pexText = slurp(copyIn(result.directory, "scripts/modsuser.pex"));
     std::vector<uint8_t> bytes(pexText.begin(), pexText.end());
     auto scan = pex::scan(bytes);
     CHECK(scan.ok);
@@ -3823,20 +3840,20 @@ TEST(auto_merger_relinks_scripts_and_configs)
     CHECK_EQ(toOutput, size_t(2));
 
     // The MCM config: the pair rewritten, the requirement renamed, the other plugin's name untouched.
-    const std::string json = slurp(result.directory / "mcm" / "config" / "mods" / "config.json");
+    const std::string json = slurp(copyIn(result.directory, "mcm/config/mods/config.json"));
     char id[16];
     std::snprintf(id, sizeof(id), "%03X", kw->objectId);
     CHECK(json.find("\"" + kw->outputPlugin + "|" + id + "\"") != std::string::npos);
     CHECK(json.find("[\"" + kw->outputPlugin + "\"]") != std::string::npos);
     CHECK(json.find("Not ModS.esp|800") != std::string::npos);
-    CHECK(std::filesystem::exists(result.directory / "Multiplexer_Relinked.tsv"));
+    CHECK(std::filesystem::exists(copyIn(result.directory, "Multiplexer_Relinked.tsv")));
 
     // Turned off, the next export has no relinked copies; the earlier export is left as it is.
     p.config().compile.autoMerge = false;
     auto next = p.exportOutputs();
-    CHECK(!std::filesystem::exists(next.directory / "scripts" / "modsuser.pex"));
+    CHECK(!std::filesystem::exists(copyIn(next.directory, "scripts/modsuser.pex")));
     CHECK(!std::filesystem::exists(next.directory / "Multiplexer_Relinked.tsv"));
-    CHECK(std::filesystem::exists(result.directory / "scripts" / "modsuser.pex"));
+    CHECK(std::filesystem::exists(copyIn(result.directory, "scripts/modsuser.pex")));
 }
 
 // The definition check also checks the nested group writer against the load order's plugins with
@@ -4147,7 +4164,7 @@ TEST(references_named_constants_by_their_readers)
             CHECK(q.compile());
             CHECK(q.compiledOutput()->isCompiled(q.session().findPlugin("ModS.esp")->index));
             auto result = q.exportOutputs();
-            const auto copy = result.directory / "scripts" / "consts.pex";
+            const auto copy = copyIn(result.directory, "scripts/consts.pex");
             CHECK(std::filesystem::exists(copy));
             std::ifstream in(copy, std::ios::binary);
             std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -4229,9 +4246,9 @@ TEST(references_functions_returning_a_plugin_name)
         for (const auto& mp : p.compiledOutput()->mappings)
             if (iequals(mp.sourcePlugin, "ModS.esp") && mp.sourceObjectId == 0x812)
                 moved = mp.objectId, output = mp.outputPlugin;
-        const auto program = slurpFile(result.directory / "scripts" / "mods" / "program.pex");
+        const auto program = slurpFile(copyIn(result.directory, "scripts/mods/program.pex"));
         CHECK(program.find(output) != std::string::npos);
-        const auto copy = slurpFile(result.directory / "scripts" / "caller.pex");
+        const auto copy = slurpFile(copyIn(result.directory, "scripts/caller.pex"));
         CHECK(!copy.empty());
         std::string id(4, '\0');
         storeLE<uint32_t>(reinterpret_cast<uint8_t*>(id.data()), moved);
@@ -4298,7 +4315,7 @@ TEST(references_followed_through_variables)
         CHECK(p.compile());
         auto result = p.exportOutputs();
         CHECK_EQ(p.validation()->errors, uint64_t(0));
-        const auto copy = result.directory / "scripts" / "flow.pex";
+        const auto copy = copyIn(result.directory, "scripts/flow.pex");
         CHECK(std::filesystem::exists(copy));
         if (std::filesystem::exists(copy)) {
             std::ifstream in(copy, std::ios::binary);
@@ -4397,7 +4414,7 @@ TEST(references_reverse_pairs_and_settlement_blueprints)
     CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
     CHECK(p.compile());
     auto result = p.exportOutputs();
-    const auto copy = result.directory / "f4se" / "plugins" / "transfersettlements" / "blueprints" / "test.json";
+    const auto copy = copyIn(result.directory, "f4se/plugins/transfersettlements/blueprints/test.json");
     CHECK(std::filesystem::exists(copy));
     if (std::filesystem::exists(copy)) {
         std::ifstream in(copy);
@@ -4433,7 +4450,7 @@ TEST(references_reverse_pairs_and_settlement_blueprints)
         CHECK(text.find("\"baseid_dec\": 31374") != std::string::npos); // the base is not changed
         CHECK(text.find("786886") != std::string::npos); // other plugins' items unchanged
     }
-    const auto xcell = result.directory / "f4se" / "plugins" / "x-cell-exceptions.ini";
+    const auto xcell = copyIn(result.directory, "f4se/plugins/x-cell-exceptions.ini");
     CHECK(std::filesystem::exists(xcell));
     if (std::filesystem::exists(xcell)) {
         const auto text = slurpFile(xcell);
@@ -4497,18 +4514,18 @@ TEST(references_tool_configs_in_data_are_rewritten)
     char hex[16];
     std::snprintf(hex, sizeof(hex), "%X", moved->objectId);
     const std::string id = hex;
-    const auto distr = result.directory / "mods_distr.ini";
+    const auto distr = result.directory / "ModS_DISTR.ini"; // spelled as the original: SPID matches "_DISTR" case-sensitively
     CHECK(std::filesystem::exists(distr));
     if (std::filesystem::exists(distr)) {
         const auto text = slurpFile(distr);
         CHECK(text.find("Perk = 0x" + id + "~" + moved->outputPlugin + "|NONE|NONE") != std::string::npos);
         CHECK(text.find("Spell = 0x2F1F~Fallout4.esm") != std::string::npos);
     }
-    const auto swap = result.directory / "mods_swap.ini";
+    const auto swap = result.directory / "ModS_SWAP.ini";
     CHECK(std::filesystem::exists(swap));
     if (std::filesystem::exists(swap))
         CHECK(slurpFile(swap).find("0x2F1F~Fallout4.esm|0x" + id + "~" + moved->outputPlugin) != std::string::npos);
-    const auto tab = result.directory / "pipboytabs" / "modstab.ini";
+    const auto tab = copyIn(result.directory, "pipboytabs/modstab.ini");
     CHECK(std::filesystem::exists(tab));
     if (std::filesystem::exists(tab))
         CHECK(slurpFile(tab).find("FirstList " + moved->outputPlugin + "|" + id) != std::string::npos);
@@ -4580,12 +4597,12 @@ TEST(references_per_plugin_formid_inis)
                 t = mp.objectId;
         }
         CHECK(!output.empty());
-        const auto ini = result.directory / "bcr" / (output + ".ini");
+        const auto ini = copyIn(result.directory, "bcr") / (output + ".ini");
         CHECK(std::filesystem::exists(ini));
         char expect[128];
         std::snprintf(expect, sizeof(expect), "[Weapons]\nweaponFormId_A=%x\nweaponFormId_B=0x%x\n", s, t);
         CHECK_EQ(slurpFile(ini), std::string(expect));
-        CHECK(slurpFile(result.directory / "Multiplexer_Relinked.tsv").find("bcr\\" + output + ".ini") != std::string::npos);
+        CHECK(slurpFile(copyIn(result.directory, "Multiplexer_Relinked.tsv")).find("bcr\\" + output + ".ini") != std::string::npos);
     }
     {
         // A key both INIs use: the later plugin's gets its name appended.
@@ -4597,7 +4614,7 @@ TEST(references_per_plugin_formid_inis)
         for (const auto& mp : p->compiledOutput()->mappings)
             if (iequals(mp.sourcePlugin, "ModT.esp"))
                 output = mp.outputPlugin;
-        const auto text = slurpFile(result.directory / "bcr" / (output + ".ini"));
+        const auto text = slurpFile(copyIn(result.directory, "bcr") / (output + ".ini"));
         CHECK(text.find("weaponFormId_A=") != std::string::npos);
         CHECK(text.find("WEAPONFORMID_A_ModT=") != std::string::npos);
     }
@@ -4627,7 +4644,7 @@ TEST(references_settlement_workbench_with_its_own_base)
     CHECK(p.compile());
     auto result = p.exportOutputs();
     CHECK(p.compiledOutput()->isCompiled(p.session().findPlugin("ModS.esp")->index));
-    const auto copy = result.directory / "f4se" / "plugins" / "transfersettlements" / "blueprints" / "test.json";
+    const auto copy = copyIn(result.directory, "f4se/plugins/transfersettlements/blueprints/test.json");
     CHECK(std::filesystem::exists(copy));
     if (std::filesystem::exists(copy)) {
         const auto text = slurpFile(copy);
@@ -4671,7 +4688,7 @@ TEST(references_left_lookup_sharing_a_renamed_name)
     CHECK(q.compiledOutput()->isCompiled(q.session().findPlugin("ModT.esp")->index));
     auto result = q.exportOutputs();
     CHECK_EQ(q.validation()->errors, uint64_t(0));
-    CHECK(std::filesystem::exists(result.directory / "scripts" / "two.pex"));
+    CHECK(std::filesystem::exists(copyIn(result.directory, "scripts/two.pex")));
 }
 
 // 6j. A lookup through the script's own function (AddItem(asPlugin, aiFormID) calling
@@ -4699,7 +4716,7 @@ TEST(references_lookup_through_own_function)
     CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
     CHECK(p.compile());
     auto result = p.exportOutputs();
-    const auto copy = result.directory / "scripts" / "paired.pex";
+    const auto copy = copyIn(result.directory, "scripts/paired.pex");
     CHECK(std::filesystem::exists(copy));
     if (std::filesystem::exists(copy)) {
         std::ifstream in(copy, std::ios::binary);
@@ -4794,7 +4811,7 @@ TEST(references_failed_transformation_fails_closed)
         warned |= is.category == "Kept Out Automatically" && is.message.find("ModS.esp") != std::string::npos;
     CHECK(warned);
     auto result = p.exportOutputs();
-    CHECK(!std::filesystem::exists(result.directory / "scripts" / "full.pex"));
+    CHECK(!std::filesystem::exists(copyIn(result.directory, "scripts/full.pex")));
     CHECK(!std::filesystem::exists(result.directory / AutoMerger::kManifest));
 }
 
@@ -4828,13 +4845,13 @@ TEST(references_successful_transformation_rescans_clean)
     for (const char* file : {"scripts/modsuser.pex", "f4se/plugins/robco_patcher/mods.ini"}) {
         std::string relative = file;
         std::replace(relative.begin(), relative.end(), '/', '\\');
-        auto copy = bytesOf(slurpFile(result.directory / file));
+        auto copy = bytesOf(slurpFile(copyIn(result.directory, file)));
         CHECK(!copy.empty());
         for (const auto& r : ReferenceScanner::inspect(names, relative, copy))
             if (r.plugin == s.findPlugin("ModS.esp")->index)
                 CHECK_EQ(r.cls, ReferenceClass::Safe); // the comment and the unused string only
     }
-    const auto ini = slurpFile(result.directory / "f4se" / "plugins" / "robco_patcher" / "mods.ini");
+    const auto ini = slurpFile(copyIn(result.directory, "f4se/plugins/robco_patcher/mods.ini"));
     char id[16];
     std::snprintf(id, sizeof(id), "%03X", kw->objectId);
     CHECK_EQ(ini, "; ModS.esp keyword\nfilterByKeyword=" + kw->outputPlugin + "|" + id + ":Fallout4.esm|800\n");
@@ -4843,7 +4860,7 @@ TEST(references_successful_transformation_rescans_clean)
     const auto manifest = slurpFile(result.directory / AutoMerger::kManifest);
     CHECK(manifest.find("f4se\\plugins\\robco_patcher\\mods.ini\t") != std::string::npos);
     CHECK(manifest.find("\tModS.esp|812\t" + kw->outputPlugin + "|" + id + "\n") != std::string::npos);
-    CHECK(manifest.find("scripts\\modsuser.pex\t") != std::string::npos);
+    CHECK(toLower(manifest).find("scripts\\modsuser.pex\t") != std::string::npos);
     CHECK(manifest.find("Game.IsPluginInstalled\tModS.esp\t" + kw->outputPlugin + "\n") != std::string::npos);
 }
 
@@ -4888,7 +4905,7 @@ TEST(robco_config_named_after_a_compiled_plugin_follows_the_output)
     CHECK(kw != nullptr);
     if (!kw)
         return;
-    const auto base = result.directory / "f4se" / "plugins" / "robco_patcher";
+    const auto base = copyIn(result.directory, "f4se/plugins/robco_patcher");
     char id[16];
     std::snprintf(id, sizeof(id), "%03X", kw->objectId);
     const auto rewritten = base / "kcd" / "Multiplexer - mods" / (kw->outputPlugin + ".ini");
@@ -4981,26 +4998,26 @@ TEST(references_rollback)
     CHECK(p.compile());
     auto result = p.exportOutputs();
     const auto dir = result.directory;
-    const auto script = slurpFile(dir / "scripts" / "modsuser.pex");
-    const auto json = slurpFile(dir / "mcm" / "config" / "mods" / "config.json");
+    const auto script = slurpFile(copyIn(dir, "scripts/modsuser.pex"));
+    const auto json = slurpFile(copyIn(dir, "mcm/config/mods/config.json"));
     CHECK(!script.empty());
     CHECK(json.find("ModS.esp") == std::string::npos);
 
     // Rollback removes every copy of an export.
     CHECK_EQ(AutoMerger::rollback(dir), size_t(2));
-    CHECK(!std::filesystem::exists(dir / "scripts" / "modsuser.pex"));
+    CHECK(!std::filesystem::exists(copyIn(dir, "scripts/modsuser.pex")));
     CHECK(!std::filesystem::exists(dir / AutoMerger::kManifest));
     // A new export writes them again, in a folder of its own; the earlier one is left as it is.
     auto again = p.exportOutputs();
     CHECK(again.directory != dir);
-    CHECK(slurpFile(again.directory / "scripts" / "modsuser.pex") == script);
-    CHECK(!std::filesystem::exists(dir / "scripts" / "modsuser.pex"));
+    CHECK(slurpFile(copyIn(again.directory, "scripts/modsuser.pex")) == script);
+    CHECK(!std::filesystem::exists(copyIn(dir, "scripts/modsuser.pex")));
 
     // Block one temporary file: the relink fails, so the whole build is withdrawn. No half-written
     // copy is left, the copies are rolled back, the output plugins and the zip are removed, and a note
     // says the build failed. The failed export stays "<name>.tmp": never the latest.
     p.config().beforeExportWrite = [](const std::filesystem::path& out) {
-        std::filesystem::create_directories(out / "scripts" / "modsuser.pex.fo4mx-new" / "blocked");
+        std::filesystem::create_directories(out / "scripts" / "ModSUser.pex.fo4mx-new" / "blocked");
     };
     auto failed = p.exportOutputs();
     p.config().beforeExportWrite = nullptr;
@@ -5008,9 +5025,9 @@ TEST(references_rollback)
     CHECK(!p.autoMerge()->errors.empty());
     const auto fdir = failed.directory;
     CHECK(iendsWith(pathToUtf8(failed.packageRoot.filename()), ".tmp"));
-    CHECK(!std::filesystem::exists(fdir / "mcm" / "config" / "mods" / "config.json.fo4mx-new"));
-    CHECK(!std::filesystem::exists(fdir / "scripts" / "modsuser.pex"));
-    CHECK(!std::filesystem::exists(fdir / "mcm" / "config" / "mods" / "config.json"));
+    CHECK(!std::filesystem::exists(copyIn(fdir, "mcm/config/mods/config.json.fo4mx-new")));
+    CHECK(!std::filesystem::exists(copyIn(fdir, "scripts/modsuser.pex")));
+    CHECK(!std::filesystem::exists(copyIn(fdir, "mcm/config/mods/config.json")));
     for (const auto& f : failed.pluginFiles)
         CHECK(!std::filesystem::exists(f));
     CHECK(!std::filesystem::exists(failed.packageRoot / "Multiplexer Output.zip"));
@@ -5019,24 +5036,24 @@ TEST(references_rollback)
     CHECK(p.exportResult() && p.exportResult()->directory == again.directory);
     auto latest = output::latestRun(output::Location{again.outputRoot, output::Layout::Package});
     CHECK(latest && *latest == again.packageRoot);
-    CHECK(slurpFile(again.directory / "scripts" / "modsuser.pex") == script); // untouched
+    CHECK(slurpFile(copyIn(again.directory, "scripts/modsuser.pex")) == script); // untouched
     // The next successful build writes a new export; the failed one keeps its note.
     CHECK(p.compile());
     auto next = p.exportOutputs();
     CHECK(!std::filesystem::exists(next.packageRoot / Pipeline::kBuildFailedMarker));
     CHECK(std::filesystem::exists(failed.packageRoot / Pipeline::kBuildFailedMarker));
-    CHECK(slurpFile(next.directory / "scripts" / "modsuser.pex") == script);
+    CHECK(slurpFile(copyIn(next.directory, "scripts/modsuser.pex")) == script);
 
     // A file of the user's in an earlier export does not stand in the way of a new one, and is kept.
-    writeFile(next.directory / "scripts" / "modsuser.pex", "user file");
+    writeFile(copyIn(next.directory, "scripts/modsuser.pex"), "user file");
     Pipeline q(cfg);
     q.scan();
     q.analyse();
     CHECK(q.compile());
     CHECK(q.compiledOutput()->isCompiled(q.session().findPlugin("ModS.esp")->index));
     auto fresh = q.exportOutputs();
-    CHECK(slurpFile(fresh.directory / "scripts" / "modsuser.pex") == script);
-    CHECK_EQ(slurpFile(next.directory / "scripts" / "modsuser.pex"), std::string("user file"));
+    CHECK(slurpFile(copyIn(fresh.directory, "scripts/modsuser.pex")) == script);
+    CHECK_EQ(slurpFile(copyIn(next.directory, "scripts/modsuser.pex")), std::string("user file"));
 }
 
 // 12. One file naming two plugins: only the compiled plugin's references change.
@@ -5057,7 +5074,7 @@ TEST(references_two_plugins_in_one_file)
     CHECK(!p.compiledOutput()->isCompiled(s.findPlugin("ModT.esp")->index));
     auto result = p.exportOutputs();
     CHECK_EQ(p.validation()->errors, uint64_t(0));
-    const auto ini = slurpFile(result.directory / "f4se" / "plugins" / "robco_patcher" / "both.ini");
+    const auto ini = slurpFile(copyIn(result.directory, "f4se/plugins/robco_patcher/both.ini"));
     CHECK(ini.find("ModS.esp") == std::string::npos);
     CHECK(ini.find("\nfilterByKeyword=ModT.esp|800\n") != std::string::npos);
 }

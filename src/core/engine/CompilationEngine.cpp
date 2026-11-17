@@ -966,6 +966,33 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             return f && !f->subs.empty() && f->subs[0].bytes.size() >= 2 ? loadLE<uint16_t>(f->subs[0].bytes.data())
                                                                           : 0;
         };
+        // A field the written version lacks goes where the version it comes from has it: after the
+        // nearest field before it that the written version has, else before the nearest one after it.
+        auto insertLike = [](FieldSet& dst, const FieldSet& from, const Field& field) -> Field* {
+            const auto& sf = from.fields;
+            size_t at = sf.size();
+            for (size_t i = 0; i < sf.size(); ++i)
+                if (sf[i].key == field.key) {
+                    at = i;
+                    break;
+                }
+            auto find = [&](const std::string& key) {
+                return std::find_if(dst.fields.begin(), dst.fields.end(), [&](const Field& f) { return f.key == key; });
+            };
+            size_t pos = dst.fields.size();
+            bool placed = false;
+            for (size_t p = std::min(at, sf.size()); p-- > 0 && !placed;)
+                if (auto it = find(sf[p].key); it != dst.fields.end()) {
+                    pos = static_cast<size_t>(it - dst.fields.begin()) + 1;
+                    placed = true;
+                }
+            for (size_t n = at + 1; n < sf.size() && !placed; ++n)
+                if (auto it = find(sf[n].key); it != dst.fields.end()) {
+                    pos = static_cast<size_t>(it - dst.fields.begin());
+                    placed = true;
+                }
+            return &*dst.fields.insert(dst.fields.begin() + static_cast<std::ptrdiff_t>(pos), field);
+        };
         for (auto& e : out.records) {
             if (e.sig != sig::CELL || previsCells.count(e.key))
                 continue;
@@ -1010,22 +1037,10 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     Field* dst = bySig(e.fields, sig);
                     if (sameField(src, dst))
                         continue;
-                    if (dst) {
+                    if (dst)
                         *dst = *src;
-                    } else {
-                        // After the field that precedes it in the version it comes from, else at the end.
-                        const auto& sf = versions[static_cast<size_t>(change)].fields;
-                        size_t pos = e.fields.fields.size();
-                        for (size_t p = static_cast<size_t>(src - sf.data()); p-- > 0;) {
-                            auto it = std::find_if(e.fields.fields.begin(), e.fields.fields.end(),
-                                                   [&](const Field& f) { return f.key == sf[p].key; });
-                            if (it != e.fields.fields.end()) {
-                                pos = static_cast<size_t>(it - e.fields.fields.begin()) + 1;
-                                break;
-                            }
-                        }
-                        e.fields.fields.insert(e.fields.fields.begin() + static_cast<std::ptrdiff_t>(pos), *src);
-                    }
+                    else
+                        insertLike(e.fields, versions[static_cast<size_t>(change)], *src);
                     taken.push_back(sig.str() + " from " + session.pluginName(from[static_cast<size_t>(change)]));
                 }
                 // Regions: every region any version lists, the written version's first.
@@ -1038,11 +1053,10 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                         if (!f || !f->isList())
                             continue;
                         if (!dst) {
-                            // The written version lists none: start from this version's field.
+                            // The written version lists none: start from this version's field, in its place.
                             Field copy = *f;
                             copy.items.clear();
-                            e.fields.fields.push_back(std::move(copy));
-                            dst = &e.fields.fields.back();
+                            dst = insertLike(e.fields, versions[v], copy);
                         }
                         if (!dst->isList())
                             break;

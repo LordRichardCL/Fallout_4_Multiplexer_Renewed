@@ -271,7 +271,7 @@ std::unordered_map<std::string, uint64_t> AutoMerger::readManifest(const std::fi
                 continue;
             auto cols = split(line, '\t', false);
             if (cols.size() >= 2)
-                files[cols[0]] = std::strtoull(cols[1].c_str(), nullptr, 16);
+                files[toLower(cols[0])] = std::strtoull(cols[1].c_str(), nullptr, 16);
         }
     }
     if (std::ifstream in{dir / kLegacyList}) {
@@ -280,7 +280,7 @@ std::unordered_map<std::string, uint64_t> AutoMerger::readManifest(const std::fi
             if (!line.empty() && line.back() == '\r')
                 line.pop_back();
             if (!line.empty() && line[0] != '#')
-                files.emplace(line, 0); // no hash recorded
+                files.emplace(toLower(line), 0); // no hash recorded
         }
     }
     return files;
@@ -410,7 +410,7 @@ void planFormIdInis(const Session& session, const Relocation& where,
             std::error_code ec;
             const auto onDisk = below(outputDir, target);
             if (std::filesystem::exists(onDisk, ec)) {
-                auto it = previous.find(target);
+                auto it = previous.find(toLower(target));
                 if (it == previous.end() || (it->second != 0 && it->second != hashOf(readFile(onDisk))))
                     throw std::runtime_error(target + " is already in the output folder and was not written by this app");
             }
@@ -600,7 +600,7 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                 std::error_code ec;
                 if (!std::filesystem::exists(below(outputDir, path), ec))
                     return;
-                auto it = previous.find(path);
+                auto it = previous.find(toLower(path));
                 if (it == previous.end() || (it->second != 0 && it->second != hashOf(readFile(below(outputDir, path)))))
                     throw std::runtime_error(path + ": the output folder already has this file and it was not written by "
                                              "this app; it is never replaced (use a separate output folder, such as a "
@@ -617,6 +617,9 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
             }
             const auto original = ReferenceScanner::readOriginal(session, *entry);
             f.originalHash = hashOf(original);
+            f.spelled = ReferenceScanner::originalSpelling(session, *entry);
+            if (toLower(f.spelled) != f.path)
+                f.spelled.clear();
             const auto before = ReferenceScanner::inspect(names, f.path, original);
 
             Expected expected;
@@ -955,10 +958,11 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
         auto tmp = target;
         tmp += kTempSuffix;
         try {
-            std::error_code ec;
-            if (fs::exists(target, ec)) {
-                auto it = previous.find(f->written_path());
-                if (it == previous.end() || (it->second != 0 && it->second != hashOf(readFile(target))))
+            // An earlier copy can be spelled differently (earlier versions wrote lowercase names).
+            const auto existing = findPathCaseInsensitive(outputDir, f->written_path());
+            if (!existing.empty()) {
+                auto it = previous.find(toLower(f->written_path()));
+                if (it == previous.end() || (it->second != 0 && it->second != hashOf(readFile(existing))))
                     throw std::runtime_error("a file this app did not write is in the output folder; it is not replaced");
             }
             fs::create_directories(target.parent_path());
@@ -989,10 +993,11 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
     for (const auto& [tmp, target] : staged) {
         std::error_code ec;
         fs::path backup;
-        if (fs::exists(target, ec)) {
-            backup = target;
+        const auto existing = findPathCaseInsensitive(outputDir, pathToUtf8(target.lexically_relative(outputDir)));
+        if (!existing.empty()) {
+            backup = existing;
             backup += ".fo4mx-old";
-            fs::rename(target, backup, ec);
+            fs::rename(existing, backup, ec);
             if (ec) {
                 failure = pathToUtf8(target) + ": " + ec.message();
                 break;
@@ -1029,11 +1034,12 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
 
     // 3. Remove copies an earlier export wrote that this build no longer produces (unless changed since).
     for (const auto& [path, hash] : previous) {
-        if (std::any_of(planned.begin(), planned.end(), [&](const RelinkFile* f) { return f->written_path() == path; }))
+        if (std::any_of(planned.begin(), planned.end(),
+                        [&](const RelinkFile* f) { return toLower(f->written_path()) == path; }))
             continue;
-        const auto target = below(outputDir, path);
+        const auto target = findPathCaseInsensitive(outputDir, path);
         std::error_code ec;
-        if (fs::exists(target, ec) && (hash == 0 || hashOf(readFile(target)) == hash))
+        if (!target.empty() && fs::exists(target, ec) && (hash == 0 || hashOf(readFile(target)) == hash))
             fs::remove(target, ec);
     }
 
@@ -1072,9 +1078,9 @@ size_t AutoMerger::rollback(const std::filesystem::path& outputDir)
 {
     size_t removed = 0;
     for (const auto& [path, hash] : readManifest(outputDir)) {
-        const auto target = below(outputDir, path);
+        const auto target = findPathCaseInsensitive(outputDir, path);
         std::error_code ec;
-        if (std::filesystem::exists(target, ec) && (hash == 0 || hashOf(readFile(target)) == hash) &&
+        if (!target.empty() && std::filesystem::exists(target, ec) && (hash == 0 || hashOf(readFile(target)) == hash) &&
             std::filesystem::remove(target, ec))
             ++removed;
     }

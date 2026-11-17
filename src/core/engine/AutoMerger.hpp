@@ -65,7 +65,9 @@ struct RelinkFile {
     size_t changedCalls = 0, changedPairs = 0, renamed = 0;
     std::vector<std::string> notes;
 
-    const std::string& written_path() const { return target.empty() ? path : target; }
+    std::string spelled;                // path with the original file name's case (empty: path)
+    // Where the copy goes: its own target, else the original's place, spelled as the original is.
+    const std::string& written_path() const { return !target.empty() ? target : !spelled.empty() ? spelled : path; }
 };
 
 struct AutoMergeReport {
