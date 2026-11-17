@@ -67,6 +67,7 @@ LARGE_INTEGER g_freq{}, g_start{};
 std::mutex g_traceLock;
 std::set<std::string> g_seenArchives;  // archives opened so far (lower case)
 unsigned g_archives = 0;               // distinct archives opened
+unsigned g_absent = 0;                 // distinct archives the game looked for and did not find
 unsigned g_reopens = 0;                // further opens of an archive already opened
 std::string g_lastArchive;             // the last archive opened for the first time
 DWORD g_lastArchiveThread = 0;
@@ -102,14 +103,17 @@ std::string utf8(const std::wstring& w)
     return s;
 }
 
-// Milliseconds since F4SEPlugin_Load.
+// Milliseconds since F4SEPlugin_Load, in whole numbers: the game changes the floating-point settings of
+// some of its threads, and a time computed in floating point there came out as "nan".
 double sinceLoad()
 {
     if (!g_freq.QuadPart)
         return 0;
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
-    return static_cast<double>(now.QuadPart - g_start.QuadPart) * 1000.0 / static_cast<double>(g_freq.QuadPart);
+    const long long ticks = now.QuadPart - g_start.QuadPart;
+    const long long ms = ticks / g_freq.QuadPart * 1000 + ticks % g_freq.QuadPart * 1000 / g_freq.QuadPart;
+    return static_cast<double>(ms);
 }
 
 // One line: wall-clock time, then seconds since F4SEPlugin_Load. Trace lines (one per archive) are not
@@ -122,9 +126,16 @@ void log(const std::string& text, bool flush = true)
         return;
     SYSTEMTIME t;
     GetLocalTime(&t);
+    long long ms = 0;
+    if (g_freq.QuadPart) {
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        const long long ticks = now.QuadPart - g_start.QuadPart;
+        ms = ticks / g_freq.QuadPart * 1000 + ticks % g_freq.QuadPart * 1000 / g_freq.QuadPart;
+    }
     char stamp[48];
-    std::snprintf(stamp, sizeof(stamp), "[%02u:%02u:%02u.%03u +%8.3fs] ", t.wHour, t.wMinute, t.wSecond,
-                  t.wMilliseconds, sinceLoad() / 1000.0);
+    std::snprintf(stamp, sizeof(stamp), "[%02u:%02u:%02u.%03u +%4lld.%03llds] ", t.wHour, t.wMinute, t.wSecond,
+                  t.wMilliseconds, ms / 1000, ms % 1000);
     const std::string line = stamp + text + "\r\n";
     DWORD written = 0;
     WriteFile(g_log, line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
@@ -216,6 +227,7 @@ void loadList()
     } else {
         log("No MultiplexerArchives.txt and no Fallout4Custom.ini: nothing to supply");
     }
+    std::vector<std::string> entries; // in list order, as written
     size_t start = 0;
     while (start <= g_full.size()) {
         size_t comma = g_full.find(',', start);
@@ -227,9 +239,43 @@ void loadList()
         while (!n.empty() && n.back() == ' ')
             n.pop_back();
         if (!n.empty())
-            g_wanted.insert(lower(n));
+            entries.push_back(n);
         start = comma + 1;
     }
+    // Warnings only (the list is supplied as it is): an archive named twice, or one that is not in Data.
+    // The game skips a missing archive, so neither stops the list; they are noted because a wrong list
+    // is worth knowing about.
+    std::vector<std::string> duplicates, missing;
+    for (const auto& n : entries) {
+        if (!g_wanted.insert(lower(n)).second) {
+            duplicates.push_back(n);
+            continue;
+        }
+        const int wn = MultiByteToWideChar(CP_UTF8, 0, n.data(), static_cast<int>(n.size()), nullptr, 0);
+        std::wstring wide(static_cast<size_t>(wn > 0 ? wn : 0), L'\0');
+        if (wn > 0)
+            MultiByteToWideChar(CP_UTF8, 0, n.data(), static_cast<int>(n.size()), wide.data(), wn);
+        const std::wstring path = g_gameDir + L"Data\\" + wide;
+        if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES)
+            missing.push_back(n);
+    }
+    if (entries.empty())
+        return;
+    auto listed = [](const std::vector<std::string>& v) {
+        std::string out;
+        for (size_t i = 0; i < v.size() && i < 20; ++i)
+            out += "\r\n    " + v[i];
+        if (v.size() > 20)
+            out += "\r\n    ... and " + std::to_string(v.size() - 20) + " more";
+        return out;
+    };
+    log("List checked: " + std::to_string(entries.size()) + " entries, " + std::to_string(g_wanted.size()) + " distinct, " +
+        std::to_string(duplicates.size()) + " named more than once, " + std::to_string(missing.size()) +
+        " not found in Data (supplied as they are; the game skips an archive it cannot find)");
+    if (!duplicates.empty())
+        log("Warning: named more than once:" + listed(duplicates));
+    if (!missing.empty())
+        log("Warning: not found in Data:" + listed(missing));
 }
 
 bool readable(const void* p, size_t n)
@@ -501,6 +547,12 @@ void traceOpen(const std::wstring& path, HANDLE h)
                 ++g_reopens;
                 return;
             }
+            // The game looks for "<plugin> - Main.ba2" and "- Textures.ba2" for every plugin; most do not
+            // exist. Those are only counted: numbering them would bury the archives that do load.
+            if (h == INVALID_HANDLE_VALUE) {
+                ++g_absent;
+                return;
+            }
             ++g_archives;
             g_lastArchive = name;
             g_lastArchiveThread = thread;
@@ -510,12 +562,13 @@ void traceOpen(const std::wstring& path, HANDLE h)
                                 : g_supplied.load()    ? "list"
                                                        : "list, NOT supplied";
             line = "BA2 #" + std::to_string(g_archives) + "  " + name + "  thread " + std::to_string(thread) + "  [" +
-                   phase + "]" + (h == INVALID_HANDLE_VALUE ? "  (open failed)" : "");
+                   phase + "]";
         } else if (plugin && h != INVALID_HANDLE_VALUE && g_seenPlugins.insert(name).second) {
             const size_t n = g_seenPlugins.size();
             if (n == 1) {
                 line = "First plugin file opened by the game: " + name + " (thread " + std::to_string(thread) + ", after " +
-                       std::to_string(g_archives) + " archives; archive registration is over)";
+                       std::to_string(g_archives) + " archives opened and " + std::to_string(g_absent) +
+                       " looked for and not found; archive registration is over)";
                 flush = true;
             } else if (n % 250 == 0) {
                 line = std::to_string(n) + " plugin files opened, the last " + name;
@@ -565,7 +618,7 @@ DWORD WINAPI watchdog(LPVOID)
             line = std::string(head) + "Last archive: #" + std::to_string(g_archives) + " " +
                    (g_lastArchive.empty() ? std::string("(none)") : g_lastArchive) + " (thread " +
                    std::to_string(g_lastArchiveThread) + "); last file: " + g_lastFile + "; " +
-                   std::to_string(g_reopens) + " reopens; " +
+                   std::to_string(g_absent) + " looked for and not found; " + std::to_string(g_reopens) + " reopens; " +
                    (g_seenPlugins.empty() ? "no plugin file opened yet: the game is still in archive registration"
                                           : std::to_string(g_seenPlugins.size()) +
                                                 " plugin files opened: the game is reading plugins");
@@ -702,15 +755,17 @@ void onMessage(f4se_abi::F4SEMessagingInterface::Message* msg)
         if (msg->type <= f4se_abi::F4SEMessagingInterface::kGameDataReady &&
             msg->type != f4se_abi::F4SEMessagingInterface::kPreSaveGame &&
             msg->type != f4se_abi::F4SEMessagingInterface::kPostSaveGame) {
-            unsigned archives = 0, plugins = 0;
+            unsigned archives = 0, absent = 0, plugins = 0;
             {
                 std::lock_guard<std::mutex> lock(g_traceLock);
                 archives = g_archives;
+                absent = g_absent;
                 plugins = static_cast<unsigned>(g_seenPlugins.size());
             }
             std::string what = std::string("F4SE message ") + messageName(msg->type) + " (thread " +
                                std::to_string(GetCurrentThreadId()) + "): " + std::to_string(archives) +
-                               " archives and " + std::to_string(plugins) + " plugin files opened so far";
+                               " archives opened (" + std::to_string(absent) + " looked for and not found) and " +
+                               std::to_string(plugins) + " plugin files opened so far";
             if (msg->type == f4se_abi::F4SEMessagingInterface::kGameDataReady)
                 what += msg->data ? " (plugins loaded)" : " (sent before the plugins load)";
             log(what);

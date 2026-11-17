@@ -53,12 +53,15 @@ Everything is written to `Documents\My Games\Fallout4\F4SE\MultiplexerArchiveLoa
 The log also records when things happen, so a loading problem can be placed in the startup sequence:
 
 - every line has the wall-clock time and the seconds since `F4SEPlugin_Load` (`[14:37:30.168 +   0.153s]`);
+- `List checked: …`: entries, distinct names, names listed twice and archives not found in `Data`, with up
+  to 20 of each as warnings. Only a note: the list is supplied as it is (the game skips a missing archive);
 - `Archive registration starts: the game opens its first archive, …`: the moment the list is supplied;
 - one `BA2 #n  <archive>  thread <id>  [phase]` line for each archive the game opens, the first time it
   opens it. Phase `list`: named in `MultiplexerArchives.txt`, opened by the game's own list loading;
   `list, NOT supplied`: named there, but the list was not supplied; `not in the list`: the game's own
-  lists, DLC, Creation Club and plugins' archives. `(open failed)` marks an archive the game could not
-  open. Further opens of an archive are only counted;
+  lists, DLC, Creation Club and plugins' archives. Further opens of an archive are only counted, and so
+  are archives the game looks for and does not find (it looks for `<plugin> - Main.ba2` and
+  `- Textures.ba2` for every plugin; most do not exist): numbering those would bury the ones that load;
 - `First plugin file opened by the game: …`: archive registration is over and plugin data loading starts;
   then a count every 250 plugin files;
 - every F4SE message (PostLoad, PostPostLoad, InputLoaded, both GameDataReady messages, GameLoaded, …) with
