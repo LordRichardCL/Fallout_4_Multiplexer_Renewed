@@ -96,6 +96,13 @@ Notes on a row:
 
 A record is **Ready**, **Needs decision**, **Blocked** (for example, you chose to carry two different values for the same field) or has **Nothing to carry**. The plan also lists the extra masters a patch would need.
 
+To decide in the app: select a record in the **Conflict Centre** and open its **Compatibility patch plan** tab (beside **Fields**). It lists each change the winner lacks:
+- what the change was, which mod made it, and what became of it;
+- its class and the rule that decided it;
+- an **In the patch** choice: *Default*, *Carry forward* or *Keep the winner's value*. Red and Unknown rows show *Never carried*.
+
+A choice is saved at once. The tab shows the record's status, any problem (for example two different values chosen for the same field), and the masters a patch would need. The tab needs Analyse to have run in this session. Compile again to write the result.
+
 To record a choice from the command line: `fo4mx plan <install options> carry|keep|default <Plugin.esp:OBJECTID> <change id>`. The ids are listed by `fo4mx plan` and in the Conflict Report's JSON. Choices are saved in `patch_plan_decisions.json` next to the database and kept across scans. **Apply the compatibility patch plan** (Compilation page, off by default; CLI `--apply-patch-plan`). With this on, compiling writes the plan:
 - **What each record becomes:** every record the plan marks Ready is written as its winning version plus the changes the plan carries.
 - **Where it goes:** to `Multiplexer_Patch.esp` when only mods that stay in the load order hold the record; to an output when a compiled mod does.

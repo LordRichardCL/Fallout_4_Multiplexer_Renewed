@@ -26,6 +26,7 @@ private:
     void showConflict(int row);
     void applyResolution();
     void clearFilters();
+    void showPlan();
 
     FilterChips* chips_;
     QComboBox* signature_;
@@ -39,6 +40,8 @@ private:
     QLabel* chain_;
     QLabel* summary_;
     QTableWidget* fields_;
+    QTableWidget* plan_;
+    QLabel* planNote_;
     QComboBox* resolution_;
     QLabel* resolutionNote_;
 

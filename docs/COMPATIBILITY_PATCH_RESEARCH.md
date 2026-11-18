@@ -342,6 +342,8 @@ Plugins
 
 **Status:** milestone 1 is implemented (18 Nov 2026): `engine/Provenance`, the trace on conflict entries (cached), the Conflict Report table "Changes not in the winning version", and the JSON report's `changes`. Tests are in `tests/test_provenance.cpp` (1–9, 11, 12 and keyed competition) and `conflict_report_traces_changes_not_in_the_winner` (10, with the cached second run).
 
+**Decisions in the app** (18 Nov 2026): the Conflict Centre's record detail has a "Compatibility patch plan" tab with the plan entries of the selected record and a choice per change (default, carry forward, keep the winner's value), saved through `Pipeline::setPlanDecision`.
+
 **Phases 8 and 9 (writing the plan)** are implemented (18 Nov 2026), behind the option `applyPatchPlan` (Compilation page "Apply the compatibility patch plan", CLI `--apply-patch-plan`, off by default).
 - **What is written.** Every record the plan marks Ready is written as its winning version plus the changes the plan carries:
   - to `Multiplexer_Patch.esp` when only plugins that stay hold it;

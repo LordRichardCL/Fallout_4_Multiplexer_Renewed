@@ -402,6 +402,23 @@ void AppController::saveResolution(const QString& originPlugin, quint32 objectId
     }
 }
 
+bool AppController::setPlanDecision(const QString& originPlugin, quint32 objectId, const QString& changeId, int action)
+{
+    if (busy_ || !pipeline_ || !pipeline_->patchPlan())
+        return false;
+    auto& s = pipeline_->session();
+    auto o = s.findPlugin(ss(originPlugin));
+    if (!o)
+        return false;
+    std::optional<fo4mx::PlanAction> a;
+    if (action == 0)
+        a = fo4mx::PlanAction::CarryForward;
+    else if (action == 1)
+        a = fo4mx::PlanAction::KeepWinner;
+    pipeline_->setPlanDecision(fo4mx::FormKey{o->index, objectId}, ss(changeId), a);
+    return true;
+}
+
 void AppController::clearResolution(const QString& originPlugin, quint32 objectId)
 {
     db::Database db(activeDatabase_);

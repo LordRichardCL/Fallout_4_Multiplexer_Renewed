@@ -15,6 +15,7 @@
 #include <QSqlQuery>
 #include <QTableView>
 #include <QTableWidget>
+#include <QTabWidget>
 #include <QVBoxLayout>
 
 #include <map>
@@ -151,7 +152,29 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     fields_->verticalHeader()->hide();
     fields_->horizontalHeader()->setStretchLastSection(true);
     fields_->setWordWrap(false);
-    dl->addWidget(fields_, 1);
+
+    // The compatibility patch plan for this record: each change the winner lacks, its class, and the choice.
+    auto* planPane = new QWidget;
+    auto* pl = new QVBoxLayout(planPane);
+    pl->setContentsMargins(0, 4, 0, 0);
+    planNote_ = new QLabel;
+    planNote_->setObjectName("PageSubtitle");
+    planNote_->setWordWrap(true);
+    plan_ = new QTableWidget;
+    plan_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    plan_->setSelectionMode(QAbstractItemView::NoSelection);
+    plan_->verticalHeader()->hide();
+    plan_->verticalHeader()->setDefaultSectionSize(28);
+    plan_->horizontalHeader()->setStretchLastSection(true);
+    plan_->setColumnCount(7);
+    plan_->setHorizontalHeaderLabels({"Field", "Change", "Made by", "What became of it", "Class", "Why", "In the patch"});
+    pl->addWidget(planNote_);
+    pl->addWidget(plan_, 1);
+
+    auto* tabs = new QTabWidget;
+    tabs->addTab(fields_, "Fields");
+    tabs->addTab(planPane, "Compatibility patch plan");
+    dl->addWidget(tabs, 1);
 
     auto* bottom = new QHBoxLayout;
     auto* legend = new QLabel("<span style='color:#3ddc84'>■</span> Winning value &nbsp; "
@@ -444,6 +467,8 @@ void ConflictsPage::showConflict(int row)
     for (int c = 1; c <= columns + 1; ++c)
         fields_->horizontalHeader()->resizeSection(c, 220);
 
+    showPlan();
+
     resolution_->clear();
     resolution_->addItem("Automatic (merge compatible edits)");
     for (const auto& n : chainNames)
@@ -472,6 +497,98 @@ void ConflictsPage::showConflict(int row)
                           "used. Change the load order to choose a different version.")
                       .arg(model_->value(row, ColType).toString()));
     }
+}
+
+void ConflictsPage::showPlan()
+{
+    plan_->setRowCount(0);
+    auto* p = app_->pipeline();
+    const fo4mx::PatchPlan* plan = p ? p->patchPlan() : nullptr;
+    if (!plan || originPlugin_.isEmpty()) {
+        planNote_->setText("Run Analyse to see what a compatibility patch would do with this record's changes.");
+        return;
+    }
+    const auto& s = p->session();
+    const auto* origin = s.findPlugin(originPlugin_.toStdString());
+    const fo4mx::PlanRecord* rec = nullptr;
+    for (const auto& r : plan->records)
+        if (origin && r.conflict->key == fo4mx::FormKey{origin->index, objectId_})
+            rec = &r;
+    if (!rec) {
+        planNote_->setText("No change made by another plugin is missing from the winning version of this record.");
+        return;
+    }
+    QString note = QString("Status: <b>%1</b>. Green changes are carried by default, Yellow ones wait for your "
+                           "choice, Red and Unknown ones are never carried. With \"Apply the compatibility patch "
+                           "plan\" on (Compilation), the next compilation writes the record with the changes "
+                           "carried.")
+                       .arg(QString::fromStdString(fo4mx::planStatusName(rec->status)));
+    for (const auto& problem : rec->problems)
+        note += "<br><span style='color:#ff5c5c'>" + QString::fromStdString(problem).toHtmlEscaped() + "</span>";
+    if (!rec->masters.empty()) {
+        QStringList masters;
+        for (auto m : rec->masters)
+            masters << QString::fromStdString(s.pluginName(m));
+        note += "<br>Needs as masters: " + masters.join(", ").toHtmlEscaped();
+    }
+    planNote_->setTextFormat(Qt::RichText);
+    planNote_->setText(note);
+
+    plan_->setRowCount(static_cast<int>(rec->entries.size()));
+    int row = 0;
+    for (const auto& pe : rec->entries) {
+        const auto& t = rec->conflict->changes[pe.change];
+        const QString change = QString::fromStdString(
+            t.item.empty() ? t.before + " → " + t.after : std::string(fo4mx::changeOpName(t.op)) + " " + t.item);
+        const QString fate = QString::fromStdString(
+            std::string(fo4mx::changeStatusName(t.status)) +
+            (t.lostAt != fo4mx::kInvalidPlugin ? " (" + s.pluginName(t.lostAt) + ")" : std::string()));
+        auto cell = [&](int col, const QString& text) {
+            auto* item = new QTableWidgetItem(text);
+            item->setToolTip(text);
+            plan_->setItem(row, col, item);
+            return item;
+        };
+        cell(0, QString::fromStdString(t.field));
+        cell(1, change);
+        cell(2, QString::fromStdString(s.pluginName(t.source)));
+        cell(3, fate);
+        auto* cls = cell(4, QString::fromStdString(fo4mx::compatClassName(t.cls)));
+        cls->setForeground(t.cls == fo4mx::CompatClass::Green    ? theme::kGreen
+                           : t.cls == fo4mx::CompatClass::Yellow ? QColor("#f5c542")
+                           : t.cls == fo4mx::CompatClass::Red    ? theme::kRed
+                                                                 : theme::kMuted);
+        cell(5, QString::fromStdString(t.rule + (pe.note.empty() ? "" : "; " + pe.note)));
+
+        auto* choice = new QComboBox;
+        if (pe.decision == fo4mx::PlanDecision::Locked) {
+            choice->addItem("Never carried");
+            choice->setEnabled(false);
+        } else {
+            const bool greenDefault = t.cls == fo4mx::CompatClass::Green;
+            choice->addItem(greenDefault ? "Default: carry forward" : "Default: keep the winner's (decide)", -1);
+            choice->addItem("Carry forward", 0);
+            choice->addItem("Keep the winner's value", 1);
+            if (pe.decision == fo4mx::PlanDecision::User)
+                choice->setCurrentIndex(pe.action == fo4mx::PlanAction::CarryForward ? 1 : 2);
+            const QString changeId = QString::fromStdString(t.changeId);
+            connect(choice, &QComboBox::activated, this, [this, choice, changeId] {
+                if (!app_->setPlanDecision(originPlugin_, objectId_, changeId, choice->currentData().toInt()))
+                    planNote_->setText("The choice could not be saved now (a task is running, or Analyse has "
+                                       "not run). Try again when it is finished.");
+                else
+                    QMetaObject::invokeMethod(this, [this] { showPlan(); }, Qt::QueuedConnection);
+            });
+        }
+        plan_->setCellWidget(row, 6, choice);
+        ++row;
+    }
+    plan_->horizontalHeader()->resizeSection(0, 110);
+    plan_->horizontalHeader()->resizeSection(1, 260);
+    plan_->horizontalHeader()->resizeSection(2, 160);
+    plan_->horizontalHeader()->resizeSection(3, 170);
+    plan_->horizontalHeader()->resizeSection(4, 70);
+    plan_->horizontalHeader()->resizeSection(5, 260);
 }
 
 void ConflictsPage::applyResolution()

@@ -55,6 +55,10 @@ public:
     void setExcluded(const QString& plugin, bool excluded);
     void saveResolution(const QString& originPlugin, quint32 objectId, const QString& winnerPlugin);
     void clearResolution(const QString& originPlugin, quint32 objectId);
+    // The compatibility patch plan: the user's choice for one change (action -1: back to the default,
+    // 0: carry forward, 1: keep the winner's value). Saved next to the database. False while a task runs or
+    // before Analyse.
+    bool setPlanDecision(const QString& originPlugin, quint32 objectId, const QString& changeId, int action);
 
     // Apply to Game, in two steps: what it will do (nothing changes yet), then doing it.
     struct ApplyPreview {
