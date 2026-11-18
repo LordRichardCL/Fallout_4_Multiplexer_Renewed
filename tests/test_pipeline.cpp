@@ -7810,3 +7810,113 @@ TEST(conflict_report_traces_changes_not_in_the_winner)
     check(false);
     check(true);
 }
+
+// The compatibility patch plan (phase 7). Base.esm defines an armor; ModB.esp adds a keyword (Green: carried
+// by default); ModD.esp and ModE.esp set its data to different values (Yellow, competing: wait for a
+// decision); ModC.esp wins and holds neither. Carrying both competing values blocks the record; keeping one
+// makes it ready. Choices are saved and apply again in a new run.
+TEST(patch_plan_defaults_decisions_and_validation)
+{
+    auto root = buildInstall("patchplan");
+    auto data = root / "Game" / "Data";
+    auto armor = [](std::vector<uint32_t> keywords, uint8_t value, const char* name) {
+        return record("ARMO", 0x01000800,
+                      {zs("EDID", "Hat"), zs("FULL", name), raw("DATA", {value, 0, 0, 0, 0, 0, 0, 0}),
+                       u32("KSIZ", static_cast<uint32_t>(keywords.size())), formIds("KWDA", keywords)});
+    };
+    writePlugin(data / "Base.esm", {"Fallout4.esm"},
+                {armor({0x01000801}, 10, "Hat"), record("KYWD", 0x01000801, {zs("EDID", "Plain")}),
+                 record("KYWD", 0x01000802, {zs("EDID", "LaserSlot")})},
+                ESM);
+    writePlugin(data / "ModB.esp", {"Fallout4.esm", "Base.esm"}, {armor({0x01000801, 0x01000802}, 10, "Hat")});
+    writePlugin(data / "ModD.esp", {"Fallout4.esm", "Base.esm"}, {armor({0x01000801}, 20, "Hat")});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm", "Base.esm"}, {armor({0x01000801}, 30, "Hat")});
+    writePlugin(data / "ModC.esp", {"Fallout4.esm", "Base.esm"}, {armor({0x01000801}, 10, "Better Hat")});
+    writeFile(root / "plugins.txt", "*Base.esm\n*ModA.esp\n*ModB.esp\n*ModD.esp\n*ModE.esp\n*ModC.esp\n");
+    auto cfg = configFor(root);
+    cfg.patchPlanDecisions = root / "decisions.json";
+
+    auto planFor = [](const Pipeline& p) -> const PlanRecord* {
+        const auto& s = p.session();
+        const FormKey hat{s.findPlugin("Base.esm")->index, 0x800};
+        for (const auto& r : p.patchPlan()->records)
+            if (r.conflict->key == hat)
+                return &r;
+        return nullptr;
+    };
+    auto changeBy = [](const Pipeline& p, const PlanRecord& r, const char* plugin) -> const TracedChange* {
+        for (const auto& pe : r.entries) {
+            const auto& t = r.conflict->changes[pe.change];
+            if (p.session().pluginName(t.source) == plugin)
+                return &t;
+        }
+        return nullptr;
+    };
+    FormKey hat;
+    std::string dataD, dataE;
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.patchPlan() != nullptr);
+        const auto* r = planFor(p);
+        CHECK(r != nullptr);
+        if (!r)
+            return;
+        hat = r->conflict->key;
+        CHECK(r->status == PlanStatus::NeedsDecision);
+        size_t carried = 0, pending = 0;
+        for (const auto& pe : r->entries) {
+            const auto& t = r->conflict->changes[pe.change];
+            if (t.cls == CompatClass::Green) {
+                CHECK(pe.action == PlanAction::CarryForward && pe.decision == PlanDecision::Auto);
+                ++carried;
+            }
+            if (t.cls == CompatClass::Yellow) {
+                CHECK(pe.action == PlanAction::KeepWinner && pe.decision == PlanDecision::Pending);
+                ++pending;
+            }
+        }
+        CHECK_EQ(carried, size_t(1)); // ModB's keyword
+        CHECK_EQ(pending, size_t(2)); // ModD's and ModE's data
+        const auto* d = changeBy(p, *r, "ModD.esp");
+        const auto* e = changeBy(p, *r, "ModE.esp");
+        CHECK(d && e);
+        if (!(d && e))
+            return;
+        dataD = d->changeId;
+        dataE = e->changeId;
+
+        // Carrying both competing values contradicts itself.
+        p.setPlanDecision(hat, dataD, PlanAction::CarryForward);
+        p.setPlanDecision(hat, dataE, PlanAction::CarryForward);
+        r = planFor(p);
+        CHECK(r && r->status == PlanStatus::Blocked && !r->problems.empty());
+        // Keep ModE's out: ready, two changes carried.
+        p.setPlanDecision(hat, dataE, PlanAction::KeepWinner);
+        r = planFor(p);
+        CHECK(r && r->status == PlanStatus::Ready);
+        CHECK_EQ(p.patchPlan()->carried, size_t(2));
+
+        ReportContext ctx;
+        ctx.session = &p.session();
+        ctx.conflicts = p.conflicts();
+        ctx.plan = p.patchPlan();
+        const std::string text = ReportGenerator::text(ReportKind::Conflict, ctx);
+        CHECK(text.find("Compatibility patch plan") != std::string::npos);
+        CHECK(text.find("Your choice") != std::string::npos);
+    }
+    CHECK(std::filesystem::exists(root / "decisions.json"));
+    {
+        // A new run (from the cache) applies the saved choices.
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const auto* r = planFor(p);
+        CHECK(r && r->status == PlanStatus::Ready);
+        if (r) {
+            CHECK_EQ(changeBy(p, *r, "ModD.esp")->changeId, dataD);
+            CHECK_EQ(p.patchPlan()->carried, size_t(2));
+        }
+    }
+}

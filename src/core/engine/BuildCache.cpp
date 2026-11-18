@@ -14,7 +14,7 @@ namespace fo4mx {
 
 namespace {
 
-constexpr uint32_t kFormatVersion = 11; // 11: compatibility classes; 10: change provenance of conflicts; 9: IPDS PNAM read per subrecord; 8: raw source value of every described reference; // 7: Version Control Info of every record; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
+constexpr uint32_t kFormatVersion = 12; // 12: change ids; 11: compatibility classes; 10: change provenance of conflicts; 9: IPDS PNAM read per subrecord; 8: raw source value of every described reference; // 7: Version Control Info of every record; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
                                        // 4: record-level classification of types that are not merged;
                                        // 5: record placement (cells, worldspaces, topics)
 
@@ -272,6 +272,15 @@ std::string renderFormTokens(const Session& session, const std::string& text)
     return mapTokens(text, [&](uint32_t origin, uint32_t object) { return session.formLabel(FormKey{origin, object}); });
 }
 
+std::string stableFormTokens(const Session& session, const std::string& text)
+{
+    return mapTokens(text, [&](uint32_t origin, uint32_t object) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), ":%06X", object);
+        return session.pluginName(origin) + buf;
+    });
+}
+
 uint64_t sampleFileHash(const std::filesystem::path& path, uint64_t size)
 {
     constexpr size_t kChunk = 64 * 1024;
@@ -504,6 +513,8 @@ std::vector<uint8_t> serializeConflict(const Session& session, const ConflictEnt
     };
     w.write<uint32_t>(static_cast<uint32_t>(e.changes.size()));
     for (const auto& t : e.changes) {
+        writeString(w, t.fieldKey);
+        writeString(w, t.changeId);
         writeString(w, t.field);
         writeString(w, tokens(t.item));
         writeString(w, tokens(t.before));
@@ -570,6 +581,8 @@ std::optional<ConflictEntry> deserializeConflict(const Session& session, std::sp
         auto optional = [&]() { return r.read<uint8_t>() ? names.plugin(r.read<uint32_t>()) : kInvalidPlugin; };
         e.changes.resize(r.read<uint32_t>());
         for (auto& t : e.changes) {
+            t.fieldKey = readString(r);
+            t.changeId = readString(r);
             t.field = readString(r);
             t.item = tokens(readString(r));
             t.before = tokens(readString(r));

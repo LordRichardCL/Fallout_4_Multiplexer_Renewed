@@ -342,6 +342,21 @@ Plugins
 
 **Status:** milestone 1 is implemented (18 Nov 2026): `engine/Provenance`, the trace on conflict entries (cached), the Conflict Report table "Changes not in the winning version", and the JSON report's `changes`. Tests are in `tests/test_provenance.cpp` (1–9, 11, 12 and keyed competition) and `conflict_report_traces_changes_not_in_the_winner` (10, with the cached second run).
 
+**Phase 7 (reviewable patch plan)** is implemented (18 Nov 2026): `engine/PatchPlan`. It covers, per record with changes the winner lacks, starting from the winner:
+- **Entries:** one per change, with the action (carry forward or keep the winner's value) and how it was decided:
+  - Green: carried by default;
+  - Yellow: waiting for the user, kept as the winner has it until then;
+  - Red/Unknown: never carried, and a saved choice to carry is ignored.
+- **Masters** the carried changes need beyond the winner's.
+- **Pre-write validation:** two carried changes giving the same field or element different values block the record, as does exceeding the master limit.
+- **Status:** Ready, Needs decision, Blocked, or Nothing to carry.
+
+Choices are saved by record (`Plugin.esp:objectID` of the defining plugin) and a stable change id (a hash of field, operation, source plugin and value, independent of load order), in `patch_plan_decisions.json` next to the database. They apply again on later scans.
+
+The plan appears as a section of the Conflict Report and as `patchPlan` in its JSON, and through the CLI (`fo4mx plan`, with `carry|keep|default <record> <change id>`). Test: `patch_plan_defaults_decisions_and_validation`.
+
+Nothing is written from the plan yet. Writing is phase 8/9: carrying changes into a patch record, with the existing writer and the written-content check against the plan.
+
 **Phase 6 (compatibility classes)** is implemented too (18 Nov 2026): `engine/Compatibility` (`classifyChange`), applied to every traced change, counted per class in the Conflict Report and given per row with its rule and the masters a patch would need. Rules, first match wins:
 1. **Red:** undescribed data; a record type with spatial, quest, dialogue or package structure (QUST, DIAL, INFO, SCEN, PACK, NAVM, NAVI, CELL, WRLD, placed references…); any version deleted; a field holding scripts, conditions, an object template, OMOD data, perk entries, navmesh, package or dialogue data; a reference to a record not in the load order.
 2. **Unknown:** a record type without a field-by-field layout.

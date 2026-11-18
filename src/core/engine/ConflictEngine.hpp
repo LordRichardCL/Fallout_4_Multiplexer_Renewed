@@ -52,6 +52,8 @@ struct ConflictField {
 // One change a version made against the version it was made from, and what became of it by the winner
 // (engine/Provenance). Facts only: "omitted" means the winner was not made with the source as a master.
 struct TracedChange {
+    std::string fieldKey; // Field::key
+    std::string changeId; // stable across scans and load orders (field, operation, source, element, value)
     std::string field;  // field label
     std::string item;   // list element (tokens until the report is finalised), "" for a whole field
     std::string before; // the parent version's value

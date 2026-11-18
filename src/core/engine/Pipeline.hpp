@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/PatchPlan.hpp"
 #include "assets/AssetScanner.hpp"
 #include "db/Database.hpp"
 #include "engine/AssetTracer.hpp"
@@ -35,6 +36,8 @@ struct PipelineConfig {
     std::filesystem::path reportDirectory;
     bool useCache = true;               // incremental scans / analysis / compilation
     std::filesystem::path cachePath;    // default: next to the database
+    // The user's choices in the compatibility patch plan (JSON); default: next to the database.
+    std::filesystem::path patchPlanDecisions;
     bool traceAssets = true;            // resolve the assets compiled records use
     // When validation finds records that cannot be written safely, keep their source plugins out of
     // compilation (and those records out of the patch) and compile again, instead of blocking export.
@@ -105,6 +108,12 @@ public:
     bool compiled() const { return compiled_.has_value(); }
 
     const ConflictReport* conflicts() const { return conflicts_ ? &*conflicts_ : nullptr; }
+    // The reviewable compatibility patch plan, built after Analyse from the conflicts and saved choices.
+    const PatchPlan* patchPlan() const { return plan_ ? &*plan_ : nullptr; }
+    const PlanDecisions& planDecisions() const { return planDecisions_; }
+    std::filesystem::path planDecisionsPath() const;
+    // Records the user's choice for one change (nullopt: back to the default), saves it and rebuilds the plan.
+    void setPlanDecision(FormKey record, const std::string& changeId, std::optional<PlanAction> action);
     const DependencyReport* dependencies() const { return dependencies_ ? &*dependencies_ : nullptr; }
     const CompiledOutput* compiledOutput() const { return compiled_ ? &*compiled_ : nullptr; }
     const ValidationReport* validation() const { return validation_ ? &*validation_ : nullptr; }
@@ -160,6 +169,8 @@ private:
     std::unique_ptr<Session> session_;
     std::unique_ptr<db::Database> db_;
     std::optional<ConflictReport> conflicts_;
+    std::optional<PatchPlan> plan_;
+    PlanDecisions planDecisions_;
     std::optional<DependencyReport> dependencies_;
     std::optional<CompiledOutput> compiled_;
     std::optional<ValidationReport> validation_;

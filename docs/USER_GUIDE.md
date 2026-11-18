@@ -89,6 +89,15 @@ Notes on a row:
 - the same element added by another plugin;
 - data the app does not understand.
 
+**Compatibility patch plan** (Conflict Report, below the changes; CLI `fo4mx plan`). For each record with changes the winner lacks, it says what a compatibility patch would do with each change, starting from the winning version:
+- Green changes are carried by default.
+- Yellow ones wait for your decision; until then the winner's value is kept.
+- Red and Unknown ones are never carried.
+
+A record is **Ready**, **Needs decision**, **Blocked** (for example, you chose to carry two different values for the same field) or has **Nothing to carry**. The plan also lists the extra masters a patch would need.
+
+To record a choice from the command line: `fo4mx plan <install options> carry|keep|default <Plugin.esp:OBJECTID> <change id>`. The ids are listed by `fo4mx plan` and in the Conflict Report's JSON. Choices are saved in `patch_plan_decisions.json` next to the database and kept across scans. Nothing is written from the plan yet; that comes next.
+
 Each row also has a class: whether carrying the change into a patch matches a documented rule. **Green** is low risk, though not guaranteed. **Yellow** needs your review (competing values, a later plugin that removed or replaced it, record flags, form lists, removals, a new master). **Red** is never carried automatically (scripts, conditions, object templates, quests, cells, deleted records, data the app does not understand). **Unknown** means there is no rule for that record type. The report counts each class. The table states facts, not intentions: it never says a plugin removed something on purpose. It is the first step of the compatibility patch work (`docs/COMPATIBILITY_PATCH_RESEARCH.md`); nothing is merged from it yet.
 
 Finding conflicts:

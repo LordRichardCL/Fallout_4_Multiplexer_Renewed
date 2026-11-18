@@ -390,6 +390,55 @@ std::string conflictReport(const ReportContext& ctx)
                   {"mono"});
         }
     h.tableEnd(lostShown, lostTotal);
+
+    // The reviewable compatibility patch plan (phase 7): nothing is written from it yet.
+    if (const auto* plan = ctx.plan) {
+        h.h2("Compatibility patch plan");
+        h.note("What a compatibility patch would do with each change above, starting from the winning version. "
+               "Green changes are carried by default, Yellow ones wait for your decision (kept as the winner has "
+               "them until then), Red and Unknown ones are never carried. Your choices are saved and kept across "
+               "scans. Nothing is written from this plan yet.");
+        h.cards({{"Records Ready", formatCount(plan->byStatus[static_cast<size_t>(PlanStatus::Ready)])},
+                 {"Need a Decision", formatCount(plan->byStatus[static_cast<size_t>(PlanStatus::NeedsDecision)])},
+                 {"Blocked", formatCount(plan->byStatus[static_cast<size_t>(PlanStatus::Blocked)])},
+                 {"Changes Carried", formatCount(plan->carried)},
+                 {"Changes Waiting", formatCount(plan->pending)},
+                 {"Kept as Winner", formatCount(plan->kept)},
+                 {"Never Carried", formatCount(plan->locked)},
+                 {"Extra Masters", formatCount(plan->masters.size())}});
+        h.tableStart({"Form", "Status", "Carried", "Waiting", "Kept / never carried", "Masters needed", "Problems"});
+        size_t planShown = 0;
+        for (const auto& pr : plan->records) {
+            if (planShown >= ctx.maxRows)
+                break;
+            ++planShown;
+            size_t carried = 0, waiting = 0, other = 0;
+            for (const auto& pe : pr.entries)
+                (pe.decision == PlanDecision::Pending ? waiting
+                 : pe.action == PlanAction::CarryForward ? carried
+                                                         : other)++;
+            h.row({s.formLabel(pr.conflict->key), planStatusName(pr.status), std::to_string(carried),
+                   std::to_string(waiting), std::to_string(other), names(pr.masters), join(pr.problems, "; ")},
+                  {"mono"});
+        }
+        h.tableEnd(planShown, plan->records.size());
+        h.h2("Compatibility patch plan, change by change");
+        h.tableStart({"Form", "Field", "Change", "Made by", "Class", "Plan", "Decision", "Note"});
+        size_t entryShown = 0, entryTotal = 0;
+        for (const auto& pr : plan->records)
+            for (const auto& pe : pr.entries) {
+                ++entryTotal;
+                if (entryShown >= ctx.maxRows)
+                    continue;
+                ++entryShown;
+                const auto& t = pr.conflict->changes[pe.change];
+                std::string change = t.item.empty() ? t.before + " → " + t.after : std::string(changeOpName(t.op)) + " " + t.item;
+                h.row({s.formLabel(pr.conflict->key), t.field, change, s.pluginName(t.source), compatClassName(t.cls),
+                       planActionName(pe.action), planDecisionName(pe.decision), pe.note},
+                      {"mono"});
+            }
+        h.tableEnd(entryShown, entryTotal);
+    }
     return h.finish();
 }
 
@@ -865,6 +914,7 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             json::Value changes;
             for (const auto& t : e.changes) {
                 json::Value to;
+                to.set("id", t.changeId);
                 to.set("field", t.field);
                 if (!t.item.empty())
                     to.set("element", t.item);
@@ -903,6 +953,47 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             list.push(o);
         }
         root.set("conflicts", list);
+        if (const auto* plan = ctx.plan) {
+            json::Value po;
+            po.set("carried", static_cast<uint64_t>(plan->carried));
+            po.set("waiting", static_cast<uint64_t>(plan->pending));
+            po.set("keptAsWinner", static_cast<uint64_t>(plan->kept));
+            po.set("neverCarried", static_cast<uint64_t>(plan->locked));
+            json::Value masters;
+            for (auto p : plan->masters)
+                masters.push(s->pluginName(p));
+            po.set("extraMasters", masters);
+            json::Value records;
+            for (const auto& pr : plan->records) {
+                json::Value ro;
+                ro.set("formId", s->loadOrderFormId(pr.conflict->key));
+                ro.set("record", PlanDecisions::recordId(*s, pr.conflict->key));
+                ro.set("status", planStatusName(pr.status));
+                json::Value entries;
+                for (const auto& pe : pr.entries) {
+                    const auto& t = pr.conflict->changes[pe.change];
+                    json::Value eo;
+                    eo.set("change", t.changeId);
+                    eo.set("field", t.field);
+                    eo.set("madeBy", s->pluginName(t.source));
+                    eo.set("class", compatClassName(t.cls));
+                    eo.set("plan", planActionName(pe.action));
+                    eo.set("decision", planDecisionName(pe.decision));
+                    if (!pe.note.empty())
+                        eo.set("note", pe.note);
+                    entries.push(eo);
+                }
+                ro.set("changes", entries);
+                json::Value problems;
+                for (const auto& p : pr.problems)
+                    problems.push(p);
+                if (!pr.problems.empty())
+                    ro.set("problems", problems);
+                records.push(ro);
+            }
+            po.set("records", records);
+            root.set("patchPlan", po);
+        }
         break;
     }
     case ReportKind::Asset: {

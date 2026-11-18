@@ -115,6 +115,7 @@ void Pipeline::scan(ProgressSink& progress)
     if (cache_)
         cache_->resetCounters();
     conflicts_.reset();
+    plan_.reset();
     dependencies_.reset();
     compiled_.reset();
     validation_.reset();
@@ -477,6 +478,8 @@ void Pipeline::analyse(ProgressSink& progress)
         scan(progress);
     progress.stage("Analyse");
     conflicts_ = ConflictEngine::analyse(*session_, config_.conflicts, progress);
+    planDecisions_ = PlanDecisions::load(planDecisionsPath());
+    plan_ = buildPatchPlan(*session_, *conflicts_, planDecisions_);
     session_->autoMergeEnabled = config_.compile.autoMerge;
     if (config_.compile.autoMerge) {
         progress.stage("Auto-Merger: checking scripts and configs");
@@ -506,6 +509,24 @@ void Pipeline::analyse(ProgressSink& progress)
         db::DatabaseWriter(*db_).writeAnalysis(*session_, *conflicts_, *dependencies_, progress);
     if (db_)
         db::DatabaseWriter(*db_).writeAutoMerge(*session_, autoMerge(), nullptr);
+}
+
+std::filesystem::path Pipeline::planDecisionsPath() const
+{
+    if (!config_.patchPlanDecisions.empty())
+        return config_.patchPlanDecisions;
+    if (!config_.databasePath.empty())
+        return config_.databasePath.parent_path() / "patch_plan_decisions.json";
+    return {};
+}
+
+void Pipeline::setPlanDecision(FormKey record, const std::string& changeId, std::optional<PlanAction> action)
+{
+    planDecisions_.set(PlanDecisions::recordId(*session_, record), changeId, action);
+    if (const auto path = planDecisionsPath(); !path.empty())
+        planDecisions_.save(path);
+    if (conflicts_)
+        plan_ = buildPatchPlan(*session_, *conflicts_, planDecisions_);
 }
 
 void Pipeline::refreshEligibility()
@@ -1294,6 +1315,7 @@ std::vector<std::filesystem::path> Pipeline::writeReports(const std::filesystem:
     ReportContext ctx;
     ctx.session = session_.get();
     ctx.conflicts = conflicts();
+    ctx.plan = patchPlan();
     ctx.dependencies = dependencies();
     ctx.compiled = compiledOutput();
     ctx.validation = reportValidation();

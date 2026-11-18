@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 
 #include <spdlog/spdlog.h>
 
@@ -224,6 +225,20 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
         if (keepDetails)
             for (const auto& ev : rp.events) {
                 TracedChange t;
+                t.fieldKey = ev.fieldKey;
+                {
+                    // FNV-1a over what identifies the change independently of plugin indices.
+                    const std::string text = ev.fieldKey + '\0' + changeOpName(ev.op) + '\0' +
+                                             session.pluginName(inst[ev.version].plugin) + '\0' +
+                                             stableFormTokens(session, ev.item) + '\0' +
+                                             stableFormTokens(session, ev.after);
+                    uint64_t h = 1469598103934665603ULL;
+                    for (unsigned char ch : text)
+                        h = (h ^ ch) * 1099511628211ULL;
+                    char buf[20];
+                    std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(h));
+                    t.changeId = buf;
+                }
                 t.field = ev.label;
                 t.item = ev.item;
                 t.before = ev.before;

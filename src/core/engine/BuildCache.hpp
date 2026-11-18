@@ -100,5 +100,7 @@ std::optional<std::vector<std::pair<FormKey, Signature>>> deserializeEdges(const
 // load-order FormIDs) are rendered against the current load order.
 std::string formToken(FormKey key);
 std::string renderFormTokens(const Session& session, const std::string& text);
+// The same text with forms as "Plugin.esp:objectID", independent of the load order (stable identifiers).
+std::string stableFormTokens(const Session& session, const std::string& text);
 
 } // namespace fo4mx

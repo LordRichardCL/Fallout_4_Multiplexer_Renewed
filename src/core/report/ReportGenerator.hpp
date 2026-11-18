@@ -4,6 +4,7 @@
 #include "engine/CompilationEngine.hpp"
 #include "engine/ConflictEngine.hpp"
 #include "engine/DependencyEngine.hpp"
+#include "engine/PatchPlan.hpp"
 #include "engine/Session.hpp"
 #include "engine/ValidationEngine.hpp"
 
@@ -23,6 +24,7 @@ enum class ReportStyle : uint8_t { Rich, Preview, Print };
 struct ReportContext {
     const Session* session = nullptr;
     const ConflictReport* conflicts = nullptr;
+    const PatchPlan* plan = nullptr; // the compatibility patch plan (shown in the Conflict Report)
     const DependencyReport* dependencies = nullptr;
     const CompiledOutput* compiled = nullptr;
     const ValidationReport* validation = nullptr;

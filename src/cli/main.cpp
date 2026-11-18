@@ -21,6 +21,7 @@
 #include <iostream>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <limits>
 #include <unordered_set>
@@ -38,6 +39,12 @@ Usage:
   fo4mx status   <install> [--db FILE]
   fo4mx scan     <install> [--db FILE]
   fo4mx analyse  <install> [--db FILE] [--reports DIR]
+  fo4mx plan     <install> [--db FILE] [carry|keep|default <Plugin.esp:OBJECTID> <change id>]
+                 the compatibility patch plan: what a patch would carry of the
+                 changes the winning versions lose, and what waits for your
+                 decision. With carry/keep/default, records your choice for one
+                 change (ids as listed, or from the Conflict Report's JSON) first.
+                 Choices are saved next to the database. Nothing is written
   fo4mx compile  <install> [--db FILE] [compile options] [--dry-run]
   fo4mx check-definitions <install> [--types ARMA,MGEF,...]
                  decode every record of the supported types in the load order
@@ -609,6 +616,56 @@ int cmdPipeline(const Args& a)
         return 0;
     }
     p.analyse(progress);
+    if (a.command == "plan") {
+        auto& session = p.session();
+        if (a.positional.size() >= 3) {
+            const std::string& verb = a.positional[0];
+            const std::string& rec = a.positional[1];
+            const auto colon = rec.rfind(':');
+            const auto* plugin = colon == std::string::npos ? nullptr : session.findPlugin(rec.substr(0, colon));
+            if (!plugin)
+                throw std::runtime_error("plan: the record must be given as <Plugin.esp:OBJECTID> of the plugin that defines it");
+            const FormKey key{plugin->index, static_cast<uint32_t>(std::stoul(rec.substr(colon + 1), nullptr, 16)) & 0xFFFFFF};
+            std::optional<PlanAction> action;
+            if (verb == "carry")
+                action = PlanAction::CarryForward;
+            else if (verb == "keep")
+                action = PlanAction::KeepWinner;
+            else if (verb != "default")
+                throw std::runtime_error("plan: use carry, keep or default");
+            p.setPlanDecision(key, a.positional[2], action);
+            std::printf("Saved: %s %s for %s (%s)\n", verb.c_str(), a.positional[2].c_str(), session.formLabel(key).c_str(),
+                        pathToUtf8(p.planDecisionsPath()).c_str());
+        }
+        const auto* plan = p.patchPlan();
+        std::printf("\nCompatibility patch plan (nothing is written from it yet)\n");
+        std::printf("  records: %zu ready, %zu need a decision, %zu blocked, %zu nothing to carry\n",
+                    plan->byStatus[0], plan->byStatus[1], plan->byStatus[2], plan->byStatus[3]);
+        std::printf("  changes: %zu carried, %zu waiting, %zu kept as the winner, %zu never carried\n", plan->carried,
+                    plan->pending, plan->kept, plan->locked);
+        size_t shown = 0;
+        for (const auto& pr : plan->records) {
+            if (pr.status != PlanStatus::NeedsDecision && pr.status != PlanStatus::Blocked)
+                continue;
+            if (shown++ >= 50) {
+                std::printf("  ... more in the Conflict Report\n");
+                break;
+            }
+            std::printf("\n%s  [%s]  record id %s\n", session.formLabel(pr.conflict->key).c_str(),
+                        planStatusName(pr.status), PlanDecisions::recordId(session, pr.conflict->key).c_str());
+            for (const auto& problem : pr.problems)
+                std::printf("    problem: %s\n", problem.c_str());
+            for (const auto& pe : pr.entries) {
+                if (pe.decision == PlanDecision::Locked)
+                    continue;
+                const auto& t = pr.conflict->changes[pe.change];
+                std::printf("    %s  %-13s %-20s %s by %s (%s: %s)\n", t.changeId.c_str(), planActionName(pe.action),
+                            planDecisionName(pe.decision), t.field.c_str(), session.pluginName(t.source).c_str(),
+                            compatClassName(t.cls), t.rule.c_str());
+            }
+        }
+        return 0;
+    }
     if (a.command == "analyse" || a.command == "analyze") {
         printDashboard(p);
         auto dir = cfg.reportDirectory.empty() ? platform::applicationDataDir() / "Reports" : cfg.reportDirectory;
@@ -724,7 +781,7 @@ int main(int argc, char** argv)
             return cmdFormId(a);
         if (a.command == "clean-outputs")
             return cmdCleanOutputs(a);
-        if (a.command == "scan" || a.command == "analyse" || a.command == "analyze" || a.command == "compile" ||
+        if (a.command == "scan" || a.command == "analyse" || a.command == "analyze" || a.command == "plan" || a.command == "compile" ||
             a.command == "status" || a.command == "check-definitions" || a.command == "references")
             return cmdPipeline(a);
         std::fprintf(stderr, "Unknown command '%s'\n\n%s", a.command.c_str(), kUsage);
