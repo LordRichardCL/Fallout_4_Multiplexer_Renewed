@@ -8084,6 +8084,57 @@ TEST(patch_plan_is_written_and_read_back)
     writePlannedHat(true);  // compiled plugins hold it: an output
 }
 
+// Weapon data (WEAP DNAM, 132 bytes, described from xEdit's complete layout): ModD changes the speed, ModC
+// (the winner) the base damage. Both reach the patch.
+TEST(patch_plan_carries_one_weapon_stat)
+{
+    auto root = buildInstall("patchweapon");
+    auto data = root / "Game" / "Data";
+    const auto& def = RecordDefinitions::get().field(Signature("WEAP"), Signature("DNAM"));
+    auto at = [&](const char* name) {
+        for (const auto& m : def.values)
+            if (m.name == name)
+                return m.offset;
+        CHECK(false);
+        return uint16_t(0);
+    };
+    auto weapon = [&](float speed, uint16_t damage) {
+        std::vector<uint8_t> d(def.valueSize, 0);
+        std::memcpy(d.data() + at("Speed"), &speed, 4);
+        storeLE<uint16_t>(d.data() + at("Damage - Base"), damage);
+        return record("WEAP", 0x01000800, {zs("EDID", "Pistol"), raw("DNAM", d)});
+    };
+    writePlugin(data / "Base.esm", {"Fallout4.esm"}, {weapon(1.0f, 18)}, ESM);
+    writePlugin(data / "ModD.esp", {"Fallout4.esm", "Base.esm"}, {weapon(1.25f, 18)});
+    writePlugin(data / "ModC.esp", {"Fallout4.esm", "Base.esm"}, {weapon(1.0f, 24)});
+    writeFile(root / "plugins.txt", "*Base.esm\n*ModA.esp\n*ModD.esp\n*ModC.esp\n");
+    auto cfg = configFor(root);
+    cfg.patchPlanDecisions = root / "decisions.json";
+    cfg.analysis.excludedPlugins = {"Base.esm", "ModD.esp", "ModC.esp"};
+    cfg.compile.applyPatchPlan = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    OutputSet out(result.pluginFiles);
+    const auto* r = out.byEditorId("Pistol");
+    CHECK(r != nullptr);
+    if (!r)
+        return;
+    CHECK_EQ(r->plugin, std::string("Multiplexer_Patch.esp"));
+    const auto* d = r->record.find(Signature("DNAM"));
+    CHECK(d && d->data.size() == def.valueSize);
+    if (!d || d->data.size() != def.valueSize)
+        return;
+    float speed = 0;
+    std::memcpy(&speed, d->data.data() + at("Speed"), 4);
+    CHECK_EQ(speed, 1.25f);                                              // ModD's
+    CHECK_EQ(loadLE<uint16_t>(d->data.data() + at("Damage - Base")), uint16_t(24)); // ModC's
+}
+
 // Phase 10: one member of a struct. Armour data (ARMO DATA: value, weight, health, xEdit's complete layout):
 // ModD changes the value, ModC (the winner) the weight. Member by member they are independent, so ModD's value
 // is Green and carried by default; the patch holds ModD's value with ModC's weight and the base health, and

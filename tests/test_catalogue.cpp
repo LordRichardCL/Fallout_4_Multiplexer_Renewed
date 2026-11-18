@@ -675,3 +675,36 @@ TEST(catalogue_text_and_number_fields_described_from_xedit)
     const auto value = decodeLayout(d, Signature::fromString("PACK"), {z("ANAM", "Bool"), Subrecord(Signature::fromString("BNAM"), std::vector<uint8_t>{1, 2, 3, 4})});
     CHECK(!value.heuristic.empty());
 }
+
+// Partial structs whose value layer is xEdit's complete layout, FormID members at exactly the decoder's slots:
+// the bytes between the slots are numbers xEdit names, so they are described up to the layout's size. Bytes
+// past it (another form version) stay undescribed. All 20,008 such records in the owner's outputs (WEAP
+// DNAM/FNAM/CRDT, HAZD DNAM, STAT DNAM, ACTI RADR) have exactly the layout's size.
+TEST(partial_structs_with_complete_layouts_are_described)
+{
+    const auto& d = RecordDefinitions::get();
+    auto decode = [&](const char* rec, const char* sub, size_t size) {
+        Subrecord sr;
+        sr.signature = Signature::fromString(sub);
+        sr.data.assign(size, 0x11);
+        return decodeLayout(d, Signature::fromString(rec), {sr});
+    };
+    for (auto [rec, sub] : {std::pair{"WEAP", "DNAM"}, {"WEAP", "FNAM"}, {"WEAP", "CRDT"}, {"HAZD", "DNAM"},
+                            {"STAT", "DNAM"}, {"ACTI", "RADR"}}) {
+        const auto& f = d.field(Signature::fromString(rec), Signature::fromString(sub));
+        CHECK(f.partial && f.valuesComplete);
+        const auto whole = decode(rec, sub, f.valueSize);
+        CHECK(whole.heuristic.empty());
+        CHECK_EQ(whole.formIdSlots.size(), f.offsets.size());
+        const auto longer = decode(rec, sub, f.valueSize + 8u);
+        CHECK_EQ(longer.heuristic.size(), size_t(1));
+        if (!longer.heuristic.empty()) {
+            CHECK_EQ(longer.heuristic[0].begin, uint32_t(f.valueSize));
+            CHECK_EQ(longer.heuristic[0].end, uint32_t(f.valueSize + 8u));
+        }
+    }
+    // A partial struct without a complete layout keeps its own ranges (EXPL DATA).
+    const auto& expl = d.field(Signature("EXPL"), Signature("DATA"));
+    CHECK(!expl.valuesComplete);
+    CHECK(!(expl.plain.size() == 1 && expl.plain[0].first == 0 && expl.plain[0].second == expl.valueSize));
+}

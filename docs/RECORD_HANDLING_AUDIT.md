@@ -1190,3 +1190,7 @@ covers three setups:
   merged in the output.
 
 The exported plugins pass the written-content and layout checks.
+
+## Partial structs described from complete xEdit layouts (18 Nov 2026)
+
+WEAP DNAM, WEAP FNAM, WEAP CRDT, HAZD DNAM, STAT DNAM and ACTI RADR were partial structs: the decoder described their FormID slots and some number ranges, and treated the rest as undescribed bytes (kept exactly as written, Red in the compatibility analysis). The value layer generated from xEdit gives each of them a complete layout whose FormID members sit at exactly the decoder's slots, so the bytes between are numbers, flags and unused values. They are now described up to the layout's size; longer subrecords keep their extra bytes undescribed. Nothing new is rewritten (no FormIDs were added), so compiled output is byte-identical for these fields; the change lets conflict analysis and the compatibility patch plan compare them member by member. The definitions' fingerprint and the build cache format (14) change, so the next scan decodes again. Checked on the owner's outputs: 20,008 records, all at the layout's size, none with undescribed bytes left.

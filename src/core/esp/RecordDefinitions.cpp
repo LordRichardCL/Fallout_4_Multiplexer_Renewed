@@ -1959,6 +1959,28 @@ void buildValues(RecordDefinitions& d)
                    std::vector<ValueMember> m) { applyGenerated(d, rec, sub, label, stride, complete, std::move(m)); };
     const auto& B = Bytes;
 #include "esp/ValueDefinitions.inc"
+
+    // Partial structs (bytes outside the FormID slots were undescribed) whose value layer is xEdit's
+    // complete layout, with its FormID members exactly at the slots the decoder rewrites: every other byte
+    // up to the layout's size is a number, flag or unused value xEdit names, so it is described. Bytes past
+    // that size (another form version) stay undescribed. WEAP DNAM/FNAM/CRDT, HAZD DNAM, STAT DNAM, ACTI RADR.
+    auto describeGaps = [](FieldDef& f) {
+        if (!f.partial || !f.valuesComplete || f.valueStride || !f.valueSize || f.values.empty() ||
+            f.kind != FieldKind::Struct)
+            return;
+        std::vector<uint16_t> forms, slots(f.offsets.begin(), f.offsets.end());
+        for (const auto& m : f.values)
+            if (m.type == ValueType::FormId)
+                forms.push_back(m.offset);
+        std::sort(forms.begin(), forms.end());
+        std::sort(slots.begin(), slots.end());
+        if (forms != slots || coveredSize(f.values) != f.valueSize)
+            return;
+        f.plain = {{0, f.valueSize}};
+    };
+    for (auto& [sig, rd] : d.records_)
+        for (auto& [sub, f] : rd.fields)
+            describeGaps(f);
 }
 
 } // namespace
@@ -1969,8 +1991,10 @@ const RecordDefinitions& RecordDefinitions::get(RuntimeProfile profile)
         RecordDefinitions d;
         buildOldGen(d);
         d.applyCatalogue(RecordCatalogue::get());
+        buildValues(d);
+        // After the value layer: it describes the gaps of partial structs with complete layouts, which
+        // changes decoding, so cached work made without it is not reused.
         d.computeFingerprint();
-        buildValues(d); // descriptive only: after the fingerprint, so it never invalidates cached work
         return d;
     }();
     static const RecordDefinitions nextGen = [] {
@@ -1981,8 +2005,8 @@ const RecordDefinitions& RecordDefinitions::get(RuntimeProfile profile)
         buildOldGen(d);
         d.profileName_ = "Fallout 4 Next Gen (experimental, Old Gen layouts)";
         d.applyCatalogue(RecordCatalogue::get());
-        d.computeFingerprint();
         buildValues(d);
+        d.computeFingerprint();
         return d;
     }();
     return profile == RuntimeProfile::NextGen ? nextGen : oldGen;
