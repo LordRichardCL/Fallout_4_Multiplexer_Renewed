@@ -7920,3 +7920,93 @@ TEST(patch_plan_defaults_decisions_and_validation)
         }
     }
 }
+
+// Writing the plan (phases 8 and 9): the same chain as above with every mod staying in the load order, so the
+// record goes to the patch. ModB's keyword (Green) and ModD's data (chosen) are carried into ModC's version;
+// ModE's data is kept out. The exported patch is read back: the record holds exactly the planned values, the
+// winner's own name, references that resolve, and its masters; the written-content check agrees.
+namespace {
+void writePlannedHat(bool compiled)
+{
+    auto root = buildInstall(compiled ? "patchwritec" : "patchwrite");
+    auto data = root / "Game" / "Data";
+    auto armor = [](std::vector<uint32_t> keywords, uint8_t value, const char* name) {
+        return record("ARMO", 0x01000800,
+                      {zs("EDID", "Hat"), zs("FULL", name), raw("DATA", {value, 0, 0, 0, 0, 0, 0, 0}),
+                       u32("KSIZ", static_cast<uint32_t>(keywords.size())), formIds("KWDA", keywords)});
+    };
+    writePlugin(data / "Base.esm", {"Fallout4.esm"},
+                {armor({0x01000801}, 10, "Hat"), record("KYWD", 0x01000801, {zs("EDID", "Plain")}),
+                 record("KYWD", 0x01000802, {zs("EDID", "LaserSlot")})},
+                ESM);
+    writePlugin(data / "ModB.esp", {"Fallout4.esm", "Base.esm"}, {armor({0x01000801, 0x01000802}, 10, "Hat")});
+    writePlugin(data / "ModD.esp", {"Fallout4.esm", "Base.esm"}, {armor({0x01000801}, 20, "Hat")});
+    writePlugin(data / "ModE.esp", {"Fallout4.esm", "Base.esm"}, {armor({0x01000801}, 30, "Hat")});
+    writePlugin(data / "ModC.esp", {"Fallout4.esm", "Base.esm"}, {armor({0x01000801}, 10, "Better Hat")});
+    writeFile(root / "plugins.txt", "*Base.esm\n*ModA.esp\n*ModB.esp\n*ModD.esp\n*ModE.esp\n*ModC.esp\n");
+    auto cfg = configFor(root);
+    cfg.patchPlanDecisions = root / "decisions.json";
+    cfg.analysis.excludedPlugins = {"Base.esm", "ModB.esp", "ModD.esp", "ModE.esp", "ModC.esp"};
+    if (compiled)
+        cfg.analysis.excludedPlugins = {"Base.esm"}; // the mods compile: the record goes to an output
+    cfg.compile.applyPatchPlan = true;
+
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    const FormKey hat{s.findPlugin("Base.esm")->index, 0x800};
+    std::string idD, idE; // collected first: each decision rebuilds the plan
+    for (const auto& pr : p.patchPlan()->records)
+        if (pr.conflict->key == hat)
+            for (const auto& pe : pr.entries) {
+                const auto& t = pr.conflict->changes[pe.change];
+                if (s.pluginName(t.source) == "ModD.esp")
+                    idD = t.changeId;
+                if (s.pluginName(t.source) == "ModE.esp")
+                    idE = t.changeId;
+            }
+    CHECK(!idD.empty() && !idE.empty());
+    p.setPlanDecision(hat, idD, PlanAction::CarryForward);
+    p.setPlanDecision(hat, idE, PlanAction::KeepWinner);
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    bool reported = false;
+    for (const auto& is : p.compiledOutput()->issues)
+        reported |= is.category == "Compatibility Patch" && is.severity == Severity::Info;
+    CHECK(reported);
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0)); // written-content check: the file holds the plan
+
+    OutputSet out(result.pluginFiles);
+    const auto* r = out.byEditorId("Hat");
+    CHECK(r != nullptr);
+    if (!r)
+        return;
+    if (compiled)
+        CHECK(r->plugin.rfind("Dummy_Plugin_", 0) == 0);
+    else
+        CHECK_EQ(r->plugin, std::string("Multiplexer_Patch.esp"));
+    CHECK((out.identity(*r) == std::pair<std::string, uint32_t>{"Base.esm", 0x800}));
+    CHECK_EQ(text(r->record.find(Signature("FULL"))), std::string("Better Hat")); // the winner's own change
+    const auto* d = r->record.find(Signature("DATA"));
+    CHECK(d && d->data.size() == 8 && d->data[0] == 20); // ModD's, not ModE's
+    const auto* k = r->record.find(Signature("KWDA"));
+    CHECK(k && k->data.size() == 8);
+    if (k && k->data.size() == 8) {
+        std::set<std::pair<std::string, uint32_t>> kws{out.resolve(*r, loadLE<uint32_t>(k->data.data())),
+                                                       out.resolve(*r, loadLE<uint32_t>(k->data.data() + 4))};
+        CHECK(kws.count({"Base.esm", 0x801}) == 1);
+        CHECK(kws.count({"Base.esm", 0x802}) == 1);
+    }
+    const auto* ksiz = r->record.find(Signature("KSIZ"));
+    CHECK(ksiz && loadLE<uint32_t>(ksiz->data.data()) == 2);
+    CHECK(std::find(r->masters.begin(), r->masters.end(), "Base.esm") != r->masters.end());
+}
+} // namespace
+
+TEST(patch_plan_is_written_and_read_back)
+{
+    writePlannedHat(false); // only plugins that stay hold it: Multiplexer_Patch.esp
+    writePlannedHat(true);  // compiled plugins hold it: an output
+}

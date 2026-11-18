@@ -1,5 +1,7 @@
 #include "engine/Provenance.hpp"
 
+#include "esp/RecordDefinitions.hpp"
+
 #include <algorithm>
 #include <map>
 #include <set>
@@ -358,6 +360,154 @@ RecordProvenance traceProvenance(const std::vector<FieldSet>& chain, const std::
                 }
     }
     return rp;
+}
+
+namespace {
+
+// Puts `field` into `result` where `from` (the version it comes from) has it: after the nearest earlier
+// field `result` holds, then past the result's own fields xEdit orders before it.
+void insertField(FieldSet& result, const FieldSet& from, const Field& field)
+{
+    const auto& sf = from.fields;
+    size_t at = 0;
+    while (at < sf.size() && sf[at].key != field.key)
+        ++at;
+    size_t pos = 0;
+    for (size_t p = std::min(at, sf.size()); p-- > 0;) {
+        auto it = std::find_if(result.fields.begin(), result.fields.end(), [&](const Field& f) { return f.key == sf[p].key; });
+        if (it != result.fields.end()) {
+            pos = static_cast<size_t>(it - result.fields.begin()) + 1;
+            break;
+        }
+    }
+    if (const int rank = subrecordRank(result.sig, field.sig); rank >= 0)
+        while (pos < result.fields.size() && !from.find(result.fields[pos].key)) {
+            const int here = subrecordRank(result.sig, result.fields[pos].sig);
+            if (here < 0 || here >= rank)
+                break;
+            ++pos;
+        }
+    result.fields.insert(result.fields.begin() + static_cast<std::ptrdiff_t>(pos), field);
+}
+
+const Field* shapeOf(const std::vector<FieldSet>& chain, const std::string& key)
+{
+    for (const auto& set : chain)
+        if (const Field* f = set.find(key))
+            return f;
+    return nullptr;
+}
+
+std::vector<std::string> commonOrder(const ListView& x, const ListView& y)
+{
+    std::vector<std::string> out;
+    for (const auto& id : x.order)
+        if (y.has(id))
+            out.push_back(id);
+    return out;
+}
+
+bool holds(const FieldSet& result, const std::vector<FieldSet>& chain, const ChangeEvent& c)
+{
+    const Field* src = c.version < chain.size() ? chain[c.version].find(c.fieldKey) : nullptr;
+    const Field* have = result.find(c.fieldKey);
+    const Field* shape = shapeOf(chain, c.fieldKey);
+    if (!shape)
+        return false;
+    if (!shape->isList())
+        return c.op == ChangeOp::Remove ? have == nullptr : fieldEquivalent(have, src);
+    const bool keyed = shape->merge == MergeMode::Keyed;
+    const ListView mine = viewOf(have, keyed), theirs = viewOf(src, keyed);
+    switch (c.op) {
+    case ChangeOp::Remove: return !mine.has(c.identity);
+    case ChangeOp::Add:
+    case ChangeOp::Modify:
+        return mine.has(c.identity) && theirs.has(c.identity) &&
+               (!keyed || itemEquivalent(*mine.items.at(c.identity), *theirs.items.at(c.identity)));
+    case ChangeOp::Reorder: return commonOrder(mine, theirs) == commonOrder(theirs, mine);
+    case ChangeOp::Set: break;
+    }
+    return false;
+}
+
+} // namespace
+
+std::vector<size_t> applyChanges(FieldSet& result, const std::vector<FieldSet>& chain,
+                                 const std::vector<const ChangeEvent*>& changes)
+{
+    for (const ChangeEvent* c : changes) {
+        if (c->version >= chain.size())
+            continue;
+        const FieldSet& from = chain[c->version];
+        const Field* src = from.find(c->fieldKey);
+        const Field* shape = shapeOf(chain, c->fieldKey);
+        if (!shape)
+            continue;
+        if (!shape->isList()) {
+            Field* have = result.find(c->fieldKey);
+            if (c->op == ChangeOp::Remove) {
+                result.fields.erase(std::remove_if(result.fields.begin(), result.fields.end(),
+                                                   [&](const Field& f) { return f.key == c->fieldKey; }),
+                                    result.fields.end());
+            } else if (src) {
+                if (have)
+                    *have = *src;
+                else
+                    insertField(result, from, *src);
+            }
+            continue;
+        }
+        const bool keyed = shape->merge == MergeMode::Keyed;
+        if (!result.find(c->fieldKey)) {
+            if (c->op == ChangeOp::Remove || c->op == ChangeOp::Reorder || !src)
+                continue;
+            Field empty = *src;
+            empty.items.clear();
+            insertField(result, from, empty);
+        }
+        Field& list = *result.find(c->fieldKey);
+        const ListView theirs = viewOf(src, keyed);
+        const ListView mine = viewOf(&list, keyed);
+        auto indexOf = [&](const std::string& id) -> std::ptrdiff_t {
+            auto it = mine.items.find(id);
+            return it == mine.items.end() ? -1 : it->second - list.items.data();
+        };
+        switch (c->op) {
+        case ChangeOp::Add:
+        case ChangeOp::Modify: {
+            auto it = theirs.items.find(c->identity);
+            if (it == theirs.items.end())
+                break;
+            if (const auto i = indexOf(c->identity); i >= 0)
+                list.items[static_cast<size_t>(i)] = *it->second;
+            else
+                list.items.push_back(*it->second);
+            break;
+        }
+        case ChangeOp::Remove:
+            if (const auto i = indexOf(c->identity); i >= 0)
+                list.items.erase(list.items.begin() + i);
+            break;
+        case ChangeOp::Reorder: {
+            // The slots the shared elements occupy keep their places; they are filled in the change's order.
+            const auto wanted = commonOrder(theirs, mine);
+            std::vector<size_t> slots;
+            for (const auto& id : commonOrder(mine, theirs))
+                slots.push_back(static_cast<size_t>(indexOf(id)));
+            std::vector<ListItem> items = list.items;
+            for (size_t k = 0; k < slots.size() && k < wanted.size(); ++k)
+                items[slots[k]] = list.items[static_cast<size_t>(indexOf(wanted[k]))];
+            list.items = std::move(items);
+            break;
+        }
+        case ChangeOp::Set: break;
+        }
+    }
+    std::vector<size_t> missing;
+    for (size_t i = 0; i < changes.size(); ++i)
+        if (!holds(result, chain, *changes[i]))
+            missing.push_back(i);
+    return missing;
 }
 
 } // namespace fo4mx

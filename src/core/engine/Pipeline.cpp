@@ -609,6 +609,17 @@ bool Pipeline::compile(ProgressSink& progress)
     session_->autoRetained.clear();
     session_->previsChecks.clear();
     CompileOptions options = config_.compile;
+    // The reviewed compatibility patch plan: the changes to carry, for the records that are Ready.
+    options.plannedChanges.clear();
+    if (options.applyPatchPlan && plan_)
+        for (const auto& pr : plan_->records) {
+            if (pr.status != PlanStatus::Ready)
+                continue;
+            auto& ids = options.plannedChanges[pr.conflict->key.packed()];
+            for (const auto& pe : pr.entries)
+                if (pe.action == PlanAction::CarryForward)
+                    ids.push_back(pr.conflict->changes[pe.change].changeId);
+        }
 
     // Archive loaders need the output mod to override the original plugin files, which only a
     // Mod Organizer 2 mod folder does. Anywhere else they would overwrite the originals.

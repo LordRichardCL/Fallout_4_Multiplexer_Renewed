@@ -202,6 +202,13 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "it is. Worldspaces take the same from their versions (climate, water, music, map, location...). A "
         "cell or worldspace whose winning mod stays in the load order is written, merged, to "
         "Multiplexer_Patch.esp. Every field taken is listed in the report (Cell Configuration).");
+    applyPlan_ = new QCheckBox("Apply the compatibility patch plan");
+    applyPlan_->setToolTip(
+        "Records the compatibility patch plan marks Ready (Conflict Report, \"Compatibility patch plan\") are "
+        "written as their winning version plus the changes the plan carries: Green ones by default, Yellow ones "
+        "you chose. Only plugins that stay hold the record: it goes to Multiplexer_Patch.esp. A compiled plugin "
+        "holds it: it goes to an output. Each record is checked to hold every planned change before it is "
+        "written; one that does not is written as it would be without the plan. Off: the plan is only reported.");
     brokenAsNull_ = new QCheckBox("Write broken references as null (lossy)");
     brokenAsNull_->setToolTip(
         "A reference that cannot be written faithfully (its master is missing, or it names a record its compiled "
@@ -209,7 +216,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "order, so the game reads its own data unchanged (Kept Out Automatically: Broken reference). On: such "
         "references are written as null (00000000) and the plugin compiles; each is listed under Broken in "
         "Source. The game's own reading of these references is not verified, so this can lose data.");
-    for (auto* c : {merge_, light_, translatePrevis_, mergeCellConfig_, brokenAsNull_}) {
+    for (auto* c : {merge_, light_, translatePrevis_, mergeCellConfig_, applyPlan_, brokenAsNull_}) {
         c->setStyleSheet("QCheckBox { spacing: 8px; }");
         ml->addWidget(c);
     }
@@ -511,7 +518,8 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     connect(outputDir_, &QLineEdit::textChanged, this, [this] { storeOptions(); });
     connect(strategy_, &QComboBox::currentIndexChanged, this, [this] { storeOptions(); });
     connect(rules_, &QPlainTextEdit::textChanged, this, [this] { storeOptions(); });
-    for (auto* c : {autoOutputs_, merge_, light_, translatePrevis_, mergeCellConfig_, brokenAsNull_, patch_, patchOnly_})
+    for (auto* c : {autoOutputs_, merge_, light_, translatePrevis_, mergeCellConfig_, applyPlan_, brokenAsNull_, patch_,
+                    patchOnly_})
         connect(c, &QCheckBox::toggled, this, [this] { storeOptions(); });
     loadOptions();
 }
@@ -614,6 +622,7 @@ void CompilationPage::loadOptions()
     light_->setChecked(c.lightOutputsWhenPossible);
     translatePrevis_->setChecked(c.translatePrevis);
     mergeCellConfig_->setChecked(c.mergeCellConfig);
+    applyPlan_->setChecked(c.applyPatchPlan);
     brokenAsNull_->setChecked(c.brokenReferencesAsNull);
     patchOnly_->setChecked(c.patchOnly);
     patch_->setChecked(c.buildPatch || c.patchOnly);
@@ -637,6 +646,7 @@ void CompilationPage::storeOptions()
     c.lightOutputsWhenPossible = light_->isChecked();
     c.translatePrevis = translatePrevis_->isChecked();
     c.mergeCellConfig = mergeCellConfig_->isChecked();
+    c.applyPatchPlan = applyPlan_->isChecked();
     c.brokenReferencesAsNull = brokenAsNull_->isChecked();
     c.patchOnly = patchOnly_->isChecked();
     c.buildPatch = c.patchOnly || patch_->isChecked();

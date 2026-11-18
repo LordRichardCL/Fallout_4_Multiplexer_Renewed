@@ -50,6 +50,7 @@ private:
     QCheckBox* light_;
     QCheckBox* translatePrevis_;
     QCheckBox* mergeCellConfig_;
+    QCheckBox* applyPlan_;
     QCheckBox* brokenAsNull_;
     QCheckBox* patch_;
     QCheckBox* patchOnly_;

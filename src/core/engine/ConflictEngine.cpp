@@ -156,6 +156,19 @@ void markDeletion(ConflictEntry& e, std::span<const RecordInstance> inst)
 
 } // namespace
 
+std::string tracedChangeId(const Session& session, const ChangeEvent& ev, PluginIndex source)
+{
+    // FNV-1a over what identifies the change independently of plugin indices and load order.
+    const std::string text = ev.fieldKey + '\0' + changeOpName(ev.op) + '\0' + session.pluginName(source) + '\0' +
+                             stableFormTokens(session, ev.item) + '\0' + stableFormTokens(session, ev.after);
+    uint64_t h = 1469598103934665603ULL;
+    for (unsigned char ch : text)
+        h = (h ^ ch) * 1099511628211ULL;
+    char buf[20];
+    std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(h));
+    return buf;
+}
+
 ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex, bool fieldLevel, bool keepDetails)
 {
     const FormGroup& g = session.groups[groupIndex];
@@ -226,19 +239,7 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
             for (const auto& ev : rp.events) {
                 TracedChange t;
                 t.fieldKey = ev.fieldKey;
-                {
-                    // FNV-1a over what identifies the change independently of plugin indices.
-                    const std::string text = ev.fieldKey + '\0' + changeOpName(ev.op) + '\0' +
-                                             session.pluginName(inst[ev.version].plugin) + '\0' +
-                                             stableFormTokens(session, ev.item) + '\0' +
-                                             stableFormTokens(session, ev.after);
-                    uint64_t h = 1469598103934665603ULL;
-                    for (unsigned char ch : text)
-                        h = (h ^ ch) * 1099511628211ULL;
-                    char buf[20];
-                    std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(h));
-                    t.changeId = buf;
-                }
+                t.changeId = tracedChangeId(session, ev, inst[ev.version].plugin);
                 t.field = ev.label;
                 t.item = ev.item;
                 t.before = ev.before;

@@ -252,6 +252,7 @@ void AppController::loadSettings()
     c.lightOutputsWhenPossible = s.value("compile/light", false).toBool();
     c.translatePrevis = s.value("compile/translatePrevis", true).toBool();
     c.mergeCellConfig = s.value("compile/mergeCellConfig", false).toBool();
+    c.applyPatchPlan = s.value("compile/applyPatchPlan", false).toBool();
     c.brokenReferencesAsNull = s.value("compile/brokenReferencesAsNull", false).toBool();
     c.buildPatch = s.value("compile/patch", false).toBool();
     c.patchOnly = s.value("compile/patchOnly", false).toBool();
@@ -331,6 +332,7 @@ void AppController::saveSettings()
     s.setValue("compile/light", c.lightOutputsWhenPossible);
     s.setValue("compile/translatePrevis", c.translatePrevis);
     s.setValue("compile/mergeCellConfig", c.mergeCellConfig);
+    s.setValue("compile/applyPatchPlan", c.applyPatchPlan);
     s.setValue("compile/brokenReferencesAsNull", c.brokenReferencesAsNull);
     s.setValue("compile/patch", c.buildPatch);
     s.setValue("compile/patchOnly", c.patchOnly);

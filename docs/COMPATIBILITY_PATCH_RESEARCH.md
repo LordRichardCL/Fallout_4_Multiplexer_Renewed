@@ -342,6 +342,19 @@ Plugins
 
 **Status:** milestone 1 is implemented (18 Nov 2026): `engine/Provenance`, the trace on conflict entries (cached), the Conflict Report table "Changes not in the winning version", and the JSON report's `changes`. Tests are in `tests/test_provenance.cpp` (1–9, 11, 12 and keyed competition) and `conflict_report_traces_changes_not_in_the_winner` (10, with the cached second run).
 
+**Phases 8 and 9 (writing the plan)** are implemented (18 Nov 2026), behind the option `applyPatchPlan` (Compilation page "Apply the compatibility patch plan", CLI `--apply-patch-plan`, off by default).
+- **What is written.** Every record the plan marks Ready is written as its winning version plus the changes the plan carries:
+  - to `Multiplexer_Patch.esp` when only plugins that stay hold it;
+  - to an output when a compiled plugin does, as for any compiled record.
+- **How a change is carried** (`applyChanges`, `engine/Provenance`), matched by its stable id:
+  - a whole field takes the change's value, or is removed, and an absent field is inserted where xEdit orders it;
+  - list elements are added, removed or replaced by identity;
+  - an ordered list takes the change's order for the elements both hold.
+- **Checks before writing.** The result must hold every planned change (the same rules as tracing). A record whose plan no longer matches is written as it would be without the plan, with a Warning; one only the plan put in the patch is not written.
+- **Writing and verification** use the compiler's existing path: references translated, master lists from the references, the writer, then the written-content check, which re-reads every exported plugin and compares it with what was planned.
+- **Report.** Each record gets an Info line "Compatibility Patch" listing the carried changes and their plugins.
+- **Tests:** `apply_carries_scalars_and_list_elements`, `apply_removal_reorder_and_contradiction`, and `patch_plan_is_written_and_read_back`. The last one exports both the patch case and the output case and reads the plugin back: the planned values, the winner's own change, references resolving to the right records, the keyword count, and the masters.
+
 **Phase 7 (reviewable patch plan)** is implemented (18 Nov 2026): `engine/PatchPlan`. It covers, per record with changes the winner lacks, starting from the winner:
 - **Entries:** one per change, with the action (carry forward or keep the winner's value) and how it was decided:
   - Green: carried by default;

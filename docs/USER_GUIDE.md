@@ -96,7 +96,14 @@ Notes on a row:
 
 A record is **Ready**, **Needs decision**, **Blocked** (for example, you chose to carry two different values for the same field) or has **Nothing to carry**. The plan also lists the extra masters a patch would need.
 
-To record a choice from the command line: `fo4mx plan <install options> carry|keep|default <Plugin.esp:OBJECTID> <change id>`. The ids are listed by `fo4mx plan` and in the Conflict Report's JSON. Choices are saved in `patch_plan_decisions.json` next to the database and kept across scans. Nothing is written from the plan yet; that comes next.
+To record a choice from the command line: `fo4mx plan <install options> carry|keep|default <Plugin.esp:OBJECTID> <change id>`. The ids are listed by `fo4mx plan` and in the Conflict Report's JSON. Choices are saved in `patch_plan_decisions.json` next to the database and kept across scans. **Apply the compatibility patch plan** (Compilation page, off by default; CLI `--apply-patch-plan`). With this on, compiling writes the plan:
+- **What each record becomes:** every record the plan marks Ready is written as its winning version plus the changes the plan carries.
+- **Where it goes:** to `Multiplexer_Patch.esp` when only mods that stay in the load order hold the record; to an output when a compiled mod does.
+- **Checks:** each record must hold every planned change before it is written. If the mods changed since you made your choices, the record is written as it would be without the plan, and a warning says to analyse again and review.
+- **Report:** the Validation Report lists each record written this way, with the changes carried and the mods they came from.
+- **Verification:** after export, the written plugins are read back and compared with the plan.
+
+After changing your choices, compile again.
 
 Each row also has a class: whether carrying the change into a patch matches a documented rule. **Green** is low risk, though not guaranteed. **Yellow** needs your review (competing values, a later plugin that removed or replaced it, record flags, form lists, removals, a new master). **Red** is never carried automatically (scripts, conditions, object templates, quests, cells, deleted records, data the app does not understand). **Unknown** means there is no rule for that record type. The report counts each class. The table states facts, not intentions: it never says a plugin removed something on purpose. It is the first step of the compatibility patch work (`docs/COMPATIBILITY_PATCH_RESEARCH.md`); nothing is merged from it yet.
 

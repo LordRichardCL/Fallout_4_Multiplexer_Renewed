@@ -112,7 +112,8 @@ public:
     const PatchPlan* patchPlan() const { return plan_ ? &*plan_ : nullptr; }
     const PlanDecisions& planDecisions() const { return planDecisions_; }
     std::filesystem::path planDecisionsPath() const;
-    // Records the user's choice for one change (nullopt: back to the default), saves it and rebuilds the plan.
+    // Records the user's choice for one change (nullopt: back to the default), saves it and rebuilds the plan
+    // (pointers into the previous plan are invalidated).
     void setPlanDecision(FormKey record, const std::string& changeId, std::optional<PlanAction> action);
     const DependencyReport* dependencies() const { return dependencies_ ? &*dependencies_ : nullptr; }
     const CompiledOutput* compiledOutput() const { return compiled_ ? &*compiled_ : nullptr; }

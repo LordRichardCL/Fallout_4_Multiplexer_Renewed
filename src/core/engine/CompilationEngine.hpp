@@ -50,6 +50,10 @@ struct CompileOptions {
     // configuration field (lighting, location, encounter zone, music, water, regions...) from the
     // versions loading today, instead of the winner's version of all of them.
     bool mergeCellConfig = false;
+    // Compatibility patch plan (off by default): records the plan marks Ready are written as their winning
+    // version plus the changes the plan carries (to the patch when only plugins that stay hold them).
+    bool applyPatchPlan = false;
+    std::unordered_map<uint64_t, std::vector<std::string>> plannedChanges; // FormKey::packed() -> change ids
     // A reference that cannot be written faithfully (its master is missing, or it names a record a
     // compiled plugin does not contain): by default the plugin that stores it is kept out of compilation,
     // so it stays in the load order and the game reads its own data unchanged (fail closed). With this on

@@ -73,6 +73,10 @@ struct TracedChange {
     std::vector<PluginIndex> requiredMasters; // beyond the winner's masters
 };
 
+// The stable id of a traced change (`ev` traced with formToken labels; `source` = its version's plugin):
+// a hash of field, operation, source plugin, element and value, independent of the load order.
+std::string tracedChangeId(const Session& session, const ChangeEvent& ev, PluginIndex source);
+
 struct ConflictEntry {
     uint32_t group = 0;
     FormKey key;

@@ -66,4 +66,12 @@ bool listOrderMatters(Signature record, const Field& field);
 RecordProvenance traceProvenance(const std::vector<FieldSet>& chain, const std::vector<size_t>& parents,
                                  const std::function<std::string(FormKey)>& label);
 
+// Carries `changes` (events of a traceProvenance over `chain`) into `result`, normally a copy of the winning
+// version (docs/COMPATIBILITY_PATCH_RESEARCH.md, phase 8): a whole field takes the change's value (or is
+// removed), a list element is added, removed or replaced by its identity, an ordered list takes the change's
+// order for the elements both hold. Afterwards every change is checked against the result; the indices
+// (into `changes`) of those the result does not hold are returned, so the caller can refuse the record.
+std::vector<size_t> applyChanges(FieldSet& result, const std::vector<FieldSet>& chain,
+                                 const std::vector<const ChangeEvent*>& changes);
+
 } // namespace fo4mx

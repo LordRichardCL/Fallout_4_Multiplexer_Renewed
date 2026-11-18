@@ -100,6 +100,9 @@ Compile options:
   --light              ESL-flag outputs that fit the light plugin range
   --no-previs-translation  do not write translated previs files (only the export changes: the same
                        checks run and the same plugins compile; for testing)
+  --apply-patch-plan   write the records the compatibility patch plan marks Ready (see "plan") as
+                       their winner plus the planned changes (to the patch when only plugins
+                       that stay hold them)
   --merge-cell-config  cells and worldspaces several plugins change take the last real change of each
                        configuration field (lighting, location, water, regions...) and keep the
                        winner's previs data; those whose winner stays go to the patch
@@ -147,7 +150,7 @@ struct Args {
 
 Args parseArgs(int argc, char** argv)
 {
-    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--merge-cell-config", "--broken-references-as-null", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
+    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--merge-cell-config", "--apply-patch-plan", "--broken-references-as-null", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
                                                    "--diagnostic-recorder", "--install", "--archive-loader",
                                                    "--values", "--tree", "--help", "--unfinished",
                                                    "--verbose", "-v"};
@@ -254,6 +257,7 @@ PipelineConfig makeConfig(const Args& a)
     c.lightOutputsWhenPossible = a.has("--light");
     c.translatePrevis = !a.has("--no-previs-translation");
     c.mergeCellConfig = a.has("--merge-cell-config");
+    c.applyPatchPlan = a.has("--apply-patch-plan");
     c.brokenReferencesAsNull = a.has("--broken-references-as-null");
     c.patchOnly = a.has("--patch-only");
     c.autoMerge = a.has("--auto-merge");

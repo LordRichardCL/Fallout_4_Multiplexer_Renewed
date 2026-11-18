@@ -436,3 +436,91 @@ TEST(compatibility_dependencies_and_structures)
     f = classifyOnly(vmad, {0, 0, 0, 0}, context(Signature("ARMO")), "VMAD");
     CHECK(f.cls == CompatClass::Red && f.kind == CompatKind::Complex);
 }
+
+// ---- Carrying changes into a patch record (phase 8) ------------------------------------------------------
+
+namespace {
+std::vector<const ChangeEvent*> lostOf(const RecordProvenance& p)
+{
+    std::vector<const ChangeEvent*> out;
+    for (const auto& e : p.events)
+        if (isLost(e.status))
+            out.push_back(&e);
+    return out;
+}
+uint8_t firstByte(const FieldSet& s, const char* key)
+{
+    const Field* f = s.find(key);
+    return f && !f->subs.empty() && !f->subs[0].bytes.empty() ? f->subs[0].bytes[0] : 0;
+}
+} // namespace
+
+TEST(apply_carries_scalars_and_list_elements)
+{
+    // ModA changes damage, ModB adds weight (absent before) and a keyword, ModC (the winner) changes value.
+    const Armor base{33, std::nullopt, 100, {0x800}, {}};
+    Armor a = base, b = base, c = base;
+    a.damage = 55;
+    b.weight = 7;
+    b.keywords = {0x800, 0x900};
+    c.value = 250;
+    const std::vector<FieldSet> chain{armor(base), armor(a), armor(b), armor(c)};
+    auto p = traceProvenance(chain, {0, 0, 0, 0}, label);
+    auto lost = lostOf(p);
+    CHECK_EQ(lost.size(), size_t(3));
+    FieldSet result = chain.back();
+    auto missing = applyChanges(result, chain, lost);
+    CHECK(missing.empty());
+    CHECK_EQ(int(firstByte(result, "DATA#0")), 55);
+    CHECK_EQ(int(firstByte(result, "DNAM#0")), 7);
+    CHECK_EQ(int(firstByte(result, "FNAM#0")), 250); // the winner's own change stays
+    // The added field sits where xEdit expects it (DNAM between DATA and FNAM here, as in ModB).
+    std::vector<std::string> order;
+    for (const auto& f : result.fields)
+        order.push_back(f.sig.str());
+    const auto dnam = std::find(order.begin(), order.end(), "DNAM");
+    const auto fnam = std::find(order.begin(), order.end(), "FNAM");
+    CHECK(dnam != order.end() && fnam != order.end() && dnam < fnam);
+}
+
+TEST(apply_removal_reorder_and_contradiction)
+{
+    // A removal carried: ModB removed keyword 0x801; ModC (winner, not made against ModB) still has it.
+    const Armor base{33, 11, 100, {0x800, 0x801}, {}};
+    Armor b = base, c = base;
+    b.keywords = {0x800};
+    c.value = 250;
+    std::vector<FieldSet> chain{armor(base), armor(b), armor(c)};
+    auto p = traceProvenance(chain, {0, 0, 0}, label);
+    FieldSet result = chain.back();
+    CHECK(applyChanges(result, chain, lostOf(p)).empty());
+    const Field* kw = nullptr;
+    for (const auto& f : result.fields)
+        if (f.isList())
+            kw = &f;
+    CHECK(kw && kw->items.size() == 1);
+
+    // A form list's order carried.
+    std::vector<FieldSet> fl{list("FLST", "LNAM", {1, 2, 3}), list("FLST", "LNAM", {3, 2, 1}),
+                             list("FLST", "LNAM", {1, 2, 3, 4})};
+    auto pf = traceProvenance(fl, {0, 0, 0}, label);
+    FieldSet fr = fl.back();
+    CHECK(applyChanges(fr, fl, lostOf(pf)).empty());
+    std::vector<uint32_t> ids;
+    for (const auto& f : fr.fields)
+        if (f.isList())
+            for (const auto& item : f.items)
+                ids.push_back(item.subs[0].refs[0].second.objectId);
+    CHECK((ids == std::vector<uint32_t>{3, 2, 1, 4}));
+
+    // Two competing values carried together: the result cannot hold both, and says which it lacks.
+    const Armor s{33, 11, 100, {}, {}};
+    Armor x = s, y = s, w = s;
+    x.damage = 55;
+    y.damage = 80;
+    w.value = 1;
+    std::vector<FieldSet> comp{armor(s), armor(x), armor(y), armor(w)};
+    auto pc = traceProvenance(comp, {0, 0, 0, 0}, label);
+    FieldSet cr = comp.back();
+    CHECK_EQ(applyChanges(cr, comp, lostOf(pc)).size(), size_t(1));
+}

@@ -160,7 +160,15 @@ A separate layer, `classifyChange` (`engine/Compatibility`), judges each change:
 - **The user's saved choices** (`PlanDecisions`, JSON next to the database, keyed by stable record and change ids).
 - **Pre-write validation:** contradicting carried changes, and the master limit.
 
-Shown in the Conflict Report and the CLI's `plan` command. Nothing is written from it yet. Conflict entries carry the trace (`TracedChange`), and it is kept in the build cache. The Conflict Report has a "Changes not in the winning version" table, and the JSON report a `changes` list per conflict.
+Shown in the Conflict Report and the CLI's `plan` command.
+
+With `applyPatchPlan` on, the compiler writes the plan. Records the plan marks Ready become candidates: patch candidates when only plugins that stay hold them, ordinary ones otherwise. Their fields are the winner's plus the planned changes:
+- the chain is traced again;
+- changes are matched by `tracedChangeId`;
+- `applyChanges` applies them and checks they are held;
+- a record whose plan no longer matches falls back to its normal result with a Warning.
+
+The written-content check then verifies the exported files against these fields. Conflict entries carry the trace (`TracedChange`), and it is kept in the build cache. The Conflict Report has a "Changes not in the winning version" table, and the JSON report a `changes` list per conflict.
 
 ## Cleaning report
 

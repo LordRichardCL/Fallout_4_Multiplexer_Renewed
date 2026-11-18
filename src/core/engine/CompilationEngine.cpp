@@ -4,6 +4,7 @@
 
 #include "assets/AssetScanner.hpp"
 #include "engine/BuildCache.hpp"
+#include "engine/ConflictEngine.hpp"
 #include "engine/Diagnosis.hpp"
 #include "engine/MergeEngine.hpp"
 #include "engine/Normalizer.hpp"
@@ -460,6 +461,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         int forced;
         bool patch;
         bool combine = false; // the navmesh info map: the compiled plugins' versions combined
+        bool planned = false; // the compatibility patch plan carries changes into it
     };
     std::vector<Candidate> candidates;
     for (uint32_t gi = 0; gi < session.groups.size(); ++gi) {
@@ -474,7 +476,17 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 if (inst[i].plugin == it->second)
                     forced = static_cast<int>(i);
 
+        const bool planned = options.applyPatchPlan && options.plannedChanges.count(key.packed());
         if (!inCompiled) {
+            if (planned) {
+                const auto* entry = session.defs.catalogueEntry(inst[0].signature);
+                if (entry && entry->placement == RecordPlacement::Top && !options.skipPatchRecords.count(key.packed())) {
+                    Candidate c{gi, false, true, -1, true};
+                    c.planned = true;
+                    candidates.push_back(c);
+                    continue;
+                }
+            }
             // Only retained plugins: last-plugin-wins already applies unless the patch
             // merges the chain. Only types whose fields merge are patched (a winner-only type would just
             // repeat the winner), unless the user chose another plugin's version.
@@ -503,14 +515,16 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                              session.pluginName(r.plugin) + " overrides " + session.formLabel(key) +
                                  " from a compiled plugin but stays in the load order",
                              key, session.pluginName(r.plugin));
-        } else if (!lastCompiled && (!options.mergeCompatible || winnerOnly) && forced < 0) {
+        } else if (!lastCompiled && (!options.mergeCompatible || winnerOnly) && forced < 0 && !planned) {
             out.retainedWins++;
             continue;
         }
         // Winner-only types: the last plugin's version, taken whole (unless the user chose another).
         if (winnerOnly && forced < 0)
             forced = static_cast<int>(inst.size()) - 1;
-        candidates.push_back({gi, originCompiled, !lastCompiled, forced, false});
+        Candidate cand{gi, originCompiled, !lastCompiled, forced, false};
+        cand.planned = planned && forced < 0;
+        candidates.push_back(cand);
     }
 
     // ---- Merge ---------------------------------------------------------------
@@ -576,9 +590,48 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 }
                 const CachedMerge& m = *merges[ci];
 
+                // Compatibility patch plan: the winner plus the planned changes, matched by their stable ids
+                // and checked to be held by the result; otherwise the record is written as it would be
+                // without the plan.
+                std::optional<FieldSet> planned;
+                std::vector<std::string> carriedText;
+                if (c.planned) {
+                    const auto& ids = options.plannedChanges.at(inst[0].key.packed());
+                    Normalizer pn(session);
+                    std::vector<FieldSet> chain;
+                    for (const auto& r : inst)
+                        chain.push_back(splitFields(pn.normalize(r), session.defs));
+                    const auto rp = traceProvenance(chain, session.overrideParents(inst),
+                                                    [](FormKey k) { return formToken(k); });
+                    std::vector<const ChangeEvent*> carry;
+                    for (const auto& ev : rp.events)
+                        if (isLost(ev.status) &&
+                            std::find(ids.begin(), ids.end(), tracedChangeId(session, ev, inst[ev.version].plugin)) != ids.end())
+                            carry.push_back(&ev);
+                    FieldSet result = chain.back();
+                    const auto missing = applyChanges(result, chain, carry);
+                    if (carry.size() == ids.size() && missing.empty()) {
+                        planned = std::move(result);
+                        for (const auto* ev : carry)
+                            carriedText.push_back(ev->label + (ev->item.empty() ? "" : " " + renderFormTokens(session, ev->item)) +
+                                                  " from " + session.pluginName(inst[ev->version].plugin));
+                    } else {
+                        mergeIssues[ci].push_back(
+                            {Severity::Warning, "Compatibility Patch",
+                             session.formLabel(inst[0].key) + ": the plan no longer matches the record (" +
+                                 std::to_string(ids.size() - std::min(ids.size(), carry.size() - missing.size())) +
+                                 " of " + std::to_string(ids.size()) +
+                                 " planned change(s) not found or not held); written as it would be without the plan. "
+                                 "Analyse again and review the plan",
+                             inst[0].key, session.pluginName(inst.back().plugin)});
+                        if (c.patch)
+                            return; // only the plan put it in the patch
+                    }
+                }
+
                 // Once compiled plugins are disabled, the last retained instance is what the game
                 // loads. If the result equals it, an override would only be an ITM.
-                for (size_t i = inst.size(); i-- > 0;) {
+                for (size_t i = inst.size(); i-- > 0 && !planned;) {
                     if (out.compiledFlag_[inst[i].plugin])
                         continue;
                     if (m.equalsInstance[i] &&
@@ -618,8 +671,18 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     if (out.compiledFlag_[inst[i].plugin])
                         e.issues.insert(e.issues.end(), m.issues[i].begin(), m.issues[i].end());
                 e.fields = m.fields;
+                if (planned) {
+                    e.fields = std::move(*planned);
+                    e.merged = true;
+                    e.winner = inst.back().plugin;
+                    mergeIssues[ci].push_back({Severity::Info, "Compatibility Patch",
+                                               session.formLabel(inst[0].key) + " is written as " +
+                                                   session.pluginName(inst.back().plugin) +
+                                                   "'s version with the planned changes: " + join(carriedText, ", "),
+                                               inst[0].key, session.pluginName(inst.back().plugin)});
+                }
                 e.size = estimateSize(e.fields);
-                placeFrom(e, source);
+                placeFrom(e, c.planned && planned ? inst.back() : source);
                 emitted[ci] = std::move(e);
             } catch (const std::exception& ex) {
                 mergeIssues[ci].push_back({Severity::Error, "Unreadable Record",
