@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/MergeEngine.hpp"
+#include "engine/Provenance.hpp"
 #include "engine/Session.hpp"
 #include "util/Progress.hpp"
 
@@ -47,6 +48,23 @@ struct ConflictField {
     std::vector<ConflictCell> cells; // one per chain entry
 };
 
+// One change a version made against the version it was made from, and what became of it by the winner
+// (engine/Provenance). Facts only: "omitted" means the winner was not made with the source as a master.
+struct TracedChange {
+    std::string field;  // field label
+    std::string item;   // list element (tokens until the report is finalised), "" for a whole field
+    std::string before; // the parent version's value
+    std::string after;  // the source's value
+    PluginIndex source = kInvalidPlugin;
+    ChangeOp op = ChangeOp::Set;
+    ChangeStatus status = ChangeStatus::Survives;
+    PluginIndex lostAt = kInvalidPlugin;    // first version on the winner's line without it
+    std::vector<PluginIndex> keptBy;        // later versions made against the source that still hold it
+    std::vector<PluginIndex> competesWith;  // versions not made against each other that changed it differently
+    PluginIndex duplicateOf = kInvalidPlugin; // an unrelated version that added the same element
+    bool opaque = false;                    // undescribed bytes: the difference is not understood
+};
+
 struct ConflictEntry {
     uint32_t group = 0;
     FormKey key;
@@ -64,6 +82,8 @@ struct ConflictEntry {
     bool fieldsMerged() const { return handling == MergeHandling::Merged; }
     std::string summary;
     std::vector<ConflictField> fields;
+    std::vector<TracedChange> changes; // provenance of every change (with field details)
+    size_t lostChanges = 0;            // changes the winner does not hold
 };
 
 // An override identical to the version it was made against (xEdit: Identical To Master).
@@ -78,6 +98,7 @@ struct ConflictReport {
     std::vector<ConflictEntry> entries;
     std::array<size_t, 5> byType{};
     size_t identicalOverrides = 0; // groups whose overrides are all ITMs
+    size_t lostChanges = 0;        // changes, over every record, the winning version does not hold
     std::vector<ItmRecord> itms;   // every ITM override, in record order
     size_t analysedGroups = 0;
     size_t failedGroups = 0;

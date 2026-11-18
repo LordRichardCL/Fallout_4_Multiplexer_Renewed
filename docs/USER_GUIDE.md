@@ -78,6 +78,19 @@ Select a type to see each plugin it blocks and everything else that plugin needs
 
 Every override is compared with the version it was made against (the last earlier version in its own masters, as xEdit does), not with the original record.
 
+**Changes not in the winning version** (Conflict Report, and `changes` in its JSON). This table lists every change a plugin made that the winning version does not hold, with what the load order shows about it:
+- **not made with it as a master:** the winning plugin never had the change. This is the usual "lost edit".
+- **no longer contains it, holds another value, or holds the earlier value again:** a later plugin built on the change's plugin went on to differ.
+
+Changes are traced through the whole chain, so an edit made and lost in the middle is listed even when the original record and the winner look the same. Elements of a list are matched by what they are, not their position. Reordering a keyword list is no change; reordering a form list is.
+
+Notes on a row:
+- another plugin's competing value;
+- the same element added by another plugin;
+- data the app does not understand.
+
+The table states facts, not intentions: it never says a plugin removed something on purpose. It is the first step of the compatibility patch work (`docs/COMPATIBILITY_PATCH_RESEARCH.md`); nothing is merged from it yet.
+
 Finding conflicts:
 
 - **Not Merged** shows only the conflicts in record types the app keeps as they are.

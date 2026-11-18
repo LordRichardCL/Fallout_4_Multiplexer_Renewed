@@ -294,7 +294,8 @@ std::string conflictReport(const ReportContext& ctx)
              {"Type 2 · Compatible Merge", formatCount(c.byType[2])},
              {"Type 3 · Hard Conflict", formatCount(c.byType[3])},
              {"Conflict · Not Merged", formatCount(c.byType[4])},
-             {"ITM-only Chains", formatCount(c.identicalOverrides)}});
+             {"ITM-only Chains", formatCount(c.identicalOverrides)},
+             {"Changes Not in the Winner", formatCount(c.lostChanges)}});
 
     h.h2("Most conflicting plugins");
     std::vector<const PluginInfo*> plugins;
@@ -333,6 +334,52 @@ std::string conflictReport(const ReportContext& ctx)
               {"mono", "", conflictSeverityName(e->severity)});
     }
     h.tableEnd(shown, list.size());
+
+    // Change provenance: each change a plugin made against the version it was made from that the
+    // winning version does not hold, and what the load order shows about why. Facts, not intent.
+    h.h2("Changes not in the winning version");
+    h.note("Each change is what a plugin's version differs from the version it was made against (its masters). "
+           "\"Not made with it as a master\" means the later plugin never had the change to keep; \"no longer "
+           "contains it\" means it had it in its masters and does not have it now. Neither says why.");
+    h.tableStart({"Form", "Field", "Change", "Made by", "What became of it", "Notes"});
+    size_t lostShown = 0, lostTotal = 0;
+    auto names = [&](const std::vector<PluginIndex>& ps) {
+        std::vector<std::string> out;
+        for (auto p : ps)
+            out.push_back(s.pluginName(p));
+        return join(out, ", ");
+    };
+    for (auto e : list)
+        for (const auto& t : e->changes) {
+            if (!isLost(t.status))
+                continue;
+            ++lostTotal;
+            if (lostShown >= ctx.maxRows)
+                continue;
+            ++lostShown;
+            const std::string src = s.pluginName(t.source);
+            const std::string at = t.lostAt == kInvalidPlugin ? std::string("the winner") : s.pluginName(t.lostAt);
+            std::string change = t.item.empty() ? t.before + " → " + t.after : std::string(changeOpName(t.op)) + " " + t.item;
+            std::string fate;
+            switch (t.status) {
+            case ChangeStatus::OmittedLater: fate = "not in " + at + ", which was not made with " + src + " as a master"; break;
+            case ChangeStatus::RemovedLater: fate = at + " (made with " + src + " as a master) no longer contains it"; break;
+            case ChangeStatus::Replaced: fate = at + " (made with " + src + " as a master) holds another value"; break;
+            case ChangeStatus::Reverted: fate = at + " (made with " + src + " as a master) holds the earlier value again"; break;
+            case ChangeStatus::Survives: break;
+            }
+            std::vector<std::string> notes;
+            if (!t.competesWith.empty())
+                notes.push_back("competes with " + names(t.competesWith));
+            if (t.duplicateOf != kInvalidPlugin)
+                notes.push_back("also added by " + s.pluginName(t.duplicateOf));
+            if (!t.keptBy.empty())
+                notes.push_back("kept by " + names(t.keptBy));
+            if (t.opaque)
+                notes.push_back("undescribed bytes: not understood");
+            h.row({s.formLabel(e->key), t.field, change, src, fate, join(notes, "; ")}, {"mono"});
+        }
+    h.tableEnd(lostShown, lostTotal);
     return h.finish();
 }
 
@@ -764,6 +811,7 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
         counts.set("hardConflict", static_cast<uint64_t>(c.byType[3]));
         counts.set("notMergedConflict", static_cast<uint64_t>(c.byType[4]));
         counts.set("itmOnly", static_cast<uint64_t>(c.identicalOverrides));
+        counts.set("changesNotInWinner", static_cast<uint64_t>(c.lostChanges));
         root.set("counts", counts);
         json::Value list;
         for (const auto& e : c.entries) {
@@ -799,6 +847,36 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
                 fields.push(fo);
             }
             o.set("fields", fields);
+            // Change provenance: every change a version made against the one it was made from.
+            json::Value changes;
+            for (const auto& t : e.changes) {
+                json::Value to;
+                to.set("field", t.field);
+                if (!t.item.empty())
+                    to.set("element", t.item);
+                to.set("operation", changeOpName(t.op));
+                to.set("before", t.before);
+                to.set("after", t.after);
+                to.set("madeBy", s->pluginName(t.source));
+                to.set("status", changeStatusName(t.status));
+                if (t.lostAt != kInvalidPlugin)
+                    to.set("lostAt", s->pluginName(t.lostAt));
+                json::Value kept, competing;
+                for (auto p : t.keptBy)
+                    kept.push(s->pluginName(p));
+                for (auto p : t.competesWith)
+                    competing.push(s->pluginName(p));
+                if (!t.keptBy.empty())
+                    to.set("keptBy", kept);
+                if (!t.competesWith.empty())
+                    to.set("competesWith", competing);
+                if (t.duplicateOf != kInvalidPlugin)
+                    to.set("alsoAddedBy", s->pluginName(t.duplicateOf));
+                if (t.opaque)
+                    to.set("notUnderstood", true);
+                changes.push(to);
+            }
+            o.set("changes", changes);
             list.push(o);
         }
         root.set("conflicts", list);

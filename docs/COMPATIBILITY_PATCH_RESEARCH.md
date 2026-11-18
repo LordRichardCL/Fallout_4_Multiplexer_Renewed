@@ -150,7 +150,7 @@ These are the terms used from here on. They follow xEdit's vocabulary (S1, S2) a
 | Conditions `CTDA` (+ `CIS1/2`) | COBJ, PERK, INFO, PACK, MGEF… | **unsorted** list; order matters (OR chains) | none stable: position + content | yes | one region, compared whole |
 | Leveled entries `LVLO`(+`COED`) | LVLI, LVLN, LVSP | sorted by level, keyed level+reference | (level, reference, count, COED) with duplicate counter | **yes, meaningful** | `Multiset` |
 | Leveled list header `LVLD`, `LVLF`, `LVLG` | LVLI… | scalar | — | — | Scalar |
-| Container items `CNTO`(+`COED`) | CONT, NPC_ | sorted | item FormID | xEdit sorts; counts per entry | `Keyed` |
+| Container items `CNTO`(+`COED`) | CONT, NPC_ | sorted | item + count (+ COED) | repeats kept | `Multiset` |
 | Factions `SNAM` | NPC_ | sorted | faction FormID | no | `Keyed` |
 | Perks `PRKR` | NPC_ | sorted | perk FormID | no | `Keyed` |
 | FormID list `LNAM` | FLST | **not sorted** (order used by scripts) | position + FormID | yes | `Set` (to be reviewed: order matters) |
@@ -277,7 +277,7 @@ Each handler declares:
 - whether it may merge automatically;
 - its sources and its test fixtures.
 
-The first entries map onto existing `MergeMode`s: `Scalar` paths, `Set` (sorted sets), `Multiset` (leveled entries) and `Keyed` (CNTO, factions, perks, relations). New entries come only with sources and tests:
+The first entries map onto existing `MergeMode`s: `Scalar` paths, `Set` (sorted sets), `Multiset` (leveled entries) and `Keyed` (factions, perks, relations). New entries come only with sources and tests:
 - `OrderedList` (FLST, conditions);
 - `StructMembers` (value-layer members);
 - `ObjectTemplate`;
@@ -312,7 +312,7 @@ Plugins
 | Scalar fields of `Specialised` types | yes (per field) | no (changers only) | yes, last changer wins on competition | forced winner per record only | yes | written-content check | struct members not separated | S1, S2 |
 | Sorted sets (KWDA, APPR…) | yes | no | yes (`Set`) | no | yes | yes | — | S3 |
 | Leveled entries | yes | no | yes (`Multiset`) | no | yes | yes | — | S2 5.10, S5 |
-| Keyed lists (CNTO, factions, perks, relations) | yes | no | yes (`Keyed`) | no | yes | yes | duplicate-entry bug fixed 17 Nov 2026 | S3 |
+| Keyed lists (factions, perks, relations) | yes | no | yes (`Keyed`) | no | yes | yes | duplicate-entry bug fixed 17 Nov 2026 | S3 |
 | FLST | yes | no | yes (`Set`) | no | yes | yes | order not preserved as data (6) | S3 |
 | Conditions, VMAD, object templates, OMOD data | yes (whole field) | no | whole value, last changer | no | yes | yes | not split into elements | S3 |
 | Winner-only types | yes | no | no (winner) | forced winner | yes | yes | — | — |
@@ -339,6 +339,8 @@ Plugins
 ---
 
 ## 12. Smallest sensible milestone, tests and files
+
+**Status:** milestone 1 is implemented (18 Nov 2026): `engine/Provenance`, the trace on conflict entries (cached), the Conflict Report table "Changes not in the winning version", and the JSON report's `changes`. Tests are in `tests/test_provenance.cpp` (1–9, 11, 12 and keyed competition) and `conflict_report_traces_changes_not_in_the_winner` (10, with the cached second run).
 
 **Milestone 1 (phases 2–5 of the specification, detection only):** provenance for the field paths and list
 elements Multiplexer already understands, shown in the conflict report. No patch plan, no writing.

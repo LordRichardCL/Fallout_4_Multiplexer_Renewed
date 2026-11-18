@@ -134,6 +134,29 @@ For each override chain, `MergeEngine::merge` compares every plugin's fields wit
 
 Chains whose overrides are all byte-identical to the base are reported as ITMs, not conflicts; with field analysis, an override identical to its own masters' version is an ITM. Every field carries per-plugin cell status (Base, Same, Winning, Merged, Replaced) and the compiled result. The Conflict Centre renders exactly this.
 
+### Change provenance
+
+`traceProvenance` (`engine/Provenance`) runs on the same chain and parent versions. It follows each change through to the winner (`docs/COMPATIBILITY_PATCH_RESEARCH.md`, milestone 1). Each version's changes are what it differs from its parent version:
+- **Whole fields:** set, added or removed.
+- **List elements:** added, removed, or changed under the same key. Elements are matched by identity, not position: keyed lists by key, others by value with a repeat number (A, A is A#0, A#1, as xEdit numbers leveled list entries).
+- **Order:** only for lists whose order is data (FLST). Lists xEdit sorts (keywords, attach slots, components, leveled entries, factions, perks) have no order change.
+
+Each change ends in one of five states, judged against the winner:
+- **Survives:** the winner holds it.
+- **Replaced:** a version made against the change's plugin holds another value.
+- **Reverted:** a version made against the change's plugin holds the earlier value again.
+- **Removed later:** a version made against the change's plugin no longer contains the element.
+- **Omitted later:** the winner was not made with the change's plugin as a master, so it never had the change.
+
+The trace also records:
+- the later versions that kept a change;
+- the first version on the winner's line without it;
+- versions not made against each other that changed the same value differently (competing);
+- the same element added by unrelated versions (duplicate);
+- fields with undescribed bytes (not understood).
+
+Detection only: nothing is merged or written from it, and no intent is claimed. Conflict entries carry the trace (`TracedChange`), and it is kept in the build cache. The Conflict Report has a "Changes not in the winning version" table, and the JSON report a `changes` list per conflict.
+
 ## Cleaning report
 
 `engine/CleaningEngine` runs after conflict and dependency analysis and adds findings to the dependency report (marked `cleaning`, stored with `DependencyIssues.cleaning = 1`):

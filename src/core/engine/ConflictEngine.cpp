@@ -206,6 +206,34 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
     const ChainAnalysis& a = merged.analysis;
     e.fieldsAnalysed = true;
 
+    // Change provenance: what each version changed against the one it was made from, and its fate.
+    {
+        auto token = [](FormKey k) { return formToken(k); };
+        const RecordProvenance rp = traceProvenance(chain, parents, token);
+        e.lostChanges = rp.lostCount();
+        if (keepDetails)
+            for (const auto& ev : rp.events) {
+                TracedChange t;
+                t.field = ev.label;
+                t.item = ev.item;
+                t.before = ev.before;
+                t.after = ev.after;
+                t.source = inst[ev.version].plugin;
+                t.op = ev.op;
+                t.status = ev.status;
+                if (ev.lostAt >= 0)
+                    t.lostAt = inst[static_cast<size_t>(ev.lostAt)].plugin;
+                for (size_t k : ev.keptBy)
+                    t.keptBy.push_back(inst[k].plugin);
+                for (size_t k : ev.competesWith)
+                    t.competesWith.push_back(inst[k].plugin);
+                if (ev.duplicateOf >= 0)
+                    t.duplicateOf = inst[static_cast<size_t>(ev.duplicateOf)].plugin;
+                t.opaque = ev.opaque;
+                e.changes.push_back(std::move(t));
+            }
+    }
+
     if (!e.fieldsMerged()) {
         std::vector<bool> unchanged(inst.size(), false);
         for (size_t c : a.itms)
@@ -248,6 +276,9 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
             e.summary += "; " + std::to_string(hardFields) + " contested (" + hardNames + ")";
         if (a.winnerLosesChanges)
             e.summary += "; last-plugin-wins loses edits";
+        if (e.lostChanges)
+            e.summary += "; " + std::to_string(e.lostChanges) + " change" + (e.lostChanges == 1 ? "" : "s") +
+                         " not in the winner";
     }
     markDeletion(e, inst);
 
@@ -353,12 +384,19 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
         spdlog::info("Conflict cache: {} chains reused, {} analysed", cache->conflicts.hits.load(),
                      cache->conflicts.misses.load());
     }
-    for (auto& e : results)
+    for (auto& e : results) {
         for (auto& f : e.fields) {
             f.result = renderFormTokens(session, f.result);
             for (auto& c : f.cells)
                 c.value = renderFormTokens(session, c.value);
         }
+        for (auto& t : e.changes) {
+            t.item = renderFormTokens(session, t.item);
+            t.before = renderFormTokens(session, t.before);
+            t.after = renderFormTokens(session, t.after);
+        }
+        report.lostChanges += e.lostChanges;
+    }
     report.reusedGroups = static_cast<size_t>(std::count(reused.begin(), reused.end(), 1));
 
     for (auto& p : session.plugins) {

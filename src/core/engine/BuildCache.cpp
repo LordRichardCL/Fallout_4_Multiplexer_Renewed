@@ -14,7 +14,7 @@ namespace fo4mx {
 
 namespace {
 
-constexpr uint32_t kFormatVersion = 9; // 9: IPDS PNAM read per subrecord; 8: raw source value of every described reference; // 7: Version Control Info of every record; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
+constexpr uint32_t kFormatVersion = 10; // 10: change provenance of conflicts; 9: IPDS PNAM read per subrecord; 8: raw source value of every described reference; // 7: Version Control Info of every record; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
                                        // 4: record-level classification of types that are not merged;
                                        // 5: record placement (cells, worldspaces, topics)
 
@@ -491,6 +491,32 @@ std::vector<uint8_t> serializeConflict(const Session& session, const ConflictEnt
             w.write<uint8_t>(static_cast<uint8_t>(c.status));
         }
     }
+    w.write<uint32_t>(static_cast<uint32_t>(e.lostChanges));
+    auto plugins = [&](const std::vector<PluginIndex>& list) {
+        w.write<uint32_t>(static_cast<uint32_t>(list.size()));
+        for (auto p : list)
+            w.write(names.id(p));
+    };
+    auto optional = [&](PluginIndex p) {
+        w.write<uint8_t>(p == kInvalidPlugin ? 0 : 1);
+        if (p != kInvalidPlugin)
+            w.write(names.id(p));
+    };
+    w.write<uint32_t>(static_cast<uint32_t>(e.changes.size()));
+    for (const auto& t : e.changes) {
+        writeString(w, t.field);
+        writeString(w, tokens(t.item));
+        writeString(w, tokens(t.before));
+        writeString(w, tokens(t.after));
+        w.write(names.id(t.source));
+        w.write<uint8_t>(static_cast<uint8_t>(t.op));
+        w.write<uint8_t>(static_cast<uint8_t>(t.status));
+        optional(t.lostAt);
+        plugins(t.keptBy);
+        plugins(t.competesWith);
+        optional(t.duplicateOf);
+        w.write<uint8_t>(t.opaque ? 1 : 0);
+    }
     return names.finish(w);
 }
 
@@ -529,6 +555,29 @@ std::optional<ConflictEntry> deserializeConflict(const Session& session, std::sp
                 c.value = tokens(readString(r));
                 c.status = static_cast<CellStatus>(r.read<uint8_t>());
             }
+        }
+        e.lostChanges = r.read<uint32_t>();
+        auto plugins = [&]() {
+            std::vector<PluginIndex> list(r.read<uint32_t>());
+            for (auto& p : list)
+                p = names.plugin(r.read<uint32_t>());
+            return list;
+        };
+        auto optional = [&]() { return r.read<uint8_t>() ? names.plugin(r.read<uint32_t>()) : kInvalidPlugin; };
+        e.changes.resize(r.read<uint32_t>());
+        for (auto& t : e.changes) {
+            t.field = readString(r);
+            t.item = tokens(readString(r));
+            t.before = tokens(readString(r));
+            t.after = tokens(readString(r));
+            t.source = names.plugin(r.read<uint32_t>());
+            t.op = static_cast<ChangeOp>(r.read<uint8_t>());
+            t.status = static_cast<ChangeStatus>(r.read<uint8_t>());
+            t.lostAt = optional();
+            t.keptBy = plugins();
+            t.competesWith = plugins();
+            t.duplicateOf = optional();
+            t.opaque = r.read<uint8_t>() != 0;
         }
         return e;
     } catch (const std::exception&) {

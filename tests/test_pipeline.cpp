@@ -19,6 +19,7 @@
 #include "engine/PluginSummary.hpp"
 #include "engine/ReferenceScanner.hpp"
 #include "esp/LayoutCheck.hpp"
+#include "report/ReportGenerator.hpp"
 #include "esp/FieldDecoder.hpp"
 #include "esp/PluginFile.hpp"
 #include "papyrus/Pex.hpp"
@@ -7749,4 +7750,59 @@ TEST(cell_configuration_merge_writes_cells_whose_winner_stays)
     CHECK(held.outsideLocation);
     CHECK(held.outsideWithWorld);
     CHECK(held.labInPatch);
+}
+
+// Change provenance through the pipeline (milestone 1, test 10): Base.esm defines an armor with one
+// keyword. ModB.esp adds a second keyword; ModC.esp, made from Base.esm alone, changes the armor's data and
+// wins. The conflict entry traces ModB's keyword as omitted from ModC (not made with ModB as a master), the
+// Conflict Report says so in those terms, and a second run restores the same trace from the build cache.
+TEST(conflict_report_traces_changes_not_in_the_winner)
+{
+    auto root = buildInstall("provenance");
+    auto data = root / "Game" / "Data";
+    auto armor = [](std::vector<uint32_t> keywords, uint8_t value) {
+        return record("ARMO", 0x01000800,
+                      {zs("EDID", "Hat"), raw("DATA", {value, 0, 0, 0, 0, 0, 0, 0}),
+                       u32("KSIZ", static_cast<uint32_t>(keywords.size())), formIds("KWDA", keywords)});
+    };
+    writePlugin(data / "Base.esm", {"Fallout4.esm"},
+                {armor({0x01000801}, 10), record("KYWD", 0x01000801, {zs("EDID", "Plain")}),
+                 record("KYWD", 0x01000802, {zs("EDID", "LaserSlot")})},
+                ESM);
+    writePlugin(data / "ModB.esp", {"Fallout4.esm", "Base.esm"}, {armor({0x01000801, 0x01000802}, 10)});
+    writePlugin(data / "ModC.esp", {"Fallout4.esm", "Base.esm"}, {armor({0x01000801}, 99)});
+    writeFile(root / "plugins.txt", "*Base.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
+    auto check = [&](bool cached) {
+        Pipeline p(configFor(root));
+        p.scan();
+        p.analyse();
+        const auto& s = p.session();
+        if (cached)
+            CHECK(p.conflicts()->reusedGroups > 0);
+        const auto* e = p.conflicts()->find({s.findPlugin("Base.esm")->index, 0x800});
+        CHECK(e != nullptr);
+        if (!e)
+            return;
+        CHECK_EQ(e->lostChanges, size_t(1));
+        const TracedChange* lost = nullptr;
+        for (const auto& t : e->changes)
+            if (isLost(t.status))
+                lost = &t;
+        CHECK(lost != nullptr);
+        if (!lost)
+            return;
+        CHECK(lost->status == ChangeStatus::OmittedLater);
+        CHECK(lost->op == ChangeOp::Add);
+        CHECK_EQ(s.pluginName(lost->source), std::string("ModB.esp"));
+        CHECK_EQ(s.pluginName(lost->lostAt), std::string("ModC.esp"));
+        CHECK(lost->item.find("LaserSlot") != std::string::npos);
+        ReportContext ctx;
+        ctx.session = &s;
+        ctx.conflicts = p.conflicts();
+        const std::string text = ReportGenerator::text(ReportKind::Conflict, ctx);
+        CHECK(text.find("Changes not in the winning version") != std::string::npos);
+        CHECK(text.find("not in ModC.esp, which was not made with ModB.esp as a master") != std::string::npos);
+    };
+    check(false);
+    check(true);
 }
