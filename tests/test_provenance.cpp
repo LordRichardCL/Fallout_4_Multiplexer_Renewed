@@ -1,6 +1,8 @@
 #include "Test.hpp"
 
+#include "engine/Compatibility.hpp"
 #include "engine/Provenance.hpp"
+#include "esp/Record.hpp"
 
 #include <algorithm>
 #include <optional>
@@ -287,4 +289,150 @@ TEST(provenance_keyed_competition)
     CHECK((a->competesWith == std::vector<size_t>{2}));
     CHECK(a->status == ChangeStatus::OmittedLater);
     CHECK(b->status == ChangeStatus::Survives);
+}
+
+// ---- Compatibility classes (phase 6: research report 8.2) ----------------------------------------------
+
+namespace {
+
+// Plugins 0..3 are the chain's (0 defines the record, 3 wins); 3 masters 0 only; 9 is outside the chain.
+CompatContext context(Signature record, bool fieldsMerge = true)
+{
+    CompatContext c;
+    c.record = record;
+    c.fieldsMerge = fieldsMerge;
+    c.winner = 3;
+    c.chainPlugins = {0, 1, 2, 3};
+    c.masters = [](PluginIndex p, PluginIndex other) { return p == 3 && other == 0; };
+    c.exists = [](FormKey k) { return k.objectId != 0xDEAD; };
+    return c;
+}
+
+std::vector<FieldSet> withPlugins(std::vector<FieldSet> chain)
+{
+    for (size_t i = 0; i < chain.size(); ++i)
+        chain[i].plugin = static_cast<PluginIndex>(i);
+    return chain;
+}
+
+CompatFinding classifyOnly(const std::vector<FieldSet>& chain, const std::vector<size_t>& parents,
+                           const CompatContext& ctx, const std::string& field = {})
+{
+    auto p = traceProvenance(chain, parents, label);
+    for (const auto& e : p.events)
+        if (isLost(e.status) && (field.empty() || e.fieldKey.find(field) != std::string::npos))
+            return classifyChange(e, chain, RecordDefinitions::get(), ctx);
+    CHECK(false); // no lost change found
+    return {};
+}
+
+} // namespace
+
+TEST(compatibility_classes_for_lost_changes)
+{
+    const auto& defs = RecordDefinitions::get();
+    (void)defs;
+    const Armor base{33, 11, 100, {0x800}, {}};
+    Armor a = base, b = base, c = base;
+    a.damage = 55;
+    c.value = 250;
+
+    // Green: a field no other plugin changed, omitted by a winner not made against it.
+    auto chain = withPlugins({armor(base), armor(a), armor(b), armor(c)});
+    auto f = classifyOnly(chain, {0, 0, 0, 0}, context(Signature("ARMO")), "DATA");
+    CHECK(f.cls == CompatClass::Green && f.kind == CompatKind::Independent);
+
+    // Yellow: competing values.
+    Armor b2 = base;
+    b2.damage = 80;
+    f = classifyOnly(withPlugins({armor(base), armor(a), armor(b2), armor(c)}), {0, 0, 0, 0},
+                     context(Signature("ARMO")), "DATA");
+    CHECK(f.cls == CompatClass::Yellow && f.kind == CompatKind::Competing);
+
+    // Yellow: removed by a later plugin made against it.
+    Armor k = base;
+    k.keywords = {0x800, 0x900};
+    f = classifyOnly(withPlugins({armor(base), armor(k), armor(base), armor(base)}), {0, 0, 1, 2},
+                     context(Signature("ARMO")), "KWDA");
+    CHECK(f.cls == CompatClass::Yellow && f.kind == CompatKind::Ambiguous);
+
+    // Green: an element of a set omitted; it names a record of plugin 0, which the winner masters.
+    auto setChain = withPlugins({armor(base), armor(k), armor(base), armor(base)});
+    f = classifyOnly(setChain, {0, 0, 0, 0}, context(Signature("ARMO")), "KWDA");
+    CHECK(f.cls == CompatClass::Green);
+    CHECK(f.requiredMasters.empty());
+
+    // Unknown: a record type with no field rule.
+    f = classifyOnly(chain, {0, 0, 0, 0}, context(Signature("ARMO"), false), "DATA");
+    CHECK(f.cls == CompatClass::Unknown);
+
+    // Red: a quest, undescribed data, a deleted record.
+    f = classifyOnly(chain, {0, 0, 0, 0}, context(Signature("QUST")), "DATA");
+    CHECK(f.cls == CompatClass::Red);
+    Armor u = base, u2 = base;
+    u.undescribed = 1;
+    u2.undescribed = 2;
+    f = classifyOnly(withPlugins({armor(u), armor(u2), armor(u), armor(u)}), {0, 0, 0, 0}, context(Signature("ARMO")),
+                     "ZZZZ");
+    CHECK(f.cls == CompatClass::Red && f.kind == CompatKind::Unsupported);
+    auto deleted = chain;
+    deleted[3].fields[0].subs[0].bytes[0] |= RecordFlags::Deleted;
+    f = classifyOnly(deleted, {0, 0, 0, 0}, context(Signature("ARMO")), "DATA");
+    CHECK(f.cls == CompatClass::Red);
+}
+
+TEST(compatibility_dependencies_and_structures)
+{
+    const Armor base{33, 11, 100, {0x800}, {}};
+    // A keyword from a plugin outside the chain: a patch would need it as a master.
+    auto withKeyword = [&](FormKey kw) {
+        auto set = armor(base);
+        for (auto& f : set.fields)
+            if (f.isList())
+                for (auto& item : f.items)
+                    for (auto& sub : item.subs)
+                        for (auto& [off, k] : sub.refs)
+                            k = kw;
+        return set;
+    };
+    auto outside = withPlugins({armor(base), withKeyword(FormKey{9, 0x900}), armor(base), armor(base)});
+    auto f = classifyOnly(outside, {0, 0, 0, 0}, context(Signature("ARMO")), "KWDA");
+    CHECK(f.cls == CompatClass::Yellow && f.kind == CompatKind::Dependent);
+    CHECK((f.requiredMasters == std::vector<PluginIndex>{9}));
+
+    // From a plugin of the chain the winner does not master: Green, the master listed.
+    auto inChain = withPlugins({armor(base), withKeyword(FormKey{1, 0x900}), armor(base), armor(base)});
+    f = classifyOnly(inChain, {0, 0, 0, 0}, context(Signature("ARMO")), "KWDA");
+    CHECK(f.cls == CompatClass::Green);
+    CHECK((f.requiredMasters == std::vector<PluginIndex>{1}));
+
+    // A record that is not in the load order: Red.
+    auto missing = withPlugins({armor(base), withKeyword(FormKey{0, 0xDEAD}), armor(base), armor(base)});
+    f = classifyOnly(missing, {0, 0, 0, 0}, context(Signature("ARMO")), "KWDA");
+    CHECK(f.cls == CompatClass::Red);
+
+    // A form list addition: order is data, so review.
+    auto flst = withPlugins({list("FLST", "LNAM", {1}), list("FLST", "LNAM", {1, 2}), list("FLST", "LNAM", {1}),
+                             list("FLST", "LNAM", {1})});
+    f = classifyOnly(flst, {0, 0, 0, 0}, context(Signature("FLST")));
+    CHECK(f.cls == CompatClass::Yellow);
+
+    // Leveled list entry: Green (an entry of a list that keeps repeats).
+    auto lvli = withPlugins({list("LVLI", "LVLO", {1}), list("LVLI", "LVLO", {1, 2}), list("LVLI", "LVLO", {1}),
+                             list("LVLI", "LVLO", {1})});
+    f = classifyOnly(lvli, {0, 0, 0, 0}, context(Signature("LVLI")));
+    CHECK(f.cls == CompatClass::Green);
+
+    // Scripts: Red.
+    auto script = [](uint8_t v) {
+        NormRecord r;
+        r.key = FormKey{0, 0x1000};
+        r.sig = Signature("ARMO");
+        r.subs.push_back(sub("EDID", {'R', 0}));
+        r.subs.push_back(sub("VMAD", {6, 0, 2, 0, 0, 0, v}));
+        return splitFields(r, RecordDefinitions::get());
+    };
+    auto vmad = withPlugins({script(0), script(1), script(0), script(0)});
+    f = classifyOnly(vmad, {0, 0, 0, 0}, context(Signature("ARMO")), "VMAD");
+    CHECK(f.cls == CompatClass::Red && f.kind == CompatKind::Complex);
 }

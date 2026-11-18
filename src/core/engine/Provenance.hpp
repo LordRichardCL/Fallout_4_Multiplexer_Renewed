@@ -45,6 +45,7 @@ struct ChangeEvent {
     int duplicateOf = -1;             // a version not made against this one that added the same element
     bool opaque = false;              // the field holds undescribed bytes: the difference is not understood
     std::string identity;             // list elements: the element's identity (key, or value and repeat number)
+    std::vector<FormKey> references;  // records the changed value or added element names
 };
 
 struct RecordProvenance {

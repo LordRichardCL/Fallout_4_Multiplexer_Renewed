@@ -211,6 +211,16 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
         auto token = [](FormKey k) { return formToken(k); };
         const RecordProvenance rp = traceProvenance(chain, parents, token);
         e.lostChanges = rp.lostCount();
+        CompatContext cc;
+        cc.record = e.sig;
+        cc.fieldsMerge = e.fieldsMerged();
+        cc.winner = e.winner;
+        cc.chainPlugins = e.chain;
+        cc.masters = [&](PluginIndex p, PluginIndex other) {
+            const auto& m = session.plugins[p].masters;
+            return std::find(m.begin(), m.end(), other) != m.end();
+        };
+        cc.exists = [&](FormKey k) { return session.exists(k); };
         if (keepDetails)
             for (const auto& ev : rp.events) {
                 TracedChange t;
@@ -230,6 +240,11 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
                 if (ev.duplicateOf >= 0)
                     t.duplicateOf = inst[static_cast<size_t>(ev.duplicateOf)].plugin;
                 t.opaque = ev.opaque;
+                const CompatFinding cf = classifyChange(ev, chain, session.defs, cc);
+                t.cls = cf.cls;
+                t.kind = cf.kind;
+                t.rule = cf.rule;
+                t.requiredMasters = cf.requiredMasters;
                 e.changes.push_back(std::move(t));
             }
     }
@@ -396,6 +411,9 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
             t.after = renderFormTokens(session, t.after);
         }
         report.lostChanges += e.lostChanges;
+        for (const auto& t : e.changes)
+            if (isLost(t.status))
+                report.lostByClass[static_cast<size_t>(t.cls)]++;
     }
     report.reusedGroups = static_cast<size_t>(std::count(reused.begin(), reused.end(), 1));
 

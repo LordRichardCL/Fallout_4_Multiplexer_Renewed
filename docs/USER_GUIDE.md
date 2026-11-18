@@ -89,7 +89,7 @@ Notes on a row:
 - the same element added by another plugin;
 - data the app does not understand.
 
-The table states facts, not intentions: it never says a plugin removed something on purpose. It is the first step of the compatibility patch work (`docs/COMPATIBILITY_PATCH_RESEARCH.md`); nothing is merged from it yet.
+Each row also has a class: whether carrying the change into a patch matches a documented rule. **Green** is low risk, though not guaranteed. **Yellow** needs your review (competing values, a later plugin that removed or replaced it, record flags, form lists, removals, a new master). **Red** is never carried automatically (scripts, conditions, object templates, quests, cells, deleted records, data the app does not understand). **Unknown** means there is no rule for that record type. The report counts each class. The table states facts, not intentions: it never says a plugin removed something on purpose. It is the first step of the compatibility patch work (`docs/COMPATIBILITY_PATCH_RESEARCH.md`); nothing is merged from it yet.
 
 Finding conflicts:
 

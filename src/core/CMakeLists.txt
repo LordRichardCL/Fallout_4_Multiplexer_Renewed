@@ -56,6 +56,7 @@ add_library(fo4mx_core STATIC
     engine/PluginScanner.cpp
     engine/PluginSummary.cpp
     engine/Provenance.cpp
+    engine/Compatibility.cpp
     engine/PostCompilation.cpp
     engine/ReferenceIndex.cpp
     engine/ReferenceScanner.cpp

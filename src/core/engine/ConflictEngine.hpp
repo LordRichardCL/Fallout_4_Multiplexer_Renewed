@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/MergeEngine.hpp"
+#include "engine/Compatibility.hpp"
 #include "engine/Provenance.hpp"
 #include "engine/Session.hpp"
 #include "util/Progress.hpp"
@@ -63,6 +64,11 @@ struct TracedChange {
     std::vector<PluginIndex> competesWith;  // versions not made against each other that changed it differently
     PluginIndex duplicateOf = kInvalidPlugin; // an unrelated version that added the same element
     bool opaque = false;                    // undescribed bytes: the difference is not understood
+    // Compatibility analysis (engine/Compatibility): whether carrying it forward matches a documented rule.
+    CompatClass cls = CompatClass::Unknown;
+    CompatKind kind = CompatKind::Unsupported;
+    std::string rule;
+    std::vector<PluginIndex> requiredMasters; // beyond the winner's masters
 };
 
 struct ConflictEntry {
@@ -99,6 +105,7 @@ struct ConflictReport {
     std::array<size_t, 5> byType{};
     size_t identicalOverrides = 0; // groups whose overrides are all ITMs
     size_t lostChanges = 0;        // changes, over every record, the winning version does not hold
+    std::array<size_t, 4> lostByClass{}; // those changes by CompatClass (Green, Yellow, Red, Unknown)
     std::vector<ItmRecord> itms;   // every ITM override, in record order
     size_t analysedGroups = 0;
     size_t failedGroups = 0;

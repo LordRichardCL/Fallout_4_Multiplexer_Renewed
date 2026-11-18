@@ -7796,6 +7796,10 @@ TEST(conflict_report_traces_changes_not_in_the_winner)
         CHECK_EQ(s.pluginName(lost->source), std::string("ModB.esp"));
         CHECK_EQ(s.pluginName(lost->lostAt), std::string("ModC.esp"));
         CHECK(lost->item.find("LaserSlot") != std::string::npos);
+        // An element of a sorted set, from Base.esm (a master of the winner): low risk.
+        CHECK(lost->cls == CompatClass::Green);
+        CHECK(lost->requiredMasters.empty());
+        CHECK_EQ(p.conflicts()->lostByClass[0], size_t(1));
         ReportContext ctx;
         ctx.session = &s;
         ctx.conflicts = p.conflicts();

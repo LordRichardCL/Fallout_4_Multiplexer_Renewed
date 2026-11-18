@@ -155,7 +155,7 @@ The trace also records:
 - the same element added by unrelated versions (duplicate);
 - fields with undescribed bytes (not understood).
 
-Detection only: nothing is merged or written from it, and no intent is claimed. Conflict entries carry the trace (`TracedChange`), and it is kept in the build cache. The Conflict Report has a "Changes not in the winning version" table, and the JSON report a `changes` list per conflict.
+A separate layer, `classifyChange` (`engine/Compatibility`), judges each change: Green (a documented low-risk rule, every check passed), Yellow (review), Red (never carried automatically) or Unknown (no rule). It also lists the masters a patch carrying the change would need. The rules are in `docs/COMPATIBILITY_PATCH_RESEARCH.md`, phase 6. Detection only: nothing is merged or written from either layer, and no intent is claimed. Conflict entries carry the trace (`TracedChange`), and it is kept in the build cache. The Conflict Report has a "Changes not in the winning version" table, and the JSON report a `changes` list per conflict.
 
 ## Cleaning report
 

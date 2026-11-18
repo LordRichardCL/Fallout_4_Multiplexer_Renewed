@@ -295,7 +295,11 @@ std::string conflictReport(const ReportContext& ctx)
              {"Type 3 · Hard Conflict", formatCount(c.byType[3])},
              {"Conflict · Not Merged", formatCount(c.byType[4])},
              {"ITM-only Chains", formatCount(c.identicalOverrides)},
-             {"Changes Not in the Winner", formatCount(c.lostChanges)}});
+             {"Changes Not in the Winner", formatCount(c.lostChanges)},
+             {"Green · Low Risk", formatCount(c.lostByClass[0])},
+             {"Yellow · Review", formatCount(c.lostByClass[1])},
+             {"Red · Not Carried", formatCount(c.lostByClass[2])},
+             {"Unknown · No Rule", formatCount(c.lostByClass[3])}});
 
     h.h2("Most conflicting plugins");
     std::vector<const PluginInfo*> plugins;
@@ -340,8 +344,11 @@ std::string conflictReport(const ReportContext& ctx)
     h.h2("Changes not in the winning version");
     h.note("Each change is what a plugin's version differs from the version it was made against (its masters). "
            "\"Not made with it as a master\" means the later plugin never had the change to keep; \"no longer "
-           "contains it\" means it had it in its masters and does not have it now. Neither says why.");
-    h.tableStart({"Form", "Field", "Change", "Made by", "What became of it", "Notes"});
+           "contains it\" means it had it in its masters and does not have it now. Neither says why. The class says "
+           "whether carrying the change into a patch matches a documented rule: Green low risk (not a guarantee), "
+           "Yellow review needed, Red never carried automatically, Unknown no rule for it "
+           "(docs/COMPATIBILITY_PATCH_RESEARCH.md, 8.2).");
+    h.tableStart({"Form", "Field", "Change", "Made by", "What became of it", "Class", "Why", "Notes"});
     size_t lostShown = 0, lostTotal = 0;
     auto names = [&](const std::vector<PluginIndex>& ps) {
         std::vector<std::string> out;
@@ -377,7 +384,10 @@ std::string conflictReport(const ReportContext& ctx)
                 notes.push_back("kept by " + names(t.keptBy));
             if (t.opaque)
                 notes.push_back("undescribed bytes: not understood");
-            h.row({s.formLabel(e->key), t.field, change, src, fate, join(notes, "; ")}, {"mono"});
+            if (!t.requiredMasters.empty())
+                notes.push_back("a patch would need " + names(t.requiredMasters) + " as master");
+            h.row({s.formLabel(e->key), t.field, change, src, fate, compatClassName(t.cls), t.rule, join(notes, "; ")},
+                  {"mono"});
         }
     h.tableEnd(lostShown, lostTotal);
     return h.finish();
@@ -812,6 +822,10 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
         counts.set("notMergedConflict", static_cast<uint64_t>(c.byType[4]));
         counts.set("itmOnly", static_cast<uint64_t>(c.identicalOverrides));
         counts.set("changesNotInWinner", static_cast<uint64_t>(c.lostChanges));
+        counts.set("notInWinnerGreen", static_cast<uint64_t>(c.lostByClass[0]));
+        counts.set("notInWinnerYellow", static_cast<uint64_t>(c.lostByClass[1]));
+        counts.set("notInWinnerRed", static_cast<uint64_t>(c.lostByClass[2]));
+        counts.set("notInWinnerUnknown", static_cast<uint64_t>(c.lostByClass[3]));
         root.set("counts", counts);
         json::Value list;
         for (const auto& e : c.entries) {
@@ -874,6 +888,15 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
                     to.set("alsoAddedBy", s->pluginName(t.duplicateOf));
                 if (t.opaque)
                     to.set("notUnderstood", true);
+                to.set("class", compatClassName(t.cls));
+                to.set("kind", compatKindName(t.kind));
+                to.set("rule", t.rule);
+                if (!t.requiredMasters.empty()) {
+                    json::Value req;
+                    for (auto p : t.requiredMasters)
+                        req.push(s->pluginName(p));
+                    to.set("requiredMasters", req);
+                }
                 changes.push(to);
             }
             o.set("changes", changes);

@@ -342,6 +342,20 @@ Plugins
 
 **Status:** milestone 1 is implemented (18 Nov 2026): `engine/Provenance`, the trace on conflict entries (cached), the Conflict Report table "Changes not in the winning version", and the JSON report's `changes`. Tests are in `tests/test_provenance.cpp` (1–9, 11, 12 and keyed competition) and `conflict_report_traces_changes_not_in_the_winner` (10, with the cached second run).
 
+**Phase 6 (compatibility classes)** is implemented too (18 Nov 2026): `engine/Compatibility` (`classifyChange`), applied to every traced change, counted per class in the Conflict Report and given per row with its rule and the masters a patch would need. Rules, first match wins:
+1. **Red:** undescribed data; a record type with spatial, quest, dialogue or package structure (QUST, DIAL, INFO, SCEN, PACK, NAVM, NAVI, CELL, WRLD, placed references…); any version deleted; a field holding scripts, conditions, an object template, OMOD data, perk entries, navmesh, package or dialogue data; a reference to a record not in the load order.
+2. **Unknown:** a record type without a field-by-field layout.
+3. **Yellow:**
+   - another plugin changed it differently (competing);
+   - a later plugin made with it as a master differs (removed, replaced, reverted);
+   - record flags;
+   - ordered lists (FLST);
+   - a removal;
+   - a reference to a plugin outside the record's chain that the winner does not master (dependent).
+4. **Green:** a field no other plugin changed, an element of a set, an entry of a list that keeps repeats, or a keyed element no other plugin changed, omitted by a winner not made against it.
+
+The masters a patch would need beyond the winner's are listed in every case. Tests: `compatibility_classes_for_lost_changes` and `compatibility_dependencies_and_structures`.
+
 **Milestone 1 (phases 2–5 of the specification, detection only):** provenance for the field paths and list
 elements Multiplexer already understands, shown in the conflict report. No patch plan, no writing.
 

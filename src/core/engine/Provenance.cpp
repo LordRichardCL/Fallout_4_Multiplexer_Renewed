@@ -72,6 +72,28 @@ std::string canonical(const ListItem& item)
     return s;
 }
 
+std::vector<FormKey> refsOf(const std::vector<NormSub>& subs)
+{
+    std::vector<FormKey> out;
+    for (const auto& s : subs)
+        for (const auto& [off, k] : s.refs)
+            if (k.valid() && std::find(out.begin(), out.end(), k) == out.end())
+                out.push_back(k);
+    return out;
+}
+
+std::vector<FormKey> refsOf(const Field* f)
+{
+    if (!f)
+        return {};
+    auto out = refsOf(f->subs);
+    for (const auto& item : f->items)
+        for (const auto& k : refsOf(item.subs))
+            if (std::find(out.begin(), out.end(), k) == out.end())
+                out.push_back(k);
+    return out;
+}
+
 bool opaqueField(const Field* f)
 {
     if (!f)
@@ -188,6 +210,7 @@ RecordProvenance traceProvenance(const std::vector<FieldSet>& chain, const std::
                 e.before = v[p] ? describeField(v[p], label) : "(absent)";
                 e.after = v[a] ? describeField(v[a], label) : "(absent)";
                 e.opaque = opaque;
+                e.references = refsOf(v[a]);
                 auto holds = [&](size_t j) { return fieldEquivalent(v[j], v[a]); };
                 for (size_t j = a + 1; j < n; ++j)
                     if (rp.madeAgainst(j, a) && holds(j))
@@ -239,6 +262,8 @@ RecordProvenance traceProvenance(const std::vector<FieldSet>& chain, const std::
                 e.before = describeItem(*shape, before);
                 e.after = describeItem(*shape, after);
                 e.opaque = opaque;
+                if (after)
+                    e.references = refsOf(after->subs);
                 auto holds = [&](size_t j) {
                     return op == ChangeOp::Remove ? !views[j].has(id) : sameItem(j, a, id);
                 };
