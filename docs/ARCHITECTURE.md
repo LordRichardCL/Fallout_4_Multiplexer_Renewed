@@ -136,7 +136,7 @@ Chains whose overrides are all byte-identical to the base are reported as ITMs, 
 
 ### Change provenance
 
-`traceProvenance` (`engine/Provenance`) runs on the same chain and parent versions. It follows each change through to the winner (`docs/COMPATIBILITY_PATCH_RESEARCH.md`, milestone 1). Each version's changes are what it differs from its parent version:
+`traceProvenance` (`engine/Provenance`) runs on the same chain and parent versions. It follows each change through to the winner (`docs/COMPATIBILITY_PATCH_RESEARCH.md`, milestone 1). Each version's changes are what it differs from its parent version: A struct field whose value layer is xEdit's complete layout is traced member by member (phase 10), so changes to different members are separate changes.
 - **Whole fields:** set, added or removed.
 - **List elements:** added, removed, or changed under the same key. Elements are matched by identity, not position: keyed lists by key, others by value with a repeat number (A, A is A#0, A#1, as xEdit numbers leveled list entries).
 - **Order:** only for lists whose order is data (FLST). Lists xEdit sorts (keywords, attach slots, components, leveled entries, factions, perks) have no order change.

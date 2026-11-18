@@ -223,7 +223,7 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
     // Change provenance: what each version changed against the one it was made from, and its fate.
     {
         auto token = [](FormKey k) { return formToken(k); };
-        const RecordProvenance rp = traceProvenance(chain, parents, token);
+        const RecordProvenance rp = traceProvenance(chain, parents, token, &session.defs);
         e.lostChanges = rp.lostCount();
         CompatContext cc;
         cc.record = e.sig;

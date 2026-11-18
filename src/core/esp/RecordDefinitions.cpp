@@ -119,17 +119,7 @@ RegionDef region(const char* name, std::initializer_list<const char*> start, std
 
 uint16_t memberSize(const ValueMember& m)
 {
-    switch (m.type) {
-    case ValueType::Bytes: return m.size;
-    case ValueType::U8:
-    case ValueType::I8:
-    case ValueType::Flags8:
-    case ValueType::Enum8: return 1;
-    case ValueType::U16:
-    case ValueType::I16:
-    case ValueType::Flags16: return 2;
-    default: return 4;
-    }
+    return valueMemberSize(m);
 }
 
 uint16_t coveredSize(const std::vector<ValueMember>& members)
@@ -2215,6 +2205,21 @@ uint8_t RecordDefinitions::conditionParam(uint16_t function, int param) const
 bool RecordDefinitions::conditionFunctionKnown(uint16_t function) const
 {
     return conditionFormParams_.count(function) != 0;
+}
+
+uint16_t valueMemberSize(const ValueMember& m)
+{
+    switch (m.type) {
+    case ValueType::Bytes: return m.size;
+    case ValueType::U8:
+    case ValueType::I8:
+    case ValueType::Flags8:
+    case ValueType::Enum8: return 1;
+    case ValueType::U16:
+    case ValueType::I16:
+    case ValueType::Flags16: return 2;
+    default: return 4;
+    }
 }
 
 } // namespace fo4mx

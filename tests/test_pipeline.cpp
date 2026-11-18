@@ -8083,3 +8083,63 @@ TEST(patch_plan_is_written_and_read_back)
     writePlannedHat(false); // only plugins that stay hold it: Multiplexer_Patch.esp
     writePlannedHat(true);  // compiled plugins hold it: an output
 }
+
+// Phase 10: one member of a struct. Armour data (ARMO DATA: value, weight, health, xEdit's complete layout):
+// ModD changes the value, ModC (the winner) the weight. Member by member they are independent, so ModD's value
+// is Green and carried by default; the patch holds ModD's value with ModC's weight and the base health, and
+// the written-content check agrees.
+TEST(patch_plan_carries_one_struct_member)
+{
+    auto root = buildInstall("patchmember");
+    auto data = root / "Game" / "Data";
+    auto armor = [](uint32_t value, float weight, uint32_t health) {
+        std::vector<uint8_t> d(12);
+        storeLE<uint32_t>(d.data(), value);
+        std::memcpy(d.data() + 4, &weight, 4);
+        storeLE<uint32_t>(d.data() + 8, health);
+        return record("ARMO", 0x01000800, {zs("EDID", "Coat"), raw("DATA", d)});
+    };
+    writePlugin(data / "Base.esm", {"Fallout4.esm"}, {armor(10, 1.0f, 50)}, ESM);
+    writePlugin(data / "ModD.esp", {"Fallout4.esm", "Base.esm"}, {armor(20, 1.0f, 50)});
+    writePlugin(data / "ModC.esp", {"Fallout4.esm", "Base.esm"}, {armor(10, 2.0f, 50)});
+    writeFile(root / "plugins.txt", "*Base.esm\n*ModA.esp\n*ModD.esp\n*ModC.esp\n");
+    auto cfg = configFor(root);
+    cfg.patchPlanDecisions = root / "decisions.json";
+    cfg.analysis.excludedPlugins = {"Base.esm", "ModD.esp", "ModC.esp"};
+    cfg.compile.applyPatchPlan = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    const FormKey coat{s.findPlugin("Base.esm")->index, 0x800};
+    bool green = false;
+    for (const auto& pr : p.patchPlan()->records)
+        if (pr.conflict->key == coat)
+            for (const auto& pe : pr.entries) {
+                const auto& t = pr.conflict->changes[pe.change];
+                if (s.pluginName(t.source) == "ModD.esp") {
+                    CHECK_EQ(t.item, std::string("Value"));
+                    green = t.cls == CompatClass::Green && pe.action == PlanAction::CarryForward;
+                }
+            }
+    CHECK(green);
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0)); // written-content check
+    OutputSet out(result.pluginFiles);
+    const auto* r = out.byEditorId("Coat");
+    CHECK(r != nullptr);
+    if (!r)
+        return;
+    CHECK_EQ(r->plugin, std::string("Multiplexer_Patch.esp"));
+    const auto* d = r->record.find(Signature("DATA"));
+    CHECK(d && d->data.size() == 12);
+    if (!d || d->data.size() != 12)
+        return;
+    float weight = 0;
+    std::memcpy(&weight, d->data.data() + 4, 4);
+    CHECK_EQ(loadLE<uint32_t>(d->data.data()), 20u);     // ModD's value
+    CHECK_EQ(weight, 2.0f);                             // ModC's weight
+    CHECK_EQ(loadLE<uint32_t>(d->data.data() + 8), 50u); // the base health
+}

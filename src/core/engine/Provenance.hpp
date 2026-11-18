@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/FieldModel.hpp"
+#include "esp/RecordDefinitions.hpp"
 
 #include <functional>
 #include <string>
@@ -46,6 +47,11 @@ struct ChangeEvent {
     bool opaque = false;              // the field holds undescribed bytes: the difference is not understood
     std::string identity;             // list elements: the element's identity (key, or value and repeat number)
     std::vector<FormKey> references;  // records the changed value or added element names
+    // A member of a struct field (phase 10): the change is that member's bytes only ("Data", member "Speed").
+    // `item` then holds the member's name, so changes to different members are told apart.
+    std::string member;
+    uint16_t memberOffset = 0, memberSize = 0;
+    bool isMember() const { return !member.empty(); }
 };
 
 struct RecordProvenance {
@@ -63,13 +69,19 @@ bool listOrderMatters(Signature record, const Field& field);
 
 // chain[0] is the defining version, chain.back() the winner; `parents` as Session::overrideParents
 // (empty: every version against chain[0]). `label` describes referenced forms.
+//
+// With `defs`, a struct field is traced member by member (docs/COMPATIBILITY_PATCH_RESEARCH.md, phase 10)
+// when its value layer is complete (valuesComplete, one element, no undescribed FormIDs) and every version
+// holds it as one subrecord of exactly that size; otherwise, and without `defs`, as a whole value.
 RecordProvenance traceProvenance(const std::vector<FieldSet>& chain, const std::vector<size_t>& parents,
-                                 const std::function<std::string(FormKey)>& label);
+                                 const std::function<std::string(FormKey)>& label,
+                                 const RecordDefinitions* defs = nullptr);
 
 // Carries `changes` (events of a traceProvenance over `chain`) into `result`, normally a copy of the winning
 // version (docs/COMPATIBILITY_PATCH_RESEARCH.md, phase 8): a whole field takes the change's value (or is
 // removed), a list element is added, removed or replaced by its identity, an ordered list takes the change's
-// order for the elements both hold. Afterwards every change is checked against the result; the indices
+// order for the elements both hold, a struct member takes the change's bytes (only where the result holds the
+// field at the same size). Afterwards every change is checked against the result; the indices
 // (into `changes`) of those the result does not hold are returned, so the caller can refuse the record.
 std::vector<size_t> applyChanges(FieldSet& result, const std::vector<FieldSet>& chain,
                                  const std::vector<const ChangeEvent*>& changes);

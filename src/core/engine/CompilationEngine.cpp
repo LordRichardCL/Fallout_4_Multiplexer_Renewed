@@ -602,7 +602,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     for (const auto& r : inst)
                         chain.push_back(splitFields(pn.normalize(r), session.defs));
                     const auto rp = traceProvenance(chain, session.overrideParents(inst),
-                                                    [](FormKey k) { return formToken(k); });
+                                                    [](FormKey k) { return formToken(k); }, &session.defs);
                     std::vector<const ChangeEvent*> carry;
                     for (const auto& ev : rp.events)
                         if (isLost(ev.status) &&

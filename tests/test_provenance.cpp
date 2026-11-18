@@ -5,6 +5,7 @@
 #include "esp/Record.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <optional>
 
 using namespace fo4mx;
@@ -523,4 +524,144 @@ TEST(apply_removal_reorder_and_contradiction)
     auto pc = traceProvenance(comp, {0, 0, 0, 0}, label);
     FieldSet cr = comp.back();
     CHECK_EQ(applyChanges(cr, comp, lostOf(pc)).size(), size_t(1));
+}
+
+// Phase 10: struct members. Ammo data (AMMO DNAM, xEdit's complete layout: projectile, flags, unused bytes,
+// damage, health): one plugin changes the damage, another (the winner) the health. Member by member these
+// are two independent changes, so the damage is carried; as whole values they would compete. Without
+// definitions, or when a version holds the field at another size, the field stays one value.
+
+namespace {
+
+struct AmmoData {
+    float damage = 10.0f;
+    uint32_t health = 100;
+    uint32_t projectile = 0x800; // FormID member at offset 0
+    size_t size = 0;             // 0: the layout's size
+};
+
+const FieldDef& ammoDnam()
+{
+    return RecordDefinitions::get().field(Signature("AMMO"), Signature("DNAM"));
+}
+
+FieldSet ammo(const AmmoData& d)
+{
+    NormRecord r;
+    r.key = FormKey{0, 0x3000};
+    r.sig = Signature("AMMO");
+    r.subs.push_back(sub("EDID", {'A', 0}));
+    NormSub s = sub("DNAM", std::vector<uint8_t>(d.size ? d.size : ammoDnam().valueSize, 0));
+    std::memcpy(s.bytes.data() + 8, &d.damage, 4);
+    std::memcpy(s.bytes.data() + 12, &d.health, 4);
+    s.refs.emplace_back(0, FormKey{0, d.projectile});
+    r.subs.push_back(s);
+    return splitFields(r, RecordDefinitions::get());
+}
+
+template <typename T>
+T memberAt(const FieldSet& set, size_t offset)
+{
+    T v{};
+    std::memcpy(&v, set.find("DNAM#0")->subs[0].bytes.data() + offset, sizeof(T));
+    return v;
+}
+
+const ChangeEvent* memberEvent(const RecordProvenance& p, size_t version, const std::string& member)
+{
+    for (const auto& e : p.events)
+        if (e.version == version && e.member == member)
+            return &e;
+    return nullptr;
+}
+
+} // namespace
+
+TEST(struct_members_traced_classified_and_carried)
+{
+    const auto& def = ammoDnam();
+    CHECK(def.valuesComplete);
+    CHECK_EQ(def.valueSize, uint16_t(16));
+    const AmmoData base;
+    AmmoData a = base, b = base;
+    a.damage = 15.5f; // ModA: the damage
+    b.health = 250;   // ModB (winner): the health
+    const auto chain = withPlugins({ammo(base), ammo(a), ammo(b)});
+    auto p = traceProvenance(chain, {0, 0, 0}, label, &RecordDefinitions::get());
+    CHECK_EQ(p.events.size(), size_t(2));
+    const ChangeEvent* damage = memberEvent(p, 1, "Damage");
+    const ChangeEvent* health = memberEvent(p, 2, "Health");
+    CHECK(damage && health);
+    if (!damage || !health)
+        return;
+    CHECK_EQ(damage->label, std::string("DNAM")); // the field, as whole-field changes name it
+    CHECK_EQ(damage->item, std::string("Damage"));
+    CHECK_EQ(damage->before, std::string("10"));
+    CHECK_EQ(damage->after, std::string("15.5"));
+    CHECK(damage->status == ChangeStatus::OmittedLater);
+    CHECK(damage->competesWith.empty()); // different members do not compete
+    CHECK(health->status == ChangeStatus::Survives);
+    auto ctx = context(Signature("AMMO"));
+    ctx.winner = 2;
+    ctx.chainPlugins = {0, 1, 2};
+    ctx.masters = [](PluginIndex pl, PluginIndex other) { return pl == 2 && other == 0; };
+    CHECK(classifyChange(*damage, chain, RecordDefinitions::get(), ctx).cls == CompatClass::Green);
+
+    FieldSet result = chain.back();
+    CHECK(applyChanges(result, chain, {damage}).empty());
+    CHECK_EQ(memberAt<float>(result, 8), 15.5f);        // carried
+    CHECK_EQ(memberAt<uint32_t>(result, 12), 250u);     // the winner's own change stays
+    CHECK_EQ(result.find("DNAM#0")->subs[0].refs.size(), size_t(1)); // the projectile kept once
+
+    // Without definitions: one whole value, as before (the two changes then compete).
+    auto whole = traceProvenance(chain, {0, 0, 0}, label);
+    CHECK_EQ(whole.events.size(), size_t(2));
+    for (const auto& e : whole.events)
+        CHECK(e.member.empty());
+    CHECK(!whole.events[0].competesWith.empty());
+}
+
+TEST(struct_members_compete_and_fall_back)
+{
+    const AmmoData base;
+    AmmoData a = base, b = base;
+    a.damage = 15.5f;
+    b.damage = 20.0f;
+    a.projectile = 0x900; // a reference member: compared by the record it names
+    const auto chain = withPlugins({ammo(base), ammo(a), ammo(b)});
+    auto p = traceProvenance(chain, {0, 0, 0}, label, &RecordDefinitions::get());
+    const ChangeEvent* damageA = memberEvent(p, 1, "Damage");
+    const ChangeEvent* projectileA = memberEvent(p, 1, "Projectile");
+    CHECK(damageA && projectileA);
+    if (!damageA || !projectileA)
+        return;
+    CHECK(damageA->competesWith == std::vector<size_t>{2}); // the same member, different values
+    CHECK(projectileA->competesWith.empty());
+    CHECK_EQ(projectileA->after, std::string("900"));
+    CHECK_EQ(projectileA->references.size(), size_t(1));
+    FieldSet result = chain.back();
+    CHECK(applyChanges(result, chain, {projectileA}).empty());
+    CHECK_EQ(result.find("DNAM#0")->subs[0].refs[0].second.objectId, 0x900u);
+    CHECK_EQ(memberAt<float>(result, 8), 20.0f);
+
+    // A version holding the field at another size: the layout does not fit, so the field is one value.
+    AmmoData odd = b;
+    odd.size = ammoDnam().valueSize + 4;
+    const auto mixed = withPlugins({ammo(base), ammo(a), ammo(odd)});
+    auto q = traceProvenance(mixed, {0, 0, 0}, label, &RecordDefinitions::get());
+    CHECK(!q.events.empty());
+    for (const auto& e : q.events)
+        CHECK(e.member.empty());
+    // A member change is not forced into a field of another size: it is refused.
+    FieldSet into = mixed.back();
+    CHECK_EQ(applyChanges(into, chain, {projectileA}).size(), size_t(1));
+
+    // Undescribed bytes in any version: whole value (and Red), never members.
+    auto opaqueChain = chain;
+    auto& s = opaqueChain[1].find("DNAM#0")->subs[0];
+    s.heuristic = true;
+    s.opaque.emplace_back(4, 8);
+    auto r = traceProvenance(opaqueChain, {0, 0, 0}, label, &RecordDefinitions::get());
+    for (const auto& e : r.events)
+        CHECK(e.member.empty() && e.opaque);
 }

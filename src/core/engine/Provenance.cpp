@@ -3,6 +3,8 @@
 #include "esp/RecordDefinitions.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -137,10 +139,128 @@ ListView viewOf(const Field* f, bool keyed)
     return v;
 }
 
+// Phase 10: struct members. A field is traced member by member only when its value layer is the whole
+// layout (xEdit's members, checked complete), it is one struct (not an array), no bytes of it may hold
+// undescribed FormIDs, and every version holds it as one subrecord of exactly that size. Anything else
+// stays a whole value, as before: a member is never guessed from a layout that does not fit.
+std::vector<ValueMember> memberLayout(const RecordDefinitions* defs, Signature record, const Field& shape,
+                                      const std::vector<const Field*>& versions, bool opaque)
+{
+    if (!defs || opaque || shape.shape != FieldShape::Scalar || shape.key == "@flags")
+        return {};
+    const FieldDef& def = defs->field(record, shape.sig);
+    if (def.values.empty() || !def.valuesComplete || def.valueStride || !def.valueSize ||
+        def.kind == FieldKind::Unknown)
+        return {};
+    for (const Field* f : versions)
+        if (!f || f->subs.size() != 1 || f->subs[0].sig != shape.sig || f->subs[0].bytes.size() != def.valueSize)
+            return {};
+    // One member is the whole field: nothing to separate (and its changes keep their ids).
+    if (def.values.size() < 2)
+        return {};
+    std::vector<ValueMember> members = def.values;
+    std::sort(members.begin(), members.end(), [](const ValueMember& a, const ValueMember& b) { return a.offset < b.offset; });
+    // Members must tile the struct: no overlap, nothing past its end.
+    uint32_t end = 0;
+    for (const auto& m : members) {
+        if (m.offset < end || m.offset + valueMemberSize(m) > def.valueSize || valueMemberSize(m) == 0)
+            return {};
+        end = m.offset + valueMemberSize(m);
+    }
+    return members;
+}
+
+std::vector<std::pair<uint32_t, FormKey>> refsIn(const NormSub& s, uint32_t off, uint32_t size)
+{
+    std::vector<std::pair<uint32_t, FormKey>> out;
+    for (const auto& r : s.refs)
+        if (r.first >= off && r.first < off + size)
+            out.push_back(r);
+    std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    return out;
+}
+
+bool fitsMember(const Field* f, uint32_t off, uint32_t size)
+{
+    return f && f->subs.size() == 1 && off + size <= f->subs[0].bytes.size();
+}
+
+bool memberEquivalent(const Field* a, const Field* b, uint32_t off, uint32_t size)
+{
+    if (!fitsMember(a, off, size) || !fitsMember(b, off, size))
+        return false;
+    const auto& x = a->subs[0];
+    const auto& y = b->subs[0];
+    return std::equal(x.bytes.begin() + off, x.bytes.begin() + off + size, y.bytes.begin() + off) &&
+           refsIn(x, off, size) == refsIn(y, off, size);
+}
+
+std::string describeMember(const ValueMember& m, const Field* f, const std::function<std::string(FormKey)>& label)
+{
+    const uint32_t size = valueMemberSize(m);
+    if (!fitsMember(f, m.offset, size))
+        return "(absent)";
+    const auto& s = f->subs[0];
+    const uint8_t* p = s.bytes.data() + m.offset;
+    uint32_t u = 0;
+    std::memcpy(&u, p, std::min<uint32_t>(size, 4));
+    char buf[64];
+    switch (m.type) {
+    case ValueType::FormId: {
+        const auto refs = refsIn(s, m.offset, size);
+        if (refs.empty() || !refs[0].second.valid())
+            return "NULL";
+        return label ? label(refs[0].second) : std::string("(form)");
+    }
+    case ValueType::Float: {
+        float v;
+        std::memcpy(&v, p, 4);
+        std::snprintf(buf, sizeof(buf), "%g", static_cast<double>(v));
+        return buf;
+    }
+    case ValueType::I8: return std::to_string(static_cast<int8_t>(u));
+    case ValueType::I16: return std::to_string(static_cast<int16_t>(u));
+    case ValueType::I32: return std::to_string(static_cast<int32_t>(u));
+    case ValueType::Enum8:
+    case ValueType::Enum32:
+        if (u < m.labels.size() && !m.labels[u].empty())
+            return m.labels[u];
+        return std::to_string(u);
+    case ValueType::Flags8:
+    case ValueType::Flags16:
+    case ValueType::Flags32: {
+        std::snprintf(buf, sizeof(buf), "0x%0*X", static_cast<int>(size * 2), u);
+        std::string out = buf, names;
+        for (size_t bit = 0; bit < 32 && bit < m.labels.size(); ++bit)
+            if ((u >> bit) & 1u)
+                names += (names.empty() ? "" : ", ") + (m.labels[bit].empty() ? "bit " + std::to_string(bit) : m.labels[bit]);
+        return names.empty() ? out : out + " (" + names + ")";
+    }
+    case ValueType::Bytes: {
+        std::string out;
+        for (uint32_t i = 0; i < size && i < 32; ++i) {
+            std::snprintf(buf, sizeof(buf), "%s%02X", i ? " " : "", p[i]);
+            out += buf;
+        }
+        return out + (size > 32 ? " ..." : "");
+    }
+    default: return std::to_string(u);
+    }
+}
+
+std::vector<FormKey> keysOf(const std::vector<std::pair<uint32_t, FormKey>>& refs)
+{
+    std::vector<FormKey> out;
+    for (const auto& [off, k] : refs)
+        if (k.valid() && std::find(out.begin(), out.end(), k) == out.end())
+            out.push_back(k);
+    return out;
+}
+
 } // namespace
 
 RecordProvenance traceProvenance(const std::vector<FieldSet>& chain, const std::vector<size_t>& givenParents,
-                                 const std::function<std::string(FormKey)>& label)
+                                 const std::function<std::string(FormKey)>& label, const RecordDefinitions* defs)
 {
     RecordProvenance rp;
     const size_t n = chain.size();
@@ -197,6 +317,54 @@ RecordProvenance traceProvenance(const std::vector<FieldSet>& chain, const std::
         if (!shape)
             continue;
         const size_t first = rp.events.size();
+
+        if (const auto members = memberLayout(defs, chain[0].sig, *shape, v, opaque); !members.empty()) {
+            // A struct, member by member: each member is a value of its own.
+            for (const auto& m : members) {
+                const uint32_t off = m.offset, size = valueMemberSize(m);
+                auto same = [&](size_t x, size_t y) { return memberEquivalent(v[x], v[y], off, size); };
+                const size_t memberFirst = rp.events.size();
+                for (size_t a = 1; a < n; ++a) {
+                    const size_t p = rp.parents[a];
+                    if (same(a, p))
+                        continue;
+                    ChangeEvent e;
+                    e.fieldKey = key;
+                    e.label = shape->label;
+                    e.member = m.name;
+                    e.memberOffset = static_cast<uint16_t>(off);
+                    e.memberSize = static_cast<uint16_t>(size);
+                    e.item = m.name;
+                    e.identity = "member:" + m.name;
+                    e.version = a;
+                    e.op = ChangeOp::Set;
+                    e.before = describeMember(m, v[p], label);
+                    e.after = describeMember(m, v[a], label);
+                    e.references = keysOf(refsIn(v[a]->subs[0], off, size));
+                    auto holds = [&](size_t j) { return same(j, a); };
+                    for (size_t j = a + 1; j < n; ++j)
+                        if (rp.madeAgainst(j, a) && holds(j))
+                            e.keptBy.push_back(j);
+                    if (holds(w)) {
+                        e.status = ChangeStatus::Survives;
+                    } else if (rp.madeAgainst(w, a)) {
+                        e.lostAt = firstOnLineAfter(a, [&](size_t j) { return !holds(j); });
+                        e.status = same(static_cast<size_t>(e.lostAt), 0) ? ChangeStatus::Reverted : ChangeStatus::Replaced;
+                    } else {
+                        e.status = ChangeStatus::OmittedLater;
+                        e.lostAt = firstOnLineAfter(a, [](size_t) { return true; });
+                    }
+                    rp.events.push_back(std::move(e));
+                }
+                for (size_t i = memberFirst; i < rp.events.size(); ++i)
+                    for (size_t k = memberFirst; k < rp.events.size(); ++k) {
+                        const size_t a = rp.events[i].version, b = rp.events[k].version;
+                        if (a != b && !rp.madeAgainst(a, b) && !rp.madeAgainst(b, a) && !same(a, b))
+                            rp.events[i].competesWith.push_back(b);
+                    }
+            }
+            continue;
+        }
 
         if (!shape->isList()) {
             // A whole value.
@@ -414,6 +582,8 @@ bool holds(const FieldSet& result, const std::vector<FieldSet>& chain, const Cha
     const Field* shape = shapeOf(chain, c.fieldKey);
     if (!shape)
         return false;
+    if (c.isMember())
+        return memberEquivalent(have, src, c.memberOffset, c.memberSize);
     if (!shape->isList())
         return c.op == ChangeOp::Remove ? have == nullptr : fieldEquivalent(have, src);
     const bool keyed = shape->merge == MergeMode::Keyed;
@@ -443,6 +613,33 @@ std::vector<size_t> applyChanges(FieldSet& result, const std::vector<FieldSet>& 
         const Field* shape = shapeOf(chain, c->fieldKey);
         if (!shape)
             continue;
+        if (c->isMember()) {
+            // The member's bytes and references only; the result must hold the field at the same size
+            // (otherwise the change is not held and the record is refused by the check below).
+            Field* have = result.find(c->fieldKey);
+            const uint32_t off = c->memberOffset, size = c->memberSize;
+            if (!fitsMember(have, off, size) || !fitsMember(src, off, size) ||
+                have->subs[0].bytes.size() != src->subs[0].bytes.size())
+                continue;
+            auto& to = have->subs[0];
+            const auto& in = src->subs[0];
+            std::copy(in.bytes.begin() + off, in.bytes.begin() + off + size, to.bytes.begin() + off);
+            to.refs.erase(std::remove_if(to.refs.begin(), to.refs.end(),
+                                         [&](const auto& r) { return r.first >= off && r.first < off + size; }),
+                          to.refs.end());
+            for (const auto& r : refsIn(in, off, size))
+                to.refs.push_back(r);
+            std::sort(to.refs.begin(), to.refs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+            // The source values stored at those offsets (diagnostics) follow the references they belong to.
+            to.rawRefs.erase(std::remove_if(to.rawRefs.begin(), to.rawRefs.end(),
+                                            [&](const auto& r) { return r.offset >= off && r.offset < off + size; }),
+                             to.rawRefs.end());
+            for (const auto& r : in.rawRefs)
+                if (r.offset >= off && r.offset < off + size)
+                    to.rawRefs.push_back(r);
+            std::sort(to.rawRefs.begin(), to.rawRefs.end());
+            continue;
+        }
         if (!shape->isList()) {
             Field* have = result.find(c->fieldKey);
             if (c->op == ChangeOp::Remove) {

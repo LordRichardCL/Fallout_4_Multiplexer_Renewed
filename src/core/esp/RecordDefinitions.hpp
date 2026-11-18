@@ -70,6 +70,9 @@ struct ValueMember {
     std::vector<std::string> labels; // Flags: bit names (bit 0 first); Enum: value names (0 first)
 };
 
+// Bytes a member occupies (its type's width; Bytes: its own size).
+uint16_t valueMemberSize(const ValueMember& m);
+
 struct FieldDef {
     FieldKind kind = FieldKind::Unknown;
     std::vector<uint16_t> offsets; // Struct / StructArray FormID offsets
