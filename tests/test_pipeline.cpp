@@ -7614,3 +7614,139 @@ TEST(archive_loader_lifts_the_list_limit)
     for (const auto& b : d.blockers)
         CHECK(b.find("archive loader") == std::string::npos);
 }
+
+namespace {
+struct StaysResult {
+    bool labInPatch = false, labLighting = false;
+    bool worldInPatch = false, worldClimate = false;
+    bool outsideInPatch = false, outsideLocation = false, outsideWithWorld = false;
+    bool worldInOutput = false, outsideInOutput = false;
+    bool quietCell = false; // a cell nothing changed: not written
+    bool reported = false;
+};
+// Base.esm (stays) defines an interior cell, a worldspace and an exterior cell; ModP.esp changes their
+// lighting, climate and location; ModL.esp, the winner, repeats Base's values. ModP and ModL stay. With
+// `placedRef`, ModQ.esp (compiled, loading before ModP) places a reference in the exterior cell, so an
+// output holds the worldspace and the cell (copied as the game loads them).
+StaysResult compileWinnerStays(const char* name, bool merge, bool placedRef)
+{
+    auto root = buildInstall(name);
+    auto data = root / "Game" / "Data";
+    std::vector<uint8_t> xcllBase(92, 0), xcllP(92, 0);
+    xcllP[0] = 0x22;
+    auto lab = [&](const std::vector<uint8_t>& xcll) {
+        std::vector<uint8_t> d(2, 0);
+        d[0] = 1;
+        return record("CELL", 0x01000803, {zs("EDID", "Lab"), raw("DATA", d), raw("XCLL", xcll)});
+    };
+    auto quiet = [&]() { return record("CELL", 0x01000805, {zs("EDID", "Quiet"), raw("DATA", {1, 0})}); };
+    auto world = [&](uint32_t climate) {
+        return record("WRLD", 0x01000810, {zs("EDID", "Wasteland"), u32("CNAM", climate)});
+    };
+    auto outside = [&](bool location) {
+        std::vector<Subrecord> subs{zs("EDID", "Outside"), raw("DATA", {2, 0}), raw("XCLC", gridBytes(3, -4))};
+        if (location)
+            subs.push_back(u32("XLCN", 0x01000806));
+        return record("CELL", 0x01000811, subs);
+    };
+    writePlugin(data / "Base.esm", {"Fallout4.esm"},
+                {lab(xcllBase), quiet(), record("LCTN", 0x01000806, {zs("EDID", "Town")}),
+                 record("CLMT", 0x01000807, {zs("EDID", "Dry")}), record("CLMT", 0x01000808, {zs("EDID", "Wet")}),
+                 world(0x01000807), outside(false)},
+                ESM);
+    std::string order = "*Base.esm\n*ModA.esp\n*ModB.esp\n*ModC.esp\n";
+    if (placedRef) {
+        writePlugin(data / "ModQ.esp", {"Fallout4.esm", "Base.esm"},
+                    {world(0x01000807), outside(false),
+                     record("REFR", 0x02000800, {zs("EDID", "Signpost"), u32("NAME", 0x800)})});
+        order += "*ModQ.esp\n";
+    }
+    writePlugin(data / "ModP.esp", {"Fallout4.esm", "Base.esm"},
+                {lab(xcllP), quiet(), world(0x01000808), outside(true)});
+    writePlugin(data / "ModL.esp", {"Fallout4.esm", "Base.esm"},
+                {lab(xcllBase), quiet(), world(0x01000807), outside(false)});
+    writeFile(root / "plugins.txt", order + "*ModP.esp\n*ModL.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"Base.esm", "ModP.esp", "ModL.esp"};
+    cfg.compile.mergeCellConfig = merge;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    StaysResult r;
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto& s = p.session();
+    const auto* out = p.compiledOutput();
+    if (placedRef)
+        CHECK(out->isCompiled(s.findPlugin("ModQ.esp")->index));
+    const PluginIndex base = s.findPlugin("Base.esm")->index;
+    for (const auto& i : out->issues)
+        r.reported |= i.category == "Cell Configuration";
+    auto inPatch = [&](const EmittedRecord& e) { return out->outputs.at(static_cast<size_t>(e.output)).patch; };
+    int worldOutput = -1, outsideOutput = -1;
+    for (const auto& e : out->records) {
+        auto sub = [&](const char* sig) -> const NormSub* {
+            for (const auto& f : e.fields.fields)
+                for (const auto& x : f.subs)
+                    if (x.sig == Signature::fromString(sig))
+                        return &x;
+            return nullptr;
+        };
+        if (e.editorId == "Lab") {
+            r.labInPatch = inPatch(e);
+            const auto* x = sub("XCLL");
+            r.labLighting = x && !x->bytes.empty() && x->bytes[0] == 0x22;
+        } else if (e.editorId == "Quiet") {
+            r.quietCell = true;
+        } else if (e.editorId == "Wasteland") {
+            (inPatch(e) ? r.worldInPatch : r.worldInOutput) = true;
+            const auto* x = sub("CNAM");
+            r.worldClimate = x && !x->refs.empty() && x->refs[0].second == FormKey{base, 0x808};
+            worldOutput = e.output;
+        } else if (e.editorId == "Outside") {
+            (inPatch(e) ? r.outsideInPatch : r.outsideInOutput) = true;
+            const auto* x = sub("XLCN");
+            r.outsideLocation = x && !x->refs.empty() && x->refs[0].second == FormKey{base, 0x806};
+            outsideOutput = e.output;
+        }
+    }
+    r.outsideWithWorld = outsideOutput >= 0 && outsideOutput == worldOutput;
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0)); // the written-content check agrees with the plan
+    for (const auto& f : result.pluginFiles)
+        CHECK(checkLayout(PluginFile::load(f), true).problems.empty());
+    return r;
+}
+} // namespace
+
+// Cell configuration merge for cells and worldspaces whose winning version stays in the load order: no
+// output would write them, so the merged versions go to the patch (an exterior cell with its
+// worldspace). One whose versions bring nothing forward is not written. When an output already holds
+// the worldspace and the cell (a compiled reference in the cell), the merge is applied there.
+TEST(cell_configuration_merge_writes_cells_whose_winner_stays)
+{
+    const auto on = compileWinnerStays("cellstayson", true, false);
+    CHECK(on.labInPatch);
+    CHECK(on.labLighting);
+    CHECK(on.worldInPatch);
+    CHECK(on.worldClimate);
+    CHECK(on.outsideInPatch);
+    CHECK(on.outsideLocation);
+    CHECK(on.outsideWithWorld);
+    CHECK(!on.quietCell);
+    CHECK(on.reported);
+
+    const auto off = compileWinnerStays("cellstaysoff", false, false);
+    CHECK(!off.labInPatch);
+    CHECK(!off.worldInPatch);
+    CHECK(!off.outsideInPatch);
+    CHECK(!off.reported);
+
+    const auto held = compileWinnerStays("cellstaysheld", true, true);
+    CHECK(held.worldInOutput);
+    CHECK(held.worldClimate);
+    CHECK(held.outsideInOutput);
+    CHECK(held.outsideLocation);
+    CHECK(held.outsideWithWorld);
+    CHECK(held.labInPatch);
+}

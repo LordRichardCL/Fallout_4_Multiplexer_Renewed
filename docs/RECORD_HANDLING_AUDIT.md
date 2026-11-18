@@ -900,7 +900,7 @@ The build after the Clean precombine fix compiled 484 plugins with no errors, bu
    - the parent cell is context, not identity;
    - moving a record to another cell or changing its persistence is structural;
    - every field gets a merge contract (identity, parent rules, field classes, FormID references, validation, automatic-merge level), filled in from xEdit's definitions and real plugin data, not from guesses at what the abbreviations mean.
-2. **Cell configuration merge (requested; optional setting, off by default).** CELL records written to outputs: **done** (see "Cell configuration merge" below). Still to do: WRLD, and cells whose winner stays (Multiplexer_Patch.esp). Like PJM's FO4CheckPrevisbines option 4 ("Fix only Cell Config Conflicts"): the written cell keeps the winner's precombine and previs data, and brings forward the last real change of each configuration field from earlier versions.
+2. **Cell configuration merge (requested; optional setting, off by default).** CELL records written to outputs: **done** (see "Cell configuration merge" below). WRLD, and cells whose winner stays (Multiplexer_Patch.esp): **done** (see "Cell configuration merge: worldspaces and winners that stay" below). Like PJM's FO4CheckPrevisbines option 4 ("Fix only Cell Config Conflicts"): the written cell keeps the winner's precombine and previs data, and brings forward the last real change of each configuration field from earlier versions.
    - **Fields brought forward.**
      - CELL: MHDT, EDID, XCLL, XLCN, XCMO, XEZN, XCAS, XCIM, XGDR, XCCM, XCWT, XWCU, XCLW, XILW, LTMP, and XCLR (regions, the union of every version's list).
      - CELL flags: No LOD Water, Show Sky, Use Sky Lighting, Distance LOD Only, Has Water, Sunlight Shadows, Can Travel From Here, Player Followers Can't Travel Here, Public Area, Hand Changed, Can't Wait, Off Limits.
@@ -1152,3 +1152,41 @@ light-radius warnings, NAVM unused data, VMAD property types. Two came from the 
   which include the base ones. In the reviewed outputs, 21 FACT records had duplicate XNAM relations;
   NPC factions and perks use the same path. The merged list now holds only the merged items. The IPDS
   test covers it.
+
+## Cell configuration merge: worldspaces and winners that stay (18 Nov 2026)
+
+With `mergeCellConfig` on:
+
+- **Worldspaces.** Each WRLD written to an output (merged, or copied to hold compiled cells) takes the
+  last real change of MHDT, XWEM, ICON, XEZN, CNAM, LTMP, XLCN, NAM2, NAM3 and ZNAM, with the same rule as
+  cells: the last version whose value is set and differs from the defining plugin's. WNAM and PNAM (the
+  parent worldspace and what is taken from it) are never changed. There are no worldspace flags,
+  regions or partial versions to handle.
+- **Winners that stay.** A CELL or WRLD that no output writes has more than one version and a winning
+  version from a plugin that stays. It is taken in as the game loads it now and merged the same way. One
+  whose merge (and, for cells with compiled versions under them, the cell inheritance pass) changes
+  nothing is dropped again. A kept one is written:
+  - to the patch, which loads last. An exterior cell goes into the same patch plugin as its worldspace,
+    so the worldspace is written too: merged, or the game's current version.
+  - to the output that already holds its worldspace, for an exterior cell whose worldspace an output
+    writes. A plugin holds a cell only with its worldspace, and outputs also load after every plugin
+    that stays.
+- **Previs files.** Writing such a cell makes the plugin holding it the one the game reads the cell's
+  own previs file in. The file's records are read in today's numbering before allocation and become
+  masters of that plugin. The file is then translated as for compiled cells (P2b). A file that cannot
+  be read, names a compiled record no output writes, or fails to translate leaves the cell out. Failing
+  to translate is an Error on the cell, so the next validation round leaves it out, as for patch
+  records.
+- **Partial winners** are left as they are. A cell the inheritance pass cannot handle is dropped
+  quietly: it loads as it would have without the option.
+
+Each record written this way gets an Info line ("Cell Configuration") saying where it went, beside the
+existing line listing the fields taken. Test `cell_configuration_merge_writes_cells_whose_winner_stays`
+covers three setups:
+- an interior cell, a worldspace and an exterior cell whose winners stay: patched, the cell with its
+  worldspace;
+- a cell nothing changed: not written;
+- the same cell and worldspace held by an output because a compiled plugin places a reference there:
+  merged in the output.
+
+The exported plugins pass the written-content and layout checks.

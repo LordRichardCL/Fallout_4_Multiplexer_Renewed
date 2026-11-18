@@ -718,6 +718,54 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         }
     }
 
+    // Cells taken in for the configuration merge -> the records their previs file names (their masters).
+    std::map<FormKey, std::vector<FormKey>> configPrevisRecords;
+    // ---- Cell configuration merge: cells and worldspaces whose winner stays ----------------
+    // A cell or worldspace no output writes, with more than one version and a winning version from a
+    // plugin that stays, is taken in as the game loads it now (configOnly). The configuration merge
+    // below brings the other versions' changes into it; one it leaves unchanged is dropped again.
+    // Partial winners are left as they are, as for written cells.
+    if (options.mergeCellConfig) {
+        Normalizer norm(session);
+        for (uint32_t gi = 0; gi < session.groups.size(); ++gi) {
+            const auto inst = session.instances(session.groups[gi]);
+            const Signature s = inst[0].signature;
+            if ((s != sig::CELL && s != Signature("WRLD")) || inst.size() < 2)
+                continue;
+            const FormKey key = inst[0].key;
+            const auto& last = inst.back();
+            if (!key.valid() || out.indexByKey.count(key) || out.compiledFlag_[key.origin] ||
+                out.compiledFlag_[last.plugin] || options.skipPatchRecords.count(key.packed()) ||
+                (s == sig::CELL && (last.flags & kCellPartialFlag)))
+                continue;
+            EmittedRecord e;
+            e.key = key;
+            e.sig = s;
+            for (size_t i = inst.size(); i-- > 0;)
+                if (inst[i].editorId) {
+                    e.editorId = session.strings.get(inst[i].editorId);
+                    break;
+                }
+            e.configOnly = true;
+            e.winner = last.plugin;
+            for (const auto& r : inst)
+                e.chain.push_back(r.plugin);
+            e.contributors.push_back(last.plugin);
+            try {
+                e.fields = splitFields(norm.normalize(last), session.defs);
+            } catch (const std::exception& ex) {
+                addIssue(Severity::Warning, "Cell Configuration",
+                         session.formLabel(key) + ": cannot be read (" + ex.what() + "); left as it is",
+                         key, session.pluginName(last.plugin));
+                continue;
+            }
+            e.size = estimateSize(e.fields);
+            placeFrom(e, last);
+            out.indexByKey[key] = static_cast<uint32_t>(out.records.size());
+            out.records.push_back(std::move(e));
+        }
+    }
+
     // A quest holding compiled dialogue (topics, scenes, branches) is written with it, in one output.
     {
         std::set<FormKey> quests;
@@ -885,7 +933,12 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             } catch (const std::exception& ex) {
                 problem = std::string("cannot be compared with its earlier versions (") + ex.what() + ")";
             }
-            if (!problem.empty()) {
+            if (!problem.empty() && e.configOnly) {
+                // Taken in only for the configuration merge: left out again, so the cell loads as it
+                // would have without the merge.
+                previsCells.insert(e.key);
+                e.configChanged = false;
+            } else if (!problem.empty()) {
                 previsCells.insert(e.key);
                 addIssue(Severity::Error, "Cell Inheritance",
                          session.formLabel(e.key) + " as written from " + session.pluginName(e.winner) + ": " +
@@ -893,6 +946,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                              "the cell stay",
                          e.key, session.pluginName(e.winner));
             } else if (!inherited.empty()) {
+                e.configChanged = true;
                 e.size = estimateSize(e.fields);
                 addIssue(Severity::Info, "Cell Inheritance",
                          session.formLabel(e.key) + " is written from " + session.pluginName(e.winner) +
@@ -910,11 +964,15 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     // flag and the record's identity. Partial cells, and cells the inheritance guard keeps out, as they are.
     if (options.mergeCellConfig) {
         Normalizer cfgNorm(session);
-        static const Signature kConfigSigs[] = {Signature("EDID"), Signature("MHDT"), Signature("XCLL"),
-                                                Signature("XLCN"), Signature("XCMO"), Signature("XEZN"),
-                                                Signature("XCAS"), Signature("XCIM"), Signature("XGDR"),
-                                                Signature("XCCM"), Signature("XCWT"), Signature("XWCU"),
-                                                Signature("XCLW"), Signature("XILW"), Signature("LTMP")};
+        static const std::vector<Signature> kCellSigs = {
+            Signature("EDID"), Signature("MHDT"), Signature("XCLL"), Signature("XLCN"), Signature("XCMO"),
+            Signature("XEZN"), Signature("XCAS"), Signature("XCIM"), Signature("XGDR"), Signature("XCCM"),
+            Signature("XCWT"), Signature("XWCU"), Signature("XCLW"), Signature("XILW"), Signature("LTMP")};
+        // Worldspaces: max height data, water environment map, map image, encounter zone, climate,
+        // interior lighting, location, water, LOD water, music. Never the parent worldspace (WNAM, PNAM).
+        static const std::vector<Signature> kWorldSigs = {
+            Signature("MHDT"), Signature("XWEM"), Signature("ICON"), Signature("XEZN"), Signature("CNAM"),
+            Signature("LTMP"), Signature("XLCN"), Signature("NAM2"), Signature("NAM3"), Signature("ZNAM")};
         // xEdit's CELL DATA flags: Has Water, Can't Travel From Here, No LOD Water, Public Area, Hand
         // Changed, Show Sky, Use Sky Lighting, Sunlight Shadows, Distant LOD only, Player Followers Can't
         // Travel Here. Record flags: Off Limits (17), Can't Wait (19); never No Pre Vis (7).
@@ -1012,7 +1070,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             return &*dst.fields.insert(dst.fields.begin() + static_cast<std::ptrdiff_t>(pos), field);
         };
         for (auto& e : out.records) {
-            if (e.sig != sig::CELL || previsCells.count(e.key))
+            const bool isCell = e.sig == sig::CELL;
+            if ((!isCell && e.sig != Signature("WRLD")) || previsCells.count(e.key))
                 continue;
             const auto* g = session.findGroup(e.key);
             if (!g)
@@ -1024,7 +1083,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     w = i;
                     break;
                 }
-            if (w == chain.size() || w == 0 || (chain[w].flags & kCellPartialFlag))
+            if (w == chain.size() || w == 0 || (isCell && (chain[w].flags & kCellPartialFlag)))
                 continue;
             std::vector<std::string> taken;
             try {
@@ -1032,14 +1091,14 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 std::vector<FieldSet> versions;
                 std::vector<PluginIndex> from;
                 for (size_t i = 0; i <= w; ++i) {
-                    if (i > 0 && (chain[i].flags & kCellPartialFlag))
+                    if (i > 0 && isCell && (chain[i].flags & kCellPartialFlag))
                         continue;
                     versions.push_back(splitFields(cfgNorm.normalize(chain[i]), session.defs));
                     from.push_back(chain[i].plugin);
                 }
                 const size_t last = versions.size() - 1; // the written version
                 auto& base = versions.front();
-                for (const Signature sig : kConfigSigs) {
+                for (const Signature sig : isCell ? kCellSigs : kWorldSigs) {
                     const Field* baseField = bySig(base, sig);
                     int change = -1;
                     for (size_t v = versions.size(); v-- > 1;) {
@@ -1062,7 +1121,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     taken.push_back(sig.str() + " from " + session.pluginName(from[static_cast<size_t>(change)]));
                 }
                 // Regions: every region any version lists, the written version's first.
-                {
+                if (isCell) {
                     Field* dst = bySig(e.fields, Signature("XCLR"));
                     std::set<std::string> sources;
                     size_t added = 0;
@@ -1116,6 +1175,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                         taken.push_back(std::string(what) + " from " +
                                         join(std::vector<std::string>(sources.begin(), sources.end()), ", "));
                 };
+                if (isCell) {
                 mergeBits(
                     kDataBits, [&](FieldSet& s) -> uint32_t { return u16Of(bySig(s, Signature("DATA"))); },
                     [&](uint32_t v) {
@@ -1136,14 +1196,19 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                         return true;
                     },
                     "record flags (Off Limits, Can't Wait)");
+                }
             } catch (const std::exception& ex) {
                 addIssue(Severity::Warning, "Cell Configuration",
                          session.formLabel(e.key) + ": its versions could not be compared (" + ex.what() +
-                             "); written from " + session.pluginName(e.winner) + " as it is",
+                             (e.configOnly ? std::string("); left as it is")
+                                           : "); written from " + session.pluginName(e.winner) + " as it is"),
                          e.key, session.pluginName(e.winner));
+                if (e.configOnly)
+                    e.configChanged = false;
                 continue;
             }
             if (!taken.empty()) {
+                e.configChanged = true;
                 e.size = estimateSize(e.fields);
                 addIssue(Severity::Info, "Cell Configuration",
                          session.formLabel(e.key) + " is written from " + session.pluginName(e.winner) +
@@ -1152,6 +1217,133 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             }
         }
     }
+    // Cells and worldspaces taken in only for the configuration merge: kept when it changed them, with
+    // the worldspace an exterior cell needs (the game's current version when nothing changed it). They
+    // go to the patch (Multiplexer_Patch.esp), which loads last; an exterior cell whose worldspace an
+    // output already holds goes with it into that output instead, as a plugin holds a cell only with its
+    // worldspace and outputs, too, load after every plugin that stays. A cell with its own previs file
+    // makes the plugin holding it the one the game reads the file's FormIDs in, so the file is
+    // translated there (Previs Numbering, below) and the records it names become that plugin's masters;
+    // a file that cannot be read leaves the cell as it is.
+    if (options.mergeCellConfig) {
+        for (auto& e : out.records) {
+            if (!e.configOnly || !e.configChanged || e.sig != sig::CELL)
+                continue;
+            std::vector<FormKey> keys;
+            std::string problem;
+            bool ok = previsRecords(session, e, keys, problem);
+            for (const auto& k : keys)
+                if (ok && out.compiledFlag_[k.origin] && !out.indexByKey.count(k)) {
+                    ok = false;
+                    problem = "its previs file names " + session.formLabel(k) + ", which no output writes";
+                }
+            if (!ok) {
+                e.configChanged = false;
+                addIssue(Severity::Warning, "Cell Configuration",
+                         session.formLabel(e.key) + ": left as it is; " + problem, e.key,
+                         session.pluginName(e.winner));
+            } else if (!keys.empty()) {
+                configPrevisRecords[e.key] = std::move(keys);
+            }
+        }
+        std::set<FormKey> needed;
+        for (const auto& e : out.records)
+            if (e.configOnly && e.configChanged && e.parent.valid())
+                needed.insert(e.parent);
+        std::vector<EmittedRecord> kept;
+        kept.reserve(out.records.size());
+        for (auto& e : out.records) {
+            if (e.configOnly && !e.configChanged) {
+                if (!needed.count(e.key))
+                    continue;
+                e.container = true;
+                out.containers++;
+            } else if (e.configOnly) {
+                out.configRecords++;
+            }
+            kept.push_back(std::move(e));
+        }
+        out.records = std::move(kept);
+        out.indexByKey.clear();
+        for (uint32_t i = 0; i < out.records.size(); ++i)
+            out.indexByKey[out.records[i].key] = i;
+        // A worldspace no output writes and with no other version: copied as the game loads it.
+        Normalizer norm(session);
+        for (const auto& k : needed) {
+            if (out.indexByKey.count(k))
+                continue;
+            const auto* g = session.findGroup(k);
+            if (!g || out.compiledFlag_[k.origin])
+                continue; // checked below: the cell is then dropped
+            const auto inst = session.instances(*g);
+            EmittedRecord w;
+            w.key = k;
+            w.sig = inst.back().signature;
+            for (size_t i = inst.size(); i-- > 0;)
+                if (inst[i].editorId) {
+                    w.editorId = session.strings.get(inst[i].editorId);
+                    break;
+                }
+            w.container = true;
+            w.configOnly = true;
+            w.winner = inst.back().plugin;
+            for (const auto& r : inst)
+                w.chain.push_back(r.plugin);
+            w.contributors.push_back(inst.back().plugin);
+            try {
+                w.fields = splitFields(norm.normalize(inst.back()), session.defs);
+            } catch (const std::exception&) {
+                continue;
+            }
+            w.size = estimateSize(w.fields);
+            placeFrom(w, inst.back());
+            out.indexByKey[k] = static_cast<uint32_t>(out.records.size());
+            out.records.push_back(std::move(w));
+            out.containers++;
+        }
+        // Where each goes; a cell whose worldspace could not be copied is left as it is.
+        std::vector<uint8_t> drop(out.records.size(), 0);
+        bool dropping = false;
+        for (auto& e : out.records) {
+            if (!e.configOnly)
+                continue;
+            e.patch = true;
+            if (!e.parent.valid())
+                continue;
+            auto it = out.indexByKey.find(e.parent);
+            if (it == out.indexByKey.end()) {
+                addIssue(Severity::Warning, "Cell Configuration",
+                         session.formLabel(e.key) + ": left as it is; its worldspace " +
+                             session.formLabel(e.parent) + " cannot be written with it",
+                         e.key, session.pluginName(e.winner));
+                drop[out.indexByKey.at(e.key)] = 1;
+                dropping = true;
+                out.configRecords--;
+                continue;
+            }
+            if (!out.records[it->second].configOnly)
+                e.patch = false; // with its worldspace, in an output
+        }
+        if (dropping) {
+            std::vector<EmittedRecord> rest;
+            for (uint32_t i = 0; i < out.records.size(); ++i)
+                if (!drop[i])
+                    rest.push_back(std::move(out.records[i]));
+            out.records = std::move(rest);
+            out.indexByKey.clear();
+            for (uint32_t i = 0; i < out.records.size(); ++i)
+                out.indexByKey[out.records[i].key] = i;
+        }
+        for (const auto& e : out.records)
+            if (e.configOnly && !e.container)
+                addIssue(Severity::Info, "Cell Configuration",
+                         session.formLabel(e.key) + "'s winning version (" + session.pluginName(e.winner) +
+                             ") stays in the load order; the merged " + (e.sig == sig::CELL ? "cell" : "worldspace") +
+                             " is written to " + (e.patch ? options.patchName : std::string("the output holding its worldspace")) +
+                             ", which loads after it",
+                         e.key, session.pluginName(e.winner));
+    }
+
     // Previs (XPRI): a new reference listed there is in a previs file (.uvd), which holds its FormID in
     // the numbering of the plugin whose cell record wins. A cell's own previs file is translated into
     // the output's numbering when the cell is written (P2b, "Previs Numbering" below), or keeps the
@@ -1399,6 +1591,10 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             for (const auto& [k, via] : collectRefs(e.fields))
                 if (k.valid() && !session.plugins[k.origin].baseGame)
                     need.insert(k.origin);
+            if (auto it = configPrevisRecords.find(e.key); it != configPrevisRecords.end())
+                for (const auto& k : it->second)
+                    if (!session.plugins[k.origin].baseGame)
+                        need.insert(k.origin);
             std::set<PluginIndex> merged = current;
             merged.insert(need.begin(), need.end());
             if (patchCount == 0 || merged.size() > limit) {
@@ -1409,6 +1605,11 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             }
             patchOutput[v] = N + patchCount - 1;
         }
+        // A cell goes into the patch plugin holding its worldspace.
+        for (auto v : patchRecords)
+            if (const auto& e = out.records[v]; e.parent.valid())
+                if (auto it = out.indexByKey.find(e.parent); it != out.indexByKey.end() && out.records[it->second].patch)
+                    patchOutput[v] = patchOutput[it->second];
     }
 
     out.outputs.resize(static_cast<size_t>(N + patchCount));
@@ -1587,6 +1788,10 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 for (const auto& [k, via] : collectRefs(e.fields))
                     if (k.valid() && !out.compiledFlag_[k.origin])
                         m.insert(k.origin);
+                if (auto it = configPrevisRecords.find(e.key); it != configPrevisRecords.end())
+                    for (const auto& k : it->second)
+                        if (!out.compiledFlag_[k.origin])
+                            m.insert(k.origin);
             };
             // Room for other outputs as masters.
             const size_t limit = 254 > static_cast<size_t>(N) ? 254 - static_cast<size_t>(N) : 1;
@@ -1777,7 +1982,12 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             const auto& e = out.records[v];
             if (!e.isNew && e.key.valid())
                 retained.insert(e.key.origin);
-            for (const auto& [k, via] : collectRefs(e.fields)) {
+            std::vector<FormKey> refs;
+            for (const auto& [k, via] : collectRefs(e.fields))
+                refs.push_back(k);
+            if (auto it = configPrevisRecords.find(e.key); it != configPrevisRecords.end())
+                refs.insert(refs.end(), it->second.begin(), it->second.end());
+            for (const auto& k : refs) {
                 if (!k.valid())
                     continue;
                 if (out.compiledFlag_[k.origin]) {
@@ -2047,6 +2257,16 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 r.formIds = t.formIds;
                 r.changed = t.changed;
                 out.previsFiles.push_back(std::move(r));
+                continue;
+            }
+            if (e.configOnly) {
+                // Written only for the configuration merge: the next round leaves it out (as it is today).
+                addIssue(Severity::Error, "Previs Numbering",
+                         session.formLabel(e.key) + " (cell configuration merge) is written to " +
+                             out.outputName(e.output) + ", so its previs file " + t.path +
+                             " would be read in that plugin's numbering, but " + t.problem +
+                             "; the merged cell is left out",
+                         e.key, session.pluginName(e.winner));
                 continue;
             }
             const std::string why = session.formLabel(e.key) + " is written to " + out.outputName(e.output) +

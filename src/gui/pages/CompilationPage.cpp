@@ -199,7 +199,9 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "change of each configuration field from the others: lighting, lighting template, location, encounter "
         "zone, music, acoustic space, image space, god rays, water, regions and the cell's flags. Like "
         "FO4CheckPrevisbines' \"Fix only Cell Config Conflicts\". Off: the winning mod's version is written as "
-        "it is. Every field taken is listed in the report (Cell Configuration).");
+        "it is. Worldspaces take the same from their versions (climate, water, music, map, location...). A "
+        "cell or worldspace whose winning mod stays in the load order is written, merged, to "
+        "Multiplexer_Patch.esp. Every field taken is listed in the report (Cell Configuration).");
     brokenAsNull_ = new QCheckBox("Write broken references as null (lossy)");
     brokenAsNull_->setToolTip(
         "A reference that cannot be written faithfully (its master is missing, or it names a record its compiled "

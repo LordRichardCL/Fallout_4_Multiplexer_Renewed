@@ -113,6 +113,10 @@ struct EmittedRecord {
     FormKey parent;
     bool container = false;
     bool world = false; // a cell, worldspace or cell child: all go to one output
+    // Cell configuration merge: a cell or worldspace no output would write otherwise (its winning
+    // version stays), written only when the merge changes it (configChanged).
+    bool configOnly = false;
+    bool configChanged = false;
 };
 
 struct OutputPlugin {
@@ -206,6 +210,7 @@ struct CompiledOutput {
     size_t mergesReused = 0;   // override chains restored from the build cache
     size_t mergesComputed = 0; // override chains merged in this compilation
     size_t containers = 0;     // cells and worldspaces copied to hold compiled references
+    size_t configRecords = 0;  // cells and worldspaces written only for the cell configuration merge
     // Reopened from an export after a restart (no records in memory): enough to switch the load order
     // over (Apply to Game), never to export again.
     bool restored = false;

@@ -42,6 +42,12 @@ struct PrevisTranslation {
 };
 PrevisTranslation translatePrevis(Session& session, const CompiledOutput& out, const EmittedRecord& cell);
 
+// The records a cell's own previs file names, read as the game reads them today (the winning plugin's
+// numbering); IDs that point to no record are left out (translatePrevis gives them unused IDs). Used to
+// give the plugin that will hold the cell the masters the translated file needs. False with `problem`
+// set when the file is there but cannot be read; true with no keys when the cell has no file of its own.
+bool previsRecords(Session& session, const EmittedRecord& cell, std::vector<FormKey>& keys, std::string& problem);
+
 // Read-only evidence for cells kept out because of their precombine or previs data: reads the
 // cell's previs file (vis\<plugin>\<cell>.uvd, or the file named by RVIS) and looks for its
 // precombined meshes, then compares the file's object IDs with the cell's previs (XPRI) and

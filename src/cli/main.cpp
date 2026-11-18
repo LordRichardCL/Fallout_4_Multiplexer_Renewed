@@ -93,8 +93,9 @@ Compile options:
   --light              ESL-flag outputs that fit the light plugin range
   --no-previs-translation  do not write translated previs files (only the export changes: the same
                        checks run and the same plugins compile; for testing)
-  --merge-cell-config  cells several plugins change take the last real change of each configuration
-                       field (lighting, location, water, regions...) and keep the winner's previs data
+  --merge-cell-config  cells and worldspaces several plugins change take the last real change of each
+                       configuration field (lighting, location, water, regions...) and keep the
+                       winner's previs data; those whose winner stays go to the patch
   --broken-references-as-null  write references that cannot be written faithfully (missing master,
                        or a record a compiled plugin does not contain) as null and compile their
                        plugin (lossy); default: that plugin stays in the load order

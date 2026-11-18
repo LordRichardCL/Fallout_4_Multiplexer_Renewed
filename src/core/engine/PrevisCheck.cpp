@@ -151,6 +151,33 @@ PrevisTranslation translatePrevis(Session& session, const CompiledOutput& out, c
     return t;
 }
 
+bool previsRecords(Session& session, const EmittedRecord& e, std::vector<FormKey>& keys, std::string& problem)
+{
+    keys.clear();
+    const std::string path = previsFilePath(session, e.key);
+    if (!ownsPrevisFile(e) || !assetExists(session, path))
+        return true;
+    const auto* winner = session.winner(e.key);
+    if (!winner) {
+        problem = "the cell's winning record was not found";
+        return false;
+    }
+    const auto file = readPrevisFile(session.readAsset(path));
+    if (!file.recognised) {
+        problem = path + ": its layout is not recognised (" + file.problem + ")";
+        return false;
+    }
+    std::set<FormKey> seen;
+    for (uint32_t raw : file.ids) {
+        if (PrevisFile::isCombinedObject(raw))
+            continue;
+        const FormKey k = session.resolve(session.plugins[winner->plugin], raw);
+        if (k.valid() && session.winner(k) && seen.insert(k).second)
+            keys.push_back(k);
+    }
+    return true;
+}
+
 std::string checkPrevis(Session& session, const EmittedRecord& e)
 {
     std::set<FormKey> xpri, xcri;

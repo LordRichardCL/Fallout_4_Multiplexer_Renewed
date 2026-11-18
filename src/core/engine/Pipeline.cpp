@@ -755,7 +755,7 @@ bool Pipeline::compile(ProgressSink& progress)
             if (it == compiled_->indexByKey.end())
                 continue;
             const auto& e = compiled_->records[it->second];
-            if (e.patch) {
+            if (e.patch || e.configOnly) { // a record written only to merge: left out next round
                 if (options.skipPatchRecords.insert(e.key.packed()).second) {
                     isolatedPatchRecords.emplace(session_->formLabel(e.key), is.message);
                     ++isolated;
