@@ -4944,6 +4944,79 @@ TEST(robco_config_named_after_a_compiled_plugin_follows_the_output)
     CHECK(manifest.find("Multiplexer - mods\\" + kw->outputPlugin + ".ini") != std::string::npos);
 }
 
+// A plugin whose name has an apostrophe: its RobCo config <plugin>.ini is still a gate (owner's
+// build: "Tina's Candy Land.esp.ini" was missed, the plugin was compiled and RobCo skipped the config).
+TEST(robco_gate_for_a_plugin_name_with_an_apostrophe)
+{
+    auto root = referenceInstall("refrobcoapos");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "Tina's Mod.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000812, {zs("EDID", "Tina_Keyword")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModS.esp\n*ModT.esp\n*Tina's Mod.esp\n");
+    writeFile(data / "F4SE" / "Plugins" / "RobCo_Patcher" / "kcd" / "Tina's Mod.esp.ini",
+              "filterByKeyword=Tina's Mod.esp|812:Fallout4.esm|800\n");
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    bool gate = false;
+    for (const auto* r : referencesOf(s, "Tina's Mod.esp"))
+        gate |= r->context == ReferenceScanner::kRobCoGate;
+    CHECK(gate);
+    CHECK(p.compile());
+    if (!p.compiledOutput()->isCompiled(s.findPlugin("Tina's Mod.esp")->index))
+        return; // kept out: nothing is lost either
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const FormMapping* kw = nullptr;
+    for (const auto& m : p.compiledOutput()->mappings)
+        if (m.editorId == "Tina_Keyword")
+            kw = &m;
+    CHECK(kw != nullptr);
+    if (!kw)
+        return;
+    const auto base = copyIn(result.directory, "f4se/plugins/robco_patcher");
+    CHECK(std::filesystem::exists(base / "kcd" / "Multiplexer - tina's mod" / (kw->outputPlugin + ".ini")));
+    CHECK(!std::filesystem::exists(base / "kcd" / "tina's mod.esp.ini"));
+}
+
+// A light plugin's FormID with bits above its own 12: the game keeps the low 12 (owner's build:
+// RobCo found Ketaros_World.esp|D646, record 646, before compiling). It names that record, so the
+// config follows it into the output instead of being left naming a plugin that is no longer loaded.
+TEST(light_plugin_formid_names_the_record_its_low_bits_name)
+{
+    auto root = referenceInstall("reflightmask");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModL.esl", {"Fallout4.esm"}, {record("KYWD", 0x01000812, {zs("EDID", "ModL_Keyword")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModS.esp\n*ModT.esp\n*ModL.esl\n");
+    writeFile(data / "F4SE" / "Plugins" / "RobCo_Patcher" / "kcd" / "keywords.ini",
+              "filterByKeyword=ModL.esl|D812:Fallout4.esm|800\n");
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto& s = p.session();
+    if (!p.compiledOutput()->isCompiled(s.findPlugin("ModL.esl")->index))
+        return; // kept out: nothing is lost either
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const FormMapping* kw = nullptr;
+    for (const auto& m : p.compiledOutput()->mappings)
+        if (m.editorId == "ModL_Keyword")
+            kw = &m;
+    CHECK(kw != nullptr);
+    if (!kw)
+        return;
+    char id[16];
+    std::snprintf(id, sizeof(id), "%04X", kw->objectId); // the original's width (D812) is kept
+    const auto written = copyIn(result.directory, "f4se/plugins/robco_patcher/kcd/keywords.ini");
+    CHECK_EQ(slurpFile(written), "filterByKeyword=" + kw->outputPlugin + "|" + id + ":Fallout4.esm|800\n");
+}
+
 // Windows limits paths to 259 characters. A RobCo config named after a plugin with a long name gets a
 // short folder name when "Multiplexer - <plugin>" would not fit under the output folder; when even that
 // does not fit, its plugin stays in the load order (planned, not failed at export: owner's build, a

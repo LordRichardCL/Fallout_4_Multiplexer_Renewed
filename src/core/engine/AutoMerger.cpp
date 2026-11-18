@@ -110,12 +110,11 @@ struct Relocation {
     }
     const std::pair<std::string, uint32_t>* find(const Session& session, PluginIndex plugin, uint32_t formId) const
     {
-        // A light plugin's records are 000-FFF, written alone or as a load-order FormID FExxx<id>;
-        // anything else names no record of it (masking would pick an unrelated one).
-        const bool light = session.plugins[plugin].isLight();
-        if (light && (formId & 0x00FFF000u) != 0 && (formId >> 24) != 0xFE)
-            return nullptr;
-        const uint32_t mask = light ? 0xFFF : 0xFFFFFF;
+        // The game looks a (plugin, FormID) pair up keeping only the bits that are the plugin's own:
+        // the low 12 for a light plugin, the low 24 otherwise. RobCo Patcher, GetFormFromFile and
+        // the CommonLib tools all do, so "Light.esp|D646" names record 646 (owner's build: RobCo
+        // found Ketaros_World.esp|D646 before compiling, and nothing after it was left unchanged).
+        const uint32_t mask = session.plugins[plugin].isLight() ? 0xFFF : 0xFFFFFF;
         auto it = byRecord.find((uint64_t(plugin) << 32) | (formId & mask));
         return it == byRecord.end() ? nullptr : &it->second;
     }

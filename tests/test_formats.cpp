@@ -662,6 +662,16 @@ TEST(pex_and_config_plugin_names)
     CHECK_EQ(names.size(), size_t(2));
     CHECK(std::find(names.begin(), names.end(), "some mod - patch.esp") != names.end());
     CHECK(std::find(names.begin(), names.end(), "other.esm") != names.end());
+
+    // Apostrophes may be part of the name (owner's build: RobCo's "Tina's Candy Land.esp.ini" was
+    // read as "s candy land.esp", so the gate was missed and the config skipped after compiling).
+    names = AssetScanner::pluginNamesInText("Tina's Candy Land.esp.ini");
+    CHECK(std::find(names.begin(), names.end(), "tina's candy land.esp") != names.end());
+    names = AssetScanner::pluginNamesInText("x='Dr. Phibbs' Limbs.esp'");
+    CHECK(std::find(names.begin(), names.end(), "dr. phibbs' limbs.esp") != names.end());
+    names = AssetScanner::pluginNamesInText("sPlugin='Quoted.esp'");
+    CHECK_EQ(names.size(), size_t(1));
+    CHECK_EQ(names[0], std::string("quoted.esp"));
 }
 
 // Compiled Fallout 4 scripts: the scanner walks the whole file and finds GetFormFromFile calls; any

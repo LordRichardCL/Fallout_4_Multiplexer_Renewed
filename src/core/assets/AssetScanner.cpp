@@ -56,18 +56,33 @@ std::vector<std::string> AssetScanner::pluginNamesInText(std::string_view text)
             size_t end = pos + 4;
             bool boundary = end >= lower.size() || !std::isalnum(static_cast<unsigned char>(lower[end]));
             if (boundary) {
+                // An apostrophe may quote the name or be part of it ("Tina's Candy Land.esp",
+                // "Dr. Phibbs' ...esp"): every start after one is a candidate, and callers keep
+                // the candidates that are plugin names. Missing the full name would let a plugin
+                // named in a file name be compiled while that file still needs the name.
+                std::vector<size_t> starts;
                 size_t start = pos;
                 while (start > 0) {
                     char c = lower[start - 1];
-                    if (c == '"' || c == '\'' || c == '=' || c == '|' || c == ',' || c == ':' || c == '\n' ||
-                        c == '\r' || c == '\t' || c == '>' || c == '<' || c == '/' || c == '\\' || c == '~' ||
-                        c == '[' || c == ']' || c == '{' || c == '}' || c == ';' || c == '(')
+                    if (c == '\'') {
+                        starts.push_back(start);
+                        --start;
+                        continue;
+                    }
+                    if (c == '"' || c == '=' || c == '|' || c == ',' || c == ':' || c == '\n' || c == '\r' ||
+                        c == '\t' || c == '>' || c == '<' || c == '/' || c == '\\' || c == '~' || c == '[' ||
+                        c == ']' || c == '{' || c == '}' || c == ';' || c == '(')
                         break;
                     --start;
                 }
-                std::string name = trim(std::string_view(lower).substr(start, end - start));
-                if (name.size() > 4)
-                    out.push_back(name);
+                starts.push_back(start);
+                for (size_t s : starts) {
+                    while (s < end && lower[s] == '\'')
+                        ++s;
+                    std::string name = trim(std::string_view(lower).substr(s, end - s));
+                    if (name.size() > 4 && std::find(out.begin(), out.end(), name) == out.end())
+                        out.push_back(name);
+                }
             }
             pos = end;
         }
