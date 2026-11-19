@@ -22,6 +22,8 @@ Untick **Show this screen at start-up** to go straight to the Dashboard next tim
 
 ## 2. Settings
 
+**Finding your way around.** Every page starts with its icon, a title and one line saying what it is for. The longer explanation is behind the **?** next to the title (hover over it); options have their own **?** too. Options are switches with a short description under them. The page's main action is the green button; Save Settings is an ordinary button on the pages that have it, except on Settings itself.
+
 **Settings** holds the same installation details plus everything else. Choose your installation type:
 
 | Type | What to enter |
@@ -34,7 +36,7 @@ Optional overrides: a different `plugins.txt`, a different INI folder, and the s
 
 **Never compile these plugins** lets you keep plugins in the load order. For example, keep a patch you are still editing.
 
-**Saving settings.** The Settings page is where all settings live, but the Compilation and Advanced Users Auto-Merger pages have options too, and each of these pages has a **Save Settings** button. All of them save the same settings, wherever the changes were made. A change is kept as soon as you make it, while you move between pages, and the next Scan, Analyse or Compile uses it. **Save Settings** keeps it after the app is closed. While something is unsaved the button shows a dot (**Save Settings •**). Closing the app with unsaved changes asks whether to save them. A new results database path is used only once saved. Running a task never saves settings for you. Excluding a plugin on the Plugins page is saved at once, without saving anything else.
+**Saving settings.** The Settings page is where all settings live, but the Compilation and Auto-Merger pages have options too, and each of these pages has a **Save Settings** button. All of them save the same settings, wherever the changes were made. A change is kept as soon as you make it, while you move between pages, and the next Scan, Analyse or Compile uses it. **Save Settings** keeps it after the app is closed. While something is unsaved the button shows a dot (**Save Settings •**). Closing the app with unsaved changes asks whether to save them. A new results database path is used only once saved. Running a task never saves settings for you. Excluding a plugin on the Plugins page is saved at once, without saving anything else.
 
 ## 3. Scan
 
@@ -487,7 +489,9 @@ Where they are found: script properties (VMAD) in the active plugins' own record
 
 ## Advanced Users Auto-Merger
 
-An optional, separate mode for experienced users (left sidebar: **Advanced Users Auto-Merger**). It is off by default; the normal compiler never needs it.
+![Auto-Merger](images/18-auto-merger.png)
+
+An optional, separate mode for experienced users (left sidebar, under Tools: **Auto-Merger**). It is off by default; the normal compiler never needs it.
 
 **What it does.** With the Auto-Merger on, a plugin whose filename references are all **Safe** or **Rewritable** is compiled, and exactly its Rewritable references are changed, in copies written into the output folder:
 
@@ -514,7 +518,7 @@ A copy that fails any check keeps its plugins in the load order (**Kept Out Auto
 - **To undo**, turn the Auto-Merger off and export again, or delete the files listed in the manifest. Copies changed since they were written are left alone.
 - The output folder's own copies are never read as originals when scanning.
 
-The tab lists every plugin with filename references (**Kept Out**, **Kept Out by a Failed Check**, **Relinkable**, **Compiled and Relinked**), every file with its classification and result, and every change. **Export HTML / JSON / TXT** saves its own report, also written by **Export All** as `AutoMergerReport`. On the command line: `--auto-merge`.
+The tab lists every plugin with filename references (**Kept Out**, **Kept Out by a Failed Check**, **Relinkable**, **Compiled and Relinked**), every file with its classification and result, and every change. The **HTML / JSON / TXT** buttons save its own report, also written by **Export All** as `AutoMergerReport`. On the command line: `--auto-merge`.
 
 Start a new game when using it, and keep backups of your mod setup.
 
@@ -523,6 +527,8 @@ Start a new game when using it, and keep backups of your mod setup.
 **Reports** previews each report and exports it as HTML, JSON, TXT or PDF. **Export All** writes every report to a folder in all three file formats (HTML, JSON and TXT). The TXT reports are plain text with aligned columns, for reading in any text editor. The command line's `--reports DIR` writes them too.
 
 ## Diagnostics (optional Diagnostic Recorder)
+
+![Diagnostics](images/17-diagnostics.png)
 
 `MultiplexerDiagnosticRecorder.dll` is an optional F4SE plugin that records a small, fixed set of events while you play: the game, F4SE and recorder versions, F4SE's start-up, game data, new game, save loading and saving messages, the active plugins as the game reads them, which F4SE plugins loaded (with F4SE's own reasons for those that did not), and whether the game exited normally. It changes no plugin, save or game data and installs no hooks; it is not a crash logger (keep Buffout 4 for crash logs).
 

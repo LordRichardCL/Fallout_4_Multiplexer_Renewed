@@ -36,12 +36,15 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
     search_->setPlaceholderText("Search plugins…");
     search_->setClearButtonEnabled(true);
     search_->setMinimumWidth(260);
-    auto* exportBtn = makeButton("Export…");
+    auto* exportBtn = makeButton("Export…", nullptr, "export");
     exportBtn->setToolTip("Save the blocking record types and every plugin's type, flags, record types, masters and "
                           "eligibility to a text file");
-    l->addWidget(makePageHeader("Plugin Explorer",
-                                "Every installed plugin, its type, records, masters and whether it can be compiled.",
-                                {search_, exportBtn}));
+    l->addWidget(makePageHeader("Plugin Explorer", "Every plugin, and whether it can be compiled.", {search_, exportBtn},
+                                "plugins",
+                                "Every installed plugin with its type, records, masters and eligibility. Select one to "
+                                "see why it can or cannot be compiled, the files that name it, and its record types. "
+                                "\"Exclude from compilation\" keeps a plugin in the load order as it is (saved with Save "
+                                "Settings)."));
     connect(exportBtn, &QPushButton::clicked, this, [this] {
         QString path = QFileDialog::getSaveFileName(
             this, "Export plugin report",
@@ -87,7 +90,7 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
     details_ = new QTextBrowser;
     details_->setOpenExternalLinks(false);
     sl->addWidget(details_, 1);
-    exclude_ = makeButton("Exclude from compilation");
+    exclude_ = makeButton("Exclude from compilation", nullptr, "block");
     exclude_->setEnabled(false);
     sl->addWidget(exclude_);
     split->addWidget(side);

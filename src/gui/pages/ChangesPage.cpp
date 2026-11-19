@@ -49,16 +49,18 @@ ChangesPage::ChangesPage(AppController* app, QWidget* parent) : Page(app, parent
     auto* l = new QVBoxLayout(this);
     l->setContentsMargins(28, 24, 28, 18);
     l->setSpacing(10);
-    auto* check = makeButton("Check Now");
-    auto* rebuild = makeButton("Rebuild", "Primary");
+    auto* check = makeButton("Check Now", nullptr, "refresh");
+    auto* rebuild = makeButton("Rebuild", "Primary", "compile");
     connect(check, &QPushButton::clicked, app_, &AppController::runCheck);
     connect(rebuild, &QPushButton::clicked, app_, &AppController::runRebuild);
     for (auto* b : {check, rebuild})
         connect(app_, &AppController::busyChanged, b, [b](bool busy) { b->setEnabled(!busy); });
-    l->addWidget(makePageHeader("Mod Space Changes",
+    l->addWidget(makePageHeader("Mod Space Changes", "What changed in your mods since the last build.", {check, rebuild},
+                                "changes",
                                 "Everything installed, removed, updated or reordered since the last build, and what it "
-                                "means for the compiled output. Changes marked as affecting the build require recompilation.",
-                                {check, rebuild}));
+                                "means for the compiled output. Changes marked \"Requires Rebuild\" change the game data "
+                                "the outputs hold: compile again. \"Asset layer only\" changes (meshes, textures, scripts "
+                                "and other loose files) need no rebuild."));
     banner_ = new BuildStatusBanner;
     l->addWidget(banner_);
     types_ = new QLabel;

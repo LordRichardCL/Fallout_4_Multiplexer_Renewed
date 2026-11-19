@@ -45,13 +45,20 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     l->setContentsMargins(28, 24, 28, 24);
     l->setSpacing(12);
 
-    auto* setupBtn = makeButton("Open Setup Screen");
+    auto* setupBtn = makeButton("Open Setup Screen", nullptr, "settings");
     auto* saveBtn = makeSaveSettingsButton();
-    l->addWidget(makePageHeader("Settings", "Where your game and mods are, and how analysis behaves.", {setupBtn, saveBtn}));
+    saveBtn->setObjectName("Primary"); // saving is this page's main action
+    saveBtn->setIcon(lineIcon("check", QColor(0xea, 0xff, 0xf2), 15));
+    l->addWidget(makePageHeader("Settings", "Where your game and mods are, and how analysis behaves.", {setupBtn, saveBtn},
+                                "settings",
+                                "Every page shares one set of settings. Changes are kept while you move between pages "
+                                "and take effect once saved with Save Settings (on this page, Compilation or "
+                                "Auto-Merger); saving keeps them after a restart."));
 
-    auto* installBox = new QGroupBox("Installation");
-    auto* il = new QVBoxLayout(installBox);
+    QVBoxLayout* il = nullptr;
+    auto* installBox = makeSectionCard("folder", "Installation", &il);
     auto* kinds = new QHBoxLayout;
+    kinds->setSpacing(22);
     mo2_ = new QRadioButton("Mod Organizer 2");
     vortex_ = new QRadioButton("Vortex");
     standalone_ = new QRadioButton("Standalone");
@@ -67,7 +74,7 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     auto* mo2Form = new QFormLayout(mo2Rows_);
     mo2Form->setContentsMargins(0, 0, 0, 0);
     auto* mo2Row = pathRow(mo2Path_, true, "Folder containing ModOrganizer.ini");
-    auto* findMo2 = makeButton("Find Instances");
+    auto* findMo2 = makeButton("Find Instances", nullptr, "scan");
     static_cast<QHBoxLayout*>(mo2Row->layout())->addWidget(findMo2);
     mo2Form->addRow("MO2 instance folder", mo2Row);
     connect(findMo2, &QPushButton::clicked, this, [this] {
@@ -117,7 +124,7 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
         "Downloads page ready to install (restart Vortex if it does not show). In Vortex: Settings → Downloads shows "
         "the folder; use its \"fallout4\" subfolder. Without it, drag the zip onto Vortex's Mods page instead.");
     dlHelp->setWordWrap(true);
-    dlHelp->setStyleSheet("color: palette(placeholder-text);");
+    dlHelp->setObjectName("OptionDescription");
     vortexForm->addWidget(dlHelp);
     il->addWidget(vortexRows_);
     connect(suggest, &QPushButton::clicked, this, [this] {
@@ -147,7 +154,7 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
 
     auto* form = new QFormLayout;
     auto* gameRow = pathRow(gamePath_, true, "Fallout 4 folder (contains Fallout4.exe)");
-    auto* detect = makeButton("Detect");
+    auto* detect = makeButton("Detect", nullptr, "scan");
     static_cast<QHBoxLayout*>(gameRow->layout())->addWidget(detect);
     form->addRow("Game folder", gameRow);
     form->addRow("plugins.txt override", pathRow(pluginsFile_, false, "Optional: use this plugins.txt instead"));
@@ -164,51 +171,61 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     il->addLayout(form);
     l->addWidget(installBox);
 
-    auto* analysisBox = new QGroupBox("Analysis and compilation");
-    auto* al = new QVBoxLayout(analysisBox);
-    al->addWidget(new QLabel("Never compile these plugins (one per line):"));
+    QVBoxLayout* al = nullptr;
+    l->addWidget(makeSectionCard("compile", "Analysis and compilation", &al));
+    al->addWidget(makeSectionTitle("Never compile these plugins",
+                                   "One plugin file name per line. These stay in the load order as they are, whatever "
+                                   "their eligibility. The Plugins page's \"Exclude from compilation\" adds to this "
+                                   "list."));
     excluded_ = new QPlainTextEdit;
+    excluded_->setPlaceholderText("One plugin per line, e.g. MyMod.esp");
     excluded_->setMaximumHeight(130);
     al->addWidget(excluded_);
-    creationClub_ = new QCheckBox("Allow compiling Creation Club plugins");
-    allTypes_ = new QCheckBox("Show field differences for record types that are not merged (slower, display only)");
-    al->addWidget(creationClub_);
-    al->addWidget(allTypes_);
-    l->addWidget(analysisBox);
+    creationClub_ = new ToggleSwitch("Allow compiling Creation Club plugins");
+    allTypes_ = new ToggleSwitch("Show field differences for record types that are not merged (slower, display only)");
+    al->addWidget(makeOptionRow("Allow compiling Creation Club plugins", "Off by default: they stay in the load order.",
+                                "Creation Club plugins are official content the game may check for by name. Leaving "
+                                "them in the load order is the safe default; turn this on only if you know the "
+                                "content does not depend on its own file.",
+                                {creationClub_}));
+    al->addWidget(makeOptionRow("Show field differences for every record type",
+                                "Slower. Display only: nothing compiled changes.",
+                                "The Conflict Centre compares values field by field for the record types that are "
+                                "merged. With this on it does the same for the other types too, so you can read their "
+                                "differences.",
+                                {allTypes_}));
 
-    auto* diagBox = new QGroupBox("Diagnostics");
-    auto* dl = new QVBoxLayout(diagBox);
-    recorder_ = new QCheckBox("Prepare the Diagnostic Recorder (optional F4SE plugin) with each export");
-    dl->addWidget(recorder_);
-    auto* diagNote = new QLabel(
+    QVBoxLayout* dl = nullptr;
+    l->addWidget(makeSectionCard("diagnostics", "Diagnostics", &dl));
+    recorder_ = new ToggleSwitch("Prepare the Diagnostic Recorder (optional F4SE plugin) with each export");
+    dl->addWidget(makeOptionRow(
+        "Prepare the Diagnostic Recorder with each export",
+        "An optional F4SE plugin that records what happens while you play, for the Diagnostics page.",
         "MultiplexerDiagnosticRecorder.dll records a small, fixed set of events while you play (versions, F4SE's "
         "start-up, game data, new game, load and save messages, the active plugins, which F4SE plugins loaded, and "
         "whether the game exited normally) so the Diagnostics page can point to likely causes. It changes no "
         "plugin, save or game data and installs no hooks. Export puts it, with a zip and install notes, in "
         "\"Multiplexer Output\\Diagnostic Recorder\" (beside the package, never inside it); install that zip as a mod "
-        "to use it. Its logs: Documents\\My Games\\Fallout4\\F4SE\\MultiplexerDiagnosticRecorder.");
-    diagNote->setWordWrap(true);
-    diagNote->setObjectName("PageSubtitle");
-    dl->addWidget(diagNote);
-    l->addWidget(diagBox);
+        "to use it. Its logs: Documents\\My Games\\Fallout4\\F4SE\\MultiplexerDiagnosticRecorder.",
+        {recorder_}));
 
-    auto* loaderBox = new QGroupBox("Archives");
-    auto* ll = new QVBoxLayout(loaderBox);
-    archiveLoader_ = new QCheckBox("Load compiled plugins' archives with the F4SE archive loader (requires F4SE)");
-    ll->addWidget(archiveLoader_);
-    auto* loaderNote = new QLabel(
+    QVBoxLayout* ll = nullptr;
+    l->addWidget(makeSectionCard("assets", "Archives", &ll));
+    archiveLoader_ = new ToggleSwitch("Load compiled plugins' archives with the F4SE archive loader (requires F4SE)");
+    ll->addWidget(makeOptionRow(
+        "Load compiled plugins' archives with the F4SE archive loader",
+        "Requires F4SE and Fallout 4 1.10.163. Lets plugins with many archives compile.",
         "Fallout 4 reads only the first 1,023 characters of the archive list in Fallout4Custom.ini, so without this "
         "plugins whose archives do not fit stay in the load order. With it, export ships MultiplexerArchiveLoader.dll "
         "and the full list in the package (Data\\F4SE\\Plugins); the loader gives the game the whole list when it "
         "starts. The game must then always be started through F4SE. Fallout 4 1.10.163 only. Its log: "
-        "Documents\\My Games\\Fallout4\\F4SE\\MultiplexerArchiveLoader.log.");
-    loaderNote->setWordWrap(true);
-    loaderNote->setObjectName("PageSubtitle");
-    ll->addWidget(loaderNote);
-    l->addWidget(loaderBox);
+        "Documents\\My Games\\Fallout4\\F4SE\\MultiplexerArchiveLoader.log.",
+        {archiveLoader_}));
 
-    auto* advBox = new QGroupBox("Advanced");
-    auto* af = new QFormLayout(advBox);
+    QVBoxLayout* advBody = nullptr;
+    l->addWidget(makeSectionCard("settings", "Advanced", &advBody));
+    auto* af = new QFormLayout;
+    advBody->addLayout(af);
     threads_ = new QSpinBox;
     threads_->setRange(0, 64);
     threads_->setSpecialValueText("Automatic");
@@ -219,23 +236,15 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     logs->setObjectName("PageSubtitle");
     logs->setTextInteractionFlags(Qt::TextSelectableByMouse);
     af->addRow(logs);
-    l->addWidget(advBox);
 
-    auto* resetBox = new QGroupBox("Start fresh");
-    auto* rl = new QVBoxLayout(resetBox);
-    auto* resetNote = new QLabel(
-        "Forget everything this app has stored: settings, folders, exclusions, conflict resolutions, the results "
-        "database, the build cache and the logs. Use it after installing a new version, or when results look stale. "
-        "Generated plugins and reports in your output folder are not deleted.");
-    resetNote->setObjectName("PageSubtitle");
-    resetNote->setWordWrap(true);
-    rl->addWidget(resetNote);
-    auto* reset = makeButton("Reset to Fresh State…", "Danger");
-    auto* resetRow = new QHBoxLayout;
-    resetRow->addWidget(reset);
-    resetRow->addStretch();
-    rl->addLayout(resetRow);
-    l->addWidget(resetBox);
+    QVBoxLayout* rl = nullptr;
+    l->addWidget(makeSectionCard("refresh", "Start fresh", &rl));
+    auto* reset = makeButton("Reset to Fresh State…", "Danger", "block");
+    rl->addWidget(makeOptionRow("Reset to fresh state", "Forget everything this app has stored. Your outputs are kept.",
+                                "Forget settings, folders, exclusions, conflict resolutions, the results database, the "
+                                "build cache and the logs. Use it after installing a new version, or when results look "
+                                "stale. Generated plugins and reports in your output folder are not deleted.",
+                                {reset}));
 
     status_ = new QLabel;
     status_->setObjectName("PageSubtitle");

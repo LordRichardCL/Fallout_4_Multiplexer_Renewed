@@ -215,9 +215,14 @@ private:
     QStringList labels_;
 };
 
-// Page title + subtitle + optional right-aligned widgets.
-QWidget* makePageHeader(const QString& title, const QString& subtitle, const std::vector<QWidget*>& actions = {});
+// Page title + subtitle + optional right-aligned widgets. With `icon`, the page's icon sits in a tile on the
+// left; with `help`, a "?" next to the title holds the longer explanation.
+QWidget* makePageHeader(const QString& title, const QString& subtitle, const std::vector<QWidget*>& actions = {},
+                        const QString& icon = {}, const QString& help = {});
 QLabel* makeSectionTitle(const QString& text);
-QPushButton* makeButton(const QString& text, const char* objectName = nullptr);
+// A button; with `icon`, a line icon in the button's text colour (light on Primary buttons).
+QPushButton* makeButton(const QString& text, const char* objectName = nullptr, const QString& icon = {});
+// A section title with a "?" holding its explanation.
+QWidget* makeSectionTitle(const QString& text, const QString& help);
 
 } // namespace gui

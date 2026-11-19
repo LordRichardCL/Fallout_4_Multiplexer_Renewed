@@ -60,8 +60,6 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     openFolder_ = makeButton("Open Folder");
     openFolder_->setIcon(lineIcon("folder", theme::kText, 15));
     auto* saveSettings = makeSaveSettingsButton();
-    saveSettings->setObjectName(QString()); // an ordinary button here: Compile is the main action
-    saveSettings->setIcon(lineIcon("check", theme::kText, 15));
 
     // Header: title, one line, and the presets.
     presets_ = new SegmentedControl({"Recommended", "Safest", "Custom"});

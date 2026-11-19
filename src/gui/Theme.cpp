@@ -27,6 +27,7 @@ QToolTip { background: #1c2420; color: #d7e4dc; border: 1px solid #2a3530; paddi
 
 #HelpBadge { border: 1px solid #4f6359; border-radius: 8px; color: #8aa196; font-size: 7.5pt; font-weight: 700; }
 #HelpBadge:hover { border-color: #3ddc84; color: #3ddc84; }
+#HeaderIcon { background: #16241d; border: 1px solid #24503a; border-radius: 10px; }
 #OptionTitle { font-weight: 600; color: #e4efe8; }
 #OptionDescription { color: #8aa196; font-size: 9pt; }
 #OptionRow { border-top: 1px solid #1f2824; }

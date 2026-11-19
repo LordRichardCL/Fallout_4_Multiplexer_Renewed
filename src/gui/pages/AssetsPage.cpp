@@ -32,9 +32,12 @@ AssetsPage::AssetsPage(AppController* app, QWidget* parent) : Page(app, parent)
     search_->setPlaceholderText("Search asset path, e.g. textures\\weapons\\10mm");
     search_->setClearButtonEnabled(true);
     search_->setMinimumWidth(320);
-    l->addWidget(makePageHeader("Asset Intelligence",
-                                "Loose files and BA2 archives merged in engine load order. The last source wins.",
-                                {search_}));
+    l->addWidget(makePageHeader("Asset Intelligence", "Which mod's file the game uses, for every asset.", {search_},
+                                "assets",
+                                "Loose files and BA2 archives merged in the engine's load order: archives in plugin "
+                                "order, then loose files, which win over any archive. The last source wins. "
+                                "\"Conflicting\" lists assets more than one mod provides; select one to see every "
+                                "source and the winner."));
     chips_ = new FilterChips({"Conflicting", "All", "Texture", "Mesh", "Script", "Material", "Audio", "Animation",
                               "Interface", "FaceGen", "Precombined"});
     l->addWidget(chips_);

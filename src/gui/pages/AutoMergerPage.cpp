@@ -26,30 +26,38 @@ AutoMergerPage::AutoMergerPage(AppController* app, QWidget* parent) : Page(app, 
     auto* l = new QVBoxLayout(this);
     l->setContentsMargins(28, 24, 28, 18);
     l->setSpacing(10);
-    analyse_ = makeButton("Analyse");
-    html_ = makeButton("Export HTML");
-    json_ = makeButton("Export JSON");
-    txt_ = makeButton("Export TXT");
-    l->addWidget(makePageHeader("Advanced Users Auto-Merger",
-                                "Compiles plugins that scripts and configs refer to by name, and relinks those files.",
-                                {analyse_, html_, json_, txt_, makeSaveSettingsButton()}));
+    analyse_ = makeButton("Analyse", "Primary", "analyse");
+    html_ = makeButton("HTML", nullptr, "export");
+    json_ = makeButton("JSON", nullptr, "export");
+    txt_ = makeButton("TXT", nullptr, "export");
+    for (auto [b, f] : {std::pair{html_, "HTML"}, {json_, "JSON"}, {txt_, "TXT"}}) {
+        b->setToolTip(QString("Export the Auto-Merger Report as %1").arg(f));
+        b->setAccessibleName(QString("Export %1").arg(f));
+    }
+    l->addWidget(makePageHeader("Auto-Merger", "For advanced users: compiles plugins that scripts and configs name.",
+                                {analyse_, html_, json_, txt_, makeSaveSettingsButton()}, "automerge",
+                                "Plugins whose file names appear in scripts (.pex) or config files (MCM, RobCo Patcher, "
+                                "...) are normally kept out of compilation. With the Auto-Merger on, every such file is "
+                                "checked; a plugin whose files can all be relinked is compiled, and relinked copies of "
+                                "those files are written into the output folder, where they must override the originals. "
+                                "Scripts: Game.GetFormFromFile calls are pointed at the output plugin and the record's "
+                                "new FormID. Configs: \"Plugin.esp|FormID\" pairs are rewritten. Anything it cannot "
+                                "relink safely (F4SE DLLs, names or FormIDs computed at run time, Transfer Settlements "
+                                "blueprints, configs naming a plugin without a FormID) keeps its plugin out."));
 
-    auto* intro = new QLabel(
-        "<b>For advanced users.</b> Plugins whose file names appear in scripts (.pex) or config files (MCM, "
-        "RobCo Patcher, ...) are normally kept out of compilation. With the Auto-Merger on, every such file is "
-        "checked; a plugin whose files can all be relinked is compiled, and relinked copies of those files are "
-        "written into the output folder, where they must override the originals. Scripts: Game.GetFormFromFile "
-        "calls are pointed at the output plugin and the record's new FormID. Configs: \"Plugin.esp|FormID\" pairs "
-        "are rewritten. Anything it cannot relink safely (F4SE DLLs, names or FormIDs computed at run time, "
-        "Transfer Settlements blueprints, configs naming a plugin without a FormID) keeps its plugin out. "
-        "Start a new game, and keep the output mod enabled above the mods it relinks.");
-    intro->setWordWrap(true);
-    intro->setStyleSheet("color:#8aa196");
-    l->addWidget(intro);
-
-    enabled_ = new QCheckBox("Enable the Advanced Users Auto-Merger (applies at the next Analyse and Compile)");
+    enabled_ = new ToggleSwitch("Enable the Advanced Users Auto-Merger (applies at the next Analyse and Compile)");
     enabled_->setChecked(app_->config().compile.autoMerge);
-    l->addWidget(enabled_);
+    {
+        QVBoxLayout* body = nullptr;
+        l->addWidget(makeSectionCard("automerge", "Auto-Merger", &body));
+        body->addWidget(makeOptionRow("Relink plugins named in scripts and configs",
+                                      "Applies at the next Analyse and Compile. Start a new game, and keep the output "
+                                      "mod enabled above the mods it relinks.",
+                                      "Off: plugins named in scripts or configs stay in the load order, as they are. "
+                                      "On: each such file is checked, and a plugin whose files can all be changed "
+                                      "exactly is compiled with relinked copies of those files.",
+                                      {enabled_}));
+    }
     summary_ = new QLabel;
     l->addWidget(summary_);
     chips_ = new FilterChips({"All", "Kept Out", "Relinkable", "Compiled and Relinked"});

@@ -25,18 +25,21 @@ ValidationPage::ValidationPage(AppController* app, QWidget* parent) : Page(app, 
     auto* l = new QVBoxLayout(this);
     l->setContentsMargins(28, 24, 28, 18);
     l->setSpacing(10);
-    auto* run = makeButton("Run Validation", "Primary");
+    auto* run = makeButton("Run Validation", "Primary", "validation");
     connect(run, &QPushButton::clicked, app_, &AppController::runCompile);
     connect(app_, &AppController::busyChanged, run, [run](bool b) { run->setEnabled(!b); });
-    auto* defs = makeButton("Check Record Definitions");
+    auto* defs = makeButton("Check Record Definitions", nullptr, "records");
     defs->setToolTip("Decode every record of the supported types in your load order (base game included) and report "
                      "field layouts that look wrong. Results appear under Definitions.");
     connect(defs, &QPushButton::clicked, app_, &AppController::runDefinitionCheck);
     connect(app_, &AppController::busyChanged, defs, [defs](bool b) { defs->setEnabled(!b); });
-    l->addWidget(makePageHeader("Validation Centre",
+    l->addWidget(makePageHeader("Validation Centre", "Checks on the compiled output before anything is written.",
+                                {defs, run}, "validation",
                                 "Missing references, broken FormIDs, duplicate IDs, missing masters, circular "
-                                "dependencies and orphaned records. Critical failures block export.",
-                                {defs, run}));
+                                "dependencies and orphaned records. Errors and critical failures block export; "
+                                "warnings and info are for you to read. Run Validation compiles again and checks the "
+                                "result. Check Record Definitions decodes every record of the supported types and lists "
+                                "layouts that look wrong (under Definitions)."));
     auto* cards = new QHBoxLayout;
     checks_ = new StatCard("Checks");
     passed_ = new StatCard("Passed");
@@ -55,9 +58,9 @@ ValidationPage::ValidationPage(AppController* app, QWidget* parent) : Page(app, 
     search_ = new QLineEdit;
     search_->setPlaceholderText("Filter messages…");
     search_->setClearButtonEnabled(true);
-    auto* copy = makeButton("Copy");
+    auto* copy = makeButton("Copy", nullptr, "export");
     copy->setToolTip("Copy the rows shown (with the current filter) to the clipboard");
-    auto* save = makeButton("Save…");
+    auto* save = makeButton("Save…", nullptr, "folder");
     save->setToolTip("Save the rows shown (with the current filter) to a text file");
     filterRow->addWidget(chips_, 1);
     filterRow->addWidget(search_);

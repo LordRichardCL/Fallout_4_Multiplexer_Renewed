@@ -781,23 +781,40 @@ QPushButton* SegmentedControl::button(const QString& label) const
     return nullptr;
 }
 
-QWidget* makePageHeader(const QString& title, const QString& subtitle, const std::vector<QWidget*>& actions)
+QWidget* makePageHeader(const QString& title, const QString& subtitle, const std::vector<QWidget*>& actions,
+                        const QString& icon, const QString& help)
 {
     auto* w = new QWidget;
     auto* l = new QHBoxLayout(w);
     l->setContentsMargins(0, 0, 0, 6);
+    l->setSpacing(12);
+    if (!icon.isEmpty()) {
+        auto* tile = new QLabel;
+        tile->setObjectName("HeaderIcon");
+        tile->setFixedSize(42, 42);
+        tile->setAlignment(Qt::AlignCenter);
+        tile->setPixmap(linePixmap(icon, theme::kAccent, 22, tile->devicePixelRatioF() > 1 ? tile->devicePixelRatioF() : 2.0));
+        l->addWidget(tile, 0, Qt::AlignVCenter);
+    }
     auto* texts = new QVBoxLayout;
     texts->setSpacing(2);
+    auto* titleRow = new QHBoxLayout;
+    titleRow->setSpacing(8);
     auto* t = new QLabel(title);
     t->setObjectName("PageTitle");
+    titleRow->addWidget(t);
+    if (!help.isEmpty())
+        titleRow->addWidget(new HelpBadge(help), 0, Qt::AlignVCenter);
+    titleRow->addStretch(1);
     auto* s = new QLabel(subtitle);
     s->setObjectName("PageSubtitle");
     s->setWordWrap(true);
-    texts->addWidget(t);
+    s->setVisible(!subtitle.isEmpty());
+    texts->addLayout(titleRow);
     texts->addWidget(s);
     l->addLayout(texts, 1);
     for (auto* a : actions)
-        l->addWidget(a, 0, Qt::AlignBottom);
+        l->addWidget(a, 0, icon.isEmpty() ? Qt::AlignBottom : Qt::AlignVCenter);
     return w;
 }
 
@@ -808,12 +825,29 @@ QLabel* makeSectionTitle(const QString& text)
     return l;
 }
 
-QPushButton* makeButton(const QString& text, const char* objectName)
+QWidget* makeSectionTitle(const QString& text, const QString& help)
+{
+    auto* w = new QWidget;
+    auto* l = new QHBoxLayout(w);
+    l->setContentsMargins(0, 0, 0, 0);
+    l->setSpacing(8);
+    l->addWidget(makeSectionTitle(text));
+    if (!help.isEmpty())
+        l->addWidget(new HelpBadge(help), 0, Qt::AlignVCenter);
+    l->addStretch(1);
+    return w;
+}
+
+QPushButton* makeButton(const QString& text, const char* objectName, const QString& icon)
 {
     auto* b = new QPushButton(text);
     if (objectName)
         b->setObjectName(objectName);
     b->setCursor(Qt::PointingHandCursor);
+    if (!icon.isEmpty()) {
+        const bool primary = objectName && QByteArray(objectName) == "Primary";
+        b->setIcon(lineIcon(icon, primary ? QColor(0xea, 0xff, 0xf2) : theme::kText, 15));
+    }
     return b;
 }
 

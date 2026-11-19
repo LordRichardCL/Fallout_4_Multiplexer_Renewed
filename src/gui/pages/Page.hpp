@@ -24,10 +24,11 @@ protected:
     AppController* app_;
 
     // A "Save Settings" button for a page with options: saves the whole settings state (the same as
-    // the Settings page's button) and shows when there are unsaved changes.
+    // the Settings page's button) and shows when there are unsaved changes. An ordinary button: on the
+    // pages with their own main action, that action stays the one that stands out.
     QPushButton* makeSaveSettingsButton()
     {
-        auto* b = makeButton("Save Settings", "Primary");
+        auto* b = makeButton("Save Settings", nullptr, "check");
         auto show = [b](bool unsaved) {
             b->setText(unsaved ? "Save Settings \u2022" : "Save Settings");
             b->setToolTip(unsaved ? "Some settings have changed and are not saved yet. Changes are kept while you "

@@ -87,9 +87,13 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     search_->setMinimumWidth(260);
     signature_ = new QComboBox;
     signature_->setMinimumWidth(110);
-    l->addWidget(makePageHeader("Conflict Centre",
-                                "Which plugin wins each record, why it wins, and what every other plugin tried to change.",
-                                {signature_, search_}));
+    l->addWidget(makePageHeader("Conflict Centre", "Which plugin wins each record, and what the others changed.",
+                                {signature_, search_}, "conflicts",
+                                "Every record more than one plugin changes. Hard conflicts change the same value "
+                                "differently; compatible merges change different values and are combined when "
+                                "compiling; simple overrides change nothing another plugin changed. Select a record to "
+                                "see its override chain, the values field by field, and where each change came from. "
+                                "\"Winner when compiling\" lets you choose a different winner for one record."));
     chips_ = new FilterChips({"All", "Hard Conflicts", "Compatible Merges", "Simple Overrides", "Not Merged", "Critical"});
     plugin_ = new QComboBox;
     plugin_->setMinimumWidth(240);
@@ -100,7 +104,7 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     role_->addItem("loses", "loses");
     role_->setToolTip("Involved: the plugin edits the record. Wins: it is the last plugin to edit it. "
                       "Loses: it edits the record but another plugin wins.");
-    auto* clear = makeButton("Clear Filters");
+    auto* clear = makeButton("Clear Filters", nullptr, "refresh");
     count_ = new QLabel;
     count_->setObjectName("PageSubtitle");
     auto* filters = new QHBoxLayout;

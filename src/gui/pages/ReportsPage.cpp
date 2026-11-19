@@ -47,13 +47,22 @@ ReportsPage::ReportsPage(AppController* app, QWidget* parent) : Page(app, parent
     auto* l = new QVBoxLayout(this);
     l->setContentsMargins(28, 24, 28, 18);
     l->setSpacing(10);
-    html_ = makeButton("Export HTML");
-    json_ = makeButton("Export JSON");
-    txt_ = makeButton("Export TXT");
-    pdf_ = makeButton("Export PDF");
-    all_ = makeButton("Export All…", "Primary");
-    l->addWidget(makePageHeader("Reports", "Conflict, asset, dependency, compilation and validation reports.",
-                                {html_, json_, txt_, pdf_, all_}));
+    html_ = makeButton("HTML", nullptr, "export");
+    json_ = makeButton("JSON", nullptr, "export");
+    txt_ = makeButton("TXT", nullptr, "export");
+    pdf_ = makeButton("PDF", nullptr, "export");
+    for (auto [b, f] : {std::pair{html_, "HTML"}, {json_, "JSON"}, {txt_, "TXT"}, {pdf_, "PDF"}}) {
+        b->setToolTip(QString("Export the report shown as %1").arg(f));
+        b->setAccessibleName(QString("Export %1").arg(f));
+    }
+    all_ = makeButton("Export All…", "Primary", "export");
+    all_->setToolTip("Write every report in every format to a folder");
+    l->addWidget(makePageHeader("Reports", "Every report, ready to read or export.", {html_, json_, txt_, pdf_, all_},
+                                "reports",
+                                "Conflict, asset, dependency, compilation, validation and Auto-Merger reports. Pick one "
+                                "on the left to preview it; the buttons export the report shown as HTML, JSON, TXT or "
+                                "PDF. Reports need a scan and analysis from this session; the compilation and "
+                                "validation reports also need a compile."));
     auto* split = new QSplitter(Qt::Horizontal);
     list_ = new QListWidget;
     list_->setMaximumWidth(280);

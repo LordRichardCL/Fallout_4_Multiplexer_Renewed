@@ -27,31 +27,28 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     auto* l = new QVBoxLayout(this);
     l->setContentsMargins(28, 24, 28, 18);
     l->setSpacing(10);
-    auto* newest = makeButton("Open Newest Log", "Primary");
-    auto* openBtn = makeButton("Open Log…");
-    auto* folder = makeButton("Open Log Folder");
-    auto* save = makeButton("Save Report…");
-    auto* check = makeButton("Check Installation");
-    l->addWidget(makePageHeader("Diagnostics",
-                                "What the optional Diagnostic Recorder saw while you played, and what it likely means.",
-                                {newest, openBtn, folder, check, save}));
-
-    auto* intro = new QLabel(
-        "Turn on <b>Prepare the Diagnostic Recorder</b> in Settings, export, and install "
-        "<i>Multiplexer Output\\Diagnostic Recorder\\Multiplexer Diagnostic Recorder.zip</i> as a mod. Start the game "
-        "through F4SE; each session writes a log. Findings are likely causes with their evidence, not certainties; "
-        "for crashes, keep a crash logger such as Buffout 4 as well. When a Multiplexer build is found, the game's "
-        "load order is compared with the one it was built for.");
-    intro->setWordWrap(true);
-    intro->setStyleSheet("color:#8aa196");
-    l->addWidget(intro);
+    auto* newest = makeButton("Open Newest Log", "Primary", "diagnostics");
+    auto* openBtn = makeButton("Open Log…", nullptr, "folder");
+    auto* folder = makeButton("Log Folder", nullptr, "folder");
+    folder->setToolTip("Open the folder the Diagnostic Recorder writes its logs to");
+    folder->setAccessibleName("Open Log Folder");
+    auto* save = makeButton("Save Report…", nullptr, "export");
+    auto* check = makeButton("Check Installation", nullptr, "check");
+    l->addWidget(makePageHeader("Diagnostics", "What happened while you played, and what it likely means.",
+                                {newest, openBtn, folder, check, save}, "diagnostics",
+                                "To record: turn on \"Prepare the Diagnostic Recorder\" in Settings, export, and "
+                                "install Multiplexer Output\\Diagnostic Recorder\\Multiplexer Diagnostic Recorder.zip "
+                                "as a mod. Start the game through F4SE; each session writes a log. Findings are likely "
+                                "causes with their evidence, not certainties; for crashes, keep a crash logger such as "
+                                "Buffout 4 as well. When a Multiplexer build is found, the game's load order is compared "
+                                "with the one it was built for."));
 
     install_ = new QLabel;
     install_->setWordWrap(true);
     install_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     l->addWidget(install_);
 
-    summary_ = new QLabel("No log opened.");
+    summary_ = new QLabel("No log opened yet. <b>Open Newest Log</b> reads your latest session; the <b>?</b> above says how to record one.");
     summary_->setWordWrap(true);
     summary_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     l->addWidget(summary_);

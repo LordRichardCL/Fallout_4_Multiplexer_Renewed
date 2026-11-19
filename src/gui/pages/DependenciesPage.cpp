@@ -52,9 +52,11 @@ DependenciesPage::DependenciesPage(AppController* app, QWidget* parent) : Page(a
     auto* l = new QVBoxLayout(this);
     l->setContentsMargins(28, 24, 28, 18);
     l->setSpacing(10);
-    l->addWidget(makePageHeader("Dependency Graph",
-                                "Trace master relationships and record references. Scroll to zoom, drag to pan, click a "
-                                "node to highlight what it uses (green) and what uses it (yellow)."));
+    l->addWidget(makePageHeader("Dependency Graph", "What each plugin and record depends on.", {}, "dependencies",
+                                "Plugins: master relationships. Records: what a record references and what references "
+                                "it. Cleaning: mod-cleaning checks as described in the xEdit documentation (reporting "
+                                "only). Scroll to zoom, drag to pan, click a node to highlight what it uses (green) and "
+                                "what uses it (yellow)."));
     tabs_ = new QTabWidget;
     l->addWidget(tabs_, 1);
 
@@ -65,7 +67,7 @@ DependenciesPage::DependenciesPage(AppController* app, QWidget* parent) : Page(a
     pluginSearch_ = new QLineEdit;
     pluginSearch_->setPlaceholderText("Find plugin…");
     neighbourhoodOnly_ = new QCheckBox("Only the selected plugin's masters and dependents");
-    auto* fitP = makeButton("Fit");
+    auto* fitP = makeButton("Fit", nullptr, "refresh");
     pbar->addWidget(pluginSearch_, 1);
     pbar->addWidget(neighbourhoodOnly_);
     pbar->addWidget(fitP);
@@ -94,8 +96,8 @@ DependenciesPage::DependenciesPage(AppController* app, QWidget* parent) : Page(a
     depth_->setRange(1, 4);
     depth_->setValue(2);
     depth_->setPrefix("Depth ");
-    auto* show = makeButton("Show", "Primary");
-    auto* fitR = makeButton("Fit");
+    auto* show = makeButton("Show", "Primary", "dependencies");
+    auto* fitR = makeButton("Fit", nullptr, "refresh");
     rbar->addWidget(recordSearch_, 1);
     rbar->addWidget(depth_);
     rbar->addWidget(show);
@@ -150,10 +152,9 @@ DependenciesPage::DependenciesPage(AppController* app, QWidget* parent) : Page(a
     auto* cl = new QVBoxLayout(cleaningTab);
     cl->setContentsMargins(0, 8, 0, 0);
     auto* cleaningBar = new QHBoxLayout;
-    auto* cleaningNote = new QLabel("Mod-cleaning checks as described in the xEdit documentation. Reporting only: no "
-                                    "plugin is changed. Findings in official files are informational.");
-    cleaningNote->setWordWrap(true);
-    cleaningNote->setStyleSheet("color:#8aa196");
+    auto* cleaningNote = makeSectionTitle("Cleaning checks",
+                                          "Mod-cleaning checks as described in the xEdit documentation. Reporting only: "
+                                          "no plugin is changed. Findings in official files are informational.");
     cleaningCategory_ = new QComboBox;
     cleaningCategory_->setMinimumWidth(240);
     cleaningBar->addWidget(cleaningNote, 1);
