@@ -4513,7 +4513,9 @@ TEST(references_tool_configs_in_data_are_rewritten)
     auto data = root / "Game" / "Data";
     writePlugin(data / "ModS.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000812, {zs("EDID", "ModS_Keyword")})});
     writeFile(data / "ModS_DISTR.ini", "Perk = 0x812~ModS.esp|NONE|NONE\nSpell = 0x2F1F~Fallout4.esm\n");
-    writeFile(data / "ModS_SWAP.ini", "[Forms]\n0x2F1F~Fallout4.esm|0x812~ModS.esp\n");
+    // The second line swaps ModS's record for Fallout4.esm's: "|0x2F1F~" belongs to Fallout4.esm, not to
+    // ModS (owner's build: read as ModS.esp|2F1F, the overlap check kept two plugins out).
+    writeFile(data / "ModS_SWAP.ini", "[Forms]\n0x2F1F~Fallout4.esm|0x812~ModS.esp\n0x812~ModS.esp|0x2F1F~Fallout4.esm\n");
     writeFile(data / "PipboyTabs" / "ModSTab.ini", "FirstList ModS.esp|812\n");
     auto cfg = configFor(root);
     cfg.compile.autoMerge = true;
@@ -4521,9 +4523,11 @@ TEST(references_tool_configs_in_data_are_rewritten)
     p.scan();
     p.analyse();
     const auto refs = referencesOf(p.session(), "ModS.esp");
-    CHECK_EQ(refs.size(), size_t(3));
-    for (const auto* r : refs)
+    CHECK_EQ(refs.size(), size_t(4));
+    for (const auto* r : refs) {
         CHECK_EQ(r->cls, ReferenceClass::Rewritable);
+        CHECK(!r->hasFormId || r->formId == 0x812); // never Fallout4.esm's 2F1F
+    }
     CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
     CHECK(p.compile());
     auto result = p.exportOutputs();
@@ -4547,7 +4551,11 @@ TEST(references_tool_configs_in_data_are_rewritten)
     const auto swap = result.directory / "ModS_SWAP.ini";
     CHECK(std::filesystem::exists(swap));
     if (std::filesystem::exists(swap))
-        CHECK(slurpFile(swap).find("0x2F1F~Fallout4.esm|0x" + id + "~" + moved->outputPlugin) != std::string::npos);
+    {
+        const auto text = slurpFile(swap);
+        CHECK(text.find("0x2F1F~Fallout4.esm|0x" + id + "~" + moved->outputPlugin + "\n") != std::string::npos);
+        CHECK(text.find("0x" + id + "~" + moved->outputPlugin + "|0x2F1F~Fallout4.esm\n") != std::string::npos);
+    }
     const auto tab = copyIn(result.directory, "pipboytabs/modstab.ini");
     CHECK(std::filesystem::exists(tab));
     if (std::filesystem::exists(tab))

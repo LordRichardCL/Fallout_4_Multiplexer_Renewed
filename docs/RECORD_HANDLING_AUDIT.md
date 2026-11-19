@@ -1208,3 +1208,9 @@ WEAP DNAM, WEAP FNAM, WEAP CRDT, HAZD DNAM, STAT DNAM and ACTI RADR were partial
 **Tests:** `large_references_in_force_are_kept_when_their_plugin_compiles` (export, read back, translated FormIDs, written-content check; it fails without the rule) and `large_references_left_as_they_are_when_today_is_ambiguous`.
 
 **To confirm in game:** FasterStartup's "Large-reference audit" count should return close to the pre-compile number.
+
+## "0xID~Plugin" before "Plugin|ID" in tool configs (19 Nov 2026)
+
+**Found in the owner's build of 18 Nov.** `vehicleoverhaulcontinued_swap.ini` kept Atomic World.esp and VehicleOverhaulContinued.esp out with "overlapping changes". A Base Object Swapper line reads `0xABC~A.esp|0xDEF~B.esp`: the `|` separates the original from the replacement, and each FormID is written before its plugin with `~`. The reference reader looked for RobCo's `Plugin|FormID` first, so it read `A.esp|0xDEF`: B's FormID as if it were A's, and A's own FormID (ABC) not at all. When both plugins compiled, the two changes to DEF overlapped and the check kept both plugins out. When only A compiled, A's FormID would have stayed unchanged, and DEF would have been rewritten when A happened to have a record with that number. The Base Object Swapper's results before and after compiling were the same (551 swaps, the same 6,056 failures), so no such line was rewritten wrongly in that build.
+
+**Fix.** A FormID written before the name (`0x…~Plugin` or `0x…:Plugin`) is read first. A `|FormID` after a name counts only when it is not followed by `~` (then it is the next plugin's). RobCo's `A.esp|812:B.esp|800` reads as before. Test: `references_tool_configs_in_data_are_rewritten` now swaps a compiled plugin's record for a base game one as well (`0x812~ModS.esp|0x2F1F~Fallout4.esm`); it fails with the old reader.

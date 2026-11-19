@@ -421,26 +421,10 @@ std::vector<ReferenceScanner::Mention> ReferenceScanner::mentions(std::string_vi
                        text[at - 1] == '-' || text[at - 1] == '.' || static_cast<unsigned char>(text[at - 1]) >= 0x80))
             continue;
         Mention m{at, end};
-        if (end < text.size() && text[end] == '|') {
-            size_t q = end + 1;
-            if (q + 1 < text.size() && text[q] == '0' && (text[q + 1] == 'x' || text[q + 1] == 'X'))
-                q += 2;
-            size_t digits = q;
-            while (digits < text.size() && digits - q < 8 && std::isxdigit(static_cast<unsigned char>(text[digits])))
-                ++digits;
-            // The FormID ends the word: "Plugin.esp|ActorTypeNPC" (a SPID filter) is not FormID AC.
-            const bool longer = digits < text.size() && (std::isalnum(static_cast<unsigned char>(text[digits])) ||
-                                                         text[digits] == '_');
-            if (digits > q && !longer) {
-                m.pair = true;
-                m.idBegin = q;
-                m.idEnd = digits;
-                m.formId = static_cast<uint32_t>(std::stoul(std::string(text.substr(q, digits - q)), nullptr, 16));
-            }
-        }
         // "0x<FormID>:Plugin.esp" (X-Cell and other configs) or "0x<FormID>~Plugin.esp" (Spell/Perk/Item
-        // Distributor, Base Object Swapper): the FormID written before the name.
-        if (!m.pair && at >= 4 && (text[at - 1] == ':' || text[at - 1] == '~')) {
+        // Distributor, Base Object Swapper): the FormID written before the name. Checked first: in
+        // "0xABC~A.esp|0xDEF~B.esp" (a Base Object Swapper line) A's FormID is ABC, and DEF is B's.
+        if (at >= 4 && (text[at - 1] == ':' || text[at - 1] == '~')) {
             size_t digits = at - 1;
             while (digits > 0 && at - 1 - digits < 8 && std::isxdigit(static_cast<unsigned char>(text[digits - 1])))
                 --digits;
@@ -452,6 +436,25 @@ std::vector<ReferenceScanner::Mention> ReferenceScanner::mentions(std::string_vi
                 m.idBegin = digits;
                 m.idEnd = at - 1;
                 m.formId = static_cast<uint32_t>(std::stoul(std::string(text.substr(digits, at - 1 - digits)), nullptr, 16));
+            }
+        }
+        // "Plugin.esp|FormID" (RobCo Patcher, Pip-Boy Tabs...): the FormID written after the name.
+        if (!m.pair && end < text.size() && text[end] == '|') {
+            size_t q = end + 1;
+            if (q + 1 < text.size() && text[q] == '0' && (text[q + 1] == 'x' || text[q + 1] == 'X'))
+                q += 2;
+            size_t digits = q;
+            while (digits < text.size() && digits - q < 8 && std::isxdigit(static_cast<unsigned char>(text[digits])))
+                ++digits;
+            // The FormID ends the word: "Plugin.esp|ActorTypeNPC" (a SPID filter) is not FormID AC; one
+            // followed by "~" is the next name's ("A.esp|0xDEF~B.esp"), not this one's.
+            const bool longer = digits < text.size() && (std::isalnum(static_cast<unsigned char>(text[digits])) ||
+                                                         text[digits] == '_' || text[digits] == '~');
+            if (digits > q && !longer) {
+                m.pair = true;
+                m.idBegin = q;
+                m.idEnd = digits;
+                m.formId = static_cast<uint32_t>(std::stoul(std::string(text.substr(q, digits - q)), nullptr, 16));
             }
         }
         out.push_back(m);
