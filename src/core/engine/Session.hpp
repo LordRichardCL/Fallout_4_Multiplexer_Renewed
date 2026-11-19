@@ -185,6 +185,33 @@ struct PluginReference {
 };
 using PluginNameReference = PluginReference; // earlier name
 
+// Evidence on plugin name and FormID pairs in script properties (structs with sPluginName and iFormID,
+// as Sim Settlements 2 writes them): how every script that reads such a member uses it. Report only: the
+// pairs stay "Compatibility Required" whatever the evidence says.
+struct PairEvidence {
+    struct Read {
+        std::string script;   // data-relative path
+        std::string where;    // "Object.State.Function"
+        std::string member;   // "spluginname", "iformid", "concat:spluginname"
+        std::string object;   // "<struct type>|<variable>"
+        std::string use;      // what the script does with it, in words
+        bool ok = false;      // a use a rewrite of the pair keeps working
+    };
+    struct Holder {
+        size_t pairs = 0;                // pairs naming a plugin of the load order
+        std::set<PluginIndex> named;     // the plugins they name
+        std::set<PluginIndex> inPlugins; // the plugins whose records hold them
+    };
+    bool scanned = false;
+    std::vector<Read> reads;                     // every read of the two members, and text joined from them
+    std::vector<std::string> unreadable;         // scripts naming a member that could not be read back
+    std::map<std::string, Holder> holders;       // "script.property" (lower case) -> its pairs
+    std::map<PluginIndex, size_t> pairsNaming;   // plugin -> pairs naming it
+    size_t pairs = 0;
+    size_t notOk() const;
+    bool clean() const { return scanned && pairs && unreadable.empty() && notOk() == 0; }
+};
+
 // The combined verdict on a plugin's references.
 struct ReferenceDecision {
     ReferenceClass cls = ReferenceClass::Safe; // most restrictive class present
@@ -235,6 +262,7 @@ public:
     StringPool strings;
 
     std::vector<PluginReference> nameReferences; // every place a plugin's file name appears (ReferenceScanner)
+    PairEvidence pairEvidence;                   // plugin name and FormID pairs, how scripts use them (ReferenceScanner)
     // Advanced Users Auto-Merger on: plugins whose references are only safe or rewritable are compiled.
     bool autoMergeEnabled = false;
     std::map<PluginIndex, ReferenceDecision> referenceDecisions;

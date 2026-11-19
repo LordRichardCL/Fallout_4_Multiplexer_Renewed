@@ -17,6 +17,7 @@
 #include <map>
 #include <set>
 #include <mutex>
+#include <optional>
 
 #include <spdlog/spdlog.h>
 
@@ -48,7 +49,69 @@ const char* referenceClassName(ReferenceClass c)
     return "";
 }
 
+size_t PairEvidence::notOk() const
+{
+    return static_cast<size_t>(std::count_if(reads.begin(), reads.end(), [](const Read& r) { return !r.ok; }));
+}
+
 namespace {
+
+// How a script uses a member of a plugin name and FormID pair (sPluginName, iFormID), or text joined from
+// one: in words, and whether rewriting the pair (the name and the FormID together) keeps that use working.
+// Empty: not a read of either member, or a step that only passes the value on (strcat).
+std::optional<PairEvidence::Read> pairRead(const pex::PropertyRead& pr, const std::string& script)
+{
+    std::string prop = pr.property;
+    const bool joined = prop.rfind("concat:", 0) == 0;
+    if (joined)
+        prop = prop.substr(7);
+    if (prop != "struct:spluginname" && prop != "struct:iformid")
+        return std::nullopt;
+    if (pr.opcode == "strcat")
+        return std::nullopt;
+    const std::string member = prop.substr(7);
+    PairEvidence::Read r;
+    r.script = script;
+    r.where = pr.where;
+    r.member = joined ? "concat:" + member : member;
+    r.object = pr.object;
+    const std::string fn = toLower(pr.function);
+    const bool logging = !fn.empty() && (fn.find("trace") != std::string::npos || fn.find("log") != std::string::npos ||
+                                         fn.find("print") != std::string::npos ||
+                                         fn.find("notification") != std::string::npos ||
+                                         fn.find("messagebox") != std::string::npos);
+    const std::string other = member == "spluginname" ? "struct:iformid@" : "struct:spluginname@";
+    if (pr.opcode == "struct_set") {
+        r.use = "written by the script";
+        r.ok = true;
+    } else if (joined) {
+        r.ok = logging;
+        r.use = logging ? "text joined from it is logged (" + pr.function + ")"
+                        : "text joined from it is used by " + (pr.function.empty() ? pr.opcode : pr.function);
+    } else if (pr.use == pex::PropertyRead::Use::GetFormFromFile) {
+        r.ok = pr.partner == other + pr.object;
+        if (r.ok)
+            r.use = "Game.GetFormFromFile(iFormID, sPluginName) of the same struct";
+        else if (member == "spluginname")
+            r.use = "Game.GetFormFromFile with a FormID from elsewhere" + (pr.partner.empty() ? "" : " (" + pr.partner + ")");
+        else
+            r.use = "Game.GetFormFromFile with a plugin name from elsewhere" +
+                    (pr.partner.empty() ? "" : " (" + pr.partner + ")");
+    } else if (pr.use == pex::PropertyRead::Use::IsPluginInstalled) {
+        r.ok = true;
+        r.use = "Game.IsPluginInstalled";
+    } else if (logging) {
+        r.ok = true;
+        r.use = "logged (" + pr.function + ")";
+    } else if (pr.opcode.rfind("cmp_", 0) == 0) {
+        r.use = "compared (" + pr.opcode + ")";
+    } else if (pr.opcode == "array_findstruct" || pr.opcode == "array_rfindstruct") {
+        r.use = "looked up by value (" + pr.opcode + ")";
+    } else {
+        r.use = pr.function.empty() ? pr.opcode : "passed to " + pr.function;
+    }
+    return r;
+}
 
 // ---- Classifier --------------------------------------------------------------------------------
 // What a detector found. The table below is the only place that decides what each fact means.
@@ -979,6 +1042,7 @@ ReferenceDecision ReferenceScanner::decide(const std::vector<const PluginReferen
 void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& options, ProgressSink& progress)
 {
     session.nameReferences.clear();
+    session.pairEvidence = {};
     const auto names = pluginNames(session);
     const auto& idx = session.assets;
 
@@ -1167,6 +1231,24 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
         for (auto& r : v)
             session.nameReferences.push_back(std::move(r));
 
+    // Plugin name and FormID pairs: every read of the two members, in every script (evidence only).
+    {
+        auto& ev = session.pairEvidence;
+        ev.scanned = true;
+        for (size_t i = 0; i < candidates.size(); ++i) {
+            const std::string script = idx.path(idx.entries[candidates[i]]);
+            bool unreadable = false;
+            for (const auto& pr : reads[i]) {
+                if (pr.opcode == "unreadable script" && (pr.property == "spluginname" || pr.property == "iformid"))
+                    unreadable = true;
+                if (auto r = pairRead(pr, script))
+                    ev.reads.push_back(std::move(*r));
+            }
+            if (unreadable)
+                ev.unreadable.push_back(script);
+        }
+    }
+
     // Named constants (a property whose read handler returns the plugin's name, such as a mod's table
     // of plugin names): what the name means is what the scripts reading the property do with it.
     {
@@ -1339,6 +1421,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             if (p.active && !p.generated && p.error.empty() && !p.baseGame)
                 scan.push_back(p.index);
         std::vector<std::vector<PluginReference>> perPlugin(scan.size());
+        std::vector<std::vector<std::pair<std::string, PluginIndex>>> pairsIn(scan.size()); // (script.property, named)
         auto hasPluginExtension = [](std::span<const uint8_t> d) {
             for (size_t i = 0; i + 4 <= d.size(); ++i) {
                 if (d[i] != '.' || (d[i + 1] | 0x20) != 'e' || (d[i + 2] | 0x20) != 's')
@@ -1403,6 +1486,8 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                                           sig.str() + " " + (edid.empty() ? std::string() : edid + " ") + "[" + id + "]");
                             r.source = p.sourceMod;
                             perPlugin[i].push_back(std::move(r));
+                            if (ss.formIdPair && !ownConfig)
+                                pairsIn[i].emplace_back(key(ss.script) + "." + key(ss.property), it->second);
                         }
                         return true;
                     });
@@ -1421,6 +1506,22 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             }
         if (count)
             spdlog::info("{} script properties in plugin records hold a plugin's file name", count);
+        auto& ev = session.pairEvidence;
+        for (size_t i = 0; i < pairsIn.size(); ++i)
+            for (const auto& [holder, named] : pairsIn[i]) {
+                auto& h = ev.holders[holder];
+                ++h.pairs;
+                h.named.insert(named);
+                h.inPlugins.insert(scan[i]);
+                ++ev.pairsNaming[named];
+                ++ev.pairs;
+            }
+        if (ev.pairs)
+            spdlog::info("Plugin name and FormID pairs: {} in records name {} plugins; {} script reads of the pair "
+                         "members, {} of them in a use a rewrite would not keep{}",
+                         ev.pairs, ev.pairsNaming.size(), ev.reads.size(), ev.notOk(),
+                         ev.unreadable.empty() ? std::string()
+                                               : ", " + std::to_string(ev.unreadable.size()) + " scripts unreadable");
     }
 
     std::stable_sort(session.nameReferences.begin(), session.nameReferences.end(),

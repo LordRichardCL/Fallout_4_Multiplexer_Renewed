@@ -659,6 +659,46 @@ inline std::vector<uint8_t> pairedLookupScript(const std::string& plugin, uint32
     return pexFile(strings, "Paired", o.take());
 }
 
+// A script using a plugin name and FormID pair (a struct with iFormID and sPluginName, as Sim Settlements 2
+// keeps them): Lookup(akEntry) reads both members, calls Game.GetFormFromFile(iFormID, sPluginName) and logs
+// "Looking up " + sPluginName with Debug.Trace. With `compare`, it also compares sPluginName with
+// "Fallout4.esm" (a use a rewrite of the pair would not keep).
+inline std::vector<uint8_t> pairScript(bool compare = false)
+{
+    using namespace fo4mx;
+    const std::vector<std::string> strings = {"Pair", "", "Lookup", "None", "akEntry", "pair#universalform",
+                                              "::temp0", "Form", "::temp1", "Int", "::temp2", "String", "::temp3",
+                                              "iFormID", "sPluginName", "Game", "GetFormFromFile", "Looking up ",
+                                              "Debug", "Trace", "::nonevar", "::temp4", "Bool", "Fallout4.esm"};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0); // structs, variables, properties
+    o.write<uint16_t>(1); // states
+    o.write<uint16_t>(1); // default state
+    o.write<uint16_t>(1); // functions
+    auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    auto str = [&](uint16_t i) { o.write<uint8_t>(2); o.write<uint16_t>(i); };
+    auto integer = [&](int32_t v) { o.write<uint8_t>(3); o.write<int32_t>(v); };
+    o.write<uint16_t>(2); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(1); o.write<uint16_t>(4); o.write<uint16_t>(5); // akEntry : the pair struct
+    o.write<uint16_t>(5); // locals
+    o.write<uint16_t>(6); o.write<uint16_t>(7);
+    o.write<uint16_t>(8); o.write<uint16_t>(9);
+    o.write<uint16_t>(10); o.write<uint16_t>(11);
+    o.write<uint16_t>(12); o.write<uint16_t>(11);
+    o.write<uint16_t>(21); o.write<uint16_t>(22);
+    o.write<uint16_t>(compare ? 6 : 5);
+    o.write<uint8_t>(0x26); ident(8); ident(4); ident(13);                          // ::temp1 = akEntry.iFormID
+    o.write<uint8_t>(0x26); ident(10); ident(4); ident(14);                         // ::temp2 = akEntry.sPluginName
+    o.write<uint8_t>(0x19); ident(15); ident(16); ident(6); integer(2); ident(8); ident(10); // GetFormFromFile
+    o.write<uint8_t>(0x1B); ident(12); str(17); ident(10);                          // ::temp3 = "Looking up " + ...
+    o.write<uint8_t>(0x19); ident(18); ident(19); ident(20); integer(1); ident(12); // Debug.Trace(::temp3)
+    if (compare) {
+        o.write<uint8_t>(0x0F); ident(21); ident(10); str(23); // ::temp4 = ::temp2 == "Fallout4.esm"
+    }
+    return pexFile(strings, "Pair", o.take());
+}
+
 inline std::vector<uint8_t> testScript(uint32_t formId, const std::string& plugin, int sizeAdjust = 0)
 {
     ScriptOptions opt;

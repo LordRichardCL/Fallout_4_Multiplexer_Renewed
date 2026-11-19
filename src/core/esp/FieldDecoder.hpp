@@ -51,6 +51,11 @@ struct DecodedLayout {
         std::string script;
         std::string property;
         std::string value;
+        // Inside a struct: the member holding the string, and whether that struct also has an Int member
+        // named iFormID (a "plugin name and FormID" pair, as Sim Settlements 2 writes them).
+        std::string member;
+        bool formIdPair = false;
+        int32_t pairFormId = 0;
     };
     std::vector<ScriptString> scriptStrings;
 

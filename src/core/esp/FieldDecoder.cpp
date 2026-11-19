@@ -353,12 +353,9 @@ private:
         case 3: r.skip(4); break;
         case 4: r.skip(4); break;
         case 5: r.skip(1); break;
-        case 7: { // struct
-            uint32_t members = r.read<uint32_t>();
-            for (uint32_t m = 0; m < members; ++m)
-                vmadProperty(r, i, version, objFormat, depth + 1);
+        case 7: // struct
+            vmadStruct(r, i, version, objFormat, depth);
             break;
-        }
         case 11: {
             uint32_t n = r.read<uint32_t>();
             for (uint32_t k = 0; k < n; ++k)
@@ -376,16 +373,48 @@ private:
         case 15: r.skip(r.read<uint32_t>()); break;
         case 17: {
             uint32_t n = r.read<uint32_t>();
-            for (uint32_t k = 0; k < n; ++k) {
-                uint32_t members = r.read<uint32_t>();
-                for (uint32_t m = 0; m < members; ++m)
-                    vmadProperty(r, i, version, objFormat, depth + 1);
-            }
+            for (uint32_t k = 0; k < n; ++k)
+                vmadStruct(r, i, version, objFormat, depth);
             break;
         }
         default:
             throw FormatError("unsupported script property type " + std::to_string(type));
         }
+    }
+
+    // One struct value: its members, then whether it pairs a plugin name with an iFormID.
+    void vmadStruct(BinaryReader& r, uint32_t i, int16_t version, int16_t objFormat, int depth)
+    {
+        const size_t firstString = out_.scriptStrings.size();
+        const uint32_t members = r.read<uint32_t>();
+        bool hasFormId = false;
+        int32_t formId = 0;
+        for (uint32_t m = 0; m < members; ++m) {
+            const size_t at = r.position();
+            const std::string name = r.readWString();
+            const uint8_t type = r.read<uint8_t>();
+            std::string key = name;
+            while (!key.empty() && key.back() == '\0')
+                key.pop_back();
+            for (auto& c : key)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (key == "iformid" && type == 3) {
+                hasFormId = true;
+                const size_t valueAt = r.position() + (version >= 4 ? 1 : 0);
+                BinaryReader peek = r;
+                peek.seek(valueAt);
+                formId = peek.read<int32_t>();
+            }
+            r.seek(at);
+            member_ = key;
+            vmadProperty(r, i, version, objFormat, depth + 1);
+        }
+        member_.clear();
+        for (size_t k = firstString; k < out_.scriptStrings.size(); ++k)
+            if (out_.scriptStrings[k].member == "spluginname" && hasFormId) {
+                out_.scriptStrings[k].formIdPair = true;
+                out_.scriptStrings[k].pairFormId = formId;
+            }
     }
 
     void scriptString(const std::string& v)
@@ -397,7 +426,7 @@ private:
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (ext == ".esp" || ext == ".esm" || ext == ".esl") {
             out_.scriptPluginNames.push_back(v);
-            out_.scriptStrings.push_back({script_, property_, v});
+            out_.scriptStrings.push_back({script_, property_, v, member_, false, 0});
         }
     }
 
@@ -912,6 +941,7 @@ private:
     uint8_t epft_ = 0;
     std::string script_;   // VMAD: the script being read
     std::string property_; // VMAD: its top-level property being read
+    std::string member_;   // VMAD: the struct member being read (lower case), empty outside structs
     uint8_t epFunction_ = 0;
 };
 

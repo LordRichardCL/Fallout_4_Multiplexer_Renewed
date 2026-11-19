@@ -7308,6 +7308,100 @@ TEST(sim_settlements_add_on_pack_without_a_file_name_compiles)
     CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
 }
 
+// Plugin name and FormID pairs: the members a script reads from a struct are followed into
+// GetFormFromFile (each paired with the other member of the same struct) and into a log line.
+TEST(pair_members_followed_through_a_script)
+{
+    auto scan = pex::scan(pairScript());
+    CHECK(scan.ok);
+    const pex::PropertyRead* name = nullptr;
+    const pex::PropertyRead* id = nullptr;
+    const pex::PropertyRead* logged = nullptr;
+    for (const auto& pr : scan.propertyReads) {
+        if (pr.property == "struct:spluginname" && pr.use == pex::PropertyRead::Use::GetFormFromFile)
+            name = &pr;
+        if (pr.property == "struct:iformid" && pr.formIdArgument)
+            id = &pr;
+        if (pr.property == "concat:struct:spluginname" && pr.function == "Debug.Trace")
+            logged = &pr;
+    }
+    CHECK(name && id && logged);
+    if (!name || !id)
+        return;
+    CHECK_EQ(name->object, std::string("pair#universalform|akentry"));
+    CHECK_EQ(name->partner, std::string("struct:iformid@pair#universalform|akentry"));
+    CHECK_EQ(id->partner, std::string("struct:spluginname@pair#universalform|akentry"));
+    bool compared = false;
+    for (const auto& pr : pex::scan(pairScript(true)).propertyReads)
+        compared |= pr.property == "struct:spluginname" && pr.opcode == "cmp_eq";
+    CHECK(compared);
+}
+
+// The evidence report on pairs in records: a struct property (sPluginName "ModT.esp", iFormID) in ModS's
+// record, read by a script that only looks the pair up and logs it, is clean; the same script comparing
+// the name is not. Either way ModT stays out (report only).
+TEST(pair_evidence_reports_how_scripts_use_the_pairs)
+{
+    for (bool compare : {false, true}) {
+        auto root = referenceInstall(compare ? "refpairsnotclean" : "refpairsclean");
+        auto data = root / "Game" / "Data";
+        BinaryWriter w;
+        w.write<int16_t>(6);
+        w.write<int16_t>(2);
+        w.write<uint16_t>(1);
+        w.writeWString("Pair");
+        w.write<uint8_t>(0);
+        w.write<uint16_t>(1);
+        w.writeWString("Entry");
+        w.write<uint8_t>(7); // struct
+        w.write<uint8_t>(1);
+        w.write<uint32_t>(2);
+        w.writeWString("iFormID");
+        w.write<uint8_t>(3);
+        w.write<uint8_t>(1);
+        w.write<int32_t>(0x800);
+        w.writeWString("sPluginName");
+        w.write<uint8_t>(2);
+        w.write<uint8_t>(1);
+        w.writeWString("ModT.esp");
+        writePlugin(data / "ModS.esp", {"Fallout4.esm"},
+                    {record("KYWD", 0x01000812, {zs("EDID", "ModS_Keyword")}),
+                     record("MISC", 0x01000813, {zs("EDID", "ModS_Pair"), Subrecord(Signature("VMAD"), w.take())})});
+        writeBytes(data / "Scripts" / "Pair.pex", pairScript(compare));
+        auto cfg = configFor(root);
+        cfg.compile.autoMerge = true;
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const auto& s = p.session();
+        const auto& ev = s.pairEvidence;
+        const PluginIndex modT = s.findPlugin("ModT.esp")->index;
+        CHECK_EQ(ev.pairs, size_t(1));
+        CHECK_EQ(ev.pairsNaming.count(modT), size_t(1));
+        CHECK_EQ(ev.holders.count("pair.entry"), size_t(1));
+        CHECK_EQ(ev.clean(), !compare);
+        CHECK_EQ(ev.notOk(), size_t(compare ? 1 : 0));
+        size_t kept = 0;
+        for (const auto& r : ev.reads)
+            kept += r.ok;
+        CHECK_EQ(kept, size_t(3)); // the name and the FormID into GetFormFromFile, the log line
+        CHECK(s.findPlugin("ModT.esp")->eligibility != Eligibility::Eligible);
+        CHECK(p.autoMerge() != nullptr);
+        if (!p.autoMerge())
+            continue;
+        ReportContext ctx;
+        ctx.session = &s;
+        ctx.autoMerge = p.autoMerge();
+        const std::string text = ReportGenerator::text(ReportKind::AutoMerger, ctx);
+        CHECK(text.find("Plugin name and FormID pairs") != std::string::npos);
+        CHECK(text.find(compare ? "Not clean" : "Verdict: Clean") != std::string::npos);
+        CHECK(text.find("compared (cmp_eq)") != std::string::npos || !compare);
+        const std::string json = ReportGenerator::json(ReportKind::AutoMerger, ctx);
+        CHECK(json.find("keptOutOnlyByPairs") != std::string::npos);
+        CHECK(json.find("ModT.esp") != std::string::npos);
+    }
+}
+
 // A Sim Settlements 2 add-on config's sAddonFilename naming its own plugin: SS2 registers the pack only
 // when GetFormFromFile(the config's own FormID, that name) is the config (SS2Main's bytecode), so the
 // compiler writes the output's name there, where the config then is, and the plugin compiles. Any other

@@ -10,6 +10,7 @@
 #include <ctime>
 #include <fstream>
 #include <map>
+#include <tuple>
 
 namespace fo4mx {
 
@@ -731,6 +732,92 @@ std::string pluginStatus(const ReportContext& ctx, PluginIndex p)
     return ctx.compiled && ctx.compiled->isCompiled(p) ? "Compiled and relinked" : "Relinkable";
 }
 
+// Plugin name and FormID pairs (evidence only): the plugins kept out by nothing but pairs, and the verdict.
+std::vector<PluginIndex> pairOnlyPlugins(const Session& s)
+{
+    std::vector<PluginIndex> out;
+    for (const auto& [p, n] : s.pairEvidence.pairsNaming) {
+        auto d = s.referenceDecisions.find(p);
+        if (d == s.referenceDecisions.end() || d->second.cls != ReferenceClass::CompatibilityRequired)
+            continue;
+        if (d->second.counts[static_cast<size_t>(ReferenceClass::CompatibilityRequired)] <= n)
+            out.push_back(p);
+    }
+    return out;
+}
+
+std::string pairVerdict(const PairEvidence& ev)
+{
+    if (!ev.scanned)
+        return "Not scanned";
+    if (!ev.pairs)
+        return "No pairs in the load order";
+    if (ev.clean())
+        return "Clean: every read keeps working when a pair is rewritten";
+    std::string why = std::to_string(ev.notOk()) + " reads in a use a rewrite might not keep";
+    if (!ev.unreadable.empty())
+        why += ", " + std::to_string(ev.unreadable.size()) + " scripts could not be read";
+    return "Not clean: " + why;
+}
+
+template <class W>
+void pairEvidenceSection(W& h, const ReportContext& ctx)
+{
+    const auto& s = *ctx.session;
+    const auto& ev = s.pairEvidence;
+    if (!ev.scanned || (!ev.pairs && ev.reads.empty()))
+        return;
+    h.h2("Plugin name and FormID pairs (evidence, report only)");
+    const auto only = pairOnlyPlugins(s);
+    h.cards({{"Pairs in Records", formatCount(ev.pairs)},
+             {"Plugins Named", formatCount(ev.pairsNaming.size())},
+             {"Kept Out Only by Pairs", formatCount(only.size())},
+             {"Script Reads", formatCount(ev.reads.size())},
+             {"Reads Not Kept", formatCount(ev.notOk())}});
+    h.note("Script properties holding a struct with sPluginName and iFormID (as Sim Settlements 2 writes them) keep "
+           "the plugin they name out of the build. Rewriting a pair (the name and the FormID together) is safe only "
+           "if every script uses the two members for nothing but Game.GetFormFromFile(iFormID, sPluginName) of the "
+           "same struct, Game.IsPluginInstalled or logging. This section lists every read found; nothing here "
+           "changes what is compiled.");
+    h.note("Verdict: " + pairVerdict(ev));
+    h.tableStart({"Script property", "Pairs", "Plugins named", "In plugins"});
+    size_t shown = 0;
+    for (const auto& [holder, x] : ev.holders) {
+        if (shown++ >= ctx.maxRows)
+            break;
+        h.row({holder, formatCount(x.pairs), formatCount(x.named.size()), formatCount(x.inPlugins.size())}, {"mono"});
+    }
+    h.tableEnd(std::min(shown, ev.holders.size()), ev.holders.size());
+    if (!only.empty()) {
+        h.tableStart({"Plugin kept out only by pairs", "Pairs naming it"});
+        shown = 0;
+        for (PluginIndex p : only)
+            if (shown++ < ctx.maxRows)
+                h.row({s.pluginName(p), formatCount(ev.pairsNaming.at(p))});
+        h.tableEnd(std::min(shown, only.size()), only.size());
+    }
+    // Reads, the ones a rewrite might not keep first, one row per place and use.
+    std::map<std::tuple<bool, std::string, std::string, std::string, std::string>, size_t> grouped;
+    for (const auto& r : ev.reads)
+        ++grouped[{r.ok, r.script, r.where, r.member, r.use}];
+    h.tableStart({"Script", "Function", "Member", "Use", "Count", "Kept"});
+    shown = 0;
+    for (const auto& [k, n] : grouped) {
+        if (shown++ >= ctx.maxRows)
+            break;
+        const auto& [ok, script, where, member, use] = k;
+        h.row({script, where, member, use, formatCount(n), ok ? "Yes" : "No"},
+              {"mono", "mono", "", "", "", ok ? "ok" : "Warning"});
+    }
+    h.tableEnd(std::min(shown, grouped.size()), grouped.size());
+    if (!ev.unreadable.empty()) {
+        h.tableStart({"Script naming a member that could not be read"});
+        for (const auto& u : ev.unreadable)
+            h.row({u}, {"Warning"});
+        h.tableEnd(ev.unreadable.size(), ev.unreadable.size());
+    }
+}
+
 template <class W>
 std::string autoMergerReport(const ReportContext& ctx)
 {
@@ -813,6 +900,7 @@ std::string autoMergerReport(const ReportContext& ctx)
                     h.row({f.path, s.pluginName(c.plugin), c.location, c.context, c.before, c.after}, {"mono"});
         h.tableEnd(std::min(shown, changes), changes);
     }
+    pairEvidenceSection(h, ctx);
     if (!am.errors.empty()) {
         h.h2("Relink errors");
         h.tableStart({"File and error"});
@@ -1170,6 +1258,43 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             plugins.push(o);
         }
         root.set("plugins", plugins);
+        {
+            const auto& ev = s->pairEvidence;
+            json::Value pe;
+            pe.set("verdict", pairVerdict(ev));
+            pe.set("clean", ev.clean());
+            pe.set("pairs", static_cast<uint64_t>(ev.pairs));
+            json::Value holders;
+            for (const auto& [holder, x] : ev.holders) {
+                json::Value o;
+                o.set("property", holder);
+                o.set("pairs", static_cast<uint64_t>(x.pairs));
+                o.set("pluginsNamed", static_cast<uint64_t>(x.named.size()));
+                holders.push(o);
+            }
+            pe.set("holders", holders);
+            json::Value only;
+            for (PluginIndex p : pairOnlyPlugins(*s))
+                only.push(s->pluginName(p));
+            pe.set("keptOutOnlyByPairs", only);
+            json::Value reads;
+            for (const auto& r : ev.reads) {
+                json::Value o;
+                o.set("script", r.script);
+                o.set("where", r.where);
+                o.set("member", r.member);
+                o.set("object", r.object);
+                o.set("use", r.use);
+                o.set("kept", r.ok);
+                reads.push(o);
+            }
+            pe.set("reads", reads);
+            json::Value unreadable;
+            for (const auto& u : ev.unreadable)
+                unreadable.push(u);
+            pe.set("unreadable", unreadable);
+            root.set("pairEvidence", pe);
+        }
         json::Value files;
         for (const auto& f : am.files) {
             json::Value o;

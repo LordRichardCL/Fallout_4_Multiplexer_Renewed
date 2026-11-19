@@ -64,6 +64,14 @@ struct PropertyRead {
     size_t formIdOffset = 0;    // byte offset of that constant in the file
     std::string opcode;   // the instruction, for Other
     std::string where;    // "Object.State.Function"
+    // Struct members (property "struct:<member>", object "<struct type>|<variable>") and text joined from
+    // them (property "concat:struct:<member>"): followed like properties, for the evidence report on
+    // plugin name and FormID pairs. `function` is the called function for calls ("Debug.Trace");
+    // `formIdArgument` marks a value passed as GetFormFromFile's FormID, and `partner` names what the other
+    // argument of that GetFormFromFile was ("<property>@<object>", empty when it is not followed).
+    std::string function;
+    bool formIdArgument = false;
+    std::string partner;
 };
 
 // Where a string constant assigned to a variable (or the default value of a script variable, or

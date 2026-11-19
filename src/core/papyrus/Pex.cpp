@@ -319,7 +319,14 @@ private:
             pr.use = use;
             pr.opcode = kOpNames[op];
             pr.where = where_;
+            if ((op == kCallMethod || op == kCallParent) && !args.empty() && args[0].type == 1)
+                pr.function = out_.strings[args[0].string];
+            else if (op == kCallStatic && args.size() >= 2 && args[0].type == 1 && args[1].type == 1)
+                pr.function = out_.strings[args[0].string] + "." + out_.strings[args[1].string];
             return pr;
+        };
+        auto tag = [](const std::pair<std::string, std::string>* p) {
+            return p ? p->first + "@" + p->second : std::string();
         };
         // A call's result is the called function's return value: a variable holding it is followed like a
         // property read (matched by the function's name).
@@ -343,12 +350,37 @@ private:
                 propertyVars_[out_.strings[args[0].string]] = *p;
             else
                 propertyVars_.erase(out_.strings[args[0].string]);
+        } else if (op == 0x26 && args.size() == 3 && args[0].type == 1 && args[1].type == 1 &&
+                   (args[2].type == 1 || args[2].type == 2)) {
+            // struct_get dest, struct, member: the member's value is followed like a property's.
+            propertyVars_[out_.strings[args[0].string]] = {
+                "struct:" + lower(out_.strings[args[2].string]),
+                typeOf(args[1]) + "|" + lower(out_.strings[args[1].string])};
+        } else if ((op == 0x28 || op == 0x29) && args.size() == 5 && (args[2].type == 1 || args[2].type == 2)) {
+            // array_findstruct dest, array, member, value, start: the member is compared with a value.
+            auto pr = readOf({"struct:" + lower(out_.strings[args[2].string]), typeOf(args[1])}, PropertyRead::Use::Other);
+            out_.propertyReads.push_back(std::move(pr));
+        } else if (op == 0x27 && args.size() == 3 && (args[1].type == 1 || args[1].type == 2)) {
+            // struct_set struct, member, value: the script writes the member (listed, not a read).
+            auto pr = readOf({"struct:" + lower(out_.strings[args[1].string]),
+                              typeOf(args[0]) + "|" + (args[0].type == 1 ? lower(out_.strings[args[0].string]) : "")},
+                             PropertyRead::Use::Other);
+            out_.propertyReads.push_back(std::move(pr));
         } else if (getFormFromFile) {
-            if (const auto* p = propertyOf(varargs[1])) {
-                auto pr = readOf(*p, PropertyRead::Use::GetFormFromFile);
+            const auto* file = propertyOf(varargs[1]);
+            const auto* id = propertyOf(varargs[0]);
+            if (file) {
+                auto pr = readOf(*file, PropertyRead::Use::GetFormFromFile);
                 pr.formIdLiteral = varargs[0].type == 3;
                 pr.formId = varargs[0].integer;
                 pr.formIdOffset = varargs[0].offset;
+                pr.partner = tag(id);
+                out_.propertyReads.push_back(std::move(pr));
+            }
+            if (id && id->first.rfind("struct:", 0) == 0) {
+                auto pr = readOf(*id, PropertyRead::Use::GetFormFromFile);
+                pr.formIdArgument = true;
+                pr.partner = tag(file);
                 out_.propertyReads.push_back(std::move(pr));
             }
         } else {
@@ -376,6 +408,17 @@ private:
 
         if (!getFormFromFile)
             callResult();
+        // strcat dest, a, b: text joined from a struct member is followed too (where the text goes: a log
+        // line, a message, or somewhere that matters).
+        if (op == 0x1B && args.size() == 3 && args[0].type == 1) {
+            const auto* from = propertyOf(args[1]);
+            if (!from || (from->first.rfind("struct:", 0) != 0 && from->first.rfind("concat:", 0) != 0))
+                from = propertyOf(args[2]);
+            if (from && (from->first.rfind("struct:", 0) == 0 || from->first.rfind("concat:", 0) == 0)) {
+                const std::string base = from->first.rfind("concat:", 0) == 0 ? from->first : "concat:" + from->first;
+                propertyVars_[out_.strings[args[0].string]] = {base, from->second};
+            }
+        }
 
         if (getFormFromFile) {
             FormFromFileCall c;

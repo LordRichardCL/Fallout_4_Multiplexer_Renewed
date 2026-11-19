@@ -496,6 +496,8 @@ An optional, separate mode for experienced users (left sidebar: **Advanced Users
 
 Nothing else in a file changes, and compiled files are never patched by blind byte replacement: every change is made at the exact place the scanner recorded.
 
+**Plugin name and FormID pairs (report only).** Sim Settlements 2 keeps many plugin names in structs with `sPluginName` and `iFormID`; those still keep their plugins out. The Auto-Merger Report has a section that shows how every script uses those two members, a verdict (Clean or Not clean), and which plugins nothing but these pairs keeps out. It does not change what is compiled; it is the evidence needed before such pairs could be rewritten.
+
 **Checks (fail closed).** During **Compile**, before anything is written, every copy is:
 1. scanned again;
 2. checked to contain exactly the expected changes;
