@@ -20,6 +20,8 @@ namespace gui {
 class SqlModel;
 class GroupedSqlModel;
 class StageIndicator;
+class CollapsibleSection;
+class SegmentedControl;
 
 // Multiplexer Compilation System: options, pipeline, generated output.
 class CompilationPage : public Page {
@@ -37,6 +39,12 @@ private:
     void storeOptions();
     void updateButtons();
     void showTrace(const QModelIndex& index);
+    // Presets set the switches of "When mods change the same thing" and "Patch" (never the output count,
+    // folder, name or allocation); the selector shows Custom when the switches match neither.
+    void applyPreset(const QString& name);
+    void updatePresetState();
+    void updateSummaries();
+    void fillResults();
 
     QSpinBox* outputs_;
     QCheckBox* autoOutputs_ = nullptr;
@@ -71,6 +79,22 @@ private:
     QTreeView* assetsView_;
     GroupedSqlModel* assetsModel_;
     QTextBrowser* trace_;
+    SegmentedControl* presets_ = nullptr;
+    CollapsibleSection* patchSection_ = nullptr;
+    CollapsibleSection* advancedSection_ = nullptr;
+    QLabel* prefixDescription_ = nullptr;
+    QLabel* planPending_ = nullptr;
+    QWidget* stageCard_ = nullptr;
+    QLabel* lastBuild_ = nullptr;
+    QLabel* buildPill_ = nullptr;
+    QLabel* compiledN_ = nullptr;
+    QLabel* outputsN_ = nullptr;
+    QLabel* recordsN_ = nullptr;
+    QWidget* outputsList_ = nullptr;
+    QLabel* errorsN_ = nullptr;
+    QLabel* warningsN_ = nullptr;
+    QLabel* keptN_ = nullptr;
+    QLabel* pipe_ = nullptr;
     bool loading_ = false; // loadOptions() is setting the controls: no write-back
 };
 

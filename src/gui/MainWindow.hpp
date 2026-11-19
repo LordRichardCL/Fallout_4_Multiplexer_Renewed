@@ -27,13 +27,17 @@ protected:
     void closeEvent(QCloseEvent* e) override;
 
 private:
-    void addPage(const QString& name, Page* page);
+    void addGroup(const QString& title);
+    void addPage(const QString& name, const QString& label, const QString& icon, Page* page);
     void refreshAll();
+    // Counts on the navigation (changes affecting the build, patch choices waiting, plugins kept out...).
+    void refreshBadges();
 
     AppController* app_;
     QListWidget* nav_;
     QStackedWidget* stack_;
-    QMap<QString, int> pageIndex_;
+    QMap<QString, int> pageIndex_; // page name -> stack index
+    QMap<QString, int> navRow_;    // page name -> navigation row (group headers have rows too)
     QList<Page*> pages_;
     QProgressBar* progress_;
     QLabel* stageLabel_;

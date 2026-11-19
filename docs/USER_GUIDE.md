@@ -38,7 +38,16 @@ Optional overrides: a different `plugins.txt`, a different INI folder, and the s
 
 ## 3. Scan
 
-**Dashboard → Scan** builds the virtual Data folder and reads every plugin, archive and loose file. The dashboard then shows mods, plugins (ESM/ESP/ESL), archives, loose files, records and eligibility.
+**Dashboard → Scan** builds the virtual Data folder and reads every plugin, archive and loose file.
+
+**The Dashboard** shows, from the top:
+- the build's status in one line, with the one button that matters now (Scan my mods, Compile or Rebuild; Check again and Review Changes once there is a build);
+- the steps from Scan to Play & check: done steps are green, the one waiting on you is amber;
+- four numbers: plugins (and how many are compiled), output plugins, conflicts (and how many need a choice), validation errors and warnings;
+- **Needs your attention**: each item in one sentence with a button to the page that handles it (patch choices waiting, plugins kept out, validation errors, missing masters, worldspaces whose large references were left as they are);
+- your load order at a glance (how plugins are handled, kinds of conflicts) and, under **All numbers**, every count: mods, plugins by type, archives, loose files, records, asset conflicts, eligible plugins and outputs.
+
+The navigation groups the pages: **Your mods** (Changes, Plugins, Conflicts, Assets, Dependencies), **Build** (Compilation, Validation, Reports) and **Tools** (Auto-Merger, Diagnostics, Settings). Counts beside a page say something there needs you: changes that affect the build, patch choices waiting, validation errors, plugins the Auto-Merger keeps out. Ctrl+1 to Ctrl+9 open the pages in order.
 
 ## 4. Analyse
 
@@ -187,7 +196,14 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 
 ## 6. Export and switch over
 
-**Export Plugins** builds one installable mod, the same for every mod manager, in a folder of its own. Every export gets a new folder; an earlier export is never moved, renamed, deleted or changed:
+**The Compilation page.** Options on the left, results on the right, and the actions at the bottom (Save Settings, Open Folder, Export, Apply to Game, Compile) with the progress of compile, export and apply. Every option has a one-line description; the **?** beside it explains it in full. **Presets** at the top right set the switches in one click; they never change the number of outputs, their name, the folder or the allocation:
+- **Recommended**: combine compatible changes, apply your patch choices, merge cell settings, translate previs files, build Multiplexer_Patch.esp.
+- **Safest**: combine compatible changes only.
+- **Custom**: shown when the switches match neither.
+
+**Patch** (Multiplexer_Patch.esp, patch only), **Advanced** (record allocation and rules, light outputs, broken references as null) and **How to install** (the steps for your mod manager) open with a click; closed, they show their current settings in one line. The results show the last build (plugins compiled, outputs, records), each output's size, errors, warnings and plugins kept out (each with a link), and the Output Plugins, Generated Records, FormID Mappings and Assets Used tables.
+
+**Export** builds one installable mod, the same for every mod manager, in a folder of its own. Every export gets a new folder; an earlier export is never moved, renamed, deleted or changed:
 
 ```
 <output folder>\                         Settings / Compilation page: "Output folder" (default <game folder>\Multiplexer Output)
@@ -314,7 +330,7 @@ of the load order at export. After a **Scan**, the app reopens the latest finish
 - every plugin it compiled is still found.
 
 The Compilation page then says *Last build reopened: <export>*, and **Apply to Game** and **Open Output
-Folder** work on it. **Export Plugins** still needs a compilation (the records are not in memory). When the
+Folder** work on it. **Export** still needs a compilation (the records are not in memory). When the
 export does not fit, the page says why (with the first change found) and you compile again. Exports made by
 earlier versions of the app have no `Multiplexer_Build.json` and are not reopened.
 
@@ -387,11 +403,11 @@ When you start a **new build** of the app for the first time, it clears the prev
 
 ## Keeping the build up to date
 
-When the app starts it compares your mod space with the last exported build. The Dashboard banner shows:
+When the app starts it compares your mod space with the last exported build. The Dashboard's status line shows:
 
-- **✓ Up To Date**: nothing that matters changed.
-- **⚠ Changes Detected**: only assets changed (new textures, an updated loose-file mod). The compiled plugins are still correct.
-- **✖ Requires Rebuild**: plugins were added, removed, updated or reordered, compilation settings changed, or a generated plugin was deleted or edited.
+- **Your game is up to date** (Up To Date): nothing that matters changed.
+- **Some files changed** (Changes Detected): only assets changed (new textures, an updated loose-file mod). The compiled plugins are still correct.
+- **Your mods changed: rebuild needed** (Requires Rebuild): plugins were added, removed, updated or reordered, compilation settings changed, or a generated plugin was deleted or edited.
 
 **Changes** lists every added, removed and updated mod, plugin and archive, load order moves, and whether each one requires a rebuild. It also shows which record types the changed plugins contain and which compiled types are unaffected. **Check Now** re-runs the comparison at any time.
 

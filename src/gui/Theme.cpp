@@ -20,9 +20,32 @@ QToolTip { background: #1c2420; color: #d7e4dc; border: 1px solid #2a3530; paddi
 #NavTitle { color: #3ddc84; font-size: 13pt; font-weight: 600; padding: 18px 16px 2px 16px; }
 #NavSubtitle { color: #8aa196; font-size: 8pt; padding: 0 16px 14px 16px; }
 #NavList { background: transparent; border: none; outline: none; }
-#NavList::item { padding: 10px 16px; border-left: 3px solid transparent; color: #a9bcb2; }
-#NavList::item:hover { background: #18201c; color: #d7e4dc; }
-#NavList::item:selected { background: #1a2a21; color: #3ddc84; border-left: 3px solid #3ddc84; }
+#NavList::item, #NavList::item:hover, #NavList::item:selected { background: transparent; border: none; }
+#NavBrand { color: #3ddc84; font-size: 12.5pt; font-weight: 700; letter-spacing: 1px; }
+#NavBrandSub { color: #8aa196; font-size: 8pt; }
+#NavFooter { color: #6f857a; font-size: 8pt; padding: 12px 18px; border-top: 1px solid #1f2824; }
+
+#HelpBadge { border: 1px solid #4f6359; border-radius: 8px; color: #8aa196; font-size: 7.5pt; font-weight: 700; }
+#HelpBadge:hover { border-color: #3ddc84; color: #3ddc84; }
+#OptionTitle { font-weight: 600; color: #e4efe8; }
+#OptionDescription { color: #8aa196; font-size: 9pt; }
+#OptionRow { border-top: 1px solid #1f2824; }
+#AttentionRow { border-top: 1px solid #1f2824; }
+#SectionCardTitle { font-size: 10.5pt; font-weight: 600; color: #e4efe8; }
+#TileValue { font-size: 17pt; font-weight: 600; color: #e4efe8; }
+#Hero { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #13261c, stop:0.6 #161c19); border: 1px solid #2c4a39; border-radius: 12px; }
+#HeroTitle { font-size: 16pt; font-weight: 600; }
+#ActionBar { background: #121815; border-top: 1px solid #222b27; }
+#Segmented { background: #121815; border: 1px solid #26302b; border-radius: 9px; }
+QPushButton#Segment { background: transparent; border: none; border-radius: 7px; padding: 6px 16px; color: #8aa196; }
+QPushButton#Segment:hover { color: #d7e4dc; }
+QPushButton#Segment:checked { background: #1a2a21; color: #3ddc84; border: 1px solid #2c5a40; }
+QPushButton#Big { background: #1f6e45; border: 1px solid #3ddc84; color: #eafff2; font-weight: 600; font-size: 11pt; padding: 10px 22px; border-radius: 9px; }
+QPushButton#Big:hover { background: #26844f; }
+QPushButton#Big:disabled { background: #151b18; border-color: #222b27; color: #5a6a62; }
+QPushButton#LinkButton { background: transparent; border: none; color: #3ddc84; padding: 2px 4px; }
+QPushButton#LinkButton:hover { text-decoration: underline; }
+#Pill { border-radius: 9px; padding: 1px 9px; font-size: 8.5pt; }
 
 #PageTitle { font-size: 16pt; font-weight: 600; color: #e4efe8; }
 #PageSubtitle { color: #8aa196; }

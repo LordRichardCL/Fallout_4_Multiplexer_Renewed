@@ -162,6 +162,29 @@ private slots:
         QVERIFY(childWithText<QPushButton>(settings(), "Save Settings"));
     }
 
+    // Presets set only the switches; the selector follows the switches (Custom when they match neither).
+    void compilation_presets_set_switches()
+    {
+        auto* page = compilation();
+        auto* safest = childWithText<QPushButton>(page, "Safest");
+        auto* recommended = childWithText<QPushButton>(page, "Recommended");
+        auto* custom = childWithText<QPushButton>(page, "Custom");
+        QVERIFY(safest && recommended && custom);
+        const int outputs = app_->config().compile.outputCount;
+        QTest::mouseClick(recommended, Qt::LeftButton);
+        const auto& c = app_->config().compile;
+        QVERIFY(c.mergeCompatible && c.applyPatchPlan && c.mergeCellConfig && c.translatePrevis && c.buildPatch);
+        QVERIFY(!c.lightOutputsWhenPossible && !c.brokenReferencesAsNull && !c.patchOnly);
+        QVERIFY(recommended->isChecked());
+        QTest::mouseClick(safest, Qt::LeftButton);
+        QVERIFY(c.mergeCompatible && !c.applyPatchPlan && !c.mergeCellConfig && !c.translatePrevis && !c.buildPatch);
+        QVERIFY(safest->isChecked());
+        QCOMPARE(app_->config().compile.outputCount, outputs); // never touched by a preset
+        previsBox()->setChecked(true); // one switch away from Safest
+        QVERIFY(custom->isChecked());
+        app_->loadSettings(); // back to the saved state
+    }
+
     // Showing a page does not mark anything unsaved.
     void showing_pages_changes_nothing()
     {

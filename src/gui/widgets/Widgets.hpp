@@ -1,6 +1,9 @@
 #pragma once
 
+#include <QCheckBox>
 #include <QColor>
+#include <QIcon>
+#include <QLabel>
 #include <QFrame>
 #include <QPushButton>
 #include <QStringList>
@@ -8,7 +11,6 @@
 
 #include <vector>
 
-class QLabel;
 class QHBoxLayout;
 class QButtonGroup;
 class QVBoxLayout;
@@ -102,6 +104,115 @@ private:
     QLabel* detail_;
     QLabel* counts_;
     QHBoxLayout* actions_;
+};
+
+// ---- Friendlier layout (19 Nov 2026): icons, switches, help badges, collapsible sections ----------------
+
+// Line icons drawn with QPainter in the app's style (the build has no Qt SVG). Names: dashboard, changes,
+// plugins, conflicts, assets, dependencies, compile, validation, reports, automerge, diagnostics, settings,
+// scan, analyse, review, install, play, check, refresh, block, info, folder, export, warning, records.
+QPixmap linePixmap(const QString& name, const QColor& color, int size, qreal dpr = 2.0);
+QIcon lineIcon(const QString& name, const QColor& color, int size = 18);
+
+// A check box drawn as a switch. Its text is kept (for accessibility and lookups) but not drawn: the row
+// around it shows the title and description.
+class ToggleSwitch : public QCheckBox {
+    Q_OBJECT
+public:
+    explicit ToggleSwitch(const QString& text, QWidget* parent = nullptr);
+    QSize sizeHint() const override { return {40, 22}; }
+    QSize minimumSizeHint() const override { return sizeHint(); }
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+    bool hitButton(const QPoint& pos) const override { return rect().contains(pos); }
+};
+
+// A small "?" that shows its explanation as a tooltip.
+class HelpBadge : public QLabel {
+    Q_OBJECT
+public:
+    explicit HelpBadge(const QString& help, QWidget* parent = nullptr);
+};
+
+// One option: a title (with a help badge when `help` is given), a one-line description under it, and the
+// controls on the right. `description` may be changed later through the returned label (objectName
+// "OptionDescription").
+QWidget* makeOptionRow(const QString& title, const QString& description, const QString& help,
+                       const std::vector<QWidget*>& controls);
+
+// A card whose header (icon, title, one-line summary, chevron) shows or hides its body.
+class CollapsibleSection : public QFrame {
+    Q_OBJECT
+public:
+    CollapsibleSection(const QString& icon, const QString& title, bool expanded = false, QWidget* parent = nullptr);
+    QVBoxLayout* body() const { return bodyLayout_; }
+    void setSummary(const QString& text);
+    void setExpanded(bool on);
+    bool expanded() const { return expanded_; }
+
+private:
+    QWidget* bodyWidget_;
+    QVBoxLayout* bodyLayout_;
+    QLabel* summary_;
+    QLabel* chevron_;
+    bool expanded_ = false;
+};
+
+// A card with a titled header (icon + title) and a body layout, for options that are always shown.
+QFrame* makeSectionCard(const QString& icon, const QString& title, QVBoxLayout** body);
+
+// The steps from scanning to playing, each done, waiting on the user, or still ahead.
+class JourneyView : public QWidget {
+    Q_OBJECT
+public:
+    enum class State { Done, Attention, Pending };
+    struct Step {
+        QString icon, title, detail;
+        State state = State::Pending;
+    };
+    explicit JourneyView(QWidget* parent = nullptr);
+    void setSteps(std::vector<Step> steps);
+    QSize sizeHint() const override { return {800, 104}; }
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+
+private:
+    std::vector<Step> steps_;
+};
+
+// A number with an icon tile and one line of text under it.
+class IconTile : public QFrame {
+    Q_OBJECT
+public:
+    IconTile(const QString& icon, const QColor& accent, QWidget* parent = nullptr);
+    void setValue(const QString& value, const QString& text);
+
+private:
+    QLabel* value_;
+    QLabel* text_;
+};
+
+// A row of the "Needs your attention" list: coloured icon, a bold line, a plain line, and an action.
+QWidget* makeAttentionRow(const QString& icon, const QColor& accent, const QString& title, const QString& text,
+                          QPushButton* action);
+
+// Single-choice segmented buttons (presets).
+class SegmentedControl : public QFrame {
+    Q_OBJECT
+public:
+    explicit SegmentedControl(const QStringList& labels, QWidget* parent = nullptr);
+    QString current() const;
+    void setCurrent(const QString& label); // does not emit
+    QPushButton* button(const QString& label) const;
+
+signals:
+    void picked(const QString& label);
+
+private:
+    QButtonGroup* group_;
+    QStringList labels_;
 };
 
 // Page title + subtitle + optional right-aligned widgets.

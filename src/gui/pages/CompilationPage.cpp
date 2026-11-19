@@ -3,6 +3,7 @@
 #include "Format.hpp"
 #include "models/GroupedSqlModel.hpp"
 #include "models/SqlModel.hpp"
+#include "Theme.hpp"
 #include "widgets/Widgets.hpp"
 
 #include "engine/Exporter.hpp"
@@ -21,6 +22,8 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QProgressBar>
+#include <QDateTime>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QSqlQuery>
@@ -38,79 +41,84 @@ using fo4mx::AllocationStrategy;
 
 CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app, parent)
 {
-    auto* l = new QVBoxLayout(this);
-    l->setContentsMargins(28, 24, 28, 18);
-    l->setSpacing(10);
-    compile_ = makeButton("Compile", "Primary");
-    export_ = makeButton("Export Plugins");
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+    auto* l = new QVBoxLayout;
+    l->setContentsMargins(28, 22, 28, 0);
+    l->setSpacing(12);
+    outer->addLayout(l, 1);
+    compile_ = makeButton("Compile", "Big");
+    compile_->setIcon(lineIcon("compile", QColor(0xea, 0xff, 0xf2), 17));
+    export_ = makeButton("Export");
+    export_->setIcon(lineIcon("export", theme::kText, 15));
+    export_->setAccessibleName("Export Plugins");
     apply_ = makeButton("Apply to Game…");
+    apply_->setIcon(lineIcon("install", theme::kText, 15));
     apply_->setToolTip("Mod Organizer 2: switch the profile's load order to the output plugins. All installs: add "
                        "compiled plugins' archives to Fallout4Custom.ini so their assets keep loading.");
-    openFolder_ = makeButton("Open Output Folder");
+    openFolder_ = makeButton("Open Folder");
+    openFolder_->setIcon(lineIcon("folder", theme::kText, 15));
     auto* saveSettings = makeSaveSettingsButton();
-    l->addWidget(makePageHeader("Multiplexer Compilation",
-                                "Scan → Analyse → Resolve → Merge → Rewrite → Compile → Validate → Export. Eligible "
-                                "plugins are compiled into a small set of fully materialised output plugins.",
-                                {compile_, export_, apply_, openFolder_, saveSettings}));
+    saveSettings->setObjectName(QString()); // an ordinary button here: Compile is the main action
+    saveSettings->setIcon(lineIcon("check", theme::kText, 15));
 
-    stages_ = new StageIndicator({"Scan", "Analyse", "Resolve", "Merge", "Rewrite", "Compile", "Validate", "Export"});
-    auto* stageFrame = new QFrame;
-    stageFrame->setObjectName("Card");
-    auto* sfl = new QVBoxLayout(stageFrame);
-    sfl->addWidget(stages_);
-    l->addWidget(stageFrame);
+    // Header: title, one line, and the presets.
+    presets_ = new SegmentedControl({"Recommended", "Safest", "Custom"});
+    presets_->button("Recommended")
+        ->setToolTip("Combine compatible changes, apply your patch choices, merge cell settings, translate previs files "
+                     "and build Multiplexer_Patch.esp. Light outputs and writing broken references as null stay off.");
+    presets_->button("Safest")
+        ->setToolTip("Combine compatible changes only: no patch choices, no cell merge, no previs translation, no "
+                     "patch, no light outputs, broken references never written as null.");
+    presets_->button("Custom")->setToolTip("Your own choice of switches below.");
+    l->addWidget(makePageHeader("Compilation", "Turns your mods into a few output plugins, with the same game data.",
+                                {presets_}));
 
-    auto* split = new QSplitter(Qt::Horizontal);
+    auto* cols = new QHBoxLayout;
+    cols->setSpacing(16);
 
-    // Options
+    // ---- Options (left) ----
     auto* optionsScroll = new QScrollArea;
     optionsScroll->setWidgetResizable(true);
     optionsScroll->setFrameShape(QFrame::NoFrame);
     auto* options = new QWidget;
     optionsScroll->setWidget(options);
     auto* ol = new QVBoxLayout(options);
-    ol->setContentsMargins(0, 0, 8, 0);
+    ol->setContentsMargins(0, 0, 8, 12);
+    ol->setSpacing(12);
 
-    auto* outBox = new QGroupBox("Output");
-    auto* form = new QFormLayout(outBox);
     outputs_ = new QSpinBox;
     outputs_->setRange(fo4mx::CompileOptions::kMinOutputs, fo4mx::CompileOptions::kMaxOutputs);
+    outputs_->setFixedWidth(70);
     prefix_ = new QLineEdit;
+    prefix_->setFixedWidth(190);
     outputDir_ = new QLineEdit;
-    outputDir_->setPlaceholderText("Default: <game folder>\\Multiplexer Output (each export in a folder of its own)");
-    auto* browse = makeButton("…");
-    auto* dirRow = new QHBoxLayout;
-    dirRow->addWidget(outputDir_, 1);
-    dirRow->addWidget(browse);
-    autoOutputs_ = new QCheckBox("Automatic");
+    outputDir_->setMinimumWidth(240);
+    outputDir_->setPlaceholderText("Default: <game folder>\\Multiplexer Output");
+    auto* browse = makeButton("Browse");
+    autoOutputs_ = new ToggleSwitch("Automatic");
     autoOutputs_->setToolTip("Use the fewest output plugins whose master lists all fit (Fallout 4 allows at most 254 "
                              "masters per plugin), from 1 up to the maximum. Fewer outputs take fewer load order "
                              "slots; each one is larger. The number used is shown after Compile.");
-    auto* outputsRow = new QHBoxLayout;
-    outputsRow->addWidget(outputs_);
-    outputsRow->addWidget(autoOutputs_);
-    outputsRow->addStretch();
+    auto* autoLabel = new QLabel("Auto");
+    autoLabel->setObjectName("OptionDescription");
     connect(autoOutputs_, &QCheckBox::toggled, outputs_, [this](bool on) { outputs_->setEnabled(!on); });
-    form->addRow("Output plugins", outputsRow);
     prefix_->setPlaceholderText(QString("Default: %1").arg(fo4mx::CompileOptions::kDefaultOutputPrefix));
     auto* prefixDefault = makeButton("Default");
     prefixDefault->setToolTip(QString("Use the default name prefix, %1 (outputs %101.esp, %102.esp, …)")
                                   .arg(fo4mx::CompileOptions::kDefaultOutputPrefix));
     connect(prefixDefault, &QPushButton::clicked, this,
             [this] { prefix_->setText(fo4mx::CompileOptions::kDefaultOutputPrefix); });
-    auto* prefixRow = new QHBoxLayout;
-    prefixRow->addWidget(prefix_, 1);
-    prefixRow->addWidget(prefixDefault);
-    form->addRow("Name prefix", prefixRow);
-    form->addRow("Output folder", dirRow);
-    outputs_->setToolTip(QString(
+    const QString outputsHelp = QString(
         "The most output plugins the compiler may create (%1 to %2). It fills them in order and starts a new one only "
         "when the current one holds about its share of the records, so a small load order uses fewer.\n\n"
         "Each output that is not ESL-flagged takes one of Fallout 4's 254 full plugin slots, shared with the plugins "
         "that stay enabled; validation stops the export if the total would pass 254. More outputs also leave fewer "
-        "masters for the worldspace output (254 minus this number).")
-                             .arg(fo4mx::CompileOptions::kMinOutputs)
-                             .arg(fo4mx::CompileOptions::kMaxOutputs));
+        "masters for the worldspace output (254 minus this number).\n\nAuto: " + autoOutputs_->toolTip())
+                                    .arg(fo4mx::CompileOptions::kMinOutputs)
+                                    .arg(fo4mx::CompileOptions::kMaxOutputs);
+    outputs_->setToolTip(outputsHelp);
     prefix_->setToolTip(QString("Output plugins are named <prefix>01.esp, <prefix>02.esp, … The default is %1; "
                                 "any other prefix works the same. After changing it, the earlier build's outputs keep "
                                 "their old names: remove them from the game once the new build is switched on.")
@@ -122,33 +130,89 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "changes an earlier one; \"Multiplexer Latest.txt\" names the latest.\n\n"
         "Advanced: a folder inside Mod Organizer 2's mods folder makes every export a mod of its own there; then "
         "compiled plugins that have archives are replaced by archive loaders instead of loose copies and INI entries.");
-    outputsNote_ = new QLabel;
-    outputsNote_->setObjectName("PageSubtitle");
-    outputsNote_->setWordWrap(true);
-    form->addRow(outputsNote_);
-    auto updateOutputsNote = [this] {
-        const QString count = autoOutputs_->isChecked()
-                                  ? QString("the fewest output plugins that fit")
-                                  : QString("up to %1 output plugins").arg(outputs_->value());
-        outputsNote_->setText(
-            "Compiles eligible plugins into " + count + ", plus Multiplexer_Patch.esp when the patch is on. "
-            "The output folder also receives the files the game finds by plugin name and FormID (voice files, FaceGen, "
-            "start-game quest lists in seq\\), loose copies that keep archive winners, and the Auto-Merger's relinked "
-            "scripts and configs. The Multiplexer_*.tsv files in Data are the build's records for the next build; the "
-            "lists, INI line and reports next to Data are notes for you. The game reads none of them.");
-    };
-    connect(outputs_, &QSpinBox::valueChanged, this, updateOutputsNote);
-    connect(autoOutputs_, &QCheckBox::toggled, this, updateOutputsNote);
-    updateOutputsNote();
-    installNote_ = new QLabel;
-    installNote_->setObjectName("PageSubtitle");
-    installNote_->setWordWrap(true);
-    installNote_->setTextFormat(Qt::RichText);
-    form->addRow(installNote_);
-    ol->addWidget(outBox);
+    {
+        QVBoxLayout* body = nullptr;
+        ol->addWidget(makeSectionCard("compile", "Output", &body));
+        body->addWidget(makeOptionRow("Number of output plugins", "How many plugins your mods are compiled into",
+                                      outputsHelp, {outputs_, autoOutputs_, autoLabel}));
+        auto* nameRow = makeOptionRow("Name", "", prefix_->toolTip(), {prefix_, prefixDefault});
+        prefixDescription_ = nameRow->findChild<QLabel*>("OptionDescription");
+        body->addWidget(nameRow);
+        body->addWidget(makeOptionRow("Output folder", "A Mod Organizer 2 mod or any folder", outputDir_->toolTip(),
+                                      {outputDir_, browse}));
+    }
 
-    auto* allocBox = new QGroupBox("Record allocation");
-    auto* al = new QVBoxLayout(allocBox);
+    merge_ = new ToggleSwitch("Merge compatible edits (keyword lists, leveled lists, form lists, different fields)");
+    light_ = new ToggleSwitch("ESL-flag outputs that fit the light plugin range (≤ 2048 new records)");
+    merge_->setToolTip("Where two or more mods change the same record in different ways (a leveled list, keywords, "
+                       "different fields), combine their changes instead of keeping only the last mod's version.");
+    light_->setToolTip("An output with few enough new records (2,048 or fewer) is ESL-flagged, so it takes no full "
+                       "plugin slot. Outputs with new cells or worldspaces are never ESL-flagged.");
+    translatePrevis_ = new ToggleSwitch("Translate previs files into the output's numbering");
+    translatePrevis_->setToolTip(
+        "A cell written to an output wins in game, so its previs file (.uvd) is read in the output's numbering. "
+        "On: a translated copy is written loose. Off: the original file is used. Either way the same plugins "
+        "compile: this setting only decides whether translated copies are written. The checks still run, and a "
+        "previs file that cannot be translated keeps its cell's plugins out. Turn off only to compare the two in "
+        "game.");
+    mergeCellConfig_ = new ToggleSwitch("Merge cell configuration (lighting, location, water, regions...)");
+    mergeCellConfig_->setToolTip(
+        "A cell several mods change keeps the winning mod's precombine and previs data, and takes the last real "
+        "change of each configuration field from the others: lighting, lighting template, location, encounter "
+        "zone, music, acoustic space, image space, god rays, water, regions and the cell's flags. Like "
+        "FO4CheckPrevisbines' \"Fix only Cell Config Conflicts\". Off: the winning mod's version is written as "
+        "it is. Worldspaces take the same from their versions (climate, water, music, map, location...), and keep "
+        "the large references the game uses today. A cell or worldspace whose winning mod stays in the load order "
+        "is written, merged, to Multiplexer_Patch.esp. Every field taken is listed in the report (Cell "
+        "Configuration).");
+    applyPlan_ = new ToggleSwitch("Apply the compatibility patch plan");
+    applyPlan_->setToolTip(
+        "Records the compatibility patch plan marks Ready (Conflict Report, \"Compatibility patch plan\") are "
+        "written as their winning version plus the changes the plan carries: Green ones by default, Yellow ones "
+        "you chose. Only plugins that stay hold the record: it goes to Multiplexer_Patch.esp. A compiled plugin "
+        "holds it: it goes to an output. Each record is checked to hold every planned change before it is "
+        "written; one that does not is written as it would be without the plan. Off: the plan is only reported.");
+    brokenAsNull_ = new ToggleSwitch("Write broken references as null (lossy)");
+    brokenAsNull_->setToolTip(
+        "A reference that cannot be written faithfully (its master is missing, or it names a record its compiled "
+        "plugin does not contain) is never guessed. Off (default): the plugin that stores it stays in the load "
+        "order, so the game reads its own data unchanged (Kept Out Automatically: Broken reference). On: such "
+        "references are written as null (00000000) and the plugin compiles; each is listed under Broken in "
+        "Source. The game's own reading of these references is not verified, so this can lose data.");
+    planPending_ = new QLabel;
+    planPending_->setObjectName("Pill");
+    planPending_->setStyleSheet("background:#2a2614; color:#f5c542;");
+    planPending_->setToolTip("Choices waiting in the Conflicts page (Compatibility patch plan)");
+    {
+        QVBoxLayout* body = nullptr;
+        ol->addWidget(makeSectionCard("conflicts", "When mods change the same thing", &body));
+        body->addWidget(makeOptionRow("Combine compatible changes", "Keywords, leveled lists and different fields from every mod",
+                                      merge_->toolTip(), {merge_}));
+        body->addWidget(makeOptionRow("Apply my patch choices", "Keep changes the winning mod would lose",
+                                      applyPlan_->toolTip(), {planPending_, applyPlan_}));
+        body->addWidget(makeOptionRow("Merge cell settings", "Lighting, water, location and regions · never precombines",
+                                      mergeCellConfig_->toolTip(), {mergeCellConfig_}));
+        body->addWidget(makeOptionRow("Translate previs files", "Writes copies that match the outputs' numbering",
+                                      translatePrevis_->toolTip(), {translatePrevis_}));
+    }
+
+    patch_ = new ToggleSwitch("Build Multiplexer_Patch.esp for plugins that stay in the load order");
+    patchOnly_ = new ToggleSwitch("Patch only: compile no plugins");
+    const QString patchHelp = "Like a Bashed Patch: where last-plugin-wins would drop edits (leveled lists, form "
+                              "lists, keywords, different fields), the patch carries the merged record. It only "
+                              "overrides existing records, so it is always ESL-flagged and adds no FormIDs. It must "
+                              "load last.";
+    patch_->setToolTip(patchHelp);
+    patchSection_ = new CollapsibleSection("validation", "Patch");
+    patchSection_->body()->addWidget(makeOptionRow("Build Multiplexer_Patch.esp",
+                                                   "Merged records for the plugins that stay in your load order",
+                                                   patchHelp, {patch_}));
+    patchSection_->body()->addWidget(makeOptionRow("Patch only", "Build only the patch: compile no plugins",
+                                                   "Compile no plugins: only Multiplexer_Patch.esp is built, for the "
+                                                   "load order as it is.",
+                                                   {patchOnly_}));
+    ol->addWidget(patchSection_);
+
     strategy_ = new QComboBox;
     strategy_->addItem("Balanced size (recommended)", int(AllocationStrategy::Balanced));
     strategy_->addItem("Grouped by record type", int(AllocationStrategy::ByRecordType));
@@ -159,96 +223,157 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                            Qt::ToolTipRole);
     strategy_->setItemData(2, "Balanced size, then your rules send record types or mods to the output you name.",
                            Qt::ToolTipRole);
-    al->addWidget(strategy_);
+    strategy_->setMinimumWidth(240);
     strategyNote_ = new QLabel;
-    strategyNote_->setObjectName("PageSubtitle");
+    strategyNote_->setObjectName("OptionDescription");
     strategyNote_->setWordWrap(true);
-    al->addWidget(strategyNote_);
     rules_ = new QPlainTextEdit;
     rules_->setPlaceholderText("One rule per line: PATTERN=OUTPUT\nWEAP=3\nMyWeaponPack.esp=5");
-    rules_->setMaximumHeight(110);
-    al->addWidget(rules_);
-    auto* note = new QLabel("Whatever the strategy: a record always goes into the same or a later output than the "
-                            "new records it references; cells, worldspaces and quests with dialogue go together into "
-                            "the last outputs; and records keep the output they had in the previous build when its "
-                            "FormID map is in the output folder. The strategy changes how records are spread, not "
-                            "what the game sees.");
-    note->setObjectName("PageSubtitle");
-    note->setWordWrap(true);
-    al->addWidget(note);
-    ol->addWidget(allocBox);
+    rules_->setMaximumHeight(90);
+    const QString allocationHelp =
+        "Whatever the strategy: a record always goes into the same or a later output than the new records it "
+        "references; cells, worldspaces and quests with dialogue go together into the last outputs; and records keep "
+        "the output they had in the previous build when its FormID map is in the output folder. The strategy changes "
+        "how records are spread, not what the game sees.";
+    advancedSection_ = new CollapsibleSection("records", "Advanced");
+    advancedSection_->body()->addWidget(
+        makeOptionRow("Record allocation", "How records are spread over the outputs", allocationHelp, {strategy_}));
+    advancedSection_->body()->addWidget(strategyNote_);
+    advancedSection_->body()->addWidget(rules_);
+    advancedSection_->body()->addWidget(
+        makeOptionRow("Light outputs", "ESL-flag outputs with 2,048 new records or fewer", light_->toolTip(), {light_}));
+    auto* lossy = new QLabel("lossy");
+    lossy->setObjectName("Pill");
+    lossy->setStyleSheet("background:#2a1616; color:#ff5c5c;");
+    advancedSection_->body()->addWidget(makeOptionRow("Write broken references as null",
+                                                      "Lets plugins with broken references compile",
+                                                      brokenAsNull_->toolTip(), {lossy, brokenAsNull_}));
+    ol->addWidget(advancedSection_);
 
-    auto* mergeBox = new QGroupBox("Resolution");
-    auto* ml = new QVBoxLayout(mergeBox);
-    merge_ = new QCheckBox("Merge compatible edits (keyword lists, leveled lists, form lists, different fields)");
-    light_ = new QCheckBox("ESL-flag outputs that fit the light plugin range (≤ 2048 new records)");
-    merge_->setToolTip("Where two or more mods change the same record in different ways (a leveled list, keywords, "
-                       "different fields), combine their changes instead of keeping only the last mod's version.");
-    light_->setToolTip("An output with few enough new records (2,048 or fewer) is ESL-flagged, so it takes no full "
-                       "plugin slot. Outputs with new cells or worldspaces are never ESL-flagged.");
-    translatePrevis_ = new QCheckBox("Translate previs files into the output's numbering");
-    translatePrevis_->setToolTip(
-        "A cell written to an output wins in game, so its previs file (.uvd) is read in the output's numbering. "
-        "On: a translated copy is written loose. Off: the original file is used. Either way the same plugins "
-        "compile: this setting only decides whether translated copies are written. The checks still run, and a "
-        "previs file that cannot be translated keeps its cell's plugins out. Turn off only to compare the two in "
-        "game.");
-    mergeCellConfig_ = new QCheckBox("Merge cell configuration (lighting, location, water, regions...)");
-    mergeCellConfig_->setToolTip(
-        "A cell several mods change keeps the winning mod's precombine and previs data, and takes the last real "
-        "change of each configuration field from the others: lighting, lighting template, location, encounter "
-        "zone, music, acoustic space, image space, god rays, water, regions and the cell's flags. Like "
-        "FO4CheckPrevisbines' \"Fix only Cell Config Conflicts\". Off: the winning mod's version is written as "
-        "it is. Worldspaces take the same from their versions (climate, water, music, map, location...). A "
-        "cell or worldspace whose winning mod stays in the load order is written, merged, to "
-        "Multiplexer_Patch.esp. Every field taken is listed in the report (Cell Configuration).");
-    applyPlan_ = new QCheckBox("Apply the compatibility patch plan");
-    applyPlan_->setToolTip(
-        "Records the compatibility patch plan marks Ready (Conflict Report, \"Compatibility patch plan\") are "
-        "written as their winning version plus the changes the plan carries: Green ones by default, Yellow ones "
-        "you chose. Only plugins that stay hold the record: it goes to Multiplexer_Patch.esp. A compiled plugin "
-        "holds it: it goes to an output. Each record is checked to hold every planned change before it is "
-        "written; one that does not is written as it would be without the plan. Off: the plan is only reported.");
-    brokenAsNull_ = new QCheckBox("Write broken references as null (lossy)");
-    brokenAsNull_->setToolTip(
-        "A reference that cannot be written faithfully (its master is missing, or it names a record its compiled "
-        "plugin does not contain) is never guessed. Off (default): the plugin that stores it stays in the load "
-        "order, so the game reads its own data unchanged (Kept Out Automatically: Broken reference). On: such "
-        "references are written as null (00000000) and the plugin compiles; each is listed under Broken in "
-        "Source. The game's own reading of these references is not verified, so this can lose data.");
-    for (auto* c : {merge_, light_, translatePrevis_, mergeCellConfig_, applyPlan_, brokenAsNull_}) {
-        c->setStyleSheet("QCheckBox { spacing: 8px; }");
-        ml->addWidget(c);
-    }
-    ol->addWidget(mergeBox);
-
-    auto* patchBox = new QGroupBox("Conflict resolution patch");
-    auto* pl = new QVBoxLayout(patchBox);
-    patch_ = new QCheckBox("Build Multiplexer_Patch.esp for plugins that stay in the load order");
-    patchOnly_ = new QCheckBox("Patch only: compile no plugins");
-    for (auto* c : {patch_, patchOnly_}) {
-        c->setStyleSheet("QCheckBox { spacing: 8px; }");
-        pl->addWidget(c);
-    }
-    auto* patchNote = new QLabel("Like a Bashed Patch: where last-plugin-wins would drop edits (leveled lists, form "
-                                 "lists, keywords, different fields), the patch carries the merged record. It only "
-                                 "overrides existing records, so it is always ESL-flagged and adds no FormIDs. "
-                                 "It must load last.");
-    patchNote->setObjectName("PageSubtitle");
-    patchNote->setWordWrap(true);
-    pl->addWidget(patchNote);
-    ol->addWidget(patchBox);
+    auto* installSection = new CollapsibleSection("install", "How to install");
+    installNote_ = new QLabel;
+    installNote_->setObjectName("OptionDescription");
+    installNote_->setWordWrap(true);
+    installNote_->setTextFormat(Qt::RichText);
+    outputsNote_ = new QLabel;
+    outputsNote_->setObjectName("OptionDescription");
+    outputsNote_->setWordWrap(true);
+    installSection->body()->setSpacing(8);
+    installSection->body()->addWidget(installNote_);
+    installSection->body()->addWidget(outputsNote_);
+    installSection->setSummary("after Export, for your mod manager");
+    ol->addWidget(installSection);
+    auto updateOutputsNote = [this] {
+        const QString count = autoOutputs_->isChecked() ? QString("the fewest output plugins that fit")
+                                                        : QString("up to %1 output plugins").arg(outputs_->value());
+        outputsNote_->setText(
+            "Compiles eligible plugins into " + count + ", plus Multiplexer_Patch.esp when the patch is on. "
+            "The output folder also receives the files the game finds by plugin name and FormID (voice files, FaceGen, "
+            "start-game quest lists in seq\\), loose copies that keep archive winners, and the Auto-Merger's relinked "
+            "scripts and configs. The Multiplexer_*.tsv files in Data are the build's records for the next build; the "
+            "lists, INI line and reports next to Data are notes for you. The game reads none of them.");
+    };
+    connect(outputs_, &QSpinBox::valueChanged, this, updateOutputsNote);
+    connect(autoOutputs_, &QCheckBox::toggled, this, updateOutputsNote);
+    updateOutputsNote();
     ol->addStretch();
-    split->addWidget(optionsScroll);
+    cols->addWidget(optionsScroll, 5);
 
-    // Results
+    // ---- Results (right) ----
     auto* results = new QWidget;
     auto* rl = new QVBoxLayout(results);
-    rl->setContentsMargins(8, 0, 0, 0);
+    rl->setContentsMargins(0, 0, 0, 12);
+    rl->setSpacing(10);
+    stages_ = new StageIndicator({"Scan", "Analyse", "Resolve", "Merge", "Rewrite", "Compile", "Validate", "Export"});
+    stageCard_ = new QFrame;
+    stageCard_->setObjectName("Card");
+    auto* sfl = new QVBoxLayout(stageCard_);
+    sfl->setContentsMargins(10, 4, 10, 4);
+    sfl->addWidget(stages_);
+    stageCard_->hide();
+    rl->addWidget(stageCard_);
+
+    auto* resultCard = new QFrame;
+    resultCard->setObjectName("Card");
+    auto* rc = new QVBoxLayout(resultCard);
+    rc->setContentsMargins(18, 14, 18, 12);
+    rc->setSpacing(8);
+    auto* rh = new QHBoxLayout;
+    auto* lb = new QLabel("Last build");
+    lb->setObjectName("SectionCardTitle");
+    buildPill_ = new QLabel;
+    buildPill_->setObjectName("Pill");
+    lastBuild_ = new QLabel;
+    lastBuild_->setObjectName("OptionDescription");
+    rh->addWidget(lb);
+    rh->addWidget(buildPill_);
+    rh->addStretch();
+    rh->addWidget(lastBuild_);
+    rc->addLayout(rh);
+    auto* flow = new QHBoxLayout;
+    flow->setSpacing(14);
+    auto number = [&](QLabel*& value, const QString& caption) {
+        auto* v = new QVBoxLayout;
+        v->setSpacing(0);
+        value = new QLabel("—");
+        value->setObjectName("TileValue");
+        auto* c = new QLabel(caption);
+        c->setObjectName("OptionDescription");
+        v->addWidget(value);
+        v->addWidget(c);
+        flow->addLayout(v);
+    };
+    auto arrow = [&] {
+        auto* a = new QLabel("→");
+        a->setStyleSheet("color:#3ddc84; font-size:15pt;");
+        flow->addWidget(a);
+    };
+    number(compiledN_, "plugins compiled");
+    arrow();
+    number(outputsN_, "output plugins");
+    arrow();
+    number(recordsN_, "records written");
+    flow->addStretch();
+    rc->addLayout(flow);
+    outputsList_ = new QWidget;
+    auto* olist = new QVBoxLayout(outputsList_);
+    olist->setContentsMargins(0, 0, 0, 0);
+    olist->setSpacing(0);
+    rc->addWidget(outputsList_);
     summary_ = new QLabel;
     summary_->setWordWrap(true);
-    summary_->setObjectName("PageSubtitle");
-    rl->addWidget(summary_);
+    summary_->setObjectName("OptionDescription");
+    rc->addWidget(summary_);
+    rl->addWidget(resultCard);
+
+    auto* checks = new QHBoxLayout;
+    checks->setSpacing(10);
+    auto check = [&](QLabel*& value, const QString& caption, const QString& color, const QString& page) {
+        auto* f = new QFrame;
+        f->setObjectName("Card");
+        auto* v = new QVBoxLayout(f);
+        v->setContentsMargins(14, 8, 14, 8);
+        v->setSpacing(0);
+        auto* top = new QHBoxLayout;
+        value = new QLabel("—");
+        value->setObjectName("TileValue");
+        value->setStyleSheet("color:" + color + ";");
+        top->addWidget(value);
+        top->addStretch();
+        auto* open = makeButton("Open", "LinkButton");
+        connect(open, &QPushButton::clicked, this, [this, page] { emit navigate(page); });
+        top->addWidget(open);
+        v->addLayout(top);
+        auto* c = new QLabel(caption);
+        c->setObjectName("OptionDescription");
+        v->addWidget(c);
+        checks->addWidget(f, 1);
+    };
+    check(errorsN_, "errors", "#3ddc84", "Validation");
+    check(warningsN_, "warnings", "#f5c542", "Validation");
+    check(keptN_, "plugins kept out", "#e4efe8", "Advanced Users Auto-Merger");
+    rl->addLayout(checks);
+
     tabs_ = new QTabWidget;
     outputsView_ = new QTableView;
     outputsModel_ = new SqlModel(this);
@@ -281,15 +406,28 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                     "original files its meshes, materials and textures load from. Compiled plugins contain records "
                     "only; assets stay in their original mods and archives.</p>");
     resultSplit->addWidget(trace_);
-    resultSplit->setStretchFactor(0, 2);
-    resultSplit->setStretchFactor(1, 3);
+    resultSplit->setStretchFactor(0, 3);
+    resultSplit->setStretchFactor(1, 2);
     rl->addWidget(resultSplit, 1);
     connect(recordsView_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
             [this](const QModelIndex& i) { showTrace(i); });
-    split->addWidget(results);
-    split->setStretchFactor(0, 2);
-    split->setStretchFactor(1, 3);
-    l->addWidget(split, 1);
+    cols->addWidget(results, 4);
+    l->addLayout(cols, 1);
+
+    // ---- Action bar (bottom) ----
+    auto* bar = new QFrame;
+    bar->setObjectName("ActionBar");
+    auto* bh = new QHBoxLayout(bar);
+    bh->setContentsMargins(28, 10, 28, 10);
+    bh->setSpacing(10);
+    pipe_ = new QLabel;
+    pipe_->setTextFormat(Qt::RichText);
+    pipe_->setObjectName("OptionDescription");
+    bh->addWidget(pipe_);
+    bh->addStretch();
+    for (auto* b : {saveSettings, openFolder_, export_, apply_, compile_})
+        bh->addWidget(b);
+    outer->addWidget(bar);
 
     connect(browse, &QPushButton::clicked, this, [this] {
         QString d = QFileDialog::getExistingDirectory(this, "Output folder", outputDir_->text());
@@ -520,8 +658,86 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     connect(rules_, &QPlainTextEdit::textChanged, this, [this] { storeOptions(); });
     for (auto* c : {autoOutputs_, merge_, light_, translatePrevis_, mergeCellConfig_, applyPlan_, brokenAsNull_, patch_,
                     patchOnly_})
-        connect(c, &QCheckBox::toggled, this, [this] { storeOptions(); });
+        connect(c, &QCheckBox::toggled, this, [this] {
+            storeOptions();
+            updatePresetState();
+            updateSummaries();
+        });
+    connect(strategy_, &QComboBox::currentIndexChanged, this, [this] { updateSummaries(); });
+    connect(prefix_, &QLineEdit::textChanged, this, [this] { updateSummaries(); });
+    connect(presets_, &SegmentedControl::picked, this, [this](const QString& name) { applyPreset(name); });
+    connect(app_, &AppController::taskStarted, this, [this](const QString& task) {
+        if (task != "Check")
+            stageCard_->show();
+    });
+    connect(app_, &AppController::busyChanged, this, [this](bool busy) {
+        if (!busy)
+            stageCard_->hide();
+    });
     loadOptions();
+}
+
+namespace {
+struct Preset {
+    bool merge, plan, cells, previs, patch, patchOnly, light, brokenNull;
+};
+const Preset kRecommended{true, true, true, true, true, false, false, false};
+const Preset kSafest{true, false, false, false, false, false, false, false};
+} // namespace
+
+void CompilationPage::applyPreset(const QString& name)
+{
+    if (name != "Recommended" && name != "Safest") {
+        updatePresetState();
+        return;
+    }
+    const Preset& p = name == "Recommended" ? kRecommended : kSafest;
+    patchOnly_->setChecked(p.patchOnly);
+    merge_->setChecked(p.merge);
+    applyPlan_->setChecked(p.plan);
+    mergeCellConfig_->setChecked(p.cells);
+    translatePrevis_->setChecked(p.previs);
+    patch_->setChecked(p.patch);
+    light_->setChecked(p.light);
+    brokenAsNull_->setChecked(p.brokenNull);
+    updatePresetState();
+}
+
+void CompilationPage::updatePresetState()
+{
+    if (!presets_)
+        return;
+    const Preset now{merge_->isChecked(),  applyPlan_->isChecked(), mergeCellConfig_->isChecked(),
+                     translatePrevis_->isChecked(), patch_->isChecked(), patchOnly_->isChecked(),
+                     light_->isChecked(), brokenAsNull_->isChecked()};
+    auto same = [&](const Preset& p) {
+        return p.merge == now.merge && p.plan == now.plan && p.cells == now.cells && p.previs == now.previs &&
+               p.patch == now.patch && p.patchOnly == now.patchOnly && p.light == now.light &&
+               p.brokenNull == now.brokenNull;
+    };
+    presets_->setCurrent(same(kRecommended) ? "Recommended" : same(kSafest) ? "Safest" : "Custom");
+}
+
+void CompilationPage::updateSummaries()
+{
+    if (!patchSection_)
+        return;
+    const QString prefix = prefix_->text().trimmed().isEmpty() ? QString(fo4mx::CompileOptions::kDefaultOutputPrefix)
+                                                               : prefix_->text().trimmed();
+    if (prefixDescription_) {
+        prefixDescription_->setText("Outputs are named " + prefix + "01.esp, " + prefix + "02.esp…");
+        prefixDescription_->show();
+    }
+    patchSection_->setSummary(patchOnly_->isChecked() ? "patch only: no plugins compiled"
+                              : patch_->isChecked()   ? "Multiplexer_Patch.esp on"
+                                                      : "no patch");
+    const int strategy = strategy_->currentData().toInt();
+    advancedSection_->setSummary(
+        QString("%1 · light outputs %2 · broken references %3")
+            .arg(strategy == int(AllocationStrategy::ByRecordType)   ? "grouped by record type"
+                 : strategy == int(AllocationStrategy::UserDefined) ? "balanced with your rules"
+                                                                    : "balanced allocation",
+                 light_->isChecked() ? "on" : "off", brokenAsNull_->isChecked() ? "written as null" : "kept"));
 }
 
 namespace {
@@ -630,6 +846,8 @@ void CompilationPage::loadOptions()
     if (toPath(outputDir_->text().trimmed()) != app_->config().exportOptions.outputDirectory)
         outputDir_->setText(toQString(app_->config().exportOptions.outputDirectory));
     loading_ = false;
+    updatePresetState();
+    updateSummaries();
 }
 
 void CompilationPage::storeOptions()
@@ -670,6 +888,13 @@ void CompilationPage::updateButtons()
                                   : QString("Export first, or after a restart Scan: the last export is reopened when it "
                                             "still matches the load order."));
     openFolder_->setEnabled(applicable);
+    // Progress through the three steps of this page.
+    auto step = [](bool done, int n, const QString& text) {
+        return done ? QString("<span style='color:#3ddc84'>✓</span> %1").arg(text)
+                    : QString("<span style='color:#8aa196'>%1</span> %2").arg(n).arg(text);
+    };
+    pipe_->setText(step(compiled || applicable, 1, "Compiled") + "&nbsp;&nbsp;—&nbsp;&nbsp;" +
+                   step(applicable, 2, "Exported") + "&nbsp;&nbsp;—&nbsp;&nbsp;" + step(false, 3, "Apply to game"));
 }
 
 void CompilationPage::refresh()
@@ -784,7 +1009,103 @@ void CompilationPage::refresh()
                                    : " (first: " + QString::fromStdString(p->restoreDetails().front()).toHtmlEscaped() +
                                          ")"));
     }
+    fillResults();
     updateButtons();
+}
+
+void CompilationPage::fillResults()
+{
+    const QString status = meta("build_status");
+    struct {
+        const char* text;
+        const char* style;
+    } pill = {"Not built", "background:#1c2420; color:#8aa196;"};
+    if (status == "Up To Date")
+        pill = {"Up to date", "background:#1a2a21; color:#3ddc84;"};
+    else if (status == "Changes Detected")
+        pill = {"Files changed", "background:#2a2614; color:#f5c542;"};
+    else if (status == "Requires Rebuild")
+        pill = {"Rebuild needed", "background:#2a1616; color:#ff5c5c;"};
+    buildPill_->setText(pill.text);
+    buildPill_->setStyleSheet(pill.style);
+    const qint64 built = meta("build_reference").toLongLong();
+    lastBuild_->setText(built > 0 ? QDateTime::fromSecsSinceEpoch(built).toString("d MMM yyyy HH:mm") : QString());
+
+    auto shortCount = [](qint64 v) {
+        if (v >= 100000)
+            return QString("%1k").arg(v / 1000);
+        return formatCount(v);
+    };
+    const QString compiled = meta("compiled_plugins");
+    const QString outputs = meta("output_plugins");
+    const QString patchName = meta("patch_name");
+    compiledN_->setText(compiled.isEmpty() ? QString("—") : formatCount(compiled.toLongLong()));
+    outputsN_->setText(outputs.isEmpty() ? QString("—")
+                       : patchName.isEmpty() ? outputs
+                                             : QString("%1 + %2").arg(outputs).arg(patchName.split(',').size()));
+    recordsN_->setText(compiled.isEmpty() ? QString("—") : shortCount(meta("compiled_records").toLongLong()));
+
+    // One row per output: name, a bar for its size against the largest, records and size.
+    auto* list = static_cast<QVBoxLayout*>(outputsList_->layout());
+    while (auto* item = list->takeAt(0)) {
+        if (auto* w = item->widget())
+            w->deleteLater();
+        delete item;
+    }
+    QSqlDatabase db = app_->readDb();
+    if (db.isOpen()) {
+        QSqlQuery q(db);
+        q.exec("SELECT output_name, record_count, size_bytes, light FROM CompilationGroups WHERE record_count > 0 "
+               "ORDER BY output_index");
+        struct Row {
+            QString name;
+            qint64 records, bytes;
+            bool light;
+        };
+        std::vector<Row> rows;
+        qint64 largest = 1;
+        while (q.next()) {
+            rows.push_back({q.value(0).toString(), q.value(1).toLongLong(), q.value(2).toLongLong(), q.value(3).toInt() != 0});
+            largest = std::max(largest, rows.back().bytes);
+        }
+        for (const auto& r : rows) {
+            auto* w = new QWidget;
+            w->setObjectName("AttentionRow");
+            auto* h = new QHBoxLayout(w);
+            h->setContentsMargins(0, 6, 0, 6);
+            h->setSpacing(10);
+            auto* name = new QLabel(r.name + (r.light ? "  <span style='color:#5cb8ff'>ESL</span>" : QString()));
+            name->setTextFormat(Qt::RichText);
+            h->addWidget(name, 1);
+            auto* meter = new QProgressBar;
+            meter->setTextVisible(false);
+            meter->setRange(0, 1000);
+            meter->setValue(int(std::max<qint64>(10, r.bytes * 1000 / largest)));
+            meter->setFixedSize(90, 6);
+            meter->setStyleSheet("QProgressBar { border: none; background: #1f2824; border-radius: 3px; }"
+                                 "QProgressBar::chunk { border-radius: 3px; background: " +
+                                 QString(r.light ? "#5cb8ff" : "#3ddc84") + "; }");
+            h->addWidget(meter);
+            auto* size = new QLabel(QString("%1 · %2").arg(formatCount(r.records), formatBytes(r.bytes)));
+            size->setObjectName("OptionDescription");
+            size->setMinimumWidth(130);
+            size->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            h->addWidget(size);
+            list->addWidget(w);
+        }
+    }
+    outputsList_->setVisible(list->count() > 0);
+
+    const QString errors = meta("validation_pre-export_errors");
+    errorsN_->setText(errors.isEmpty() ? QString("—") : formatCount(errors.toLongLong()));
+    errorsN_->setStyleSheet(QString("color:%1;").arg(errors.toLongLong() > 0 ? "#ff5c5c" : "#3ddc84"));
+    const QString warnings = meta("validation_pre-export_warnings");
+    warningsN_->setText(warnings.isEmpty() ? QString("—") : formatCount(warnings.toLongLong()));
+    keptN_->setText(formatCount(scalar("SELECT COUNT(*) FROM AutoMergePlugins WHERE status LIKE 'Kept out%'").toLongLong()));
+
+    const auto* plan = app_->pipeline() ? app_->pipeline()->patchPlan() : nullptr;
+    planPending_->setText(plan ? QString("%1 waiting").arg(formatCount(qint64(plan->pending))) : QString());
+    planPending_->setVisible(plan && plan->pending > 0);
 }
 
 void CompilationPage::showTrace(const QModelIndex& index)
