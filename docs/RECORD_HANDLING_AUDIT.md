@@ -1194,3 +1194,17 @@ The exported plugins pass the written-content and layout checks.
 ## Partial structs described from complete xEdit layouts (18 Nov 2026)
 
 WEAP DNAM, WEAP FNAM, WEAP CRDT, HAZD DNAM, STAT DNAM and ACTI RADR were partial structs: the decoder described their FormID slots and some number ranges, and treated the rest as undescribed bytes (kept exactly as written, Red in the compatibility analysis). The value layer generated from xEdit gives each of them a complete layout whose FormID members sit at exactly the decoder's slots, so the bytes between are numbers, flags and unused values. They are now described up to the layout's size; longer subrecords keep their extra bytes undescribed. Nothing new is rewritten (no FormIDs were added), so compiled output is byte-identical for these fields; the change lets conflict analysis and the compatibility patch plan compare them member by member. The definitions' fingerprint and the build cache format (14) change, so the next scan decodes again. Checked on the owner's outputs: 20,008 records, all at the layout's size, none with undescribed bytes left.
+
+## Large references kept as the game uses them (19 Nov 2026)
+
+**Evidence.** In the owner's build of 18 Nov the outputs wrote 22 worldspaces, none with large references (RNAM): their winners stay in the load order and have none. FasterStartup's audit at game data ready listed 117,098 large references in 50 worlds, against 101,308 before compiling, all valid. If the game added up every plugin's RNAM, compiling (which removes plugins and adds none) could only lower that number. It rose, so a later plugin's list replaces an earlier one, and compiling the plugin that supplied the list let an older, larger list (the base game's or another master's) take over. Large references that later plugins have moved or disabled are what the "large reference bug" shows as distant objects.
+
+**Rule** (part of the cell configuration merge). For each worldspace with more than one version, the list in force is worked out today and after compiling (the versions that stay, then the written worldspace, which loads last), in both readings the sources leave open: the last plugin with any RNAM, or the last RNAM of each cell.
+- Same after compiling: nothing changes.
+- Different, and both readings agree on today's list: the written worldspace carries exactly today's RNAM (from the plugin that supplies it, translated to the outputs), and the result is checked to reproduce today's list in both readings. Validation Report: "Large References", Info, with the cells, references and the plugin it came from.
+- Different, and the readings disagree on today's list: left as it is, with a warning.
+- A list naming references of more than 128 plugins is left as it is with a warning (it would add too many masters).
+
+**Tests:** `large_references_in_force_are_kept_when_their_plugin_compiles` (export, read back, translated FormIDs, written-content check; it fails without the rule) and `large_references_left_as_they_are_when_today_is_ambiguous`.
+
+**To confirm in game:** FasterStartup's "Large-reference audit" count should return close to the pre-compile number.

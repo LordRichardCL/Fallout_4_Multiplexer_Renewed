@@ -7825,6 +7825,123 @@ TEST(cell_configuration_merge_writes_cells_whose_winner_stays)
     CHECK(held.labInPatch);
 }
 
+// Large references (WRLD RNAM): the game replaces a worldspace's list with a later plugin's. Base.esm lists a
+// static in cell (0, 0); ModQ.esp (compiled) lists its own new static there too; ModL.esp (stays, the winner)
+// has no RNAM. Today the game uses ModQ's list; after compiling ModQ the winner would leave Base's in force,
+// so the written worldspace carries ModQ's list, translated to the output, and the patch reproduces it.
+TEST(large_references_in_force_are_kept_when_their_plugin_compiles)
+{
+    auto root = buildInstall("largerefs");
+    auto data = root / "Game" / "Data";
+    auto rnam = [](std::vector<uint32_t> refs) {
+        std::vector<uint8_t> d(8 + refs.size() * 8, 0);
+        storeLE<uint32_t>(d.data() + 4, static_cast<uint32_t>(refs.size()));
+        for (size_t i = 0; i < refs.size(); ++i)
+            storeLE<uint32_t>(d.data() + 8 + i * 8, refs[i]);
+        return raw("RNAM", d);
+    };
+    auto world = [&](std::optional<Subrecord> large) {
+        std::vector<Subrecord> subs{zs("EDID", "Wasteland")};
+        if (large)
+            subs.push_back(*large);
+        subs.push_back(u32("CNAM", 0x01000807));
+        return record("WRLD", 0x01000810, subs);
+    };
+    writePlugin(data / "Base.esm", {"Fallout4.esm"},
+                {record("CLMT", 0x01000807, {zs("EDID", "Dry")}), record("STAT", 0x01000820, {zs("EDID", "Tower")}),
+                 world(rnam({0x01000820}))},
+                ESM);
+    writePlugin(data / "ModQ.esp", {"Fallout4.esm", "Base.esm"},
+                {world(rnam({0x01000820, 0x02000800})), record("STAT", 0x02000800, {zs("EDID", "Pylon")})});
+    writePlugin(data / "ModL.esp", {"Fallout4.esm", "Base.esm"}, {world(std::nullopt)});
+    writeFile(root / "plugins.txt", "*Base.esm\n*ModA.esp\n*ModQ.esp\n*ModL.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"Base.esm", "ModL.esp"};
+    cfg.compile.mergeCellConfig = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const auto& s = p.session();
+    const auto* out = p.compiledOutput();
+    CHECK(out->isCompiled(s.findPlugin("ModQ.esp")->index));
+    bool reported = false;
+    for (const auto& i : out->issues)
+        reported |= i.category == "Large References" && i.severity == Severity::Info;
+    CHECK(reported);
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0)); // written-content check
+    OutputSet files(result.pluginFiles);
+    const auto* w = files.byEditorId("Wasteland");
+    CHECK(w != nullptr);
+    if (!w)
+        return;
+    const auto* r = w->record.find(Signature("RNAM"));
+    CHECK(r && r->data.size() == 24);
+    if (!r || r->data.size() != 24)
+        return;
+    CHECK_EQ(loadLE<uint32_t>(r->data.data() + 4), 2u);
+    std::set<std::pair<std::string, uint32_t>> named{files.resolve(*w, loadLE<uint32_t>(r->data.data() + 8)),
+                                                     files.resolve(*w, loadLE<uint32_t>(r->data.data() + 16))};
+    CHECK(named.count({"Base.esm", 0x820}) == 1);
+    const auto* pylon = files.byEditorId("Pylon");
+    CHECK(pylon != nullptr);
+    if (pylon)
+        CHECK(named.count(files.identity(*pylon)) == 1); // ModQ's static, at its new FormID in the output
+    for (const auto& f : result.pluginFiles)
+        CHECK(checkLayout(PluginFile::load(f), true).problems.empty());
+}
+
+// When the two readings of today's list disagree (Base.esm lists cells (0, 0) and (1, 0), the compiled ModQ.esp
+// only (0, 0)), nothing is guessed: the worldspace is left as it is and a warning says so.
+TEST(large_references_left_as_they_are_when_today_is_ambiguous)
+{
+    auto root = buildInstall("largerefsamb");
+    auto data = root / "Game" / "Data";
+    auto rnam = [](int16_t x, std::vector<uint32_t> refs) {
+        std::vector<uint8_t> d(8 + refs.size() * 8, 0);
+        storeLE<uint16_t>(d.data() + 2, static_cast<uint16_t>(x));
+        storeLE<uint32_t>(d.data() + 4, static_cast<uint32_t>(refs.size()));
+        for (size_t i = 0; i < refs.size(); ++i)
+            storeLE<uint32_t>(d.data() + 8 + i * 8, refs[i]);
+        return raw("RNAM", d);
+    };
+    auto world = [&](std::vector<Subrecord> large) {
+        std::vector<Subrecord> subs{zs("EDID", "Wasteland")};
+        subs.insert(subs.end(), large.begin(), large.end());
+        subs.push_back(u32("CNAM", 0x01000807));
+        return record("WRLD", 0x01000810, subs);
+    };
+    writePlugin(data / "Base.esm", {"Fallout4.esm"},
+                {record("CLMT", 0x01000807, {zs("EDID", "Dry")}), record("STAT", 0x01000820, {zs("EDID", "Tower")}),
+                 world({rnam(0, {0x01000820}), rnam(1, {0x01000820})})},
+                ESM);
+    writePlugin(data / "ModQ.esp", {"Fallout4.esm", "Base.esm"},
+                {world({rnam(0, {0x02000800})}), record("STAT", 0x02000800, {zs("EDID", "Pylon")})});
+    writePlugin(data / "ModL.esp", {"Fallout4.esm", "Base.esm"}, {world({})});
+    writeFile(root / "plugins.txt", "*Base.esm\n*ModA.esp\n*ModQ.esp\n*ModL.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"Base.esm", "ModL.esp"};
+    cfg.compile.mergeCellConfig = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    bool warned = false, carried = false;
+    for (const auto& i : p.compiledOutput()->issues) {
+        warned |= i.category == "Large References" && i.severity == Severity::Warning;
+        carried |= i.category == "Large References" && i.severity == Severity::Info;
+    }
+    CHECK(warned);
+    CHECK(!carried);
+    for (const auto& e : p.compiledOutput()->records)
+        if (e.editorId == "Wasteland")
+            for (const auto& f : e.fields.fields)
+                CHECK(f.sig != Signature("RNAM"));
+}
+
 // Change provenance through the pipeline (milestone 1, test 10): Base.esm defines an armor with one
 // keyword. ModB.esp adds a second keyword; ModC.esp, made from Base.esm alone, changes the armor's data and
 // wins. The conflict entry traces ModB's keyword as omitted from ModC (not made with ModB as a master), the

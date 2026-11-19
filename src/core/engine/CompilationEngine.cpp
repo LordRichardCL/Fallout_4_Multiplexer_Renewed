@@ -1279,6 +1279,135 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                          e.key, session.pluginName(e.winner));
             }
         }
+    // ---- Large references (WRLD RNAM) -----------------------------------------------------------------
+    // A worldspace's large references (RNAM, one subrecord per cell) are replaced, not added up, by a later
+    // plugin: in the owner's build the outputs wrote worldspaces without RNAM, and the game then listed
+    // 15,790 more large references than before compiling (FasterStartup's audit), which only replacement
+    // explains (adding up could only lose some). Whether the game takes the last plugin with RNAM or the
+    // last RNAM of each cell is not documented, so the list in force today is worked out both ways:
+    // where they agree and compiling would change it, the written worldspace carries today's list; where
+    // they disagree, nothing is changed and a warning says so.
+    {
+        Normalizer lrNorm(session);
+        using CellList = std::map<uint32_t, const NormSub*>; // cell (Y, X) -> its RNAM
+        auto cellOf = [](const NormSub& s) { return s.bytes.size() >= 4 ? loadLE<uint32_t>(s.bytes.data()) : 0u; };
+        auto sameSub = [](const NormSub* a, const NormSub* b) {
+            return a && b && a->bytes == b->bytes && a->refs == b->refs;
+        };
+        auto sameList = [&](const CellList& a, const CellList& b) {
+            if (a.size() != b.size())
+                return false;
+            for (const auto& [cell, s] : a) {
+                auto it = b.find(cell);
+                if (it == b.end() || !sameSub(s, it->second))
+                    return false;
+            }
+            return true;
+        };
+        // In force after loading `versions` in order: the last version with any RNAM (whole), or per cell.
+        auto inForce = [&](const std::vector<const std::vector<NormSub>*>& versions, CellList& whole, CellList& perCell) {
+            whole.clear();
+            perCell.clear();
+            for (const auto* subs : versions) {
+                CellList mine;
+                for (const auto& s : *subs)
+                    if (s.sig == Signature("RNAM"))
+                        mine[cellOf(s)] = &s;
+                if (!mine.empty())
+                    whole = mine;
+                for (const auto& [cell, s] : mine)
+                    perCell[cell] = s;
+            }
+        };
+        for (auto& e : out.records) {
+            if (e.sig != Signature("WRLD"))
+                continue;
+            const auto* g = session.findGroup(e.key);
+            if (!g)
+                continue;
+            const auto chain = session.instances(*g);
+            if (chain.size() < 2)
+                continue;
+            try {
+                std::vector<std::vector<NormSub>> subs;
+                subs.reserve(chain.size() + 1);
+                for (const auto& r : chain)
+                    subs.push_back(lrNorm.normalize(r).subs);
+                std::vector<const std::vector<NormSub>*> today, after;
+                for (size_t i = 0; i < chain.size(); ++i) {
+                    today.push_back(&subs[i]);
+                    if (!out.compiledFlag_[chain[i].plugin])
+                        after.push_back(&subs[i]);
+                }
+                subs.push_back(joinFields(e.fields)); // the written version loads after every plugin that stays
+                after.push_back(&subs.back());
+                CellList todayWhole, todayCell, afterWhole, afterCell;
+                inForce(today, todayWhole, todayCell);
+                inForce(after, afterWhole, afterCell);
+                if (sameList(todayWhole, afterWhole) && sameList(todayCell, afterCell))
+                    continue;
+                const std::string where = session.formLabel(e.key);
+                if (!sameList(todayWhole, todayCell)) {
+                    addIssue(Severity::Warning, "Large References",
+                             where + ": compiling changes which large references (RNAM) the game uses, and today's list "
+                                     "differs depending on how the game combines plugins' lists; left as it is (check "
+                                     "distant objects in this worldspace in game)",
+                             e.key, session.pluginName(e.winner));
+                    continue;
+                }
+                // Today's list comes whole from one version: the written worldspace carries exactly it.
+                size_t supplier = chain.size();
+                for (size_t i = chain.size(); i-- > 0;)
+                    if (std::any_of(subs[i].begin(), subs[i].end(), [](const NormSub& s) { return s.sig == Signature("RNAM"); })) {
+                        supplier = i;
+                        break;
+                    }
+                std::set<PluginIndex> origins;
+                size_t entries = 0;
+                for (const auto& [cell, s] : todayWhole) {
+                    for (const auto& [off, k] : s->refs)
+                        if (k.valid())
+                            origins.insert(k.origin);
+                    entries += s->bytes.size() >= 8 ? (s->bytes.size() - 8) / 8 : 0;
+                }
+                if (origins.size() > 128) {
+                    addIssue(Severity::Warning, "Large References",
+                             where + ": today's large references (RNAM, from " + session.pluginName(chain[supplier].plugin) +
+                                 ") name references of " + std::to_string(origins.size()) +
+                                 " plugins, too many masters to add; left as it is",
+                             e.key, session.pluginName(e.winner));
+                    continue;
+                }
+                FieldSet source = splitFields(lrNorm.normalize(chain[supplier]), session.defs);
+                e.fields.fields.erase(std::remove_if(e.fields.fields.begin(), e.fields.fields.end(),
+                                                     [](const Field& f) { return f.sig == Signature("RNAM"); }),
+                                      e.fields.fields.end());
+                for (const auto& f : source.fields)
+                    if (f.sig == Signature("RNAM"))
+                        insertLike(e.fields, source, f);
+                // Check: after loading, the game now uses today's list, both ways.
+                subs.back() = joinFields(e.fields);
+                after.back() = &subs.back();
+                inForce(after, afterWhole, afterCell);
+                if (!sameList(todayWhole, afterWhole) || !sameList(todayCell, afterCell))
+                    throw std::runtime_error("the written large references do not reproduce today's");
+                if (e.configOnly)
+                    e.configChanged = true;
+                e.size = estimateSize(e.fields);
+                addIssue(Severity::Info, "Large References",
+                         where + " is written with the large references (RNAM) the game uses today: " +
+                             std::to_string(todayWhole.size()) + " cell(s), " + std::to_string(entries) +
+                             " reference(s), from " + session.pluginName(chain[supplier].plugin) +
+                             (out.compiledFlag_[chain[supplier].plugin] ? " (compiled)" : ""),
+                         e.key, session.pluginName(e.winner));
+            } catch (const std::exception& ex) {
+                addIssue(Severity::Warning, "Large References",
+                         session.formLabel(e.key) + ": large references (RNAM) could not be compared (" + ex.what() +
+                             "); left as it is",
+                         e.key, session.pluginName(e.winner));
+            }
+        }
+    }
     }
     // Cells and worldspaces taken in only for the configuration merge: kept when it changed them, with
     // the worldspace an exterior cell needs (the game's current version when nothing changed it). They
