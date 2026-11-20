@@ -39,6 +39,10 @@ const std::vector<std::pair<const char*, const char*>> kTerms = {
     {"Will compile", "The plugin goes into the outputs and is switched off when you switch over."},
     {"Stays in load order", "The plugin is not compiled: it holds something the compiler cannot reproduce, or a "
                             "plugin that stays needs it as a master. The reason is shown beside it."},
+    {"Stays, redirected", "Master Redirection: the plugin stays in the load order, but as a copy in the output that "
+                          "lists the output plugins instead of its compiled masters, so they compile. The copy has "
+                          "the same name and loads after the outputs; switching the output mod off restores the "
+                          "original."},
     {"Kept by you", "You excluded the plugin, or it is not among the plugins you chose to compile."},
     {"Switch over / Apply to Game", "Install the outputs and switch the compiled plugins off. Nothing in your game "
                                     "changes before this, and it can be undone."},

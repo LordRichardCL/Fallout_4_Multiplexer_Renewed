@@ -64,6 +64,7 @@ private:
     QCheckBox* applyPlan_;
     QCheckBox* brokenAsNull_;
     QCheckBox* masterPlaceholders_;
+    QCheckBox* redirectMasters_ = nullptr;
     QCheckBox* newQuestsNpcs_;
     class PluginSelection* selection_ = nullptr;
     QCheckBox* patch_;

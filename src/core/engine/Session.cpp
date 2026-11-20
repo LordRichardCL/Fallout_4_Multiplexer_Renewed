@@ -65,6 +65,16 @@ const PluginInfo* Session::findPlugin(std::string_view name) const
     return it == byKey_.end() ? nullptr : &plugins[it->second];
 }
 
+std::vector<PluginIndex> Session::pluginsInListOrder() const
+{
+    if (listOrder.size() == plugins.size())
+        return listOrder;
+    std::vector<PluginIndex> out(plugins.size());
+    for (size_t i = 0; i < out.size(); ++i)
+        out[i] = static_cast<PluginIndex>(i);
+    return out;
+}
+
 PluginIndex Session::addPlugin(PluginInfo info)
 {
     info.index = static_cast<PluginIndex>(plugins.size());

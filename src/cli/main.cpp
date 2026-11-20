@@ -117,6 +117,10 @@ Compile options:
                        (Mod Organizer 2 output inside the mods folder only)
   --accept-formid-changes  compile even though records of the build in use would get other FormIDs
                        (saves made with it lose them); otherwise compiling stops
+  --redirect-masters   Master Redirection: a plugin that stays gets a copy in the output listing
+                       the outputs instead of its compiled masters, so they compile (MO2, output
+                       inside the mods folder)
+  --no-redirect PLUGIN keep this plugin as it is with --redirect-masters (repeatable)
   --allow-return PLUGIN  a plugin the last build compiled may return to the load order when this
                        build cannot compile it (repeatable); otherwise compiling stops and names it
   --patch              also write Multiplexer_Patch.esp, merging conflicts between
@@ -162,7 +166,7 @@ struct Args {
 
 Args parseArgs(int argc, char** argv)
 {
-    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--merge-cell-config", "--apply-patch-plan", "--broken-references-as-null", "--master-placeholders", "--no-new-quests-npcs", "--accept-formid-changes", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
+    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--merge-cell-config", "--apply-patch-plan", "--broken-references-as-null", "--master-placeholders", "--redirect-masters", "--no-new-quests-npcs", "--accept-formid-changes", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
                                                    "--diagnostic-recorder", "--install", "--archive-loader",
                                                    "--values", "--tree", "--help", "--unfinished",
                                                    "--verbose", "-v"};
@@ -274,6 +278,8 @@ PipelineConfig makeConfig(const Args& a)
     c.applyPatchPlan = a.has("--apply-patch-plan");
     c.brokenReferencesAsNull = a.has("--broken-references-as-null");
     c.unusedMasterPlaceholders = a.has("--master-placeholders");
+    c.redirectMasters = a.has("--redirect-masters");
+    c.noRedirect = a.all("--no-redirect");
     c.compileNewQuestsAndNpcs = !a.has("--no-new-quests-npcs");
     c.allowReturn = a.all("--allow-return");
     c.acceptFormIdChanges = a.has("--accept-formid-changes");

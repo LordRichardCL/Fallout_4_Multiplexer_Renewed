@@ -1,4 +1,5 @@
 #include "engine/PluginScanner.hpp"
+#include "engine/Redirection.hpp"
 
 #include "engine/BuildCache.hpp"
 #include "engine/EarlierBuilds.hpp"
@@ -161,10 +162,35 @@ void PluginScanner::discoverPlugins(Session& session, ProgressSink& progress)
 
     // This app's own files: Dummy plugins and patches are outputs, never sources. An archive
     // loader stands in for a compiled plugin, so the original underneath it is read instead.
+    // A redirected copy (Master Redirection) stands in for a plugin that stays: the original underneath is
+    // read instead, and put back where it loaded before the copy moved it after the outputs.
+    std::vector<std::pair<PluginIndex, std::string>> restore; // (plugin, the plugin it loaded after)
     for (auto& p : session.plugins) {
         if (!p.error.empty() || p.header.author != kGeneratorAuthor)
             continue;
         const auto* f = fileOf[p.index];
+        if (auto after = redirectedAfter(p.header.description)) {
+            if (f->sources.size() < 2) { // the original is gone: nothing to read
+                p.generated = true;
+                p.active = false;
+                continue;
+            }
+            size_t slot = f->sources.size() - 2;
+            p.path = session.vfs.physicalPath(*f, slot);
+            p.sourceMod = session.vfs.roots()[f->sources[slot]].name;
+            p.fileSize = f->sizes[slot];
+            p.modified = f->mtimes[slot];
+            p.behindRedirect = true;
+            restore.push_back({p.index, *after});
+            try {
+                p.header = readPluginHeader(p.path);
+                p.kind = classify(p);
+            } catch (const std::exception& e) {
+                p.error = e.what();
+                p.active = false;
+            }
+            continue;
+        }
         if (p.header.description.rfind(kArchiveLoaderTag, 0) == 0 && f->sources.size() > 1) {
             size_t slot = f->sources.size() - 2;
             p.path = session.vfs.physicalPath(*f, slot);
@@ -193,10 +219,35 @@ void PluginScanner::discoverPlugins(Session& session, ProgressSink& progress)
             p.reactivated = true;
         }
 
+    // The list as plugins.txt means it, with each redirected plugin back after the one it loaded after.
+    session.listOrder.clear();
+    for (size_t i = 0; i < session.plugins.size(); ++i)
+        session.listOrder.push_back(static_cast<PluginIndex>(i));
+    for (const auto& [pi, after] : restore) {
+        auto& lo = session.listOrder;
+        lo.erase(std::find(lo.begin(), lo.end(), pi));
+        if (after.empty()) {
+            lo.insert(lo.begin(), pi);
+            continue;
+        }
+        const auto* a = session.findPlugin(after);
+        auto at = a ? std::find(lo.begin(), lo.end(), a->index) : lo.end();
+        if (at == lo.end()) {
+            spdlog::warn("{} was redirected after {}, which is no longer installed: it keeps its place in plugins.txt",
+                         session.plugins[pi].name, after);
+            lo.push_back(pi);
+            continue;
+        }
+        lo.insert(at + 1, pi);
+        spdlog::info("{}: read the original underneath its redirected copy, in its place after {}",
+                     session.plugins[pi].name, after);
+    }
+
     // Final load order: implicit plugins first, then masters, then the rest,
     // each group keeping the recorded order (this is what the engine does).
     std::vector<PluginIndex> implicitList, masters, others;
-    for (auto& p : session.plugins) {
+    for (PluginIndex li : session.listOrder) {
+        auto& p = session.plugins[li];
         if (!p.active)
             continue;
         if (p.implicit)

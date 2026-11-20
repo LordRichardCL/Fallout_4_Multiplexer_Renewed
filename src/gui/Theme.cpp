@@ -190,7 +190,7 @@ QColor statusTint(const QString& status)
 
 QColor statusText(const QString& status)
 {
-    if (status == "Will compile")
+    if (status == "Will compile" || status == "Stays, redirected")
         return kGreen;
     if (status == "Stays in load order")
         return kYellow;

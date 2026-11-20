@@ -53,6 +53,9 @@ public:
 
     QStringList excludedPlugins() const;
     void setExcluded(const QString& plugin, bool excluded);
+    // Master Redirection: plugins kept as they are (never redirected). Saved at once.
+    QStringList notRedirected() const;
+    void setRedirect(const QString& plugin, bool allowed);
     // Which plugins are compiled (Compilation page): every eligible one not excluded, or only the chosen
     // ones (opt-in). Like exclusions these are saved at once and applied to the current analysis.
     void setExcludedMany(const QStringList& plugins, bool excluded);

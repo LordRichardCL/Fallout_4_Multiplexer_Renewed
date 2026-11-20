@@ -207,6 +207,16 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "none of the plugin's records overrides it, sits in its groups, or names it in a FormID; data the "
         "definitions do not describe counts as using it. Mod Organizer 2 with the output folder in the mods "
         "folder only, as for archive loaders. The Dependency Report lists every unused master either way.");
+    redirectMasters_ = new ToggleSwitch("Master Redirection");
+    redirectMasters_->setToolTip(
+        "A plugin that stays in the load order keeps its masters there too, even frameworks that could compile. "
+        "On: such a plugin gets a copy in the output, with the same name, that lists the output plugins instead "
+        "of its compiled masters, every FormID translated; it loads after the outputs. Its own records keep their "
+        "FormIDs, and records later plugins also change are left to them (a cell holding its references is "
+        "written as the game shows it today), so the game shows what it does now. Only plugins every record of "
+        "which the app describes completely, with no precombine or previs data, that no other plugin lists as a "
+        "master. The original file is never changed: switching the output mod off restores it. Mod Organizer 2 "
+        "with the output folder in the mods folder only. Keep a plugin out of it from the Plugins page.");
     planPending_ = new QLabel;
     planPending_->setObjectName("Pill");
     planPending_->setStyleSheet("background:#2a2614; color:#f5c542;");
@@ -289,6 +299,15 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                                                       "Compile masters that plugins staying in the load order list "
                                                       "but do not use (Mod Organizer 2)",
                                                       masterPlaceholders_->toolTip(), {masterPlaceholders_}));
+    {
+        auto* pill = new QLabel("advanced");
+        pill->setObjectName("Pill");
+        pill->setStyleSheet("background:#2a2614; color:#f5c542;");
+        advancedSection_->body()->addWidget(makeOptionRow("Master Redirection",
+                                                          "Compile masters of plugins that stay: a copy of each such "
+                                                          "plugin names the outputs instead (Mod Organizer 2)",
+                                                          redirectMasters_->toolTip(), {pill, redirectMasters_}));
+    }
     ol->addWidget(advancedSection_);
 
     auto* installSection = new CollapsibleSection("install", "How to install");
@@ -703,7 +722,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     connect(strategy_, &QComboBox::currentIndexChanged, this, [this] { storeOptions(); });
     connect(rules_, &QPlainTextEdit::textChanged, this, [this] { storeOptions(); });
     for (auto* c : {autoOutputs_, merge_, light_, translatePrevis_, mergeCellConfig_, applyPlan_, brokenAsNull_, patch_,
-                    patchOnly_, masterPlaceholders_, newQuestsNpcs_})
+                    patchOnly_, masterPlaceholders_, newQuestsNpcs_, redirectMasters_})
         connect(c, &QCheckBox::toggled, this, [this] {
             storeOptions();
             updatePresetState();
@@ -780,12 +799,14 @@ void CompilationPage::updateSummaries()
                                                       : "no patch");
     const int strategy = strategy_->currentData().toInt();
     advancedSection_->setSummary(
-        QString("%1 · light outputs %2 · broken references %3 · master placeholders %4 · new quests and NPCs %5")
+        QString("%1 · light outputs %2 · broken references %3 · master placeholders %4 · new quests and NPCs %5 · "
+                "master redirection %6")
             .arg(strategy == int(AllocationStrategy::ByRecordType)   ? "grouped by record type"
                  : strategy == int(AllocationStrategy::UserDefined) ? "balanced with your rules"
                                                                     : "balanced allocation",
                  light_->isChecked() ? "on" : "off", brokenAsNull_->isChecked() ? "written as null" : "kept",
-                 masterPlaceholders_->isChecked() ? "on" : "off", newQuestsNpcs_->isChecked() ? "on" : "off"));
+                 masterPlaceholders_->isChecked() ? "on" : "off", newQuestsNpcs_->isChecked() ? "on" : "off")
+            .arg(redirectMasters_->isChecked() ? "on" : "off"));
 }
 
 namespace {
@@ -891,6 +912,7 @@ void CompilationPage::loadOptions()
     applyPlan_->setChecked(c.applyPatchPlan);
     brokenAsNull_->setChecked(c.brokenReferencesAsNull);
     masterPlaceholders_->setChecked(c.unusedMasterPlaceholders);
+    redirectMasters_->setChecked(c.redirectMasters);
     newQuestsNpcs_->setChecked(c.compileNewQuestsAndNpcs);
     patchOnly_->setChecked(c.patchOnly);
     patch_->setChecked(c.buildPatch || c.patchOnly);
@@ -921,6 +943,7 @@ void CompilationPage::storeOptions()
     c.applyPatchPlan = applyPlan_->isChecked();
     c.brokenReferencesAsNull = brokenAsNull_->isChecked();
     c.unusedMasterPlaceholders = masterPlaceholders_->isChecked();
+    c.redirectMasters = redirectMasters_->isChecked();
     c.compileNewQuestsAndNpcs = newQuestsNpcs_->isChecked();
     c.patchOnly = patchOnly_->isChecked();
     c.buildPatch = c.patchOnly || patch_->isChecked();

@@ -384,6 +384,20 @@ bool Pipeline::restoreLastBuild()
     for (const auto& name : rec.archiveLoaders)
         if (const auto* p = session_->findPlugin(name))
             rb.compiled.archiveLoaders.push_back(p->index);
+    for (const auto& entry : rec.redirected) {
+        const auto bar = entry.find('|');
+        const std::string name = entry.substr(0, bar);
+        const auto* p = session_->findPlugin(name);
+        if (!p) {
+            restoreDetails_.push_back(name + " (redirected): not in the load order");
+            continue;
+        }
+        RedirectedPlugin rp;
+        rp.plugin = p->index;
+        rp.name = p->name;
+        rp.after = bar == std::string::npos ? std::string() : entry.substr(bar + 1);
+        rb.compiled.redirected.push_back(std::move(rp));
+    }
     if (!restoreDetails_.empty())
         return refuse("plugins it compiled are no longer found. Compile again");
 
@@ -576,10 +590,13 @@ AnalysisOptions Pipeline::analysisOptions() const
     a.masterPlaceholders = config_.compile.unusedMasterPlaceholders;
     a.newQuestsAndNpcs = config_.compile.compileNewQuestsAndNpcs;
     a.placeholdersOff.clear();
-    if (a.masterPlaceholders && session_) {
+    a.redirectMasters = config_.compile.redirectMasters;
+    a.noRedirect = config_.compile.noRedirect;
+    a.redirectOff.clear();
+    if ((a.masterPlaceholders || a.redirectMasters) && session_) {
         std::string off;
         if (loaderMod(&off).empty())
-            a.placeholdersOff = off;
+            a.placeholdersOff = a.redirectOff = off;
     }
     return a;
 }
@@ -663,6 +680,7 @@ bool Pipeline::compile(ProgressSink& progress)
     // plugins (or patch records) aside and compile again. Each round only ever removes work.
     session_->autoRetained.clear();
     session_->previsChecks.clear();
+    session_->redirectFailed.clear();
     CompileOptions options = config_.compile;
     // The reviewed compatibility patch plan: the changes to carry, for the records that are Ready.
     options.plannedChanges.clear();
@@ -705,6 +723,12 @@ bool Pipeline::compile(ProgressSink& progress)
         compiled_ = CompilationEngine::compile(*session_, options, progress);
         validation_ = ValidationEngine::validate(*session_, *compiled_, progress);
         size_t isolated = 0;
+        // Master Redirection: a plugin whose copy cannot be written faithfully is not redirected, so its
+        // masters stay in the load order (fail closed) and the compilation runs again.
+        for (const auto& rp : compiled_->redirected)
+            if (!rp.failure.empty() &&
+                session_->redirectFailed.emplace(session_->plugins[rp.plugin].key, rp.failure).second)
+                ++isolated;
         // References that cannot be written faithfully (fail closed, unless written as null on request):
         // the plugin that stores each stays in the load order, so the game reads its own data unchanged.
         for (const auto& br : compiled_->brokenReferences)
@@ -878,6 +902,34 @@ bool Pipeline::compile(ProgressSink& progress)
     if (db_ && !session_->autoRetained.empty())
         db::DatabaseWriter(*db_).updatePlugins(*session_);
 
+    // The rounds stopped while a plugin's copy still could not be written: its compiled masters would leave
+    // it without them. Never export that.
+    for (const auto& rp : compiled_->redirected)
+        if (!rp.failure.empty())
+            for (PluginIndex m : session_->plugins[rp.plugin].masters)
+                if (m != kInvalidPlugin && compiled_->isCompiled(m))
+                    validation_->fail(Severity::Error, "Master Redirection",
+                                      rp.name + " cannot be redirected (" + rp.failure + "), but its master " +
+                                          session_->plugins[m].name + " was compiled. Compile again",
+                                      rp.name);
+    for (const auto& [key, why] : session_->redirectFailed) {
+        const auto* p = session_->findPlugin(key);
+        validation_->fail(Severity::Warning, "Master Redirection",
+                          (p ? p->name : key) + " is not redirected: " + why +
+                              ". Its masters stay in the load order with it.",
+                          p ? p->name : key);
+    }
+    for (const auto& rp : compiled_->redirected)
+        if (rp.failure.empty())
+            validation_->fail(Severity::Info, "Master Redirection",
+                              rp.name + " stays in the load order as a copy in the output that lists the outputs "
+                                        "instead of " + join(rp.replacedMasters, ", ") + " (" +
+                                  std::to_string(rp.translated) + " FormIDs translated, " +
+                                  std::to_string(rp.dropped) + " overrides left to the outputs or later plugins as "
+                                  "today, " + std::to_string(rp.winnerCopies) +
+                                  " cells or other containers written as the game shows them today). It loads after "
+                                  "the outputs; switching the output mod off restores the original.",
+                              rp.name);
     for (auto pi : compiled_->masterPlaceholders) {
         std::vector<std::string> by;
         for (const auto& [q, m] : session_->unusedMasters)
@@ -1383,7 +1435,8 @@ ExportResult Pipeline::exportOutputs(ProgressSink& progress)
         for (auto* p : {&result.directory, &result.packageRoot, &result.zipPath, &result.formMap, &result.archiveIni,
                         &result.disableList, &result.pluginsTxt, &result.voiceManifest, &result.recorderFolder})
             rebase(*p, from, run->folder);
-        for (auto* list : {&result.pluginFiles, &result.archiveLoaders, &result.seqFiles, &result.archiveLoaderFiles})
+        for (auto* list : {&result.pluginFiles, &result.archiveLoaders, &result.seqFiles, &result.archiveLoaderFiles,
+                           &result.redirectedCopies})
             for (auto& p : *list)
                 rebase(p, from, run->folder);
         if (autoMerge_)

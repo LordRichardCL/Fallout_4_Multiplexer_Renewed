@@ -7205,6 +7205,233 @@ TEST(unused_masters_reported_and_given_placeholders)
     }
 }
 
+// Master Redirection. ModP stays (not chosen) and uses ModM's keyword (a form list names it), and overrides
+// ModM's keyword's name. Off: ModM stays with ModP. On (Mod Organizer 2, output in the mods folder): ModM
+// compiles; a copy of ModP in the output lists the outputs instead of ModM, its list names the keyword's new
+// FormID, its own records keep their object IDs, and its override of the compiled keyword is left to the
+// outputs (which hold ModP's version, as the game shows it today). The copy loads after the outputs; a
+// rescan reads the original underneath it, in its old place.
+TEST(master_redirection_lets_masters_of_plugins_that_stay_compile)
+{
+    for (const bool on : {false, true}) {
+        auto m = buildMo2Install(on ? "redirect_on" : "redirect_off", "+Mod P\n+Mod M\n+Mod C\n+Mod B\n+Mod A\n");
+        writePlugin(m.inst / "mods" / "Mod M" / "ModM.esp", {"Fallout4.esm"},
+                    {record("KYWD", 0x01000800, {zs("EDID", "ModM_Keyword")})});
+        writePlugin(m.inst / "mods" / "Mod P" / "ModP.esp", {"Fallout4.esm", "ModM.esp"},
+                    {record("FLST", 0x02000800, {zs("EDID", "ModP_List"), u32("LNAM", 0x01000800)}),
+                     record("KYWD", 0x01000800, {zs("EDID", "ModM_Keyword_FromP")})});
+        writeFile(m.profile / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModM.esp\n*ModP.esp\n");
+        auto cfg = m.cfg;
+        cfg.compile.redirectMasters = on;
+        cfg.analysis.onlySelected = true;
+        cfg.analysis.selectedPlugins = {"ModA.esp", "ModB.esp", "ModC.esp", "ModM.esp"};
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const auto& s = p.session();
+        const auto* modM = s.findPlugin("ModM.esp");
+        const auto* modP = s.findPlugin("ModP.esp");
+        CHECK(modM && modP);
+        if (!modM || !modP)
+            continue;
+        CHECK(modP->eligibility != Eligibility::Eligible);
+        CHECK_EQ(modM->eligibility == Eligibility::Eligible, on);
+        CHECK_EQ(s.redirected.count(modP->index), size_t(on ? 1 : 0));
+        if (!on)
+            continue;
+        CHECK(p.compile());
+        const auto* out = p.compiledOutput();
+        for (const auto& [k, why] : s.redirectFailed)
+            std::printf("not redirected %s: %s\n", k.c_str(), why.c_str());
+        for (const auto& [k, why] : s.autoRetained)
+            std::printf("kept %s: %s\n", k.c_str(), why.c_str());
+        CHECK(out->isCompiled(modM->index));
+        CHECK_EQ(out->redirected.size(), size_t(1));
+        const auto& rp = out->redirected.front();
+        CHECK(rp.failure.empty());
+        CHECK_EQ(rp.after, std::string("ModM.esp"));
+        CHECK(rp.replacedMasters == std::vector<std::string>{"ModM.esp"});
+        CHECK_EQ(rp.dropped, size_t(1)); // its override of the compiled keyword: the outputs hold it
+        CHECK_EQ(rp.ownVersions, size_t(1));
+        auto result = p.exportOutputs();
+        for (const auto& is : p.validation()->issues)
+            if (is.severity == Severity::Error)
+                std::printf("ERR %s: %s\n", is.category.c_str(), is.message.c_str());
+        CHECK_EQ(p.validation()->errors, uint64_t(0));
+        CHECK_EQ(result.redirectedCopies.size(), size_t(1));
+        if (result.redirectedCopies.empty())
+            continue;
+        const auto copy = result.redirectedCopies.front();
+        CHECK_EQ(copy.filename(), std::filesystem::path("ModP.esp"));
+        const auto h = readPluginHeader(copy);
+        CHECK(h.description.rfind(kRedirectTag, 0) == 0);
+        bool listsM = false, listsOutput = false;
+        for (const auto& mm : h.masters) {
+            listsM |= mm.name == "ModM.esp";
+            listsOutput |= mm.name.rfind("Dummy_Plugin_", 0) == 0;
+        }
+        CHECK(!listsM);
+        CHECK(listsOutput);
+        std::vector<std::filesystem::path> files = result.pluginFiles;
+        files.push_back(copy);
+        OutputSet set(files);
+        const auto* list = set.byEditorId("ModP_List");
+        const auto* kw = set.byEditorId("ModM_Keyword_FromP"); // the outputs hold ModP's version
+        CHECK(list && kw);
+        if (list && kw) {
+            CHECK_EQ(list->plugin, std::string("ModP.esp"));
+            CHECK(set.identity(*list) == std::make_pair(std::string("ModP.esp"), uint32_t(0x800)));
+            const auto* lnam = list->record.find(Signature("LNAM"));
+            CHECK(lnam != nullptr);
+            if (lnam)
+                CHECK(set.resolve(*list, loadLE<uint32_t>(lnam->data.data())) == set.identity(*kw));
+            CHECK(kw->plugin.rfind("Dummy_Plugin_", 0) == 0);
+        }
+        CHECK(set.byEditorId("ModM_Keyword") == nullptr); // the copy does not override the keyword back
+        {
+            ReportContext ctx;
+            ctx.session = &s;
+            ctx.dependencies = p.dependencies();
+            ctx.compiled = out;
+            const std::string text = ReportGenerator::text(ReportKind::Dependency, ctx);
+            CHECK(text.find("Master Redirection") != std::string::npos);
+            CHECK(text.find("redirected") != std::string::npos);
+            bool noted = false;
+            for (const auto& is : p.validation()->issues)
+                noted |= is.category == "Master Redirection" && is.severity == Severity::Info &&
+                         is.message.find("instead of ModM.esp") != std::string::npos;
+            CHECK(noted);
+        }
+        // Loads after the outputs.
+        const std::string txt = Exporter::proposedPluginsTxt(s, *out);
+        CHECK(txt.find("*ModP.esp") != std::string::npos);
+        CHECK(txt.find("*ModP.esp") > txt.find("*Dummy_Plugin_"));
+        CHECK(txt.find("*ModP.esp") == txt.rfind("ModP.esp") - 1); // listed once
+        // Switched over: the output mod wins, plugins.txt as proposed. A rescan reads the original ModP in its
+        // old place, after ModM.
+        const std::string mod = pathToUtf8(result.packageRoot.filename());
+        writeFile(m.profile / "modlist.txt", "# MO2\n+" + mod + "\n+Mod P\n+Mod M\n+Mod C\n+Mod B\n+Mod A\n");
+        writeFile(m.profile / "plugins.txt", txt);
+        Pipeline again(cfg);
+        again.scan();
+        const auto& s2 = again.session();
+        const auto* p2 = s2.findPlugin("ModP.esp");
+        const auto* m2 = s2.findPlugin("ModM.esp");
+        CHECK(p2 && m2);
+        if (p2 && m2) {
+            CHECK(p2->behindRedirect);
+            CHECK(p2->active);
+            CHECK(!p2->generated);
+            CHECK_EQ(p2->sourceMod, std::string("Mod P"));
+            CHECK(p2->header.description.rfind(kRedirectTag, 0) != 0);
+            CHECK(m2->active); // compiled and switched off: still a source
+            CHECK_EQ(p2->loadOrder, m2->loadOrder + 1);
+            CHECK(p2->missingMasters.empty());
+        }
+    }
+}
+
+// Master Redirection with cells, and the plugins it must leave alone. ModP places a reference to ModM's
+// object in ModV's interior cell; ModQ, later and staying, also changes that cell. The copy keeps the
+// reference (now naming the output's object) and holds the cell as the game shows it today (ModQ's
+// version), not ModP's. Not redirected: a plugin with undescribed data, one another plugin lists as a
+// master, and any plugin when the output is not a Mod Organizer 2 mod; then ModM stays and says why.
+TEST(master_redirection_writes_cells_as_today_and_leaves_unsafe_plugins_alone)
+{
+    enum class Case { Cells, Undescribed, Listed, Package };
+    for (const auto c : {Case::Cells, Case::Undescribed, Case::Listed, Case::Package}) {
+        const std::string name = "redirect_case" + std::to_string(int(c));
+        auto m = buildMo2Install(name, "+Mod Z\n+Mod Q\n+Mod P\n+Mod V\n+Mod M\n+Mod C\n+Mod B\n+Mod A\n");
+        const auto mods = m.inst / "mods";
+        writePlugin(mods / "Mod M" / "ModM.esp", {"Fallout4.esm"},
+                    {record("MISC", 0x01000801, {zs("EDID", "ModM_Thing")})});
+        writePlugin(mods / "Mod V" / "ModV.esp", {"Fallout4.esm"},
+                    {record("CELL", 0x01000800, {zs("EDID", "VaultCell")})});
+        std::vector<Record> pRecords = {record("CELL", 0x02000800, {zs("EDID", "VaultCell_P")}),
+                                        record("REFR", 0x03000801, {zs("EDID", "P_Thing"), u32("NAME", 0x01000801)})};
+        if (c == Case::Undescribed)
+            pRecords.push_back(record("KYWD", 0x03000802, {zs("EDID", "P_Odd"), raw("XZZZ", {1, 2, 3, 4})}));
+        writePlugin(mods / "Mod P" / "ModP.esp", {"Fallout4.esm", "ModM.esp", "ModV.esp"}, pRecords);
+        writePlugin(mods / "Mod Q" / "ModQ.esp", {"Fallout4.esm", "ModV.esp"},
+                    {record("CELL", 0x01000800, {zs("EDID", "VaultCell_Q")})});
+        std::string plugins = "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModM.esp\n*ModV.esp\n*ModP.esp\n*ModQ.esp\n";
+        if (c == Case::Listed) {
+            writePlugin(mods / "Mod Z" / "ModZ.esp", {"Fallout4.esm", "ModP.esp"},
+                        {record("KYWD", 0x02000800, {zs("EDID", "Z_Keyword")})});
+            plugins += "*ModZ.esp\n";
+        }
+        writeFile(m.profile / "plugins.txt", plugins);
+        auto cfg = m.cfg;
+        cfg.compile.redirectMasters = true;
+        cfg.analysis.onlySelected = true;
+        cfg.analysis.selectedPlugins = {"ModA.esp", "ModB.esp", "ModC.esp", "ModM.esp"};
+        if (c == Case::Package)
+            cfg.exportOptions.outputDirectory.clear();
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const auto& s = p.session();
+        const auto* modM = s.findPlugin("ModM.esp");
+        const auto* modP = s.findPlugin("ModP.esp");
+        CHECK(modM && modP);
+        if (!modM || !modP)
+            continue;
+        if (c != Case::Cells) {
+            CHECK(modM->eligibility != Eligibility::Eligible);
+            CHECK(s.redirected.empty());
+            const char* expect = c == Case::Undescribed ? "data the app cannot place"
+                                 : c == Case::Listed    ? "ModZ.esp lists it as a master"
+                                                        : "not possible here";
+            bool why = false;
+            for (const auto& r : modM->reasons)
+                why |= r.find("Master Redirection cannot redirect ModP.esp") != std::string::npos &&
+                       r.find(expect) != std::string::npos;
+            CHECK(why);
+            continue;
+        }
+        CHECK_EQ(modM->eligibility, Eligibility::Eligible);
+        CHECK(p.compile());
+        const auto* out = p.compiledOutput();
+        for (const auto& [k, why] : s.redirectFailed)
+            std::printf("not redirected %s: %s\n", k.c_str(), why.c_str());
+        CHECK(out->isCompiled(modM->index));
+        CHECK_EQ(out->redirected.size(), size_t(1));
+        if (out->redirected.empty())
+            continue;
+        const auto& rp = out->redirected.front();
+        CHECK(rp.failure.empty());
+        CHECK_EQ(rp.winnerCopies, size_t(1)); // the cell, as ModQ has it
+        CHECK_EQ(rp.ownVersions, size_t(1));  // the reference
+        CHECK_EQ(rp.dropped, size_t(0));
+        auto result = p.exportOutputs();
+        for (const auto& is : p.validation()->issues)
+            if (is.severity == Severity::Error)
+                std::printf("ERR %s: %s\n", is.category.c_str(), is.message.c_str());
+        CHECK_EQ(p.validation()->errors, uint64_t(0));
+        CHECK_EQ(result.redirectedCopies.size(), size_t(1));
+        if (result.redirectedCopies.empty())
+            continue;
+        auto files = result.pluginFiles;
+        files.push_back(result.redirectedCopies.front());
+        OutputSet set(files);
+        const auto* cell = set.byEditorId("VaultCell_Q");
+        const auto* ref = set.byEditorId("P_Thing");
+        const auto* thing = set.byEditorId("ModM_Thing");
+        CHECK(cell && ref && thing);
+        CHECK(set.byEditorId("VaultCell_P") == nullptr);
+        if (cell && ref && thing) {
+            CHECK_EQ(cell->plugin, std::string("ModP.esp"));
+            CHECK(set.identity(*cell) == std::make_pair(std::string("ModV.esp"), uint32_t(0x800)));
+            CHECK(set.identity(*ref) == std::make_pair(std::string("ModP.esp"), uint32_t(0x801)));
+            const auto* nameSub = ref->record.find(Signature("NAME"));
+            CHECK(nameSub != nullptr);
+            if (nameSub)
+                CHECK(set.resolve(*ref, loadLE<uint32_t>(nameSub->data.data())) == set.identity(*thing));
+            CHECK(thing->plugin.rfind("Dummy_Plugin_", 0) == 0);
+        }
+    }
+}
+
 TEST(mo2_apply_enables_the_output_mod_and_switches_once_mo2_is_closed)
 {
     auto m = buildMo2Install("mo2_apply");

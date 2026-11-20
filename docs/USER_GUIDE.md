@@ -332,6 +332,25 @@ A master counts as unused only when none of the plugin's records overrides one o
 
 With **Placeholders for unused masters** on (Compilation page → Advanced, or `--master-placeholders`), such a master compiles anyway, and an empty light plugin with its name keeps the plugins that list it loading. It is written like an archive loader, so it needs the same setup: Mod Organizer 2 with the output folder inside the mods folder, the output mod at the bottom of the left pane, and the master kept enabled. Anywhere else the master stays in the load order, and its reasons on the Plugins page say why. You can also remove the master from the plugin in xEdit (Clean Masters).
 
+### Master Redirection (advanced)
+
+A plugin that stays in the load order keeps its masters there too, even when they could compile. Frameworks kept by one quest mod or patch are the usual case. With **Master Redirection** on (Compilation page → Advanced, or `--redirect-masters`), such a plugin stays as a **copy in the output**, under the same name. The copy lists the output plugins instead of its compiled masters, and every FormID that names a compiled record is translated. Its masters then compile.
+
+- **What the game shows does not change.** The copy loads after the outputs:
+  - Its own records keep their FormIDs.
+  - Overrides that the outputs or a later plugin also change are left to them, as today.
+  - A cell holding its references is written as the game shows it today.
+- **Only plugins the app can copy exactly:**
+  - ESP files whose records all decode completely, with no precombine or previs data.
+  - No other plugin lists them as a master.
+  - Mod Organizer 2 with the output folder inside the mods folder (the copy must win over the original).
+
+  The Plugins page says **Stays, redirected** for a copy. A master that stays because of a plugin that can't be redirected says why in its reasons. **Keep as it is (no redirection)** on the Plugins page leaves a plugin out of it.
+- **Checks:** a copy that cannot be built faithfully is not written. Its masters stay and the build runs again. Each copy is read back before anything is written.
+- **Undo:** the original file is never changed. Switching the output mod off restores it, and Apply's backups restore the load order. A rescan reads the original in its old place.
+
+The Dependency Report's **Master Redirection** section lists each copy: masters replaced, FormIDs translated, records kept, cells written as today, and overrides left to others. [Master Redirection](MASTER_REDIRECTION_DESIGN.md) has the details.
+
 ### When some records cannot be compiled safely
 
 If validation finds records that cannot be written safely, for example a FormID in data the app does not fully understand, the app does **not** block the whole export. It keeps those records' plugins in the load order (or leaves those records out of the patch) and compiles again. The **Validation** page lists every plugin it kept out under **Kept Out Automatically**, with the reason. The **Plugins** page shows them as *Retained*. Only errors that cannot be traced to a plugin or record still block export.

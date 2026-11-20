@@ -86,6 +86,9 @@ Record make(const Session& session, const CompiledOutput& c, const ExportResult&
     for (auto p : c.archiveLoaders)
         r.archiveLoaders.push_back(session.plugins[p].name);
     r.archivesToRegister = c.archivesToRegister;
+    for (const auto& rp : c.redirected)
+        if (rp.failure.empty())
+            r.redirected.push_back(rp.name + "|" + rp.after);
     for (const auto& op : c.outputs) {
         if (!op.hasRecords())
             continue;
@@ -125,6 +128,7 @@ void write(const fs::path& exportFolder, const Record& r)
     v.set("compiled", strings(r.compiled));
     v.set("archiveLoaders", strings(r.archiveLoaders));
     v.set("archivesToRegister", strings(r.archivesToRegister));
+    v.set("redirected", strings(r.redirected));
     json::Array outs;
     for (const auto& o : r.outputs) {
         json::Value ov(json::Object{});
@@ -169,6 +173,8 @@ Record read(const fs::path& exportFolder)
     r.compiled = strings(v["compiled"]);
     r.archiveLoaders = strings(v["archiveLoaders"]);
     r.archivesToRegister = strings(v["archivesToRegister"]);
+    if (v["redirected"].isArray())
+        r.redirected = strings(v["redirected"]);
     if (v["outputs"].isArray())
         for (const auto& ov : v["outputs"].asArray()) {
             Output o;

@@ -1,4 +1,5 @@
 #include "engine/Exporter.hpp"
+#include "engine/Redirection.hpp"
 #include "engine/PluginIni.hpp"
 
 #include "engine/ValidationEngine.hpp"
@@ -64,6 +65,7 @@ namespace {
 
 const char* kRegisteredFile = "Multiplexer_RegisteredArchives.txt";
 const char* kLoadersFile = "Multiplexer_ArchiveLoaders.txt";
+const char* kRedirectedFile = "Multiplexer_Redirected.tsv";
 
 std::vector<std::string> readLines(const fs::path& path)
 {
@@ -270,18 +272,26 @@ std::string Exporter::proposedPluginsTxt(const Session& session, const CompiledO
     for (const auto& op : c.outputs)
         if (op.hasRecords())
             outputs.insert(toLower(op.name));
-    for (const auto& p : session.plugins) {
-        if (p.implicit || outputs.count(p.key)) // an output of an earlier build: listed once, below
+    std::unordered_set<PluginIndex> redirected;
+    for (const auto& rp : c.redirected)
+        if (rp.failure.empty())
+            redirected.insert(rp.plugin);
+    for (PluginIndex pi : session.pluginsInListOrder()) {
+        const auto& p = session.plugins[pi];
+        if (p.implicit || outputs.count(p.key) || redirected.count(pi)) // listed once, below
             continue;
         bool active = p.active && (!c.isCompiled(p.index) || c.hasArchiveLoader(p.index));
         out += (active ? "*" : "") + p.name + "\n";
     }
     // Every output after every other plugin, the patch last: the build decided each record's winner
-    // with the outputs loading in that order.
+    // with the outputs loading in that order. Redirected copies load after the outputs they master.
     for (bool patch : {false, true})
         for (const auto& op : c.outputs)
             if (op.hasRecords() && op.patch == patch)
                 out += "*" + op.name + "\n";
+    for (const auto& rp : c.redirected)
+        if (rp.failure.empty())
+            out += "*" + rp.name + "\n";
     return out;
 }
 
@@ -340,6 +350,28 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
         } catch (const std::exception& e) {
             throw std::runtime_error(op.name + " cannot be written (nothing was written): " + e.what());
         }
+    }
+    // Master Redirection copies: built and read back before anything is written (a copy that does not read
+    // back as planned stops the export: its masters were compiled for it).
+    std::vector<std::pair<const RedirectedPlugin*, std::vector<uint8_t>>> copies;
+    for (const auto& rp : c.redirected) {
+        if (!rp.failure.empty())
+            continue;
+        PluginWriter w;
+        w.setHeader(rp.header);
+        for (size_t i = 0; i < rp.built.size(); ++i)
+            w.addRecord(rp.built[i], rp.placements[i]);
+        std::vector<uint8_t> image;
+        try {
+            image = w.build(options.compressLargeRecords);
+        } catch (const std::exception& e) {
+            throw std::runtime_error("The redirected copy of " + rp.name + " cannot be written (nothing was written): " +
+                                     e.what());
+        }
+        if (auto diff = checkRedirectedImage(rp, image); !diff.empty())
+            throw std::runtime_error("The redirected copy of " + rp.name +
+                                     " does not read back as planned (nothing was written): " + diff);
+        copies.emplace_back(&rp, std::move(image));
     }
     for (auto& [opPtr, image] : images) {
         const auto& op = *opPtr;
@@ -660,6 +692,47 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
         writeText(r.directory / kLoadersFile, list);
     }
 
+    // Master Redirection copies (same file name as the plugin that stays; the output mod wins over it), and
+    // the list of them. Copies a previous build wrote that are no longer needed are removed (only files this
+    // app wrote).
+    {
+        std::unordered_set<std::string> current;
+        std::string list = "# Fallout 4 Multiplexer Renewed redirected copies v1\n"
+                           "#plugin\tloads_after\treplaced_masters\tmasters\tformids_translated\n";
+        for (const auto& [rp, image] : copies) {
+            auto path = r.directory / utf8ToPath(rp->name);
+            if (!sameContent(path, image))
+                writeBinary(path, image);
+            r.redirectedCopies.push_back(path);
+            current.insert(toLower(rp->name));
+            list += rp->name + "\t" + rp->after + "\t" + join(rp->replacedMasters, ", ") + "\t" +
+                    join(rp->masterNames, ", ") + "\t" + std::to_string(rp->translated) + "\n";
+            spdlog::info("Wrote the redirected copy of {} ({} records, {} masters)", rp->name, rp->built.size(),
+                         rp->masterNames.size());
+        }
+        for (const auto& line : readLines(r.directory / kRedirectedFile)) {
+            const std::string name = line.substr(0, line.find('\t'));
+            if (name.empty() || current.count(toLower(name)))
+                continue;
+            auto path = r.directory / utf8ToPath(name);
+            std::error_code ec;
+            if (!fs::exists(path, ec))
+                continue;
+            try {
+                if (redirectedAfter(readPluginHeader(path).description)) {
+                    fs::remove(path, ec);
+                    spdlog::info("Removed the redirected copy of {} (no longer redirected)", name);
+                }
+            } catch (const std::exception&) {
+            }
+        }
+        std::error_code ec;
+        if (copies.empty())
+            fs::remove(r.directory / kRedirectedFile, ec);
+        else
+            writeText(r.directory / kRedirectedFile, list);
+    }
+
     // Data\<plugin>.ini of compiled plugins: their settings, in load order, in the last output's INI (read
     // while it is loaded; the compiler kept out plugins whose settings would end with another value).
     // INIs this app wrote for other outputs are removed.
@@ -753,13 +826,20 @@ void Exporter::planProfile(FileTransaction& tx, const Session& session, const Co
                 outputs.insert(toLower(op.name));
         // Everything else keeps the order the mod manager or LOOT gave it; the outputs (also when an
         // earlier build already put them somewhere) are listed once, at the end.
-        for (const auto& p : session.plugins)
-            if (!outputs.count(p.key))
-                lo += p.name + "\n";
+        std::unordered_set<PluginIndex> redirected;
+        for (const auto& rp : c.redirected)
+            if (rp.failure.empty())
+                redirected.insert(rp.plugin);
+        for (PluginIndex pi : session.pluginsInListOrder())
+            if (!outputs.count(session.plugins[pi].key) && !redirected.count(pi))
+                lo += session.plugins[pi].name + "\n";
         for (bool patch : {false, true})
             for (const auto& op : c.outputs)
                 if (op.hasRecords() && op.patch == patch)
                     lo += op.name + "\n";
+        for (const auto& rp : c.redirected)
+            if (rp.failure.empty())
+                lo += rp.name + "\n";
         tx.write(loadOrder, lo, "every plugin in its order, outputs at the end");
     }
 }

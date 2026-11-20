@@ -57,6 +57,7 @@ private:
     SqlModel* model_;
     QTextBrowser* details_;
     QPushButton* exclude_;
+    QPushButton* redirect_ = nullptr;
     QString selectedPlugin_;
     bool generatedMode_ = false;
     bool blockersMode_ = false;

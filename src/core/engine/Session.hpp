@@ -44,6 +44,10 @@ inline constexpr const char* kGeneratorAuthor = "Fallout 4 Multiplexer Renewed";
 // Description prefix of archive loaders: empty ESL plugins named after a compiled plugin so its
 // archives keep loading at the same priority.
 inline constexpr const char* kArchiveLoaderTag = "Archive loader";
+// A plugin that stays in the load order, copied into the output with its compiled masters replaced by the
+// outputs (Master Redirection). Its description starts with this tag and names the plugin it loaded after
+// ("...; loads after: <name>|"), so a scan reads the original underneath and puts it back in its place.
+inline constexpr const char* kRedirectTag = "Redirected copy";
 
 // The suffix that hides a plugin from the game: "Example.esp.ghost" is the plugin Example.esp, not loaded.
 inline constexpr std::string_view kGhostSuffix = ".ghost";
@@ -72,6 +76,7 @@ struct PluginInfo {
     bool creationClub = false;
     bool generated = false;       // a Dummy plugin, patch or loader this app wrote: never a source
     bool behindLoader = false;    // the file is the original underneath this app's archive loader
+    bool behindRedirect = false;  // the file is the original underneath this app's redirected copy
     bool reactivated = false;     // compiled in the last build and disabled since: still a source
     // The file is "<name>.ghost" (renamed so the game does not load it): read from there, never
     // active in the game, still a source when the last build compiled it. `name` has no ".ghost".
@@ -286,6 +291,17 @@ public:
     // Masters that compile while plugins that stay still list them: an empty placeholder plugin with their
     // name (an archive loader, with or without archives) keeps those plugins loading.
     std::set<PluginIndex> masterPlaceholders;
+    // Master Redirection: plugins that stay whose copy in the output lists the outputs instead of their
+    // compiled masters (from the last eligibility pass); why each plugin that was checked cannot be
+    // redirected (its own content; empty: it can); and plugins a compilation could not redirect (lowercase
+    // name -> why), rebuilt by every compilation.
+    std::set<PluginIndex> redirected;
+    std::map<PluginIndex, std::string> redirectCheck;
+    std::map<std::string, std::string> redirectFailed;
+    // The plugin list in the order plugins.txt means it: as read, with redirected copies' originals moved
+    // back to where they loaded before (empty: the order of `plugins`).
+    std::vector<PluginIndex> listOrder;
+    std::vector<PluginIndex> pluginsInListOrder() const;
     // Copies the Auto-Merger wrote into the output folder (path -> content hash, from its manifest).
     // They are never read as originals.
     std::unordered_map<std::string, uint64_t> relinkedCopies;

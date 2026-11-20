@@ -1339,3 +1339,20 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 - **Cross-script calls fail closed.** A plugin name passed to a native function (the game or F4SE implements it: no code), to a function the callee's script does not declare (inherited, or only in another state), or into a parameter that is neither String nor Var was followed into nothing and counted as "does not use it" (Safe). Each is now Unknown, naming the callee and why. Var parameters are followed like String ones. Test: the native case in `references_followed_into_other_scripts_functions`.
 - **Plugin INIs with archive settings stay.** The build lists compiled plugins' archives itself; a compiled plugin's INI carried into the output's INI (read after Fallout4Custom.ini and after plugins that stay) could replace that list, so a plugin whose INI sets anything in `[Archive]` stays in the load order (Plugin INI). Test: `references_plugin_ini_is_carried`.
 - **Plugins → Holding Back** no longer hides its "Would Also Compile" column (it shared a column position hidden by default in the plain list).
+
+## Master Redirection (20 Nov 2026)
+
+**Rule** (`engine/Redirection`, `DependencyEngine`). This is opt-in (advanced, Mod Organizer 2 only). A plugin that stays and lists masters that compile gets a copy in the output. The copy has the same name, lists the outputs instead of those masters, translates every FormID that names a compiled record, and loads after the outputs.
+
+**Which plugins:** only plugins whose records decode completely (compiled types, no undescribed data, no decode warnings), with no precombine or previs data, that are ESP files that no other plugin lists as a master. Analysis checks this per plugin.
+
+**What the copy holds:**
+- Its own new records, with their object IDs.
+- Overrides nothing later changes, as it has them.
+- Overrides that the outputs or a later plugin change are left out, as today. Where one is the container of a kept record, it is written as the game shows it today.
+
+**Fail closed:** copies that cannot be built faithfully are not written, their masters stay, and the build runs again. Export reads each copy back before writing anything. The full rules are in `docs/MASTER_REDIRECTION_DESIGN.md` ("As built").
+
+**Compiler change:** a record that a compiled plugin defines is now always written to the outputs, even when its final version equals a later override by a plugin that stays. Before, it was skipped as identical, which was only reachable through the error path for plugins that stay and override compiled records.
+
+**Tests:** `master_redirection_lets_masters_of_plugins_that_stay_compile` and `master_redirection_writes_cells_as_today_and_leaves_unsafe_plugins_alone`.

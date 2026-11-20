@@ -98,6 +98,40 @@ std::vector<uint8_t> DependencyEngine::mastersInUse(const Session& session, cons
     return used;
 }
 
+std::string redirectionBlock(Session& session, PluginIndex plugin, std::span<const uint32_t> instances)
+{
+    // The copy rewrites every FormID the plugin stores: each must be in a described field. Precombined
+    // meshes and previs files store reference FormIDs in the plugin's numbering, which the copy changes.
+    static const Signature kPrevis[] = {Signature("PCMB"), Signature("VISI"), Signature("XCRI"), Signature("XPRI")};
+    Normalizer norm(session);
+    try {
+        for (uint32_t ri : instances) {
+            const auto& inst = session.records[ri];
+            if (!session.defs.isCompilable(inst.signature))
+                return "it has " + inst.signature.str() + " records, a type that is not compiled";
+            const auto nr = norm.normalize(inst);
+            for (const auto& is : nr.issues)
+                if (is.severity != Severity::Info)
+                    return session.formLabel(inst.key) + " does not decode cleanly (" + is.message + ")";
+            for (const auto& s : nr.subs) {
+                if (s.heuristic || !s.opaque.empty())
+                    return session.formLabel(inst.key) + " has data the app cannot place (" + s.sig.str() +
+                           "), which could hold FormIDs";
+                if (inst.signature == sig::CELL)
+                    for (const auto& pv : kPrevis)
+                        if (s.sig == pv)
+                            return session.formLabel(inst.key) +
+                                   " has precombine or previs data, which stores FormIDs in the plugin's own "
+                                   "numbering";
+            }
+        }
+    } catch (const std::exception& e) {
+        return std::string("its records cannot be read (") + e.what() + ")";
+    }
+    (void)plugin;
+    return {};
+}
+
 namespace {
 
 // What keeps one plugin from compilation, independent of its masters and dependents.
@@ -448,13 +482,75 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
                 if (q.masters[i] != kInvalidPlugin)
                     listedBy[q.masters[i]].push_back({q.index, i});
     const bool placeholders = options.masterPlaceholders && options.placeholdersOff.empty();
+    // Master Redirection: plugins that stay whose masters can be redirected to the outputs, so they keep
+    // none of them in the load order. Only plugins nothing lists as a master (the copy loads after the
+    // outputs, so a plugin listing it would load before its master), ESP files, with no missing masters.
+    session.redirected.clear();
+    std::vector<uint8_t> canRedirect(session.plugins.size(), 0);
+    std::map<PluginIndex, std::string> redirectWhyNot;
+    if (options.redirectMasters && options.redirectOff.empty()) {
+        std::unordered_set<std::string> keep;
+        for (const auto& n : options.noRedirect)
+            keep.insert(toLower(n));
+        std::vector<PluginIndex> todo;
+        for (const auto& q : session.plugins) {
+            if (!q.active || q.eligibility == Eligibility::Eligible || q.eligibility == Eligibility::Error ||
+                q.eligibility == Eligibility::Inactive || q.baseGame || q.creationClub)
+                continue;
+            if (!std::any_of(q.masters.begin(), q.masters.end(), [&](PluginIndex m) {
+                    return m != kInvalidPlugin && session.plugins[m].eligibility == Eligibility::Eligible;
+                }))
+                continue;
+            std::string why;
+            if (session.userRetained.count(q.key))
+                why = "you excluded it";
+            else if (keep.count(q.key))
+                why = "you chose to keep it as it is";
+            else if (auto f = session.redirectFailed.find(q.key); f != session.redirectFailed.end())
+                why = f->second;
+            else if (q.isMaster())
+                why = "it is a master file (ESM), which loads before the outputs";
+            else if (!q.missingMasters.empty())
+                why = "it has missing masters";
+            else if (!listedBy[q.index].empty())
+                why = session.plugins[listedBy[q.index].front().first].name +
+                      " lists it as a master, and the copy loads after the outputs";
+            if (!why.empty()) {
+                redirectWhyNot[q.index] = why;
+                continue;
+            }
+            if (!session.redirectCheck.count(q.index))
+                todo.push_back(q.index);
+            canRedirect[q.index] = 1;
+        }
+        if (!todo.empty()) {
+            std::unordered_map<PluginIndex, size_t> slot;
+            for (size_t i = 0; i < todo.size(); ++i)
+                slot[todo[i]] = i;
+            std::vector<std::vector<uint32_t>> inst(todo.size());
+            for (uint32_t ri = 0; ri < session.records.size(); ++ri)
+                if (auto it = slot.find(session.records[ri].plugin); it != slot.end())
+                    inst[it->second].push_back(ri);
+            std::vector<std::string> result(todo.size());
+            parallelFor(
+                todo.size(), [&](size_t i) { result[i] = redirectionBlock(session, todo[i], inst[i]); },
+                nullProgress(), options.threads);
+            for (size_t i = 0; i < todo.size(); ++i)
+                session.redirectCheck[todo[i]] = result[i];
+        }
+        for (auto& [q, why] : session.redirectCheck)
+            if (canRedirect[q] && !why.empty()) {
+                canRedirect[q] = 0;
+                redirectWhyNot[q] = why;
+            }
+    }
     // The plugins that stay and list `m`, split into those that use it and those that do not.
     auto listers = [&](PluginIndex m, std::vector<PluginIndex>& users, std::vector<PluginIndex>& nonUsers) {
         users.clear();
         nonUsers.clear();
         for (const auto& [q, i] : listedBy[m]) {
             const auto& qp = session.plugins[q];
-            if (qp.eligibility == Eligibility::Eligible)
+            if (qp.eligibility == Eligibility::Eligible || canRedirect[q])
                 continue;
             const auto& use = masterUse(qp);
             (i < use.size() && !use[i] ? nonUsers : users).push_back(q);
@@ -478,10 +574,36 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
                        (options.masterPlaceholders ? "not possible here: " + options.placeholdersOff
                                                    : std::string("turn on \"Placeholders for unused masters\"")) +
                        ")";
+            else if (options.redirectMasters)
+                why += "; Master Redirection cannot redirect " + by.name + ": " +
+                       (!options.redirectOff.empty()        ? "not possible here: " + options.redirectOff
+                        : redirectWhyNot.count(by.index)    ? redirectWhyNot[by.index]
+                                                            : std::string("it is not checked"));
             mp.eligibility = Eligibility::Ineligible;
             mp.reasons.push_back(why);
             changed = true;
         }
+    }
+    // The plugins redirected: those that could be and list a master that compiles.
+    for (const auto& q : session.plugins) {
+        if (!canRedirect[q.index])
+            continue;
+        std::vector<std::string> names;
+        for (PluginIndex m : q.masters)
+            if (m != kInvalidPlugin && session.plugins[m].eligibility == Eligibility::Eligible)
+                names.push_back(session.plugins[m].name);
+        if (names.empty())
+            continue;
+        session.redirected.insert(q.index);
+        session.plugins[q.index].reasons.push_back(
+            "Redirected (Master Redirection): it stays, and its copy in the output lists the output plugins "
+            "instead of " + join(names, ", ") + ", which compile");
+        for (PluginIndex m : q.masters)
+            if (m != kInvalidPlugin && session.plugins[m].eligibility == Eligibility::Eligible)
+                session.plugins[m].reasons.push_back(
+                    "Listed as a master by " + q.name +
+                    ", which stays in the load order: compiled, with its copy in the output pointing at the outputs "
+                    "(Master Redirection)");
     }
     // Masters listed but not used by plugins that stay (for the report), and the placeholders needed.
     for (const auto& q : session.plugins) {
@@ -496,7 +618,7 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
     }
     for (const auto& [q, m] : session.unusedMasters) {
         auto& mp = session.plugins[m];
-        if (mp.eligibility != Eligibility::Eligible)
+        if (mp.eligibility != Eligibility::Eligible || session.redirected.count(q)) // the copy drops it
             continue;
         session.masterPlaceholders.insert(m);
         mp.reasons.push_back("Listed as a master by " + session.plugins[q].name +
@@ -518,6 +640,8 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
         // Pin edges: a plugin that stays keeps each master it lists, except an unused one with a placeholder.
         auto targets = [&](PluginIndex q, std::vector<PluginIndex>& out) {
             out.clear();
+            if (session.redirected.count(q)) // its copy names the outputs instead
+                return;
             const auto& qp = session.plugins[q];
             const auto it = session.masterUse.find(q);
             for (size_t i = 0; i < qp.masters.size(); ++i) {

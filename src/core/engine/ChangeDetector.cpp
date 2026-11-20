@@ -537,10 +537,19 @@ uint64_t ChangeDetector::settingsHash(const CompileOptions& c, const std::vector
                     // The merged cell configuration changes the written cells; only "on" is added.
                     (c.mergeCellConfig ? "|mergecellconfig" : "") + (c.applyPatchPlan ? "|patchplan" : "") + (c.brokenReferencesAsNull ? "|brokenasnull" : "") +
                     (c.unusedMasterPlaceholders ? "|masterplaceholders" : "") +
+                    (c.redirectMasters ? "|redirect" : "") +
                     (c.compileNewQuestsAndNpcs ? "" : "|nonewquestsnpcs") +
                     "|" + c.patchName + "|" + runtimeName;
     for (const auto& r : c.rules)
         s += "|" + toLower(r.pattern) + "=" + std::to_string(r.output);
+    if (c.redirectMasters) {
+        std::vector<std::string> keep;
+        for (const auto& n : c.noRedirect)
+            keep.push_back(toLower(n));
+        std::sort(keep.begin(), keep.end());
+        for (const auto& n : keep)
+            s += "|noredirect:" + n;
+    }
     std::vector<std::string> ex;
     for (const auto& e : excluded)
         ex.push_back(toLower(e));

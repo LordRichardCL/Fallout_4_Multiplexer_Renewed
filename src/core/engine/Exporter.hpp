@@ -35,6 +35,7 @@ struct ExportResult {
     std::filesystem::path disableList;
     std::filesystem::path pluginsTxt;
     std::vector<std::filesystem::path> archiveLoaders; // empty ESL plugins keeping compiled plugins' archives loading
+    std::vector<std::filesystem::path> redirectedCopies; // Master Redirection: copies of plugins that stay
     std::vector<std::filesystem::path> archiveLoaderFiles; // the F4SE archive loader and its list, when used
     std::vector<std::filesystem::path> seqFiles;       // seq\<output>.seq for start-game-enabled quests
     // Voice files of compiled new responses, copied as sound\voice\<output>\<voice type>\<new FormID>_<n>.*

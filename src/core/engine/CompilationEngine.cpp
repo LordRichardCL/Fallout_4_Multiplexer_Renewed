@@ -1,4 +1,5 @@
 #include "engine/CompilationEngine.hpp"
+#include "engine/Redirection.hpp"
 #include "esp/FieldDecoder.hpp"
 #include "engine/PrevisCheck.hpp"
 
@@ -510,7 +511,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
         if (originCompiled) {
             for (const auto& r : inst)
-                if (!out.compiledFlag_[r.plugin])
+                if (!out.compiledFlag_[r.plugin] && !session.redirected.count(r.plugin)) // a redirected copy drops it
                     addIssue(Severity::Error, "Dependency",
                              session.pluginName(r.plugin) + " overrides " + session.formLabel(key) +
                                  " from a compiled plugin but stays in the load order",
@@ -630,8 +631,10 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 }
 
                 // Once compiled plugins are disabled, the last retained instance is what the game
-                // loads. If the result equals it, an override would only be an ITM.
-                for (size_t i = inst.size(); i-- > 0 && !planned;) {
+                // loads. If the result equals it, an override would only be an ITM. Not for a record a
+                // compiled plugin defines: with its plugin disabled, the outputs must define it (a redirected
+                // plugin's copy leaves its override of it to them).
+                for (size_t i = inst.size(); i-- > 0 && !planned && !c.isNew;) {
                     if (out.compiledFlag_[inst[i].plugin])
                         continue;
                     if (m.equalsInstance[i] &&
@@ -2615,6 +2618,9 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                          FormKey{}, p.name);
         }
     }
+
+    // Master Redirection: copies of the plugins that stay with their compiled masters replaced.
+    buildRedirected(session, out);
 
     size_t used = std::count_if(out.outputs.begin(), out.outputs.end(),
                                 [](const OutputPlugin& o) { return !o.patch && !o.records.empty(); });

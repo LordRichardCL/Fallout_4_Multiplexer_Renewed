@@ -140,7 +140,7 @@ The vocabulary used below:
 - **Records.** Default: A is **skipped** (left in A). With redirection: A is **promoted**, and B is **copied verbatim apart from FormID translation**.
 - **xEdit.** Default: nothing changes. With redirection: the copied B is a normal plugin mastering Dummy plugins, so it opens in xEdit and every reference resolves. The validation engine should run the same reference check on it as on the generated plugins.
 
-**Today:** pinning is implemented. Master Redirection is not. It is the most valuable extension, because frameworks pinned by quest mods are the usual reason large load orders compile poorly.
+**Today:** pinning is the default. Master Redirection is implemented as an advanced, opt-in switch (Mod Organizer 2 only): see [Master Redirection](MASTER_REDIRECTION_DESIGN.md) for exactly which plugins qualify and how the copy is checked.
 
 ---
 

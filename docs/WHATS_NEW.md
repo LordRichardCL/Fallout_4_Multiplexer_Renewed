@@ -4,6 +4,10 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 
 ## 20 November 2026
 
+### Master Redirection (advanced, new)
+- A framework that could compile, but stays because a plugin that stays uses its records, can now compile. That plugin stays as a copy in the output, with the same name, that points at the output plugins instead. The copy loads after the outputs, and the game shows the same thing as before.
+- It is off by default (Compilation page → Advanced) and works with Mod Organizer 2 only. It covers only plugins the app can copy exactly. Every copy is checked and read back, and switching the output mod off restores the original.
+
 ### Your saves are safer across rebuilds
 - **FormIDs stay put.** A rebuild keeps every FormID the build you play with gave. New records that older ones now use go beside them rather than forcing the old ones to move. If a FormID would still change, compiling stops with a **FormID Stability** error and asks first.
 - **Compiled plugins never come back unasked.** If a new or updated mod would put a compiled plugin back into the load order, which would cost saves what they used of it, compiling stops with **Returning Plugins** and lets you choose.
@@ -35,8 +39,6 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 - The Holding Back view no longer hides its key column.
 - Windows builds survive temporary download outages (cached packages and retries).
 
-### For review
-- [Master Redirection](MASTER_REDIRECTION_DESIGN.md) is a proposed feature that would let a framework compile even when a plugin that stays uses its records. It is a design only and needs sign-off.
 
 ## 18–19 November 2026
 

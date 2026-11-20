@@ -112,6 +112,11 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
     exclude_ = makeButton("Exclude from compilation", nullptr, "block");
     exclude_->setEnabled(false);
     sl->addWidget(exclude_);
+    redirect_ = makeButton("Keep as it is (no redirection)", nullptr, "block");
+    redirect_->setToolTip("Master Redirection: never copy this plugin with its masters pointing at the outputs. "
+                          "Its compiled masters then stay in the load order with it.");
+    redirect_->setEnabled(false);
+    sl->addWidget(redirect_);
     split->addWidget(side);
     split->setStretchFactor(0, 3);
     split->setStretchFactor(1, 2);
@@ -127,6 +132,12 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
             return;
         bool excluded = app_->excludedPlugins().contains(selectedPlugin_, Qt::CaseInsensitive);
         app_->setExcluded(selectedPlugin_, !excluded);
+    });
+    connect(redirect_, &QPushButton::clicked, this, [this] {
+        if (selectedPlugin_.isEmpty())
+            return;
+        const bool kept = app_->notRedirected().contains(selectedPlugin_, Qt::CaseInsensitive);
+        app_->setRedirect(selectedPlugin_, kept);
     });
 }
 
@@ -404,10 +415,12 @@ void PluginsPage::reload()
                                   "<p style='color:#8aa196'>Select a type to see the plugins it blocks.</p>")
                               .arg(held.isEmpty() ? "0" : held, all.isEmpty() ? "0" : all));
         exclude_->setEnabled(false);
+        redirect_->setEnabled(false);
         return;
     }
     details_->setHtml("<p style='color:#8aa196'>Select a plugin to see its details.</p>");
     exclude_->setEnabled(false);
+    redirect_->setEnabled(false);
 }
 
 QString PluginsPage::exportText()
@@ -517,6 +530,7 @@ void PluginsPage::showBlocker(int row)
                           .arg(model_->value(row, 6).toString().toHtmlEscaped(),
                                model_->value(row, 7).toString().toHtmlEscaped()));
     exclude_->setEnabled(false);
+    redirect_->setEnabled(false);
 }
 
 void PluginsPage::showDetails(int row)
@@ -537,6 +551,7 @@ void PluginsPage::showDetails(int row)
                                 model_->value(row, 7).toString().toHtmlEscaped().replace(", ", "<br>"));
         details_->setHtml(html);
         exclude_->setEnabled(false);
+        redirect_->setEnabled(false);
         return;
     }
     qint64 id = model_->value(row, 10).toLongLong();
@@ -634,6 +649,10 @@ void PluginsPage::showDetails(int row)
     bool excluded = app_->excludedPlugins().contains(selectedPlugin_, Qt::CaseInsensitive);
     exclude_->setText(excluded ? "Allow compilation" : "Exclude from compilation");
     exclude_->setEnabled(!app_->busy() && q.value(19).toInt() && !q.value(22).toInt());
+    const bool kept = app_->notRedirected().contains(selectedPlugin_, Qt::CaseInsensitive);
+    redirect_->setVisible(app_->config().compile.redirectMasters || kept);
+    redirect_->setText(kept ? "Allow Master Redirection" : "Keep as it is (no redirection)");
+    redirect_->setEnabled(!app_->busy() && q.value(19).toInt() && !q.value(22).toInt());
 }
 
 } // namespace gui

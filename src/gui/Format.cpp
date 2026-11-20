@@ -26,6 +26,8 @@ QString plainStatus(const QString& eligibility, const QString& reason, bool base
         return "Kept by you";
     if (baseGame)
         return "Base game";
+    if (reason.contains("Redirected (Master Redirection)"))
+        return "Stays, redirected";
     return "Stays in load order";
 }
 
@@ -34,7 +36,8 @@ QString plainStatusSql()
     return "CASE WHEN eligibility = 'Eligible' THEN 'Will compile' WHEN eligibility = 'Inactive' THEN 'Not enabled' "
            "WHEN eligibility = 'Error' THEN 'Error' WHEN eligibility_reason LIKE 'Excluded by user%' OR "
            "eligibility_reason LIKE '%Not chosen for compilation%' THEN 'Kept by you' WHEN base_game = 1 THEN "
-           "'Base game' ELSE 'Stays in load order' END";
+           "'Base game' WHEN eligibility_reason LIKE '%Redirected (Master Redirection)%' THEN 'Stays, redirected' "
+           "ELSE 'Stays in load order' END";
 }
 
 QString formatCount(qint64 v)

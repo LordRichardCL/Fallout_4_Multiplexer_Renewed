@@ -575,6 +575,47 @@ std::string dependencyReport(const ReportContext& ctx)
         }
     }
 
+    // Master Redirection: plugins that stay with a copy naming the outputs instead of their compiled masters.
+    if (!s.redirected.empty() || !s.redirectFailed.empty()) {
+        h.h2("Master Redirection");
+        h.note("A plugin that stays in the load order normally keeps its masters there too. These plugins stay as a "
+               "copy in the output, with the same name, that lists the output plugins instead of their compiled "
+               "masters; every FormID naming a compiled record is translated. The copy loads after the outputs. "
+               "Its own records keep their FormIDs; overrides the outputs or later plugins also change are left to "
+               "them, and a cell holding its references is written as the game shows it today. The original file "
+               "is never changed: switching the output mod off restores it.");
+        h.tableStart({"Plugin", "Masters replaced", "FormIDs translated", "Own records", "Cells as today",
+                      "Left to others", "Status"});
+        size_t rows = 0;
+        auto compiledEntry = [&](PluginIndex pi) -> const RedirectedPlugin* {
+            if (!ctx.compiled)
+                return nullptr;
+            for (const auto& rp : ctx.compiled->redirected)
+                if (rp.plugin == pi)
+                    return &rp;
+            return nullptr;
+        };
+        for (auto pi : s.redirected) {
+            const auto* rp = compiledEntry(pi);
+            std::vector<std::string> masters;
+            for (auto m : s.plugins[pi].masters)
+                if (m != kInvalidPlugin && s.plugins[m].eligibility == Eligibility::Eligible)
+                    masters.push_back(s.plugins[m].name);
+            const bool ok = rp && rp->failure.empty();
+            h.row({s.plugins[pi].name, rp ? join(rp->replacedMasters, ", ") : join(masters, ", "),
+                   ok ? formatCount(rp->translated) : std::string("-"), ok ? formatCount(rp->ownVersions) : std::string("-"),
+                   ok ? formatCount(rp->winnerCopies) : std::string("-"), ok ? formatCount(rp->dropped) : std::string("-"),
+                   !rp ? std::string("planned (compile to write the copy)") : ok ? std::string("redirected") : rp->failure});
+            ++rows;
+        }
+        for (const auto& [key, why] : s.redirectFailed) {
+            const auto* p = s.findPlugin(key);
+            h.row({p ? p->name : key, "", "-", "-", "-", "-", "not redirected: " + why});
+            ++rows;
+        }
+        h.tableEnd(rows, rows);
+    }
+
     if (!s.referenceDecisions.empty()) {
         h.h2("Filename references");
         h.note("Every place a plugin's file name appears outside the plugin. The most restrictive classification "

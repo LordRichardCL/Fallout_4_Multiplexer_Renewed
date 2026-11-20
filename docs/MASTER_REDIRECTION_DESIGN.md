@@ -1,6 +1,6 @@
 # Master Redirection: design for review
 
-*Status: proposal, 20 Nov 2026. Nothing here is implemented. It needs the owner's sign-off on the decisions in the last section before any code is written.*
+*Status: implemented (version 1), 20 Nov 2026. The owner approved the proposed answer to each decision in the last section. Where version 1 differs from the proposal, see "As built" at the end.*
 
 ## The problem it solves
 
@@ -76,3 +76,28 @@ Consequence: B′ may need, as masters, plugins whose records the merged winners
 3. **Records later plugins also change.** Proposed as above: B′ holds today's merged winner. The alternative, which is to leave B out whenever any such record exists, is simpler but would exclude most patches, the main target.
 4. **Precombines and previs in B.** Proposed: keep B out in version 1 when they name A's references. Translating its previs files, as is already done for compiled plugins, could follow.
 5. **Scope of the first version.** Proposed: one level only. A is compiled, B is redirected, and no plugin is both redirected and a master that needs redirecting in turn.
+
+## As built (version 1)
+
+- **Switch:** Compilation page → Advanced → **Master Redirection** (off by default), or `--redirect-masters`. Opt-out per plugin: Plugins page → **Keep as it is (no redirection)**, or `--no-redirect <plugin>`.
+- **Which plugins:** active plugins that stay (not the base game, Creation Club, plugins you excluded or opted out) and list a master that compiles, and that also meet all of these:
+  - They are ESP files (an ESM loads before the outputs).
+  - They have no missing masters.
+  - No other plugin lists them as a master (one level only).
+  - Every record is of a compiled type and decodes completely: no undescribed data and no decode warnings.
+  - No cell has precombine or previs data (PCMB, VISI, XCRI, XPRI).
+- **Records later plugins also change (decision 3)** are left to the outputs or the later plugin. The copy leaves those overrides out, so the game shows what it shows today. The exception is a record the copy needs as a container (a cell holding its references, a worldspace, a topic or a quest). That record is written as the game shows it today: the outputs' version, else the last plugin's. A container whose version today has precombine or previs data stops the redirection, because the game would read that data in the copy's numbering.
+- **The compiler** now writes a record that a compiled plugin defines even when its final version equals a redirected plugin's override of it. With its defining plugin switched off, the outputs must define it.
+- **Fail closed:** a copy that cannot be built faithfully is not written. Reasons include:
+  - an output needs the plugin as a master;
+  - a reference names a compiled record that is not in the outputs;
+  - the master list would pass 254;
+  - a FormID cannot be expressed.
+
+  The plugin's masters then stay in the load order and the compilation runs again (Validation: Master Redirection warning). Export builds each copy in memory and reads it back: master list, every record and every subrecord as planned. Only then does it write anything.
+- **Load order:** the proposed `plugins.txt` and `loadorder.txt` list each copy after the outputs. A copy's description names the plugin it loaded after. A rescan therefore reads the original underneath the copy and puts it back in its old place, so the next build and undo see the load order as it was. The build record (`Multiplexer_Build.json`) lists the redirected plugins, so Apply after a restart also orders them correctly.
+- **Files:** `<plugin>.esp` (the copy) and `Multiplexer_Redirected.tsv` in the output's Data folder. Copies a later build no longer needs are removed.
+- **Reports:** Dependency Report → Master Redirection; Validation → Master Redirection (Info per copy, Warning per plugin not redirected). The Plugins page shows the status **Stays, redirected**.
+- **Tests:**
+  - `master_redirection_lets_masters_of_plugins_that_stay_compile`: off/on, translated reference, own FormIDs, an override left to the outputs, load order, report, and a rescan reading the original in its place.
+  - `master_redirection_writes_cells_as_today_and_leaves_unsafe_plugins_alone`: a cell written as today with the copy's reference inside it, plus undescribed data, a plugin listed as a master, and a non-MO2 output.

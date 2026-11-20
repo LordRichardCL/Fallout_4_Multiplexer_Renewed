@@ -44,6 +44,9 @@ struct Record {
     bool f4seArchiveLoader = false;
     std::vector<std::string> compiled;      // compiled plugins, by name
     std::vector<std::string> archiveLoaders; // compiled plugins replaced by an archive loader
+    // Master Redirection: plugins that stay with a copy in the output ("<name>|<plugin it loaded after>"), so
+    // Apply puts them after the outputs; absent in records written before it.
+    std::vector<std::string> redirected;
     std::vector<std::string> archivesToRegister;
     std::vector<Output> outputs;
     // Export files, relative to the export folder ("" when not written).

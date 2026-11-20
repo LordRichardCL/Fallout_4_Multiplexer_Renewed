@@ -27,7 +27,18 @@ struct AnalysisOptions {
     std::string placeholdersOff;
     // CompileOptions::compileNewQuestsAndNpcs.
     bool newQuestsAndNpcs = true;
+    // Master Redirection (CompileOptions::redirectMasters, possible only where archive loaders are): a plugin
+    // that stays and lists compiled masters gets a copy in the output naming the outputs instead, so its
+    // masters compile. `redirectOff` says why not, when wanted but not possible; `noRedirect`: plugins
+    // (lowercase or not) the user keeps as they are.
+    bool redirectMasters = false;
+    std::string redirectOff;
+    std::vector<std::string> noRedirect;
 };
+
+// Why `plugin` cannot be copied with its masters redirected, from its own content (every record decodes
+// completely into described fields of a compiled type; no precombine or previs data): empty when it can.
+std::string redirectionBlock(Session& session, PluginIndex plugin, std::span<const uint32_t> instances);
 
 struct DependencyIssue {
     Severity severity = Severity::Warning;

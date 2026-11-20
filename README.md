@@ -87,7 +87,7 @@ A plugin is compiled only when the compiled output can reproduce it exactly, and
 
 - **Every record type of the game compiles** (items, actors, NPCs, quests and dialogue, cells, worldspaces, placed references, navmeshes, packages...), with four exceptions: the placed types `PBAR PBEA PCON PFLA` stay *Candidates* until a real load order confirms their layout. Every field of every record is decoded; a plugin with data the app cannot place stays.
 - **Files that find it by name** (scripts calling `GetFormFromFile`, MCM and F4SE configs, plugin INIs, FaceGen, voice folders, archives) are classified one by one: carried to the output (FaceGen, voices, archives, INIs), rewritten when you allow it (Advanced Users Auto-Merger), or a reason to keep it.
-- **A plugin that stays keeps its masters** in the load order, unless it provably uses none of their records (optional placeholders).
+- **A plugin that stays keeps its masters** in the load order, unless it provably uses none of their records (optional placeholders), or Master Redirection (advanced, optional) gives it a copy that points at the outputs instead.
 - **New quests, dialogue and NPCs** compile by default; an advanced switch (or the **Safest** preset) keeps such plugins in the load order, for example in the middle of a playthrough.
 - Never the base game, DLC or Creation Club content, plugins you exclude, or plugins you did not choose when you compile only chosen ones.
 
@@ -170,7 +170,7 @@ docs/          specification, architecture, user guide, screenshots
 - [Dependency and Compilation Scenarios](docs/DEPENDENCY_SCENARIOS.md): what happens when compiled and retained plugins depend on each other
 - [User Guide](docs/USER_GUIDE.md)
 - [What's New](docs/WHATS_NEW.md): recent changes in plain words
-- [Master Redirection](docs/MASTER_REDIRECTION_DESIGN.md): a proposed feature, for review
+- [Master Redirection](docs/MASTER_REDIRECTION_DESIGN.md): letting frameworks compile when a plugin that stays uses them (advanced)
 - [Diagnostic Recorder](docs/DIAGNOSTIC_RECORDER.md): the optional F4SE plugin that records what happens in game, and what Multiplexer recognises in its logs
 
 ## Related

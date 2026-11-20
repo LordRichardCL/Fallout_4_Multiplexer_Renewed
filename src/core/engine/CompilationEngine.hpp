@@ -82,6 +82,12 @@ struct CompileOptions {
     bool archiveLoaders = false;
     // Placeholders for unused masters (opt-in; needs archive loaders): see AnalysisOptions::masterPlaceholders.
     bool unusedMasterPlaceholders = false;
+    // Master Redirection (advanced, off): a plugin that stays and lists masters that compile gets a copy in
+    // the output, loading after the outputs, with those masters replaced by the outputs and every FormID
+    // translated, so its masters compile. Mod Organizer 2 with the output inside the mods folder only (the
+    // copy must win over the original). `noRedirect`: plugins kept as they are.
+    bool redirectMasters = false;
+    std::vector<std::string> noRedirect;
     // Advanced: compile plugins that add new quests, dialogue, scenes or NPCs (their voice files and FaceGen
     // move with them). Off: such plugins stay in the load order; overrides of those types still compile.
     bool compileNewQuestsAndNpcs = true;
@@ -199,6 +205,24 @@ struct PrevisRewrite {
     size_t changed = 0;         // FormIDs whose value changed
 };
 
+// Master Redirection: a plugin that stays, copied into the output with its compiled masters replaced by the
+// outputs and every FormID translated (Redirection.cpp). Loads after the outputs.
+struct RedirectedPlugin {
+    PluginIndex plugin = kInvalidPlugin;
+    std::string name;
+    std::string after;                        // the plugin it loaded after (list order); empty: the first
+    std::vector<std::string> replacedMasters; // compiled masters the copy no longer lists
+    std::vector<std::string> masterNames;
+    PluginHeader header;
+    std::vector<Record> built;
+    std::vector<Placement> placements; // parallel to `built`
+    size_t ownVersions = 0;   // records written as the plugin has them (FormIDs translated)
+    size_t winnerCopies = 0;  // cells and other containers written as the game shows them today
+    size_t dropped = 0;       // overrides left to the outputs or later plugins, as today
+    size_t translated = 0;    // FormIDs now naming a record in an output
+    std::string failure;      // why it cannot be redirected (then nothing is written; its masters stay)
+};
+
 struct CompiledOutput {
     CompileOptions options;
     std::vector<PluginIndex> compiledPlugins;
@@ -214,6 +238,7 @@ struct CompiledOutput {
     bool f4seArchiveLoader = false;
     std::vector<CompileIssue> issues;
     std::vector<PrevisRewrite> previsFiles; // translated previs files, written loose on export
+    std::vector<RedirectedPlugin> redirected; // Master Redirection copies (failure set: not written)
     // References that cannot be written faithfully, left unwritten (brokenReferencesAsNull off): the
     // plugin that stores each is kept out and the compilation runs again (Pipeline).
     struct BrokenReference {

@@ -256,6 +256,10 @@ void AppController::loadSettings()
     c.applyPatchPlan = s.value("compile/applyPatchPlan", false).toBool();
     c.brokenReferencesAsNull = s.value("compile/brokenReferencesAsNull", false).toBool();
     c.unusedMasterPlaceholders = s.value("compile/unusedMasterPlaceholders", false).toBool();
+    c.redirectMasters = s.value("compile/redirectMasters", false).toBool();
+    c.noRedirect.clear();
+    for (const auto& n : s.value("compile/noRedirect").toStringList())
+        c.noRedirect.push_back(ss(n));
     c.compileNewQuestsAndNpcs = s.value("compile/newQuestsAndNpcs", true).toBool();
     c.buildPatch = s.value("compile/patch", false).toBool();
     c.patchOnly = s.value("compile/patchOnly", false).toBool();
@@ -346,6 +350,7 @@ void AppController::saveSettings()
     s.setValue("compile/applyPatchPlan", c.applyPatchPlan);
     s.setValue("compile/brokenReferencesAsNull", c.brokenReferencesAsNull);
     s.setValue("compile/unusedMasterPlaceholders", c.unusedMasterPlaceholders);
+    s.setValue("compile/redirectMasters", c.redirectMasters);
     s.setValue("compile/newQuestsAndNpcs", c.compileNewQuestsAndNpcs);
     s.setValue("compile/patch", c.buildPatch);
     s.setValue("compile/patchOnly", c.patchOnly);
@@ -447,6 +452,32 @@ void AppController::setChosen(const QStringList& plugins, bool chosen)
     if (chosen) // switching one on undoes an exclusion
         setMembership(config_.analysis.excludedPlugins, plugins, false);
     applySelection();
+}
+
+QStringList AppController::notRedirected() const
+{
+    QStringList out;
+    for (const auto& n : config_.compile.noRedirect)
+        out << qs(n);
+    return out;
+}
+
+void AppController::setRedirect(const QString& plugin, bool allowed)
+{
+    auto& list = config_.compile.noRedirect;
+    const auto key = toLower(ss(plugin));
+    list.erase(std::remove_if(list.begin(), list.end(), [&](const std::string& p) { return toLower(p) == key; }),
+               list.end());
+    if (!allowed)
+        list.push_back(ss(plugin));
+    // Saved at once, like an exclusion.
+    QSettings().setValue("compile/noRedirect", notRedirected());
+    emit settingsChanged();
+    if (pipeline_ && pipeline_->scanned() && !busy_) {
+        pipeline_->config().compile.noRedirect = config_.compile.noRedirect;
+        pipeline_->refreshEligibility();
+        emit dataChanged();
+    }
 }
 
 void AppController::setExcluded(const QString& plugin, bool excluded)
