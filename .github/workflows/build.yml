@@ -38,15 +38,49 @@ jobs:
           cache: true
       - name: Locate vcpkg
         shell: pwsh
-        run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+        run: |
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+          echo "VCPKG_COMMIT=$(git -C $env:VCPKG_INSTALLATION_ROOT rev-parse HEAD)" >> $env:GITHUB_ENV
+          # vcpkg's built packages and source downloads are kept between runs (actions/cache below): without
+          # them every run rebuilds fmt and spdlog, downloading their patches from github.com/<repo>/commit/
+          # <sha>.patch, which GitHub answers with 503 to shared runners for hours at a time.
+          $cache = "$env:GITHUB_WORKSPACE\vcpkg-cache"
+          New-Item -ItemType Directory -Force -Path "$cache\binary", "$cache\downloads" | Out-Null
+          echo "VCPKG_BINARY_CACHE_DIR=$cache\binary" >> $env:GITHUB_ENV
+          echo "VCPKG_BINARY_SOURCES=clear;files,$cache\binary,readwrite" >> $env:GITHUB_ENV
+          echo "VCPKG_DOWNLOADS=$cache\downloads" >> $env:GITHUB_ENV
+      - name: Restore vcpkg cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vcpkg-cache
+          key: vcpkg-windows-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-windows-${{ env.VCPKG_COMMIT }}-
+            vcpkg-windows-
       - name: Configure
         shell: pwsh
         run: |
-          cmake --preset windows-msvc *>&1 | Tee-Object -FilePath configure.log
-          if ($LASTEXITCODE -ne 0) {
-            Get-Content configure.log -Tail 40 | ForEach-Object { Write-Output "::error::$_" }
-            exit 1
+          # A download that fails for a moment (GitHub 503) is tried again; vcpkg keeps what it already
+          # built, so a retry continues where it stopped.
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            cmake --preset windows-msvc *>&1 | Tee-Object -FilePath configure.log
+            if ($LASTEXITCODE -eq 0) { break }
+            $transient = Select-String -Path configure.log -Pattern 'response code 5\d\d|Download failed' -Quiet
+            if (-not $transient -or $attempt -eq 4) {
+              Get-Content configure.log -Tail 40 | ForEach-Object { Write-Output "::error::$_" }
+              exit 1
+            }
+            Write-Output "::warning::Configure attempt $attempt failed on a download; trying again in $(60 * $attempt) s"
+            Start-Sleep -Seconds (60 * $attempt)
           }
+      - name: Save vcpkg cache
+        # Saved once configure succeeded, even if a later step fails, so the next run downloads nothing.
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vcpkg-cache
+          key: vcpkg-windows-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
       - name: Build
         shell: pwsh
         run: |
