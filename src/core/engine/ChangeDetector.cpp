@@ -525,6 +525,10 @@ uint64_t ChangeDetector::settingsHash(const CompileOptions& c, const std::vector
 {
     std::string s = std::to_string(c.outputCount) + (c.autoOutputs ? "auto" : "") + "|" + c.outputPrefix + "|" + std::to_string(int(c.strategy)) + "|" +
                     std::to_string(c.mergeCompatible) + std::to_string(c.lightOutputsWhenPossible) +
+                    // Only a non-default headroom is added, so builds made before it keep their hash.
+                    (c.lightHeadroom != CompileOptions::kDefaultLightHeadroom
+                         ? "|lightheadroom" + std::to_string(c.lightHeadroom)
+                         : std::string()) +
                     std::to_string(c.rewriteHeuristicReferences) + std::to_string(c.buildPatch) + std::to_string(c.patchOnly) +
                     (c.autoMerge ? "|automerge" : "") +
                     // Translated previs files are export output: switching this changes what is written.

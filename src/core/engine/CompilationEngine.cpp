@@ -2162,7 +2162,19 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                    (out.records[v].sig == sig::CELL || out.records[v].sig == Signature("WRLD"));
         });
         const bool fits = op.newRecords <= kLightCapacity;
-        op.light = op.patch || (options.lightOutputsWhenPossible && !newWorld && fits);
+        // A new light output leaves room to grow (it stays light on rebuilds).
+        const size_t room = std::min<size_t>(options.lightHeadroom, kLightCapacity);
+        const bool fitsWithRoom = op.newRecords + room <= kLightCapacity;
+        op.light = op.patch || (options.lightOutputsWhenPossible && !newWorld && fitsWithRoom);
+        if (!op.patch && options.lightOutputsWhenPossible && !newWorld && fits && !fitsWithRoom &&
+            !(oi < previousLight.size() && previousLight[oi] >= 0 && hadPrevious[oi]))
+            addIssue(Severity::Info, "Light Outputs",
+                     op.name + " is a full plugin: its " + std::to_string(op.newRecords) +
+                         " new records fit a light plugin (" + std::to_string(kLightCapacity) +
+                         "), but leave fewer than " + std::to_string(room) +
+                         " free. Outputs keep their light or full state on rebuilds, so a light output this full "
+                         "would have to become a full plugin, changing its records' FormIDs, when a mod update "
+                         "adds a few records. More outputs spread the records thinner");
         // An output keeps the light or full state it had in the previous build: switching changes the
         // FormID the game gives every record in it.
         if (!op.patch && oi < previousLight.size() && previousLight[oi] >= 0 && hadPrevious[oi]) {
@@ -2182,7 +2194,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                                        : std::to_string(op.newRecords) + " new records, more than a light plugin holds") +
                              "): the game gives its " + std::to_string(n) +
                              " records from the previous build other FormIDs, so saves made with it lose them");
-            } else if (op.light != (options.lightOutputsWhenPossible && !newWorld && fits)) {
+            } else if (op.light != (options.lightOutputsWhenPossible && !newWorld && fitsWithRoom)) {
                 addIssue(Severity::Info, "FormID Stability",
                          op.name + " stays " + (op.light ? "light (ESL)" : "a full plugin") +
                              " as in the previous build, so its records keep their FormIDs (the Light outputs "

@@ -436,8 +436,8 @@ std::string conflictReport(const ReportContext& ctx)
                 ++entryShown;
                 const auto& t = pr.conflict->changes[pe.change];
                 std::string change = t.item.empty() ? t.before + " → " + t.after : std::string(changeOpName(t.op)) + " " + t.item;
-            if (!t.position.empty())
-                change += " (" + t.position + ")";
+                if (!t.position.empty())
+                    change += " (" + t.position + ")";
                 h.row({s.formLabel(pr.conflict->key), t.field, change, s.pluginName(t.source), compatClassName(t.cls),
                        planActionName(pe.action), planDecisionName(pe.decision), pe.note},
                       {"mono"});

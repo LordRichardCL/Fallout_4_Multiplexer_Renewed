@@ -40,6 +40,12 @@ struct CompileOptions {
     std::vector<AllocationRule> rules;
     bool mergeCompatible = true;
     bool lightOutputsWhenPossible = false;
+    // New records an output must leave free before it is first made light (the range holds 2,048). An
+    // output keeps its light or full state on rebuilds (switching changes its records' FormIDs), so an
+    // output made light while nearly full would have to go full, and break saves, as soon as a mod update
+    // adds a few records. Outputs that are light already are not affected.
+    static constexpr uint32_t kDefaultLightHeadroom = 200;
+    uint32_t lightHeadroom = kDefaultLightHeadroom;
     // Write a cell's previs file (.uvd) translated into the output's numbering when the output holds the
     // cell's winning record (P2b). Off: the same plugins compile and the same files are checked (the
     // guard still keeps out what cannot be translated), but no translated copy is written, so the game

@@ -250,6 +250,7 @@ void AppController::loadSettings()
     c.strategy = static_cast<AllocationStrategy>(s.value("compile/strategy", int(AllocationStrategy::Balanced)).toInt());
     c.mergeCompatible = s.value("compile/merge", true).toBool();
     c.lightOutputsWhenPossible = s.value("compile/light", false).toBool();
+    c.lightHeadroom = s.value("compile/lightHeadroom", fo4mx::CompileOptions::kDefaultLightHeadroom).toUInt();
     c.translatePrevis = s.value("compile/translatePrevis", true).toBool();
     c.mergeCellConfig = s.value("compile/mergeCellConfig", false).toBool();
     c.applyPatchPlan = s.value("compile/applyPatchPlan", false).toBool();
@@ -339,6 +340,7 @@ void AppController::saveSettings()
     s.setValue("compile/strategy", int(c.strategy));
     s.setValue("compile/merge", c.mergeCompatible);
     s.setValue("compile/light", c.lightOutputsWhenPossible);
+    s.setValue("compile/lightHeadroom", c.lightHeadroom);
     s.setValue("compile/translatePrevis", c.translatePrevis);
     s.setValue("compile/mergeCellConfig", c.mergeCellConfig);
     s.setValue("compile/applyPatchPlan", c.applyPatchPlan);

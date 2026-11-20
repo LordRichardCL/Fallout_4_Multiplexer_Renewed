@@ -150,6 +150,15 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                        "different fields), combine their changes instead of keeping only the last mod's version.");
     light_->setToolTip("An output with few enough new records (2,048 or fewer) is ESL-flagged, so it takes no full "
                        "plugin slot. Outputs with new cells or worldspaces are never ESL-flagged.");
+    lightHeadroom_ = new QSpinBox;
+    lightHeadroom_->setRange(0, 2000);
+    lightHeadroom_->setSingleStep(50);
+    lightHeadroom_->setSuffix(" records free");
+    lightHeadroom_->setToolTip(
+        "An output keeps its light or full state on rebuilds, because switching gives all its records other "
+        "FormIDs and breaks saves. So an output is only made light when it leaves this many new records free: "
+        "room for mod updates to add records without the output having to become a full plugin. Outputs that "
+        "are light already are not affected.");
     translatePrevis_ = new ToggleSwitch("Translate previs files into the output's numbering");
     translatePrevis_->setToolTip(
         "A cell written to an output wins in game, so its previs file (.uvd) is read in the output's numbering. "
@@ -261,6 +270,9 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     advancedSection_->body()->addWidget(rules_);
     advancedSection_->body()->addWidget(
         makeOptionRow("Light outputs", "ESL-flag outputs with 2,048 new records or fewer", light_->toolTip(), {light_}));
+    advancedSection_->body()->addWidget(makeOptionRow("Room to grow (light outputs)",
+                                                      "New records a new light output must leave free",
+                                                      lightHeadroom_->toolTip(), {lightHeadroom_}));
     auto* lossy = new QLabel("lossy");
     lossy->setObjectName("Pill");
     lossy->setStyleSheet("background:#2a1616; color:#ff5c5c;");
@@ -685,6 +697,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     });
     // Every option is written to the settings state as it changes (saved with Save Settings).
     connect(outputs_, &QSpinBox::valueChanged, this, [this] { storeOptions(); });
+    connect(lightHeadroom_, &QSpinBox::valueChanged, this, [this] { storeOptions(); });
     connect(prefix_, &QLineEdit::textChanged, this, [this] { storeOptions(); });
     connect(outputDir_, &QLineEdit::textChanged, this, [this] { storeOptions(); });
     connect(strategy_, &QComboBox::currentIndexChanged, this, [this] { storeOptions(); });
@@ -871,6 +884,8 @@ void CompilationPage::loadOptions()
     updateInstallNote();
     merge_->setChecked(c.mergeCompatible);
     light_->setChecked(c.lightOutputsWhenPossible);
+    lightHeadroom_->setValue(int(c.lightHeadroom));
+    lightHeadroom_->setEnabled(c.lightOutputsWhenPossible);
     translatePrevis_->setChecked(c.translatePrevis);
     mergeCellConfig_->setChecked(c.mergeCellConfig);
     applyPlan_->setChecked(c.applyPatchPlan);
@@ -899,6 +914,8 @@ void CompilationPage::storeOptions()
     c.rules = parseRules(rules_->toPlainText());
     c.mergeCompatible = merge_->isChecked();
     c.lightOutputsWhenPossible = light_->isChecked();
+    c.lightHeadroom = static_cast<uint32_t>(lightHeadroom_->value());
+    lightHeadroom_->setEnabled(c.lightOutputsWhenPossible);
     c.translatePrevis = translatePrevis_->isChecked();
     c.mergeCellConfig = mergeCellConfig_->isChecked();
     c.applyPatchPlan = applyPlan_->isChecked();

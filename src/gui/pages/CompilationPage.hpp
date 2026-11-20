@@ -58,6 +58,7 @@ private:
     QPlainTextEdit* rules_;
     QCheckBox* merge_;
     QCheckBox* light_;
+    QSpinBox* lightHeadroom_ = nullptr;
     QCheckBox* translatePrevis_;
     QCheckBox* mergeCellConfig_;
     QCheckBox* applyPlan_;

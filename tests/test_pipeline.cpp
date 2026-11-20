@@ -1667,6 +1667,52 @@ TEST(only_chosen_plugins_are_compiled)
 // instead of moving the list to output 3, and the outputs stay light although the setting is now off.
 // Build 3 has fewer outputs, so records of the build in use would get other FormIDs: it stops, until
 // accepted for that build.
+// A new output is made light only with room to grow: it keeps its light or full state on rebuilds, so one
+// made light while nearly full would have to go full (new FormIDs) when a mod update adds a few records.
+TEST(new_light_outputs_leave_room_to_grow)
+{
+    auto root = buildInstall("lightroom");
+    auto data = root / "Game" / "Data";
+    auto keywords = [](uint32_t n) {
+        std::vector<Record> out;
+        for (uint32_t i = 0; i < n; ++i)
+            out.push_back(record("KYWD", 0x01000800 + i, {zs("EDID", "ModK_Keyword" + std::to_string(i))}));
+        return out;
+    };
+    writePlugin(data / "ModK.esp", {"Fallout4.esm"}, keywords(1900)); // fits 2,048, but with fewer than 200 free
+    writeFile(root / "plugins.txt", "*ModK.esp\n");
+    auto cfg = configFor(root);
+    cfg.databasePath.clear();
+    cfg.compile.outputCount = 1;
+    cfg.compile.lightOutputsWhenPossible = true;
+    auto lightOf = [&](const PipelineConfig& c, bool* noted) {
+        Pipeline p(c);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        bool light = false;
+        for (const auto& op : p.compiledOutput()->outputs)
+            if (!op.records.empty() && !op.patch)
+                light = op.light;
+        if (noted) {
+            *noted = false;
+            for (const auto& is : p.validation()->issues)
+                *noted = *noted || is.category == "Light Outputs";
+        }
+        return light;
+    };
+    bool noted = false;
+    CHECK(!lightOf(cfg, &noted));
+    CHECK(noted); // said why
+    auto none = cfg;
+    none.compile.lightHeadroom = 0;
+    CHECK(lightOf(none, &noted));
+    CHECK(!noted);
+    writePlugin(data / "ModK.esp", {"Fallout4.esm"}, keywords(1800)); // 248 free
+    CHECK(lightOf(cfg, &noted));
+    CHECK(!noted);
+}
+
 TEST(rebuilds_keep_the_formids_of_the_build_in_use)
 {
     namespace fs = std::filesystem;

@@ -98,6 +98,7 @@ Compile options:
                        matches PATTERN to output N (repeatable)
   --no-merge           last plugin wins instead of merging compatible edits
   --light              ESL-flag outputs that fit the light plugin range
+  --light-headroom N   new records a new light output leaves free (default 200)
   --no-previs-translation  do not write translated previs files (only the export changes: the same
                        checks run and the same plugins compile; for testing)
   --apply-patch-plan   write the records the compatibility patch plan marks Ready (see "plan") as
@@ -266,6 +267,8 @@ PipelineConfig makeConfig(const Args& a)
     }
     c.mergeCompatible = !a.has("--no-merge");
     c.lightOutputsWhenPossible = a.has("--light");
+    if (a.has("--light-headroom"))
+        c.lightHeadroom = static_cast<uint32_t>(std::stoul(a.get("--light-headroom")));
     c.translatePrevis = !a.has("--no-previs-translation");
     c.mergeCellConfig = a.has("--merge-cell-config");
     c.applyPatchPlan = a.has("--apply-patch-plan");
