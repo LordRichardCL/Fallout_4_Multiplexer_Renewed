@@ -6446,6 +6446,56 @@ Mo2Setup buildMo2Install(const std::string& name, const std::string& modlist = "
 
 } // namespace
 
+// What plugins that stay hold back. R (excluded) lists M1, which lists M2: R alone keeps both. R and R2
+// both list M3: shared. Y (excluded) lists X (excluded), which lists M4: X would stay anyway, so it holds
+// back nothing and is kept by Y; Y holds back nothing either (X stays for its own reason).
+TEST(plugins_that_stay_report_what_they_hold_back)
+{
+    auto root = buildInstall("holdback");
+    auto data = root / "Game" / "Data";
+    auto kw = [](uint32_t id, const char* edid) { return record("KYWD", id, {zs("EDID", edid)}); };
+    writePlugin(data / "M2.esp", {"Fallout4.esm"}, {kw(0x01000800, "M2Kw")});
+    writePlugin(data / "M1.esp", {"Fallout4.esm", "M2.esp"}, {kw(0x02000800, "M1Kw")});
+    writePlugin(data / "M3.esp", {"Fallout4.esm"}, {kw(0x01000800, "M3Kw")});
+    writePlugin(data / "M4.esp", {"Fallout4.esm"}, {kw(0x01000800, "M4Kw")});
+    writePlugin(data / "R.esp", {"Fallout4.esm", "M1.esp", "M3.esp"}, {kw(0x03000800, "RKw")});
+    writePlugin(data / "R2.esp", {"Fallout4.esm", "M3.esp"}, {kw(0x02000800, "R2Kw")});
+    writePlugin(data / "X.esp", {"Fallout4.esm", "M4.esp"}, {kw(0x02000800, "XKw")});
+    writePlugin(data / "Y.esp", {"Fallout4.esm", "X.esp"}, {kw(0x02000800, "YKw")});
+    writeFile(root / "plugins.txt",
+              "*ModA.esp\n*ModB.esp\n*ModC.esp\n*M2.esp\n*M1.esp\n*M3.esp\n*M4.esp\n*R.esp\n*R2.esp\n*X.esp\n*Y.esp\n");
+    auto cfg = configFor(root);
+    cfg.analysis.excludedPlugins = {"R.esp", "R2.esp", "X.esp", "Y.esp"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    auto names = [&](const std::string& plugin) {
+        std::set<std::string> out;
+        for (auto h : s.findPlugin(plugin)->holdsBack)
+            out.insert(s.plugins[h].name);
+        return out;
+    };
+    CHECK(names("R.esp") == (std::set<std::string>{"M1.esp", "M2.esp"}));
+    CHECK_EQ(s.findPlugin("R.esp")->sharedHold, size_t(1));
+    CHECK(names("R2.esp").empty());
+    CHECK_EQ(s.findPlugin("R2.esp")->sharedHold, size_t(1));
+    CHECK(names("X.esp").empty());
+    CHECK_EQ(s.findPlugin("X.esp")->heldBy, s.findPlugin("Y.esp")->index);
+    CHECK(names("Y.esp").empty());
+    CHECK_EQ(s.findPlugin("Y.esp")->heldBy, kInvalidPlugin);
+    for (const char* m : {"M1.esp", "M2.esp", "M3.esp", "M4.esp"})
+        CHECK(s.findPlugin(m)->eligibility != Eligibility::Eligible);
+    ReportContext ctx;
+    ctx.session = &s;
+    ctx.dependencies = p.dependencies();
+    const std::string text = ReportGenerator::text(ReportKind::Dependency, ctx);
+    CHECK(text.find("What plugins that stay hold back") != std::string::npos);
+    const std::string json = ReportGenerator::json(ReportKind::Dependency, ctx);
+    CHECK(json.find("\"holdsBack\"") != std::string::npos);
+    CHECK(json.find("\"heldBy\":\"Y.esp\"") != std::string::npos || json.find("\"heldBy\": \"Y.esp\"") != std::string::npos);
+}
+
 // A master that plugins staying in the load order list but use none of the records of. ModP lists ModM and
 // adds a keyword of its own; ModQ overrides ModM's keyword; ModR has undescribed data with a byte equal to
 // ModM's index. All three stay (excluded). Off: ModM stays with ModP, reported as an unused master. On

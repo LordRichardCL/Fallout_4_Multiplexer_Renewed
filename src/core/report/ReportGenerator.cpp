@@ -540,6 +540,37 @@ std::string dependencyReport(const ReportContext& ctx)
     }
     h.tableEnd(s.loadOrder.size(), s.loadOrder.size());
 
+    // What each plugin that stays holds back (masters it keeps in the load order), most first.
+    {
+        std::vector<PluginIndex> roots;
+        for (auto pi : s.loadOrder)
+            if (!s.plugins[pi].holdsBack.empty() || s.plugins[pi].sharedHold)
+                roots.push_back(pi);
+        std::stable_sort(roots.begin(), roots.end(), [&](PluginIndex a, PluginIndex b) {
+            return s.plugins[a].holdsBack.size() > s.plugins[b].holdsBack.size();
+        });
+        if (!roots.empty()) {
+            h.h2("What plugins that stay hold back");
+            h.note("A plugin that stays in the load order keeps its masters there too, and theirs. \"Would also "
+                   "compile\" counts the plugins only it keeps: they would compile if it did (for example once its "
+                   "record types are supported). \"Shared\" counts those it keeps together with other plugins that "
+                   "stay. The ones with the most are where support for their record types gains the most.");
+            h.tableStart({"Plugin", "Why it stays", "Would also compile", "Shared", "Plugins"});
+            size_t shown = 0;
+            for (auto pi : roots) {
+                if (shown++ >= ctx.maxRows)
+                    break;
+                const auto& p = s.plugins[pi];
+                std::vector<std::string> names;
+                for (auto h2 : p.holdsBack)
+                    names.push_back(s.plugins[h2].name);
+                h.row({p.name, p.reasons.empty() ? std::string() : p.reasons.front(),
+                       formatCount(p.holdsBack.size()), formatCount(p.sharedHold), join(names, ", ")});
+            }
+            h.tableEnd(std::min(shown, roots.size()), roots.size());
+        }
+    }
+
     if (!s.referenceDecisions.empty()) {
         h.h2("Filename references");
         h.note("Every place a plugin's file name appears outside the plugin. The most restrictive classification "
@@ -1127,6 +1158,16 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             for (const auto& m : s->plugins[pi].header.masters)
                 masters.push(m.name);
             o.set("masters", masters);
+            const auto& p = s->plugins[pi];
+            if (!p.holdsBack.empty() || p.sharedHold || p.heldBy != kInvalidPlugin) {
+                json::Value held;
+                for (auto h2 : p.holdsBack)
+                    held.push(s->plugins[h2].name);
+                o.set("holdsBack", held);
+                o.set("sharedHold", static_cast<uint64_t>(p.sharedHold));
+                if (p.heldBy != kInvalidPlugin)
+                    o.set("heldBy", s->plugins[p.heldBy].name);
+            }
             plugins.push(o);
         }
         root.set("plugins", plugins);

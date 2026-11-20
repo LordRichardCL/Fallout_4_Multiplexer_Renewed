@@ -56,9 +56,11 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
             f.write(exportText().toUtf8());
     });
     chips_ = new FilterChips({"All", "ESM", "ESP", "ESL", "Generated", "Conflicting", "Disabled", "Eligible", "Ineligible",
-                             "Blocking Types"});
-    chips_->setToolTip("Blocking Types: record types the compiler does not support yet, and how many plugins "
-                       "supporting each one would make compilable");
+                             "Holding Back", "Blocking Types"});
+    chips_->setToolTip("Holding Back: plugins that stay in the load order and keep others there as their masters, "
+                       "most first (those others would compile if they did). Blocking Types: record types the "
+                       "compiler does not support yet, and how many plugins supporting each one would make "
+                       "compilable");
     l->addWidget(chips_);
     chips_->setToolTip(chips_->toolTip() + "\nIneligible: every plugin that will not be compiled (ineligible, retained, "
                                            "inactive or unreadable), so Eligible + Ineligible = all plugins");
@@ -283,11 +285,17 @@ void PluginsPage::reload()
             where += " AND eligibility = 'Eligible'";
         else if (chip == "Ineligible")
             where += " AND eligibility <> 'Eligible'"; // as the summary: everything that will not be compiled
+        const bool holding = chip == "Holding Back";
+        if (holding)
+            where += " AND holds_back > 0";
         sql = "SELECT load_order_hex AS '#', name AS 'Plugin Name', type AS Type, record_count AS 'Record Count', "
               "conflict_count AS 'Conflict Count', master_count AS 'Master Count', status AS Status, "
-              "eligibility AS Eligibility, source_mod AS Mod, support AS Support, id FROM Plugins WHERE " +
-              where + " ORDER BY active DESC, CASE WHEN load_order < 0 THEN 99999 ELSE load_order END, name";
-        model_->setNumberColumns({3, 4, 5});
+              "eligibility AS Eligibility, source_mod AS Mod, " +
+              QString(holding ? "holds_back AS 'Would Also Compile'" : "support AS Support") + ", id FROM Plugins WHERE " +
+              where +
+              (holding ? " ORDER BY holds_back DESC, name"
+                       : " ORDER BY active DESC, CASE WHEN load_order < 0 THEN 99999 ELSE load_order END, name");
+        model_->setNumberColumns(holding ? QSet<int>{3, 4, 5, 9} : QSet<int>{3, 4, 5});
         model_->setBytesColumns({});
         model_->setStatusColumns({6, 7});
     }
@@ -452,8 +460,8 @@ void PluginsPage::showDetails(int row)
     QSqlQuery q(db);
     q.prepare("SELECT name, type, author, description, source_mod, path, record_count, new_records, override_count, "
               "injected_count, itm_count, deleted_count, conflict_count, hard_conflict_count, eligibility, "
-              "eligibility_reason, archives, record_types, load_order_hex, active, file_size, localized, base_game "
-              "FROM Plugins WHERE id = ?");
+              "eligibility_reason, archives, record_types, load_order_hex, active, file_size, localized, base_game, "
+              "holds_back, holds_back_names, held_by FROM Plugins WHERE id = ?");
     q.addBindValue(id);
     if (!q.exec() || !q.next())
         return;
@@ -479,6 +487,15 @@ void PluginsPage::showDetails(int row)
     html += QString("<p><b>Compilation:</b> <span style='color:%1'>%2</span><br>%3</p>")
                 .arg(ec.isValid() ? ec.name() : "#d7e4dc", elig.toHtmlEscaped(),
                      v(15).replace("; ", "<br>"));
+    if (q.value(23).toLongLong() > 0)
+        html += QString("<p><b>Holds back %1:</b> they stay in the load order only as its masters (or theirs), and "
+                        "would compile if it did:<br>%2</p>")
+                    .arg(q.value(23).toLongLong() == 1 ? QString("1 plugin")
+                                                       : formatCount(q.value(23).toLongLong()) + " plugins",
+                         v(24).replace(", ", "<br>"));
+    if (!q.value(25).toString().isEmpty())
+        html += "<p><b>Kept by:</b> " + v(25) +
+                ", which stays in the load order and lists it as a master: compiling it would need that one first.</p>";
     if (!q.value(17).toString().isEmpty())
         html += "<p><b>Record types:</b><br><span style='font-family:monospace'>" + v(17) + "</span></p>";
     if (!q.value(16).toString().isEmpty())

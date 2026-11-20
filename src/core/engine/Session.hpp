@@ -101,6 +101,13 @@ struct PluginInfo {
 
     Eligibility eligibility = Eligibility::Inactive;
     std::vector<std::string> reasons;
+    // A plugin that stays for its own reasons (not only as a master): the plugins it alone keeps in the
+    // load order as masters, directly or through them, which would compile if it did; `sharedHold` counts
+    // those it keeps together with other plugins that stay. `heldBy`: another plugin that stays and keeps
+    // this one as a master, so compiling it would need that one first (holdsBack is then empty).
+    std::vector<PluginIndex> holdsBack;
+    size_t sharedHold = 0;
+    PluginIndex heldBy = kInvalidPlugin;
     std::vector<std::string> archives; // "<plugin> - *.ba2" archives that load with it
 
     bool isMaster() const; // ESM flag or .esm / .esl extension

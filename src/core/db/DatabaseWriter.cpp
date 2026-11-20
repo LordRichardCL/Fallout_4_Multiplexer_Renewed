@@ -87,6 +87,9 @@ void DatabaseWriter::initSchema()
     ensureColumn("EligibilityBlockers", "support");
     ensureColumn("Conflicts", "preserved", "INTEGER");
     ensureColumn("Plugins", "support");
+    ensureColumn("Plugins", "holds_back", "INTEGER");
+    ensureColumn("Plugins", "holds_back_names");
+    ensureColumn("Plugins", "held_by");
     ensureColumn("DependencyIssues", "cleaning", "INTEGER");
     for (const char* c : {"kind", "format", "text", "context", "location", "class", "reason"})
         ensureColumn("NameReferences", c);
@@ -106,8 +109,8 @@ void DatabaseWriter::writePlugins(const Session& session)
         "INSERT INTO Plugins(id, name, type, load_order, load_order_hex, active, base_game, creation_club, source_mod, "
         "path, file_size, header_version, author, description, flags, localized, record_count, new_records, "
         "override_count, injected_count, itm_count, deleted_count, conflict_count, hard_conflict_count, master_count, "
-        "status, eligibility, eligibility_reason, archives, record_types, support) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        "status, eligibility, eligibility_reason, archives, record_types, support, holds_back, holds_back_names, "
+        "held_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     auto ms = db_.prepare(
         "INSERT INTO Masters(plugin_id, position, master_name, master_plugin_id, missing) VALUES(?,?,?,?,?)");
     for (const auto& p : session.plugins) {
@@ -142,6 +145,14 @@ void DatabaseWriter::writePlugins(const Session& session)
             .bind(29, join(p.archives, ", "))
             .bind(30, recordTypesSummary(p))
             .bind(31, supportLevel(session, p));
+        {
+            std::vector<std::string> held;
+            for (PluginIndex h : p.holdsBack)
+                held.push_back(session.plugins[h].name);
+            st.bind(32, static_cast<uint32_t>(p.holdsBack.size()))
+                .bind(33, join(held, ", "))
+                .bind(34, p.heldBy == kInvalidPlugin ? std::string() : session.plugins[p.heldBy].name);
+        }
         st.run();
         for (size_t i = 0; i < p.header.masters.size(); ++i) {
             PluginIndex m = i < p.masters.size() ? p.masters[i] : kInvalidPlugin;

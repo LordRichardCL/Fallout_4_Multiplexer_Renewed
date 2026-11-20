@@ -366,6 +366,6 @@ Ranked by impact; none of these is implemented yet.
 1. **Master Redirection** for fully decodable retained plugins: re-mastered copies in the output mod, loaded after the Dummy plugins.
 2. **Pin-back protection.** When a new or updated plugin would force a compiled plugin back into the load order, ask instead of doing it silently.
 3. **Append-only allocation** across rebuilds, with per-output headroom.
-4. **Pinning cost in the UI.** Show what each ineligible plugin blocks, including transitive pins.
+4. **Pinning cost in the UI.** Show what each ineligible plugin blocks, including transitive pins. *Done (20 Nov 2026): Plugins → Holding Back, the plugin details, and the Dependency Report.*
 5. **Unnecessary-master detection**, and an optional header-only ESL stub for masters a retained plugin lists but never uses. *Done (20 Nov 2026).*
 6. **Post-compilation archive winner check**, plus validation of assets that are served only by archives which will stop loading.

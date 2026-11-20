@@ -1245,3 +1245,13 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 **Reporting.** Dependency Report: "Unused Master" (Info) for each pair, with what happened to the master. Validation Report: "Master Placeholders" (Info) for each placeholder written, naming the plugins it keeps loading. Plugins page: the master's reasons.
 
 **Test:** `unused_masters_reported_and_given_placeholders` (off; on with the export, the placeholder's header and plugins.txt order; the package output; a plugin overriding the master's record; a plugin with an undescribed byte equal to the master's index).
+
+## What plugins that stay hold back (20 Nov 2026)
+
+**Why.** Plugins kept in the load order only as masters of a plugin that stays were listed with "Required as a master by ..." but nothing showed which plugin that stays was costing the most.
+
+**Computed** in the eligibility pass, after masters are pinned. A *root* is an active plugin that stays for its own reasons (not only as a master). From each root, the walk follows the masters that keep plugins in the load order (a master with a placeholder is not kept) through pinned plugins, and stops at other roots. A pinned plugin reached from exactly one root is held back by that root alone: it would compile if the root did (`PluginInfo::holdsBack`). One reached from several roots counts as shared for each (`sharedHold`). A root reached from another root is kept by it (`heldBy`); its own list is then empty, because it would stay anyway.
+
+**Shown:** Plugins page, chip **Holding Back** (column "Would Also Compile") and the plugin details; Dependency Report (HTML, TXT) "What plugins that stay hold back"; JSON `holdsBack`, `sharedHold`, `heldBy` per plugin; database columns `holds_back`, `holds_back_names`, `held_by`.
+
+**Test:** `plugins_that_stay_report_what_they_hold_back` (a chain of two masters, a shared master, a root kept by another root).

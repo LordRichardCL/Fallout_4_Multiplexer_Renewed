@@ -387,6 +387,10 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
         for (size_t i = 0; i < todo.size(); ++i)
             session.masterUse.emplace(todo[i], std::move(use[i]));
     }
+    // Before masters are pinned: the plugins that compile on their own merits.
+    std::vector<uint8_t> ownMerits(session.plugins.size(), 0);
+    for (const auto& p : session.plugins)
+        ownMerits[p.index] = p.eligibility == Eligibility::Eligible;
     session.unusedMasters.clear();
     session.masterPlaceholders.clear();
     // Each plugin's dependents, with the entry of their master list naming it.
@@ -451,6 +455,103 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
         mp.reasons.push_back("Listed as a master by " + session.plugins[q].name +
                              ", which stays in the load order and uses none of its records: compiled, with an empty "
                              "placeholder plugin of the same name keeping " + session.plugins[q].name + " loading");
+    }
+
+    // What each plugin that stays for its own reasons holds back: the pinned plugins only it reaches through
+    // the masters that keep plugins in the load order.
+    {
+        const size_t n = session.plugins.size();
+        auto pinned = [&](PluginIndex m) {
+            return ownMerits[m] && session.plugins[m].eligibility != Eligibility::Eligible;
+        };
+        auto isRoot = [&](PluginIndex q) {
+            const auto& qp = session.plugins[q];
+            return qp.active && qp.eligibility != Eligibility::Eligible && !ownMerits[q];
+        };
+        // Pin edges: a plugin that stays keeps each master it lists, except an unused one with a placeholder.
+        auto targets = [&](PluginIndex q, std::vector<PluginIndex>& out) {
+            out.clear();
+            const auto& qp = session.plugins[q];
+            const auto it = session.masterUse.find(q);
+            for (size_t i = 0; i < qp.masters.size(); ++i) {
+                const PluginIndex m = qp.masters[i];
+                if (m == kInvalidPlugin)
+                    continue;
+                const bool unused = it != session.masterUse.end() && i < it->second.size() && !it->second[i];
+                if (unused && placeholders)
+                    continue;
+                out.push_back(m);
+            }
+        };
+        constexpr int64_t kNone = -1, kMany = -2;
+        std::vector<int64_t> label(n, kNone);
+        std::vector<PluginIndex> heldBy(n, kInvalidPlugin);
+        std::vector<uint32_t> seen(n, 0);
+        uint32_t stamp = 0;
+        std::vector<PluginIndex> stack, next;
+        for (auto& p : session.plugins) {
+            p.holdsBack.clear();
+            p.sharedHold = 0;
+            p.heldBy = kInvalidPlugin;
+        }
+        for (const auto& root : session.plugins) {
+            if (!isRoot(root.index))
+                continue;
+            ++stamp;
+            stack.assign(1, root.index);
+            seen[root.index] = stamp;
+            while (!stack.empty()) {
+                const PluginIndex q = stack.back();
+                stack.pop_back();
+                targets(q, next);
+                for (PluginIndex m : next) {
+                    if (seen[m] == stamp)
+                        continue;
+                    seen[m] = stamp;
+                    if (isRoot(m)) {
+                        if (heldBy[m] == kInvalidPlugin)
+                            heldBy[m] = root.index;
+                        continue; // it stays for its own reasons; its own walk covers its masters
+                    }
+                    if (!pinned(m))
+                        continue;
+                    label[m] = label[m] == kNone ? static_cast<int64_t>(root.index) : kMany;
+                    stack.push_back(m);
+                }
+            }
+        }
+        for (const auto& p : session.plugins)
+            if (pinned(p.index) && label[p.index] >= 0)
+                session.plugins[static_cast<size_t>(label[p.index])].holdsBack.push_back(p.index);
+        for (auto& p : session.plugins) {
+            if (!isRoot(p.index))
+                continue;
+            p.heldBy = heldBy[p.index];
+            if (p.heldBy != kInvalidPlugin)
+                p.holdsBack.clear(); // it would stay anyway, and keep them with it
+        }
+        // Shared: pinned plugins reached by this one and by others.
+        for (const auto& root : session.plugins) {
+            if (!isRoot(root.index))
+                continue;
+            ++stamp;
+            stack.assign(1, root.index);
+            seen[root.index] = stamp;
+            size_t shared = 0;
+            while (!stack.empty()) {
+                const PluginIndex q = stack.back();
+                stack.pop_back();
+                targets(q, next);
+                for (PluginIndex m : next) {
+                    if (seen[m] == stamp || isRoot(m) || !pinned(m))
+                        continue;
+                    seen[m] = stamp;
+                    shared += label[m] == kMany;
+                    stack.push_back(m);
+                }
+            }
+            session.plugins[root.index].sharedHold = shared;
+        }
     }
 
     if (report) {

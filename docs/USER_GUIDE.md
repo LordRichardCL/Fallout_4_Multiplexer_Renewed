@@ -301,6 +301,10 @@ With archive loaders (MO2) nothing changes: every archive keeps its position. Wi
 
 The comparison is always with your load order **as it was before this app changed the INI**: archives an earlier **Apply to Game** added count as their plugin's own. The app knows them from `Multiplexer_RegisteredArchives.txt` in the output folder, from the last build in its database, and from the oldest `Fallout4Custom.ini.multiplexer-backup-*` next to your INI (the INI before the first change). If you delete generated files between builds, keep those backups, or restore the oldest one first.
 
+### What plugins that stay hold back
+
+A plugin that stays in the load order keeps its masters there too, and their masters in turn. **Plugins → Holding Back** lists the plugins that stay and keep others there, most first; **Would Also Compile** is how many would compile if that plugin did (for example once its record types are supported, or if you allowed it). A plugin's details show the list. They also say when another plugin that stays keeps it as a master ("Kept by"), so compiling it would need that one first. Plugins kept by several plugins that stay are counted as **Shared** in the Dependency Report's "What plugins that stay hold back", and in no plugin's own count.
+
 ### Unused masters
 
 A plugin that stays in the load order keeps its masters there too. Patches often list a master without using any of its records. The **Dependency Report** (and the Dependency Graph's *Missing Requirements & Breakages* tab) lists each one as **Unused Master**: "C.esp lists A.esp as a master but uses none of its records".

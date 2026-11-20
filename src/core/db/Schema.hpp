@@ -44,7 +44,10 @@ CREATE TABLE IF NOT EXISTS Plugins (
     eligibility_reason TEXT,
     archives TEXT,
     record_types TEXT,
-    support TEXT
+    support TEXT,
+    holds_back INTEGER,
+    holds_back_names TEXT,
+    held_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_plugins_name ON Plugins(name);
 
