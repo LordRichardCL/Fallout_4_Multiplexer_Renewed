@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QScrollArea>
 #include <QSqlQuery>
+#include <QStyle>
 #include <QVBoxLayout>
 
 namespace gui {
@@ -265,6 +266,14 @@ void DashboardPage::fillHero(bool have)
     }
     checkNow_->setVisible(built);
     review_->setVisible(built && status != "Up To Date");
+    // The highlighted button is the one the situation calls for: Rebuild only when the mods changed (or
+    // Compile before the first build); when the game is up to date, nothing needs doing.
+    const bool urgent = !built || (status != "Up To Date" && status != "Changes Detected");
+    rebuild_->setObjectName(urgent ? "Primary" : "");
+    rebuild_->setText(!built ? "Compile" : urgent ? "Rebuild" : "Rebuild anyway");
+    rebuild_->setIcon(lineIcon("compile", urgent ? QColor(0xea, 0xff, 0xf2) : theme::kText, urgent ? 17 : 15));
+    rebuild_->style()->unpolish(rebuild_);
+    rebuild_->style()->polish(rebuild_);
 }
 
 void DashboardPage::fillAttention(bool have)

@@ -573,7 +573,8 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
         for (auto& p : session.plugins) {
             if (!isRoot(p.index))
                 continue;
-            p.heldBy = heldBy[p.index];
+            // Only for a plugin that could compile at all: base game masters always stay.
+            p.heldBy = p.baseGame ? kInvalidPlugin : heldBy[p.index];
             if (p.heldBy != kInvalidPlugin)
                 p.holdsBack.clear(); // it would stay anyway, and keep them with it
         }
