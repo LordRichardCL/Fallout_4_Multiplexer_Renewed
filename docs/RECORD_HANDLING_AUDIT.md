@@ -1344,7 +1344,7 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 
 **Rule** (`engine/Redirection`, `DependencyEngine`). This is opt-in (advanced, Mod Organizer 2 only). A plugin that stays and lists masters that compile gets a copy in the output. The copy has the same name, lists the outputs instead of those masters, translates every FormID that names a compiled record, and loads after the outputs.
 
-**Which plugins:** only plugins whose records decode completely (compiled types, no undescribed data, no decode warnings), with no precombine or previs data, that are ESP files that no other plugin lists as a master. Analysis checks this per plugin.
+**Which plugins:** only plugins whose records decode completely (compiled types, no undescribed data, no decode warnings), that are ESP files that no other plugin lists as a master. Analysis checks this per plugin. Version 2 (same day): previs files of cells the copy holds are translated into its numbering, as for the outputs. See `docs/MASTER_REDIRECTION_DESIGN.md`.
 
 **What the copy holds:**
 - Its own new records, with their object IDs.

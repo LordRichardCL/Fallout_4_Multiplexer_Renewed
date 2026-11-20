@@ -85,8 +85,7 @@ Consequence: B′ may need, as masters, plugins whose records the merged winners
   - They have no missing masters.
   - No other plugin lists them as a master (one level only).
   - Every record is of a compiled type and decodes completely: no undescribed data and no decode warnings.
-  - No cell has precombine or previs data (PCMB, VISI, XCRI, XPRI).
-- **Records later plugins also change (decision 3)** are left to the outputs or the later plugin. The copy leaves those overrides out, so the game shows what it shows today. The exception is a record the copy needs as a container (a cell holding its references, a worldspace, a topic or a quest). That record is written as the game shows it today: the outputs' version, else the last plugin's. A container whose version today has precombine or previs data stops the redirection, because the game would read that data in the copy's numbering.
+- **Records later plugins also change (decision 3)** are left to the outputs or the later plugin. The copy leaves those overrides out, so the game shows what it shows today. The exception is a record the copy needs as a container (a cell holding its references, a worldspace, a topic or a quest). That record is written as the game shows it today: the outputs' version, else the last plugin's. Cells keep their precombine and previs records (PCMB, VISI, XCRI, XPRI), translated like every other field.
 - **The compiler** now writes a record that a compiled plugin defines even when its final version equals a redirected plugin's override of it. With its defining plugin switched off, the outputs must define it.
 - **Fail closed:** a copy that cannot be built faithfully is not written. Reasons include:
   - an output needs the plugin as a master;
@@ -101,3 +100,13 @@ Consequence: B′ may need, as masters, plugins whose records the merged winners
 - **Tests:**
   - `master_redirection_lets_masters_of_plugins_that_stay_compile`: off/on, translated reference, own FormIDs, an override left to the outputs, load order, report, and a rescan reading the original in its place.
   - `master_redirection_writes_cells_as_today_and_leaves_unsafe_plugins_alone`: a cell written as today with the copy's reference inside it, plus undescribed data, a plugin listed as a master, and a non-MO2 output.
+
+### Version 2: previs files (20 Nov 2026)
+
+Decision 4 is now done. A cell whose record the copy holds, its own or a container written as today, wins in game. The game therefore reads its previs file (`vis\<cell's plugin>\<cell>.uvd`) in the copy's numbering. Each such file's ID table is translated from the numbering it is read in today into the copy's, as the compiler already does for the outputs (P2b). The translated file is written loose and listed in `Multiplexer_Previs.tsv`.
+- **IDs that point to no record today** get IDs in the copy's own range that point to nothing either.
+- **When an output also holds the cell**, the copy's file replaces the output's, because the copy's record wins.
+- **A file that cannot be translated stops the redirection** (fail closed). So does a file whose IDs would change while **Translate previs files** is off.
+- **Precombined meshes** are found by the cell's defining plugin and FormID, which the copy keeps, so they are used as they are. A plugin's `- Geometry.csg` and `.cdx` load by its name, which the copy keeps.
+
+Test: `master_redirection_translates_previs_files_of_its_cells`.

@@ -7531,6 +7531,77 @@ TEST(master_redirection_light_plugin_several_outputs_and_identical_later_overrid
     }
 }
 
+// Master Redirection with a previs file. ModP's own interior cell has a previs file naming ModP's reference
+// and ModM's object in ModP's numbering (ModP lists Fallout4.esm, ModM and ModN). The copy lists fewer
+// masters, so the game would read the file in another numbering: it is translated into the copy's and
+// written loose, naming the same records.
+TEST(master_redirection_translates_previs_files_of_its_cells)
+{
+    auto m = buildMo2Install("redirect_previs", "+Mod P\n+Mod N\n+Mod M\n+Mod C\n+Mod B\n+Mod A\n");
+    const auto mods = m.inst / "mods";
+    writePlugin(mods / "Mod M" / "ModM.esp", {"Fallout4.esm"}, {record("MISC", 0x01000801, {zs("EDID", "M_Thing")})});
+    writePlugin(mods / "Mod N" / "ModN.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000800, {zs("EDID", "N_Keyword")})});
+    writePlugin(mods / "Mod P" / "ModP.esp", {"Fallout4.esm", "ModM.esp", "ModN.esp"},
+                {record("CELL", 0x03000800, {zs("EDID", "P_Cell")}),
+                 record("REFR", 0x03000801, {zs("EDID", "P_Ref"), u32("NAME", 0x01000801)})});
+    std::vector<uint8_t> uvd(0x150 + 12, 0);
+    storeLE<uint32_t>(uvd.data(), 0xD6000012);
+    storeLE<uint32_t>(uvd.data() + 0x08, uint32_t(uvd.size()));
+    storeLE<uint32_t>(uvd.data() + 0x40, 3);
+    storeLE<uint32_t>(uvd.data() + 0x50, 0x150);
+    storeLE<uint32_t>(uvd.data() + 0x150, 0xFD000000); // a combined object: not a FormID
+    storeLE<uint32_t>(uvd.data() + 0x154, 0x03000801); // ModP's reference, in ModP's numbering
+    storeLE<uint32_t>(uvd.data() + 0x158, 0x01000801); // ModM's object
+    writeFile(mods / "Mod P" / "Vis" / "ModP.esp" / "00000800.uvd", std::string(uvd.begin(), uvd.end()));
+    writeFile(m.profile / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModM.esp\n*ModN.esp\n*ModP.esp\n");
+    auto cfg = m.cfg;
+    cfg.compile.redirectMasters = true;
+    cfg.compile.outputCount = 1;
+    cfg.analysis.onlySelected = true;
+    cfg.analysis.selectedPlugins = {"ModA.esp", "ModB.esp", "ModC.esp", "ModM.esp", "ModN.esp"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    CHECK(s.redirected.count(s.findPlugin("ModP.esp")->index));
+    CHECK(p.compile());
+    const auto* out = p.compiledOutput();
+    for (const auto& [k, why] : s.redirectFailed)
+        std::printf("not redirected %s: %s\n", k.c_str(), why.c_str());
+    CHECK_EQ(out->redirected.size(), size_t(1));
+    if (out->redirected.empty() || !out->redirected.front().failure.empty())
+        return;
+    const auto& rp = out->redirected.front();
+    CHECK_EQ(rp.previsFiles.size(), size_t(1));
+    if (!rp.previsFiles.empty()) {
+        CHECK_EQ(rp.previsFiles.front().formIds, size_t(2));
+        CHECK_EQ(rp.previsFiles.front().changed, size_t(2));
+        CHECK_EQ(rp.previsFiles.front().output, std::string("ModP.esp"));
+    }
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    if (result.redirectedCopies.empty())
+        return;
+    const auto written = slurp(result.directory / "vis" / "modp.esp" / "00000800.uvd");
+    CHECK_EQ(written.size(), uvd.size());
+    if (written.size() != uvd.size())
+        return;
+    auto files = result.pluginFiles;
+    files.push_back(result.redirectedCopies.front());
+    OutputSet set(files);
+    const auto* cell = set.byEditorId("P_Cell");
+    const auto* ref = set.byEditorId("P_Ref");
+    const auto* thing = set.byEditorId("M_Thing");
+    CHECK(cell && ref && thing);
+    if (cell && ref && thing) {
+        auto id = [&](size_t at) { return loadLE<uint32_t>(reinterpret_cast<const uint8_t*>(written.data()) + at); };
+        CHECK_EQ(id(0x150), 0xFD000000u);
+        CHECK(set.resolve(*cell, id(0x154)) == set.identity(*ref)); // read in the copy's numbering
+        CHECK(set.resolve(*cell, id(0x158)) == set.identity(*thing));
+        CHECK(id(0x154) != 0x03000801u);
+    }
+}
+
 TEST(mo2_apply_enables_the_output_mod_and_switches_once_mo2_is_closed)
 {
     auto m = buildMo2Install("mo2_apply");

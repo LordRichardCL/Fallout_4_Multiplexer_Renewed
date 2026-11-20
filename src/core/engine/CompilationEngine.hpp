@@ -220,6 +220,9 @@ struct RedirectedPlugin {
     size_t winnerCopies = 0;  // cells and other containers written as the game shows them today
     size_t dropped = 0;       // overrides left to the outputs or later plugins, as today
     size_t translated = 0;    // FormIDs now naming a record in an output
+    // Previs files of cells whose winning record the copy now holds, translated into its numbering (the
+    // game reads a previs file in the numbering of the plugin whose cell record wins).
+    std::vector<PrevisRewrite> previsFiles;
     std::string failure;      // why it cannot be redirected (then nothing is written; its masters stay)
 };
 

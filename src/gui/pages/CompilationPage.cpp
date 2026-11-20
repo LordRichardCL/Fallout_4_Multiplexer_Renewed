@@ -214,7 +214,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "of its compiled masters, every FormID translated; it loads after the outputs. Its own records keep their "
         "FormIDs, and records later plugins also change are left to them (a cell holding its references is "
         "written as the game shows it today), so the game shows what it does now. Only plugins every record of "
-        "which the app describes completely, with no precombine or previs data, that no other plugin lists as a "
+        "which the app describes completely (previs files of its cells are translated), that no other plugin lists as a "
         "master. The original file is never changed: switching the output mod off restores it. Mod Organizer 2 "
         "with the output folder in the mods folder only. Keep a plugin out of it from the Plugins page.");
     planPending_ = new QLabel;

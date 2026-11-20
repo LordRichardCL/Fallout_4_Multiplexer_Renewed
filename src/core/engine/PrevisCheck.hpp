@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,14 @@ struct PrevisTranslation {
     std::vector<std::string> nowhereExamples; // the first few, for the report
 };
 PrevisTranslation translatePrevis(Session& session, const CompiledOutput& out, const EmittedRecord& cell);
+
+// The same for any plugin that will hold the cell's winning record: `express` gives a record's FormID in
+// that plugin's numbering (false: it cannot be expressed); IDs that point to no record today get IDs from
+// `nextUnused` up (at most `maxObject`) in the plugin's own index `ownIndex`. `cell` supplies the key and
+// RVIS (whose file it is).
+PrevisTranslation translatePrevisInto(Session& session, const EmittedRecord& cell, const std::string& target,
+                                      const std::function<bool(FormKey, uint32_t&)>& express, uint32_t ownIndex,
+                                      uint32_t nextUnused, uint32_t maxObject);
 
 // The records a cell's own previs file names, read as the game reads them today (the winning plugin's
 // numbering); IDs that point to no record are left out (translatePrevis gives them unused IDs). Used to

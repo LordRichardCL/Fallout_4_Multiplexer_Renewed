@@ -6,6 +6,7 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 
 ### Master Redirection (advanced, new)
 - A framework that could compile, but stays because a plugin that stays uses its records, can now compile. That plugin stays as a copy in the output, with the same name, that points at the output plugins instead. The copy loads after the outputs, and the game shows the same thing as before.
+- Plugins whose cells have previs data qualify too: their previs files are translated into the copy's numbering.
 - It is off by default (Compilation page → Advanced) and works with Mod Organizer 2 only. It covers only plugins the app can copy exactly. Every copy is checked and read back, and switching the output mod off restores the original.
 
 ### Your saves are safer across rebuilds
@@ -23,6 +24,10 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 ### You choose what compiles
 - **Plugins to compile** (Compilation page): compile everything eligible with a switch to leave some out, or **only the ones you choose**, such as just your weapon mods. A plugin left out keeps its masters in the load order too, and the list shows that straight away.
 - **Holding Back** (Plugins page) shows which plugins that stay keep the most other plugins out, and why.
+
+### Previews and asset tracing
+- Textures in BC7 and BC6H, the formats many modern textures use, now preview instead of showing details only.
+- Asset tracing follows textures named directly inside meshes, not only those named in material files.
 
 ### Easier to use
 - **Plain status words** everywhere: Will compile, Stays in load order, Kept by you, Base game, Not enabled.

@@ -343,7 +343,7 @@ A plugin that stays in the load order keeps its masters there too, even when the
   - Overrides that the outputs or a later plugin also change are left to them, as today.
   - A cell holding its references is written as the game shows it today.
 - **Only plugins the app can copy exactly:**
-  - ESP files whose records all decode completely, with no precombine or previs data.
+  - ESP files whose records all decode completely. Previs files of cells the copy holds are translated into its numbering and written loose, as for the outputs.
   - No other plugin lists them as a master.
   - Mod Organizer 2 with the output folder inside the mods folder (the copy must win over the original).
 

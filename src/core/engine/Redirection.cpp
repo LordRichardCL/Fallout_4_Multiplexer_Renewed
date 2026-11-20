@@ -2,6 +2,7 @@
 
 #include "engine/FieldModel.hpp"
 #include "engine/Normalizer.hpp"
+#include "engine/PrevisCheck.hpp"
 #include "esp/PluginFile.hpp"
 #include "util/Text.hpp"
 
@@ -17,8 +18,6 @@
 namespace fo4mx {
 
 namespace {
-
-const Signature kPrevisSubs[] = {Signature("PCMB"), Signature("VISI"), Signature("XCRI"), Signature("XPRI")};
 
 // One record the copy writes: its fields (FormKeys) and where it sits.
 struct Planned {
@@ -40,7 +39,8 @@ FormKey parentOf(const Session& session, const RecordInstance& r)
 }
 
 void build(Session& session, const CompiledOutput& out, RedirectedPlugin& rp,
-           const std::vector<std::pair<uint32_t, uint32_t>>& mine) // (group, index in the group)
+           const std::vector<std::pair<uint32_t, uint32_t>>& mine, // (group, index in the group)
+           bool translatePrevis)
 {
     const PluginIndex q = rp.plugin;
     const auto& qp = session.plugins[q];
@@ -137,12 +137,6 @@ void build(Session& session, const CompiledOutput& out, RedirectedPlugin& rp,
                 p.vc1 = w.versionControl1;
                 p.vc2 = w.versionControl2;
             }
-            for (const auto& s : joinFields(p.fields))
-                for (const auto& pv : kPrevisSubs)
-                    if (s.sig == pv)
-                        return fail(session.formLabel(k) +
-                                    ", which holds its records, has precombine or previs data today; as the copy's "
-                                    "record the game would read it in the copy's numbering");
             todo.push_back(p.parent);
             plan.emplace(k, std::move(p));
             order.push_back(k);
@@ -284,6 +278,63 @@ void build(Session& session, const CompiledOutput& out, RedirectedPlugin& rp,
         rp.placements.push_back(pl);
         rp.ownVersions += p.own;
     }
+    // Previs files: a cell whose record the copy holds wins in game, so its previs file is read in the copy's
+    // numbering from then on. Each is translated from the numbering it is read in today, as for the outputs;
+    // one that cannot be (or translation turned off while IDs would change) stops the redirection.
+    {
+        uint32_t nextUnused = 0x800;
+        for (const auto& k : order)
+            if (k.origin == q && k.objectId >= nextUnused)
+                nextUnused = k.objectId + 1;
+        const uint32_t maxObject = qp.isLight() ? 0xFFFu : 0xFFFFFFu;
+        auto express = [&](FormKey k, uint32_t& raw) {
+            bool ok = true;
+            const size_t before = rp.translated;
+            raw = translate(k, ok);
+            rp.translated = before;
+            return ok;
+        };
+        for (const auto& k : order) {
+            const auto& p = plan.at(k);
+            if (p.fields.sig != sig::CELL)
+                continue;
+            EmittedRecord cell;
+            cell.key = k;
+            cell.sig = sig::CELL;
+            cell.fields = p.fields;
+            PrevisTranslation t;
+            try {
+                t = translatePrevisInto(session, cell, rp.name + " (redirected copy)", express, self, nextUnused,
+                                        maxObject);
+            } catch (const std::exception& ex) {
+                t.hasFile = true;
+                t.ok = false;
+                t.problem = ex.what();
+            }
+            if (!t.hasFile)
+                continue;
+            if (!t.ok)
+                return fail("the previs file " + t.path + " of " + session.formLabel(k) +
+                            ", whose record the copy holds, cannot be translated into the copy's numbering: " +
+                            t.problem);
+            // Unchanged files are kept too: an output may have written its own translation of the same file,
+            // which the copy's record (loading after it) makes wrong.
+            if (t.changed && !translatePrevis)
+                return fail("the previs file " + t.path + " of " + session.formLabel(k) +
+                            " would be read in the copy's numbering, and Translate previs files is off");
+            nextUnused += static_cast<uint32_t>(t.nowhere);
+            PrevisRewrite r;
+            r.path = t.path;
+            r.bytes = std::move(t.bytes);
+            r.cell = k;
+            r.source = t.source;
+            r.numbering = t.numbering;
+            r.output = rp.name;
+            r.formIds = t.formIds;
+            r.changed = t.changed;
+            rp.previsFiles.push_back(std::move(r));
+        }
+    }
     // TIFC, a topic's response count, is the number of responses written under it.
     std::unordered_map<uint32_t, uint32_t> responses;
     for (const auto& pl : rp.placements)
@@ -337,12 +388,21 @@ void buildRedirected(Session& session, CompiledOutput& out)
     }
     for (size_t i = 0; i < out.redirected.size(); ++i) {
         auto& rp = out.redirected[i];
-        build(session, out, rp, mine[i]);
+        build(session, out, rp, mine[i], out.options.translatePrevis);
         if (!rp.failure.empty()) {
             rp.built.clear();
             rp.placements.clear();
+            rp.previsFiles.clear();
             spdlog::info("Master Redirection: {} cannot be redirected: {}", rp.name, rp.failure);
         } else {
+            // The copy loads after the outputs: where an output also holds the cell, the copy's record wins, so
+            // its translation replaces the output's.
+            for (auto& pr : rp.previsFiles) {
+                out.previsFiles.erase(std::remove_if(out.previsFiles.begin(), out.previsFiles.end(),
+                                                     [&](const PrevisRewrite& o) { return o.path == pr.path; }),
+                                      out.previsFiles.end());
+                out.previsFiles.push_back(pr);
+            }
             spdlog::info("Master Redirection: {} ({} own records, {} containers as today, {} overrides left to "
                          "others, {} FormIDs now naming outputs; replaces {})",
                          rp.name, rp.ownVersions, rp.winnerCopies, rp.dropped, rp.translated,

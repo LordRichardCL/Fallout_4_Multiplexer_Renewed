@@ -63,9 +63,34 @@ bool ownsPrevisFile(const EmittedRecord& e)
 
 PrevisTranslation translatePrevis(Session& session, const CompiledOutput& out, const EmittedRecord& e)
 {
+    if (e.output < 0)
+        return {};
+    // Unused IDs in the output's own range, for IDs that point to no record today: above every new record
+    // the output holds, one per distinct ID of this file, so the file's ID table keeps its distinct entries.
+    const auto& op = out.outputs.at(static_cast<size_t>(e.output));
+    uint32_t nextUnused = 0x800;
+    for (uint32_t ri : op.records) {
+        const auto& r = out.records[ri];
+        if (r.isNew && r.objectId >= nextUnused)
+            nextUnused = r.objectId + 1;
+    }
+    return translatePrevisInto(
+        session, e, out.outputName(e.output),
+        [&](FormKey k, uint32_t& raw) {
+            bool ok = true;
+            raw = out.translate(session, k, e.output, &ok);
+            return ok;
+        },
+        static_cast<uint32_t>(op.masterNames.size()), nextUnused, op.light ? 0xFFFu : 0xFFFFFFu);
+}
+
+PrevisTranslation translatePrevisInto(Session& session, const EmittedRecord& e, const std::string& target,
+                                      const std::function<bool(FormKey, uint32_t&)>& express, uint32_t ownIndex,
+                                      uint32_t nextUnused, uint32_t maxObject)
+{
     PrevisTranslation t;
     t.path = previsFilePath(session, e.key);
-    if (e.output < 0 || !ownsPrevisFile(e) || !assetExists(session, t.path))
+    if (!ownsPrevisFile(e) || !assetExists(session, t.path))
         return t;
     t.hasFile = true;
     t.source = assetSource(session, t.path);
@@ -84,18 +109,7 @@ PrevisTranslation translatePrevis(Session& session, const CompiledOutput& out, c
         return t;
     }
     const auto& numbering = session.plugins[winner->plugin];
-    // Unused IDs in the output's own range, for IDs that point to no record today: above every new record
-    // the output holds, one per distinct ID of this file, so the file's ID table keeps its distinct entries.
-    const auto& op = out.outputs.at(static_cast<size_t>(e.output));
-    uint32_t nextUnused = 0x800;
-    for (uint32_t ri : op.records) {
-        const auto& r = out.records[ri];
-        if (r.isNew && r.objectId >= nextUnused)
-            nextUnused = r.objectId + 1;
-    }
-    const uint32_t ownIndex = static_cast<uint32_t>(op.masterNames.size());
-    const uint32_t maxObject = op.light ? 0xFFFu : 0xFFFFFFu;
-    std::map<uint32_t, uint32_t> nowhereIds; // raw -> ID that finds nothing in the output
+    std::map<uint32_t, uint32_t> nowhereIds; // raw -> ID that finds nothing in the target
     for (uint32_t i = 0; i < file.ids.size(); ++i) {
         const uint32_t raw = file.ids[i];
         if (PrevisFile::isCombinedObject(raw))
@@ -108,8 +122,8 @@ PrevisTranslation translatePrevis(Session& session, const CompiledOutput& out, c
             if (fresh) {
                 if (nextUnused > maxObject) {
                     t.ok = false;
-                    t.problem = "its FormID " + hex8(raw) + " points to no record today, and " +
-                                out.outputName(e.output) + " has no unused ID left to give it";
+                    t.problem = "its FormID " + hex8(raw) + " points to no record today, and " + target +
+                                " has no unused ID left to give it";
                     return t;
                 }
                 it->second = makeRawFormId(ownIndex, nextUnused++);
@@ -127,14 +141,13 @@ PrevisTranslation translatePrevis(Session& session, const CompiledOutput& out, c
             }
             continue;
         }
-        bool ok = k.valid();
-        const uint32_t now = ok ? out.translate(session, k, e.output, &ok) : 0;
+        uint32_t now = 0;
+        const bool ok = k.valid() && express(k, now);
         if (!ok) {
             t.ok = false;
             t.problem = "its FormID " + hex8(raw) + " (" +
                         (k.valid() ? session.formLabel(k) + " in " + session.pluginName(k.origin) : std::string("no plugin")) +
-                        ", read in " + t.numbering + "'s numbering) cannot be expressed in " +
-                        out.outputName(e.output);
+                        ", read in " + t.numbering + "'s numbering) cannot be expressed in " + target;
             return t;
         }
         if (now != raw) {

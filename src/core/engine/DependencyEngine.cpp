@@ -100,9 +100,9 @@ std::vector<uint8_t> DependencyEngine::mastersInUse(const Session& session, cons
 
 std::string redirectionBlock(Session& session, PluginIndex plugin, std::span<const uint32_t> instances)
 {
-    // The copy rewrites every FormID the plugin stores: each must be in a described field. Precombined
-    // meshes and previs files store reference FormIDs in the plugin's numbering, which the copy changes.
-    static const Signature kPrevis[] = {Signature("PCMB"), Signature("VISI"), Signature("XCRI"), Signature("XPRI")};
+    // The copy rewrites every FormID the plugin stores: each must be in a described field. (Previs files,
+    // which store FormIDs in the numbering of the plugin whose cell record wins, are translated with the
+    // copy: Redirection.cpp.)
     Normalizer norm(session);
     try {
         for (uint32_t ri : instances) {
@@ -113,17 +113,10 @@ std::string redirectionBlock(Session& session, PluginIndex plugin, std::span<con
             for (const auto& is : nr.issues)
                 if (is.severity != Severity::Info)
                     return session.formLabel(inst.key) + " does not decode cleanly (" + is.message + ")";
-            for (const auto& s : nr.subs) {
+            for (const auto& s : nr.subs)
                 if (s.heuristic || !s.opaque.empty())
                     return session.formLabel(inst.key) + " has data the app cannot place (" + s.sig.str() +
                            "), which could hold FormIDs";
-                if (inst.signature == sig::CELL)
-                    for (const auto& pv : kPrevis)
-                        if (s.sig == pv)
-                            return session.formLabel(inst.key) +
-                                   " has precombine or previs data, which stores FormIDs in the plugin's own "
-                                   "numbering";
-            }
         }
     } catch (const std::exception& e) {
         return std::string("its records cannot be read (") + e.what() + ")";
