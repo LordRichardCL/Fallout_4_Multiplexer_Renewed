@@ -23,7 +23,10 @@
 #include <QSqlQuery>
 #include <QTableView>
 #include <QTextBrowser>
+#include <QUrl>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace gui {
 
@@ -99,6 +102,12 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
     sl->setContentsMargins(8, 0, 0, 0);
     details_ = new QTextBrowser;
     details_->setOpenExternalLinks(false);
+    details_->setOpenLinks(false);
+    // A plugin named in the details opens it.
+    connect(details_, &QTextBrowser::anchorClicked, this, [this](const QUrl& url) {
+        if (url.scheme() == "plugin")
+            focusPlugin(QUrl::fromPercentEncoding(url.path().toUtf8()));
+    });
     sl->addWidget(details_, 1);
     exclude_ = makeButton("Exclude from compilation", nullptr, "block");
     exclude_->setEnabled(false);
@@ -119,6 +128,59 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
         bool excluded = app_->excludedPlugins().contains(selectedPlugin_, Qt::CaseInsensitive);
         app_->setExcluded(selectedPlugin_, !excluded);
     });
+}
+
+QString PluginsPage::linked(const QString& escaped) const
+{
+    // Whole names only, longest first, never inside another match.
+    struct Hit {
+        int at, length;
+        QString name;
+    };
+    std::vector<Hit> hits;
+    auto boundary = [&](int i) {
+        return i < 0 || i >= escaped.size() || !(escaped[i].isLetterOrNumber() || escaped[i] == '_' || escaped[i] == '-');
+    };
+    for (const auto& n : linkNames_)
+        for (int from = 0;;) {
+            const int at = static_cast<int>(escaped.indexOf(n, from, Qt::CaseInsensitive));
+            if (at < 0)
+                break;
+            from = at + 1;
+            if (!boundary(at - 1) || !boundary(at + static_cast<int>(n.size())))
+                continue;
+            const bool overlaps = std::any_of(hits.begin(), hits.end(), [&](const Hit& h) {
+                return at < h.at + h.length && h.at < at + static_cast<int>(n.size());
+            });
+            if (!overlaps)
+                hits.push_back({at, static_cast<int>(n.size()), n});
+        }
+    std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return a.at < b.at; });
+    QString out;
+    int pos = 0;
+    for (const auto& h : hits) {
+        out += escaped.mid(pos, h.at - pos);
+        const QString shown = escaped.mid(h.at, h.length);
+        out += "<a href=\"plugin:" + QString::fromUtf8(QUrl::toPercentEncoding(h.name)) +
+               "\" style='color:#5cb8ff'>" + shown + "</a>";
+        pos = h.at + h.length;
+    }
+    return out + escaped.mid(pos);
+}
+
+void PluginsPage::focusPlugin(const QString& name)
+{
+    chips_->setCurrent("All");
+    search_->blockSignals(true);
+    search_->setText(name);
+    search_->blockSignals(false);
+    reload();
+    for (int r = 0; r < model_->rowCount(); ++r)
+        if (model_->value(r, 1).toString().compare(name, Qt::CaseInsensitive) == 0) {
+            table_->selectRow(r);
+            showDetails(r);
+            break;
+        }
 }
 
 void PluginsPage::refresh()
@@ -253,6 +315,14 @@ void PluginsPage::updateSummary()
 
 void PluginsPage::reload()
 {
+    linkNames_.clear();
+    {
+        QSqlQuery n(app_->readDb());
+        if (n.exec("SELECT name FROM Plugins"))
+            while (n.next())
+                linkNames_ << n.value(0).toString().toHtmlEscaped();
+        std::sort(linkNames_.begin(), linkNames_.end(), [](const QString& a, const QString& b) { return a.size() > b.size(); });
+    }
     QString chip = chips_->current();
     generatedMode_ = chip == "Generated";
     blockersMode_ = chip == "Blocking Types";
@@ -497,15 +567,15 @@ void PluginsPage::showDetails(int row)
                      formatCount(q.value(12).toLongLong()), formatCount(q.value(13).toLongLong()));
     html += QString("<p><b>Compiles?</b> <span style='color:%1'>%2</span><br>%3</p>")
                 .arg(ec.isValid() ? ec.name() : "#d7e4dc", elig.toHtmlEscaped(),
-                     v(15).replace("; ", "<br>"));
+                     linked(v(15)).replace("; ", "<br>"));
     if (q.value(23).toLongLong() > 0)
         html += QString("<p><b>Holds back %1:</b> they stay in the load order only as its masters (or theirs), and "
                         "would compile if it did:<br>%2</p>")
                     .arg(q.value(23).toLongLong() == 1 ? QString("1 plugin")
                                                        : formatCount(q.value(23).toLongLong()) + " plugins",
-                         v(24).replace(", ", "<br>"));
+                         linked(v(24)).replace(", ", "<br>"));
     if (!q.value(25).toString().isEmpty())
-        html += "<p><b>Kept by:</b> " + v(25) +
+        html += "<p><b>Kept by:</b> " + linked(v(25)) +
                 ", which stays in the load order and lists it as a master: compiling it would need that one first.</p>";
     if (!q.value(17).toString().isEmpty())
         html += "<p><b>Record types:</b><br><span style='font-family:monospace'>" + v(17) + "</span></p>";
@@ -520,7 +590,7 @@ void PluginsPage::showDetails(int row)
     while (m.next())
         masters << (m.value(1).toInt() ? "<span style='color:#ff5c5c'>" + m.value(0).toString().toHtmlEscaped() + " (missing)</span>"
                                         : m.value(0).toString().toHtmlEscaped());
-    html += "<p><b>Masters (" + QString::number(masters.size()) + "):</b><br>" + (masters.isEmpty() ? "none" : masters.join("<br>")) + "</p>";
+    html += "<p><b>Masters (" + QString::number(masters.size()) + "):</b><br>" + (masters.isEmpty() ? "none" : linked(masters.join("<br>"))) + "</p>";
 
     QSqlQuery d(db);
     d.prepare("SELECT p.name FROM Masters m JOIN Plugins p ON p.id = m.plugin_id WHERE m.master_plugin_id = ? "
@@ -531,7 +601,7 @@ void PluginsPage::showDetails(int row)
     while (d.next())
         dependents << d.value(0).toString().toHtmlEscaped();
     html += "<p><b>Required by (" + QString::number(dependents.size()) + "):</b><br>" +
-            (dependents.isEmpty() ? "none" : dependents.mid(0, 50).join("<br>")) + "</p>";
+            (dependents.isEmpty() ? "none" : linked(dependents.mid(0, 50).join("<br>"))) + "</p>";
 
     // Every place the plugin's file name appears, with its classification.
     QSqlQuery n(db);

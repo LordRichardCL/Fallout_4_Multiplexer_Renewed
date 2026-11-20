@@ -214,6 +214,13 @@ DependenciesPage::DependenciesPage(AppController* app, QWidget* parent) : Page(a
     });
 }
 
+void DependenciesPage::focusRecord(const QString& text)
+{
+    tabs_->setCurrentIndex(1);
+    recordSearch_->setText(text);
+    buildRecordGraph(text);
+}
+
 void DependenciesPage::refresh()
 {
     buildPluginGraph();

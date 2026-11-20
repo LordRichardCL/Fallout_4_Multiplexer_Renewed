@@ -19,6 +19,8 @@ class ConflictsPage : public Page {
 public:
     explicit ConflictsPage(AppController* app, QWidget* parent = nullptr);
     void refresh() override;
+    // Lists the conflicts matching `text` (an Editor ID) and selects the first.
+    void focusRecord(const QString& text);
 
 private:
     void reload();

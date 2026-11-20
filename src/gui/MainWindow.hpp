@@ -39,6 +39,9 @@ private:
     QMap<QString, int> pageIndex_; // page name -> stack index
     QMap<QString, int> navRow_;    // page name -> navigation row (group headers have rows too)
     QList<Page*> pages_;
+    std::vector<std::pair<QString, QString>> pageLabels_; // (label, page name), for quick search
+    // Ctrl+K: jump to a page, plugin or record.
+    void quickSearch();
     QProgressBar* progress_;
     QLabel* stageLabel_;
     QPushButton* cancel_;

@@ -29,6 +29,7 @@
 #include <QPainter>
 #include <QShortcut>
 #include "widgets/Glossary.hpp"
+#include "widgets/QuickSearch.hpp"
 #include <QSqlQuery>
 #include <QStyledItemDelegate>
 #include <QStackedWidget>
@@ -147,6 +148,16 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
     nav_->setMouseTracking(true);
     nav_->viewport()->setAttribute(Qt::WA_Hover);
     nl->addWidget(nav_, 1);
+    auto* goTo = new QPushButton("Go to…  (Ctrl+K)");
+    goTo->setObjectName("LinkButton");
+    goTo->setCursor(Qt::PointingHandCursor);
+    goTo->setIcon(lineIcon("scan", theme::kMuted, 14));
+    goTo->setToolTip("Jump to any page, plugin or record by typing part of its name");
+    goTo->setStyleSheet("margin-left: 12px;");
+    connect(goTo, &QPushButton::clicked, this, [this] { quickSearch(); });
+    nl->addWidget(goTo, 0, Qt::AlignLeft);
+    auto* ctrlK = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_K), this);
+    connect(ctrlK, &QShortcut::activated, this, [this] { quickSearch(); });
     auto* glossary = new QPushButton("Glossary  (F1)");
     glossary->setObjectName("LinkButton");
     glossary->setStyleSheet("margin-left: 12px; margin-bottom: 4px;");
@@ -289,6 +300,28 @@ void MainWindow::addPage(const QString& name, const QString& label, const QStrin
     item->setToolTip(name);
     nav_->addItem(item);
     navRow_[name] = nav_->count() - 1;
+    pageLabels_.emplace_back(label, name);
+}
+
+void MainWindow::quickSearch()
+{
+    showQuickSearch(this, app_, pageLabels_, [this](const QuickSearchTarget& t) {
+        if (t.kind == "page") {
+            showPage(t.value);
+        } else if (t.kind == "plugin") {
+            showPage("Plugins");
+            if (auto* p = findChild<PluginsPage*>())
+                p->focusPlugin(t.value);
+        } else if (t.kind == "conflict") {
+            showPage("Conflicts");
+            if (auto* p = findChild<ConflictsPage*>())
+                p->focusRecord(t.value);
+        } else if (t.kind == "record") {
+            showPage("Dependencies");
+            if (auto* p = findChild<DependenciesPage*>())
+                p->focusRecord(t.value);
+        }
+    });
 }
 
 void MainWindow::showPage(const QString& name)

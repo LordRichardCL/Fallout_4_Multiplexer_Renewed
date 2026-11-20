@@ -222,6 +222,15 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     connect(resolution_, &QComboBox::activated, this, [this] { applyResolution(); });
 }
 
+void ConflictsPage::focusRecord(const QString& text)
+{
+    clearFilters();
+    search_->setText(text);
+    reload();
+    if (model_->rowCount() > 0)
+        table_->selectRow(0);
+}
+
 void ConflictsPage::refresh()
 {
     QString current = signature_->currentText();

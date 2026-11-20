@@ -13,6 +13,7 @@ add_library(fo4mx_gui STATIC
     widgets/Widgets.cpp
     widgets/PluginSelection.cpp
     widgets/Glossary.cpp
+    widgets/QuickSearch.cpp
     models/SqlModel.cpp
     models/GroupedSqlModel.cpp
     pages/Page.hpp

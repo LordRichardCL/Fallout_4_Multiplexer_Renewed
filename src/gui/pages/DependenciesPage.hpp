@@ -22,6 +22,8 @@ class DependenciesPage : public Page {
 public:
     explicit DependenciesPage(AppController* app, QWidget* parent = nullptr);
     void refresh() override;
+    // Opens the record graph for `text` (an Editor ID).
+    void focusRecord(const QString& text);
 
 private:
     void buildPluginGraph();
