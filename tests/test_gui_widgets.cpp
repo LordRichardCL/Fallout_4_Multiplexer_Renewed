@@ -1,0 +1,324 @@
+// GUI: the reading aids added to the pages (sortable tables, the column chooser, plain status words, quick
+// search, the glossary, plugin selection and the summary card after a task). Drives the real widgets
+// offscreen against a small results database in a temporary folder; nothing of the user's is touched.
+
+#include "AppController.hpp"
+#include "Format.hpp"
+#include "MainWindow.hpp"
+#include "db/Database.hpp"
+#include "db/Schema.hpp"
+#include "models/SqlModel.hpp"
+#include "pages/CompilationPage.hpp"
+#include "pages/PluginsPage.hpp"
+#include "widgets/Glossary.hpp"
+#include "widgets/PluginSelection.hpp"
+#include "widgets/QuickSearch.hpp"
+#include "widgets/Widgets.hpp"
+
+#include <QApplication>
+#include <QCoreApplication>
+#include <QDialog>
+#include <QHeaderView>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QMenu>
+#include <QPushButton>
+#include <QSettings>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QStackedWidget>
+#include <QTableView>
+#include <QTableWidget>
+#include <QTemporaryDir>
+#include <QTest>
+#include <QTextBrowser>
+#include <QTimer>
+
+#include <functional>
+#include <memory>
+
+namespace {
+
+// Runs `step` on the next modal dialog or popup menu once it is open (the code under test blocks in exec()).
+// A second timer closes anything left open, so a failed step cannot hang the test.
+void whenOpen(const std::function<void(QWidget*)>& step)
+{
+    QTimer::singleShot(0, [step] {
+        QWidget* w = QApplication::activePopupWidget();
+        if (!w)
+            w = QApplication::activeModalWidget();
+        if (w)
+            step(w);
+    });
+    QTimer::singleShot(5000, [] {
+        if (auto* p = QApplication::activePopupWidget())
+            p->close();
+        if (auto* d = qobject_cast<QDialog*>(QApplication::activeModalWidget()))
+            d->reject();
+    });
+}
+
+template <class T>
+T* childWithText(QWidget* parent, const QString& text)
+{
+    for (auto* w : parent->findChildren<T*>())
+        if (w->text() == text)
+            return w;
+    return nullptr;
+}
+
+} // namespace
+
+class GuiWidgetsTest : public QObject {
+    Q_OBJECT
+
+    QTemporaryDir dir_;
+    std::unique_ptr<gui::AppController> app_;
+    std::unique_ptr<gui::MainWindow> window_;
+
+    QString dbPath() const { return dir_.filePath("results.sqlite"); }
+
+    // Four plugins: two compile, one stays (it holds back a master), one is switched off by the user.
+    void writeResults()
+    {
+        QFile::remove(dbPath());
+        fo4mx::db::Database db(gui::toPath(dbPath()));
+        db.exec(fo4mx::db::kSchema);
+        db.exec("INSERT INTO Plugins (id, name, type, load_order, active, base_game, creation_club, record_count, "
+                "eligibility, eligibility_reason, record_types) VALUES "
+                "(1, 'Fallout4.esm', 'ESM', 0, 1, 1, 0, 900, 'Blocked', 'Base game', 'WEAP'),"
+                "(2, 'Weapons.esp', 'ESP', 1, 1, 0, 0, 30, 'Eligible', '', 'WEAP,KYWD'),"
+                "(3, 'Armour.esp', 'ESP', 2, 1, 0, 0, 20, 'Eligible', '', 'ARMO'),"
+                "(4, 'Quest.esp', 'ESP', 3, 1, 0, 0, 50, 'Blocked', 'Uses scripts that name plugins', 'QUST'),"
+                "(5, 'Mine.esp', 'ESP', 4, 1, 0, 0, 10, 'Blocked', 'Excluded by user', 'MISC'),"
+                "(6, 'Off.esp', 'ESP', -1, 0, 0, 0, 5, 'Inactive', '', 'MISC')");
+    }
+    void start()
+    {
+        window_.reset();
+        app_ = std::make_unique<gui::AppController>();
+        window_ = std::make_unique<gui::MainWindow>(app_.get());
+    }
+    QWidget* currentPage() { return window_->findChild<QStackedWidget*>()->currentWidget(); }
+
+private slots:
+    void initTestCase()
+    {
+        QVERIFY(dir_.isValid());
+        QCoreApplication::setOrganizationName("fo4mx-gui-tests");
+        QCoreApplication::setApplicationName("widgets");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir_.path());
+        QSettings().clear();
+        QSettings().setValue("advanced/database", dbPath());
+        writeResults();
+    }
+
+    void init() { start(); }
+
+    void cleanup()
+    {
+        window_.reset();
+        app_.reset();
+    }
+
+    // The status words the tables show (an SQL expression) and the ones the detail panes show (C++) agree.
+    void plain_status_words_match_their_sql()
+    {
+        QSqlDatabase db = app_->readDb();
+        QVERIFY(db.isOpen());
+        QSqlQuery q(db);
+        QVERIFY(q.exec("SELECT name, eligibility, eligibility_reason, base_game, " + gui::plainStatusSql() +
+                       " FROM Plugins ORDER BY id"));
+        QStringList words;
+        while (q.next()) {
+            QCOMPARE(q.value(4).toString(),
+                     gui::plainStatus(q.value(1).toString(), q.value(2).toString(), q.value(3).toBool()));
+            words << q.value(4).toString();
+        }
+        QCOMPARE(words, (QStringList{"Base game", "Will compile", "Will compile", "Stays in load order", "Kept by you",
+                                     "Not enabled"}));
+        QCOMPARE(gui::plainStatus("Blocked", "Not chosen for compilation (only chosen plugins)", false),
+                 QString("Kept by you"));
+    }
+
+    // Clicking a header sorts by running the query again; LIKE patterns (% signs) and bindings survive it, and
+    // column -1 goes back to the query's own order.
+    void sorting_runs_the_query_again()
+    {
+        gui::SqlModel model;
+        QVERIFY(model.load(app_->readDb(),
+                           "SELECT name, record_count FROM Plugins WHERE name LIKE '%o%' AND active = ? ORDER BY id",
+                           {1}));
+        auto names = [&] {
+            QStringList out;
+            for (int r = 0; r < model.rowCount(); ++r)
+                out << model.value(r, 0).toString();
+            return out;
+        };
+        QCOMPARE(names(), (QStringList{"Fallout4.esm", "Weapons.esp", "Armour.esp"}));
+        model.sort(1, Qt::DescendingOrder);
+        QCOMPARE(names(), (QStringList{"Fallout4.esm", "Weapons.esp", "Armour.esp"}));
+        model.sort(1, Qt::AscendingOrder);
+        QCOMPARE(names(), (QStringList{"Armour.esp", "Weapons.esp", "Fallout4.esm"}));
+        QCOMPARE(model.value(0, 1).toInt(), 20); // rows keep their columns
+        model.sort(0, Qt::AscendingOrder);
+        QCOMPARE(names(), (QStringList{"Armour.esp", "Fallout4.esm", "Weapons.esp"}));
+        model.sort(-1);
+        QCOMPARE(names(), (QStringList{"Fallout4.esm", "Weapons.esp", "Armour.esp"}));
+    }
+
+    // The header's right-click menu lists the columns except the key ones, shows each hidden or not, and
+    // switching one on shows it and reports the change.
+    void column_chooser_shows_and_hides_columns()
+    {
+        gui::SqlModel model;
+        QVERIFY(model.load(app_->readDb(), "SELECT id, name, record_count FROM Plugins"));
+        QTableView view;
+        view.setModel(&model);
+        QList<std::pair<int, bool>> changes;
+        gui::enableColumnChooser(&view, {2}, {0}, [&](int c, bool hidden) { changes.push_back({c, hidden}); });
+        QVERIFY(view.isColumnHidden(2));
+        QVERIFY(!view.isColumnHidden(1));
+        QStringList offered;
+        bool nameShown = false, countShown = true;
+        whenOpen([&](QWidget* w) {
+            auto* menu = qobject_cast<QMenu*>(w);
+            if (!menu)
+                return;
+            for (auto* a : menu->actions()) {
+                offered << a->text();
+                if (a->text() == "name")
+                    nameShown = a->isChecked();
+                if (a->text() == "record_count") {
+                    countShown = a->isChecked();
+                    a->setChecked(true);
+                }
+            }
+            menu->close();
+        });
+        emit view.horizontalHeader()->customContextMenuRequested(QPoint(2, 2));
+        QCOMPARE(offered, (QStringList{"name", "record_count"}));
+        QVERIFY(nameShown);
+        QVERIFY(!countShown);
+        QVERIFY(!view.isColumnHidden(2));
+        QCOMPARE(changes.size(), 1);
+        QCOMPARE(changes[0].first, 2);
+        QVERIFY(!changes[0].second);
+    }
+
+    // Quick search: Enter opens the first result for the text typed, even when typed faster than the results
+    // refresh; plugins are found by part of their name.
+    void quick_search_opens_what_was_typed()
+    {
+        const std::vector<std::pair<QString, QString>> pages = {{"Dashboard", "Dashboard"}, {"Settings", "Settings"}};
+        auto run = [&](const QString& text) {
+            gui::QuickSearchTarget picked;
+            whenOpen([&](QWidget* w) {
+                auto* field = w->findChild<QLineEdit*>();
+                if (!field)
+                    return;
+                QTest::keyClicks(field, text);
+                QTest::keyClick(field, Qt::Key_Return);
+            });
+            gui::showQuickSearch(window_.get(), app_.get(), pages, [&](const gui::QuickSearchTarget& t) { picked = t; });
+            return std::pair{picked.kind, picked.value};
+        };
+        QCOMPARE(run("sett"), (std::pair<QString, QString>{"page", "Settings"}));
+        QCOMPARE(run("weap"), (std::pair<QString, QString>{"plugin", "Weapons.esp"}));
+    }
+
+    // A plugin picked in quick search (or a plugin name clicked in a reason) is shown and selected on the
+    // Plugins page.
+    void focusing_a_plugin_selects_it()
+    {
+        auto* page = window_->findChild<gui::PluginsPage*>();
+        QVERIFY(page);
+        window_->showPage("Plugins");
+        page->focusPlugin("armour.esp");
+        bool found = false;
+        for (auto* view : page->findChildren<QTableView*>()) {
+            auto* model = qobject_cast<gui::SqlModel*>(view->model());
+            if (!model || !view->selectionModel()->hasSelection())
+                continue;
+            const int row = view->selectionModel()->selectedRows().value(0).row();
+            found = model->value(row, 1).toString() == "Armour.esp";
+        }
+        QVERIFY(found);
+    }
+
+    // The glossary's filter narrows the terms, and says so when none matches.
+    void glossary_filter_narrows_the_terms()
+    {
+        QString light, none;
+        whenOpen([&](QWidget* w) {
+            auto* filter = w->findChild<QLineEdit*>();
+            auto* text = w->findChild<QTextBrowser*>();
+            if (!filter || !text)
+                return;
+            filter->setText("light plugin");
+            light = text->toPlainText();
+            filter->setText("zzzz");
+            none = text->toPlainText();
+            static_cast<QDialog*>(w)->reject();
+        });
+        gui::showGlossary(window_.get());
+        QVERIFY(light.contains("Light plugin (ESL flag)"));
+        QVERIFY(!light.contains("Winner"));
+        QVERIFY(none.contains("No term matches"));
+    }
+
+    // Plugins to compile: the list holds the plugins that could be compiled (not the base game or inactive
+    // ones), and switching one off excludes it.
+    void plugin_selection_lists_and_switches_plugins()
+    {
+        auto* sel = window_->findChild<gui::PluginSelection*>();
+        QVERIFY(sel);
+        sel->refresh();
+        auto* table = sel->findChild<QTableWidget*>();
+        QVERIFY(table);
+        QStringList names;
+        int weapons = -1;
+        for (int r = 0; r < table->rowCount(); ++r) {
+            names << table->item(r, 1)->text();
+            if (names.back() == "Weapons.esp")
+                weapons = r;
+        }
+        QCOMPARE(names, (QStringList{"Weapons.esp", "Armour.esp", "Quest.esp", "Mine.esp"}));
+        QCOMPARE(table->item(weapons, 0)->checkState(), Qt::Checked);
+        QCOMPARE(table->item(3, 2)->text(), QString("Switched off"));
+        table->item(weapons, 0)->setCheckState(Qt::Unchecked);
+        QVERIFY(app_->excludedPlugins().contains("Weapons.esp"));
+        app_->setExcluded("Weapons.esp", false);
+        QVERIFY(!app_->excludedPlugins().contains("Weapons.esp"));
+    }
+
+    // After Analyse, a card says what will compile in plain words and its buttons open the pages.
+    void summary_card_after_analysis()
+    {
+        emit app_->taskFinished("Analyse", true, "done");
+        QFrame* toast = nullptr;
+        for (auto* f : window_->findChildren<QFrame*>())
+            if (f->objectName() == "Toast")
+                toast = f;
+        QVERIFY(toast);
+        QVERIFY(!toast->isHidden());
+        bool said = false;
+        for (auto* l : toast->findChildren<QLabel*>())
+            said = said || l->text().startsWith("2 of 5 plugins will compile; 3 stay in the load order.");
+        QVERIFY(said);
+        QVERIFY(childWithText<QPushButton>(toast, "Compile"));
+        auto* plugins = childWithText<QPushButton>(toast, "Plugins");
+        QVERIFY(plugins);
+        QTest::mouseClick(plugins, Qt::LeftButton);
+        QVERIFY(qobject_cast<gui::PluginsPage*>(currentPage()));
+        QVERIFY(toast->isHidden());
+        // A failed task shows no card.
+        emit app_->taskFinished("Scan", false, "Cancelled");
+        QVERIFY(toast->isHidden());
+    }
+};
+
+QTEST_MAIN(GuiWidgetsTest)
+#include "test_gui_widgets.moc"

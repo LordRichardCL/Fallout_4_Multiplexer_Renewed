@@ -98,9 +98,11 @@ void showQuickSearch(QWidget* parent, AppController* app, const std::vector<std:
     };
     QObject::connect(list, &QListWidget::itemActivated, &dlg, choose);
     QObject::connect(field, &QLineEdit::returnPressed, &dlg, [&] {
-        debounce.stop();
-        if (list->count() == 0)
+        // Typed faster than the debounce: the list still shows the previous text's results.
+        if (debounce.isActive() || list->count() == 0) {
+            debounce.stop();
             fill();
+        }
         choose(list->currentItem());
     });
     // Up and down in the field move through the results.
