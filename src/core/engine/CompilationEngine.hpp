@@ -76,6 +76,9 @@ struct CompileOptions {
     bool archiveLoaders = false;
     // Placeholders for unused masters (opt-in; needs archive loaders): see AnalysisOptions::masterPlaceholders.
     bool unusedMasterPlaceholders = false;
+    // Plugins an earlier build compiled (now switched off) that the user allows back into the load order
+    // when this build cannot compile them. Any other such plugin stops the compilation (Pipeline).
+    std::vector<std::string> allowReturn;
     // Advanced Users Auto-Merger (opt-in): compile plugins whose names appear in scripts or configs
     // when every such file can be relinked, and write relinked copies into the output (AutoMerger).
     bool autoMerge = false;

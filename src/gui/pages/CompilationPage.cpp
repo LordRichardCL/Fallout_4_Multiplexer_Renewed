@@ -648,6 +648,8 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         if (task != "Check")
             stages_->finish(ok);
         updateButtons();
+        if (!ok && (task == "Compile" || task == "Rebuild"))
+            reviewReturning();
     });
     connect(app_, &AppController::busyChanged, this, [this] { updateButtons(); });
     connect(app_, &AppController::settingsChanged, this, [this] { loadOptions(); });
@@ -1024,6 +1026,71 @@ void CompilationPage::refresh()
     }
     fillResults();
     updateButtons();
+}
+
+void CompilationPage::reviewReturning()
+{
+    QSqlDatabase db = app_->readDb();
+    if (!db.isOpen())
+        return;
+    QSqlQuery q(db);
+    q.exec("SELECT plugin, message FROM ValidationResults WHERE category = 'Returning Plugins' AND severity = 'Error' "
+           "ORDER BY plugin");
+    std::vector<std::pair<QString, QString>> rows;
+    while (q.next())
+        rows.push_back({q.value(0).toString(), q.value(1).toString()});
+    if (rows.empty())
+        return;
+    QDialog dlg(this);
+    dlg.setWindowTitle("Plugins would return to the load order");
+    dlg.resize(760, 480);
+    auto* l = new QVBoxLayout(&dlg);
+    auto* intro = new QLabel(
+        "<b>These plugins were compiled by your last build and are switched off.</b> This build cannot compile them, "
+        "so they would return to the load order. Saves made with the last build hold their records under the "
+        "outputs' FormIDs; with them back, those saves lose what they used of them. Tick the ones that may return, "
+        "or leave them and remove or switch off what keeps them out (often a new or updated plugin that needs them "
+        "as a master), then compile again.");
+    intro->setWordWrap(true);
+    l->addWidget(intro);
+    auto* scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    auto* body = new QWidget;
+    auto* bl = new QVBoxLayout(body);
+    std::vector<std::pair<QCheckBox*, QString>> boxes;
+    for (const auto& [plugin, message] : rows) {
+        auto* box = new QCheckBox(plugin);
+        auto* why = new QLabel(message.toHtmlEscaped());
+        why->setObjectName("OptionDescription");
+        why->setWordWrap(true);
+        bl->addWidget(box);
+        bl->addWidget(why);
+        boxes.push_back({box, plugin});
+    }
+    bl->addStretch(1);
+    scroll->setWidget(body);
+    l->addWidget(scroll, 1);
+    auto* buttons = new QDialogButtonBox;
+    auto* allow = buttons->addButton("Allow ticked and compile again", QDialogButtonBox::AcceptRole);
+    buttons->addButton("Not now", QDialogButtonBox::RejectRole);
+    allow->setEnabled(false);
+    for (auto& [box, name] : boxes)
+        connect(box, &QCheckBox::toggled, allow, [allow, &boxes] {
+            allow->setEnabled(std::any_of(boxes.begin(), boxes.end(), [](const auto& b) { return b.first->isChecked(); }));
+        });
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    l->addWidget(buttons);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    auto& c = app_->config().compile;
+    for (const auto& [box, name] : boxes)
+        if (box->isChecked())
+            c.allowReturn.push_back(name.toStdString());
+    if (app_->pipeline() && !app_->busy())
+        app_->pipeline()->config().compile.allowReturn = c.allowReturn;
+    app_->settingsEdited();
+    app_->runCompile();
 }
 
 void CompilationPage::fillResults()

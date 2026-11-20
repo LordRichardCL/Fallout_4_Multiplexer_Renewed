@@ -1255,3 +1255,11 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 **Shown:** Plugins page, chip **Holding Back** (column "Would Also Compile") and the plugin details; Dependency Report (HTML, TXT) "What plugins that stay hold back"; JSON `holdsBack`, `sharedHold`, `heldBy` per plugin; database columns `holds_back`, `holds_back_names`, `held_by`.
 
 **Test:** `plugins_that_stay_report_what_they_hold_back` (a chain of two masters, a shared master, a root kept by another root).
+
+## Compiled plugins never return to the load order unasked (20 Nov 2026)
+
+**Risk.** A plugin the last build compiled is switched off, and saves made since hold its records under the outputs' FormIDs. When the next build could not compile it (a new or updated plugin that stays lists it as a master, the mod gained an unsupported record type, a check kept it out), it silently returned to the load order: the outputs no longer held its records, so those saves lost what they used of it.
+
+**Rule.** After the last compile round, every plugin that is switched off because the last build compiled it (`reactivated`) and is not compiled now stops the compilation with a **Returning Plugins** error, naming it and its reasons (for a pinned master: the plugin that needs it). Not stopped: plugins the user excluded, patch-only builds, and plugins in `CompileOptions::allowReturn` (Warning instead). The GUI asks which may return when a compile stops for this (saved with the settings); the CLI takes `--allow-return PLUGIN`.
+
+**Test:** `compiled_plugins_do_not_return_to_the_load_order_unasked` (stops, names the new plugin that needs it; compiles once allowed). The existing earlier-build tests (rebuild after switching over, a plugin the user excludes) still pass.

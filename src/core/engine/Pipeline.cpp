@@ -981,6 +981,34 @@ bool Pipeline::compile(ProgressSink& progress)
                                   " assets come from archives of compiled plugins; they keep loading from their "
                                   "original archives through Multiplexer_Archives.ini");
     }
+    // Plugins the last build compiled (switched off since, so saves may hold their records under the
+    // outputs' FormIDs) that this build would return to the load order, without the user asking for it:
+    // stop and ask instead of doing it silently.
+    {
+        std::unordered_set<std::string> allowed;
+        for (const auto& n : config_.compile.allowReturn)
+            allowed.insert(toLower(n));
+        for (const auto& p : session_->plugins) {
+            if (config_.compile.patchOnly || !p.reactivated || compiled_->isCompiled(p.index) ||
+                session_->userRetained.count(p.key))
+                continue;
+            if (allowed.count(p.key)) {
+                validation_->fail(Severity::Warning, "Returning Plugins",
+                                  p.name + " returns to the load order (you allowed it): " + join(p.reasons, "; "),
+                                  p.name);
+                continue;
+            }
+            validation_->fail(
+                Severity::Error, "Returning Plugins",
+                p.name + " was compiled by the last build and is switched off, but this build would return it to the "
+                         "load order: " + (p.reasons.empty() ? std::string("not compiled") : join(p.reasons, "; ")) +
+                    ". Saves made with the last build hold its records under the outputs' FormIDs; with it back, the "
+                    "outputs no longer have them, so those saves lose what they used of it. Allow it back (Compilation "
+                    "page, or --allow-return), exclude it yourself (Plugins page), or remove or switch off what keeps "
+                    "it out (when a new or updated plugin needs it as a master), then compile again.",
+                p.name);
+        }
+    }
     exported_.reset();
     if (db_) {
         db::DatabaseWriter w(*db_);

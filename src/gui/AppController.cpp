@@ -258,6 +258,9 @@ void AppController::loadSettings()
     c.buildPatch = s.value("compile/patch", false).toBool();
     c.patchOnly = s.value("compile/patchOnly", false).toBool();
     c.autoMerge = s.value("compile/autoMerge", false).toBool();
+    c.allowReturn.clear();
+    for (const auto& n : s.value("compile/allowReturn").toStringList())
+        c.allowReturn.push_back(ss(n));
     c.rewriteHeuristicReferences = false; // removed: never rewrite values because they look like FormIDs
     c.rules.clear();
     for (const auto& r : s.value("compile/rules").toStringList()) {
@@ -339,6 +342,12 @@ void AppController::saveSettings()
     s.setValue("compile/patch", c.buildPatch);
     s.setValue("compile/patchOnly", c.patchOnly);
     s.setValue("compile/autoMerge", c.autoMerge);
+    {
+        QStringList allow;
+        for (const auto& n : c.allowReturn)
+            allow << QString::fromStdString(n);
+        s.setValue("compile/allowReturn", allow);
+    }
     QStringList rules;
     for (const auto& r : c.rules)
         rules << qs(r.pattern) + "=" + QString::number(r.output);

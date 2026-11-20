@@ -45,6 +45,8 @@ private:
     void updatePresetState();
     void updateSummaries();
     void fillResults();
+    // After a compile stopped because plugins the last build compiled would return: ask which may.
+    void reviewReturning();
 
     QSpinBox* outputs_;
     QCheckBox* autoOutputs_ = nullptr;

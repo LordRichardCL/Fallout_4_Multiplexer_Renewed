@@ -112,6 +112,8 @@ Compile options:
   --master-placeholders  compile masters that plugins staying in the load order list but use none
                        of the records of, keeping their names with empty placeholder plugins
                        (Mod Organizer 2 output inside the mods folder only)
+  --allow-return PLUGIN  a plugin the last build compiled may return to the load order when this
+                       build cannot compile it (repeatable); otherwise compiling stops and names it
   --patch              also write Multiplexer_Patch.esp, merging conflicts between
                        plugins that stay in the load order (like a Bashed Patch)
   --patch-only         write only the patch; compile no plugins
@@ -263,6 +265,7 @@ PipelineConfig makeConfig(const Args& a)
     c.applyPatchPlan = a.has("--apply-patch-plan");
     c.brokenReferencesAsNull = a.has("--broken-references-as-null");
     c.unusedMasterPlaceholders = a.has("--master-placeholders");
+    c.allowReturn = a.all("--allow-return");
     c.patchOnly = a.has("--patch-only");
     c.autoMerge = a.has("--auto-merge");
     c.buildPatch = c.patchOnly || a.has("--patch");

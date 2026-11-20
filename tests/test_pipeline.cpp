@@ -1544,6 +1544,55 @@ TEST(earlier_builds_switched_off_plugins_stay_sources_without_the_database)
     }
 }
 
+// Pin-back protection: after switching over, a new plugin that stays (excluded) needs a compiled plugin as a
+// master. The build would return that plugin to the load order, which costs saves made with the last
+// build its records: compiling stops and names it, until the user allows it back.
+TEST(compiled_plugins_do_not_return_to_the_load_order_unasked)
+{
+    namespace fs = std::filesystem;
+    auto root = buildInstall("pinback");
+    auto cfg = configFor(root);
+    cfg.exportOptions.outputDirectory = root / "Game" / "Data";
+    std::string kept;
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        CHECK(!p.compiledOutput()->compiledPlugins.empty());
+        kept = p.session().plugins[p.compiledOutput()->compiledPlugins.front()].name;
+        auto result = p.exportOutputs();
+        fs::copy_file(result.pluginsTxt, root / "plugins.txt", fs::copy_options::overwrite_existing);
+    }
+    writePlugin(root / "Game" / "Data" / "NewPatch.esp", {"Fallout4.esm", kept},
+                {record("KYWD", 0x02000800, {zs("EDID", "NewPatchKeyword")})});
+    {
+        std::ifstream in(root / "plugins.txt");
+        std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        writeFile(root / "plugins.txt", txt + "*NewPatch.esp\n");
+    }
+    auto c = cfg;
+    c.analysis.excludedPlugins = {"NewPatch.esp"};
+    for (bool allow : {false, true}) {
+        if (allow)
+            c.compile.allowReturn = {kept};
+        Pipeline p(c);
+        p.scan();
+        CHECK(p.session().findPlugin(kept)->reactivated);
+        p.analyse();
+        CHECK_EQ(p.compile(), allow);
+        bool named = false;
+        for (const auto& is : p.validation()->issues)
+            if (is.category == "Returning Plugins" && is.plugin == kept) {
+                named = true;
+                CHECK(is.severity == (allow ? Severity::Warning : Severity::Error));
+                CHECK(is.message.find("NewPatch.esp") != std::string::npos); // why: it needs it as a master
+            }
+        CHECK(named);
+        CHECK(!p.compiledOutput()->isCompiled(p.session().findPlugin(kept)->index));
+    }
+}
+
 TEST(plugins_an_earlier_build_compiled_and_this_one_keeps_must_be_enabled)
 {
     namespace fs = std::filesystem;

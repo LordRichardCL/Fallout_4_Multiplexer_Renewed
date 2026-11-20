@@ -410,6 +410,8 @@ The plugins it compiled that are switched off are read as sources, and the Valid
 
 A plugin an earlier build compiled that this build keeps in the load order must be switched on again: **Apply to Game** does it, `Multiplexer_DisablePlugins.txt` lists it under "Enable these", and the switch-over check warns while it is still off.
 
+**Compiled plugins never return unasked.** Saves made with a build hold a compiled plugin's records under the outputs' FormIDs. If the next build cannot compile that plugin (most often because a new or updated plugin that stays in the load order needs it as a master, or the mod was updated with record types not supported yet), it would return to the load order, and those saves would lose what they used of it. So compiling stops with a **Returning Plugins** error that names each such plugin and why. The Compilation page then asks which may return: tick them and compile again (they are kept in the settings; save them with Save Settings). On the command line: `--allow-return <plugin>` (repeatable). Or remove or switch off what keeps it out and compile again. A plugin you exclude yourself (Plugins page) is your choice and is not stopped; neither is a patch-only build.
+
 ## Starting fresh
 
 **Settings → Reset to Fresh State…** removes everything the app has stored: settings and folders, exclusions, conflict resolutions, the results database, the build cache and the logs. The Setup screen then opens as on a first start. Your mods, your load order and the generated plugins in the output folder are not touched.
