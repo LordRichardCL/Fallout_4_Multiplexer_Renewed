@@ -339,7 +339,7 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
                 p.eligibility = Eligibility::Ineligible;
                 block.otherReason = true; // the setting, not missing support
                 p.reasons.push_back("Adds new quests, dialogue or NPCs: " + join(what, ", ") +
-                                    ". Compiling them is off (Compilation page, Advanced: Compile new quests, dialogue "
+                                    ". Compiling them is off (Compilation page, Compile more plugins: New quests, dialogue "
                                     "and NPCs)");
             }
         if (!newOfOverrideTypes.empty()) {

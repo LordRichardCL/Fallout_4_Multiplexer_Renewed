@@ -111,8 +111,7 @@ PluginSelection::PluginSelection(AppController* app, QWidget* parent) : QFrame(p
     table_->horizontalHeader()->setStretchLastSection(true);
     table_->setColumnWidth(1, 170);
     table_->setColumnWidth(2, 170);
-    table_->setMinimumHeight(300);
-    l->addWidget(table_, 1);
+    l->addWidget(table_);
     empty_ = new QLabel("Run Scan and Analyse to list the plugins.");
     empty_->setObjectName("OptionDescription");
     l->addWidget(empty_);
@@ -243,6 +242,13 @@ void PluginSelection::fillTable()
         table_->setItem(row, 4, t);
     }
     filling_ = false;
+    // As tall as its rows (3 to 12; it scrolls beyond), so the options below stay in reach.
+    {
+        const int shown = std::clamp(table_->rowCount(), 3, 12);
+        const int rowHeight = table_->verticalHeader()->defaultSectionSize();
+        table_->setFixedHeight(table_->horizontalHeader()->sizeHint().height() + shown * rowHeight +
+                               2 * table_->frameWidth() + 2);
+    }
     const bool have = !rows_.empty();
     table_->setVisible(have);
     empty_->setVisible(!have);

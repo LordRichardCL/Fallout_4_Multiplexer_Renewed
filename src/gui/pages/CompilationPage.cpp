@@ -66,11 +66,12 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     presets_ = new SegmentedControl({"Recommended", "Safest", "Custom"});
     presets_->button("Recommended")
         ->setToolTip("Combine compatible changes, apply your patch choices, merge cell settings, translate previs files "
-                     "and build Multiplexer_Patch.esp. Light outputs and writing broken references as null stay off.");
+                     "and build Multiplexer_Patch.esp. Light outputs, writing broken references as null, placeholders and Master "
+                     "Redirection stay off.");
     presets_->button("Safest")
         ->setToolTip("Combine compatible changes only: no patch choices, no cell merge, no previs translation, no "
                      "patch, no light outputs, broken references never written as null, and plugins that add new quests, "
-                     "dialogue or NPCs kept in the load order.");
+                     "dialogue or NPCs kept in the load order; no placeholders, no Master Redirection.");
     presets_->button("Custom")->setToolTip("Your own choice of switches below.");
     l->addWidget(makePageHeader("Compilation", "Turns your mods into a few output plugins, with the same game data.",
                                 {presets_}));
@@ -132,8 +133,9 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "compiled plugins that have archives are replaced by archive loaders instead of loose copies and INI entries.");
     selection_ = new PluginSelection(app_);
     ol->addWidget(selection_);
+    QVBoxLayout* outputBody = nullptr; // light outputs are added below, once their switches exist
     {
-        QVBoxLayout* body = nullptr;
+        QVBoxLayout*& body = outputBody;
         ol->addWidget(makeSectionCard("compile", "Output", &body));
         body->addWidget(makeOptionRow("Number of output plugins", "How many plugins your mods are compiled into",
                                       outputsHelp, {outputs_, autoOutputs_, autoLabel}));
@@ -221,6 +223,17 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     planPending_->setObjectName("Pill");
     planPending_->setStyleSheet("background:#2a2614; color:#f5c542;");
     planPending_->setToolTip("Choices waiting in the Conflicts page (Compatibility patch plan)");
+    outputBody->addWidget(makeOptionRow("Light outputs", "ESL-flag outputs that fit, so they take no full plugin slot",
+                                        light_->toolTip(), {light_}));
+    {
+        // A sub-option: only used with light outputs on.
+        auto* room = makeOptionRow("Room to grow", "With light outputs: new records a new light output leaves free",
+                                   lightHeadroom_->toolTip(), {lightHeadroom_});
+        room->setContentsMargins(28, 0, 0, 0);
+        room->setVisible(false); // shown while light outputs are on
+        lightRoomRow_ = room;
+        outputBody->addWidget(room);
+    }
     {
         QVBoxLayout* body = nullptr;
         ol->addWidget(makeSectionCard("conflicts", "When mods change the same thing", &body));
@@ -232,6 +245,39 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                                       mergeCellConfig_->toolTip(), {mergeCellConfig_}));
         body->addWidget(makeOptionRow("Translate previs files", "Writes copies that match the outputs' numbering",
                                       translatePrevis_->toolTip(), {translatePrevis_}));
+    }
+    // What may compile: each switch lets more plugins compile, and says what it would change on this load order
+    // (from the last analysis).
+    {
+        QVBoxLayout* body = nullptr;
+        ol->addWidget(makeSectionCard("dependencies", "Compile more plugins", &body));
+        auto impact = [](QLabel*& label) {
+            label = new QLabel;
+            label->setObjectName("OptionDescription");
+            label->setWordWrap(true);
+            label->setContentsMargins(4, 0, 0, 4);
+            label->setStyleSheet("color:#3ddc84;");
+            label->hide();
+            return label;
+        };
+        auto mo2Pill = [] {
+            auto* pill = new QLabel("Mod Organizer 2");
+            pill->setObjectName("Pill");
+            pill->setStyleSheet("background:#142235; color:#7fb3ff;");
+            pill->setToolTip("Only when the output folder is a mod inside Mod Organizer 2's mods folder");
+            return pill;
+        };
+        body->addWidget(makeOptionRow("New quests, dialogue and NPCs", "Off keeps plugins that add them in the load order",
+                                      newQuestsNpcs_->toolTip(), {newQuestsNpcs_}));
+        body->addWidget(impact(questsImpact_));
+        body->addWidget(makeOptionRow("Placeholders for unused masters",
+                                      "Compile masters that plugins staying in the load order only list, without using them",
+                                      masterPlaceholders_->toolTip(), {mo2Pill(), masterPlaceholders_}));
+        body->addWidget(impact(placeholdersImpact_));
+        body->addWidget(makeOptionRow("Master Redirection",
+                                      "Compile frameworks that a plugin staying in the load order uses (it stays as a copy)",
+                                      redirectMasters_->toolTip(), {mo2Pill(), redirectMasters_}));
+        body->addWidget(impact(redirectImpact_));
     }
 
     patch_ = new ToggleSwitch("Build Multiplexer_Patch.esp for plugins that stay in the load order");
@@ -278,36 +324,12 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         makeOptionRow("Record allocation", "How records are spread over the outputs", allocationHelp, {strategy_}));
     advancedSection_->body()->addWidget(strategyNote_);
     advancedSection_->body()->addWidget(rules_);
-    advancedSection_->body()->addWidget(
-        makeOptionRow("Light outputs", "ESL-flag outputs with 2,048 new records or fewer", light_->toolTip(), {light_}));
-    advancedSection_->body()->addWidget(makeOptionRow("Room to grow (light outputs)",
-                                                      "New records a new light output must leave free",
-                                                      lightHeadroom_->toolTip(), {lightHeadroom_}));
     auto* lossy = new QLabel("lossy");
     lossy->setObjectName("Pill");
     lossy->setStyleSheet("background:#2a1616; color:#ff5c5c;");
     advancedSection_->body()->addWidget(makeOptionRow("Write broken references as null",
                                                       "Lets plugins with broken references compile",
                                                       brokenAsNull_->toolTip(), {lossy, brokenAsNull_}));
-    auto* advancedPill = new QLabel("advanced");
-    advancedPill->setObjectName("Pill");
-    advancedPill->setStyleSheet("background:#2a2614; color:#f5c542;");
-    advancedSection_->body()->addWidget(makeOptionRow("Compile new quests, dialogue and NPCs",
-                                                      "Off keeps plugins that add them in the load order",
-                                                      newQuestsNpcs_->toolTip(), {advancedPill, newQuestsNpcs_}));
-    advancedSection_->body()->addWidget(makeOptionRow("Placeholders for unused masters",
-                                                      "Compile masters that plugins staying in the load order list "
-                                                      "but do not use (Mod Organizer 2)",
-                                                      masterPlaceholders_->toolTip(), {masterPlaceholders_}));
-    {
-        auto* pill = new QLabel("advanced");
-        pill->setObjectName("Pill");
-        pill->setStyleSheet("background:#2a2614; color:#f5c542;");
-        advancedSection_->body()->addWidget(makeOptionRow("Master Redirection",
-                                                          "Compile masters of plugins that stay: a copy of each such "
-                                                          "plugin names the outputs instead (Mod Organizer 2)",
-                                                          redirectMasters_->toolTip(), {pill, redirectMasters_}));
-    }
     ol->addWidget(advancedSection_);
 
     auto* installSection = new CollapsibleSection("install", "How to install");
@@ -725,6 +747,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                     patchOnly_, masterPlaceholders_, newQuestsNpcs_, redirectMasters_})
         connect(c, &QCheckBox::toggled, this, [this] {
             storeOptions();
+            updateImpact();
             updatePresetState();
             updateSummaries();
         });
@@ -744,10 +767,11 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
 
 namespace {
 struct Preset {
-    bool merge, plan, cells, previs, patch, patchOnly, light, brokenNull, newQuests;
+    bool merge, plan, cells, previs, patch, patchOnly, light, brokenNull, newQuests, placeholders, redirect;
 };
-const Preset kRecommended{true, true, true, true, true, false, false, false, true};
-const Preset kSafest{true, false, false, false, false, false, false, false, false};
+// Placeholders and Master Redirection are off in both: they are choices for after a first build has been tried.
+const Preset kRecommended{true, true, true, true, true, false, false, false, true, false, false};
+const Preset kSafest{true, false, false, false, false, false, false, false, false, false, false};
 } // namespace
 
 void CompilationPage::applyPreset(const QString& name)
@@ -766,6 +790,8 @@ void CompilationPage::applyPreset(const QString& name)
     light_->setChecked(p.light);
     brokenAsNull_->setChecked(p.brokenNull);
     newQuestsNpcs_->setChecked(p.newQuests);
+    masterPlaceholders_->setChecked(p.placeholders);
+    redirectMasters_->setChecked(p.redirect);
     updatePresetState();
 }
 
@@ -775,11 +801,13 @@ void CompilationPage::updatePresetState()
         return;
     const Preset now{merge_->isChecked(),  applyPlan_->isChecked(), mergeCellConfig_->isChecked(),
                      translatePrevis_->isChecked(), patch_->isChecked(), patchOnly_->isChecked(),
-                     light_->isChecked(), brokenAsNull_->isChecked(), newQuestsNpcs_->isChecked()};
+                     light_->isChecked(), brokenAsNull_->isChecked(), newQuestsNpcs_->isChecked(),
+                     masterPlaceholders_->isChecked(), redirectMasters_->isChecked()};
     auto same = [&](const Preset& p) {
         return p.merge == now.merge && p.plan == now.plan && p.cells == now.cells && p.previs == now.previs &&
                p.patch == now.patch && p.patchOnly == now.patchOnly && p.light == now.light &&
-               p.brokenNull == now.brokenNull && p.newQuests == now.newQuests;
+               p.brokenNull == now.brokenNull && p.newQuests == now.newQuests &&
+               p.placeholders == now.placeholders && p.redirect == now.redirect;
     };
     presets_->setCurrent(same(kRecommended) ? "Recommended" : same(kSafest) ? "Safest" : "Custom");
 }
@@ -799,14 +827,11 @@ void CompilationPage::updateSummaries()
                                                       : "no patch");
     const int strategy = strategy_->currentData().toInt();
     advancedSection_->setSummary(
-        QString("%1 · light outputs %2 · broken references %3 · master placeholders %4 · new quests and NPCs %5 · "
-                "master redirection %6")
+        QString("%1 · broken references %2")
             .arg(strategy == int(AllocationStrategy::ByRecordType)   ? "grouped by record type"
                  : strategy == int(AllocationStrategy::UserDefined) ? "balanced with your rules"
                                                                     : "balanced allocation",
-                 light_->isChecked() ? "on" : "off", brokenAsNull_->isChecked() ? "written as null" : "kept",
-                 masterPlaceholders_->isChecked() ? "on" : "off", newQuestsNpcs_->isChecked() ? "on" : "off")
-            .arg(redirectMasters_->isChecked() ? "on" : "off"));
+                 brokenAsNull_->isChecked() ? "written as null" : "kept"));
 }
 
 namespace {
@@ -907,6 +932,8 @@ void CompilationPage::loadOptions()
     light_->setChecked(c.lightOutputsWhenPossible);
     lightHeadroom_->setValue(int(c.lightHeadroom));
     lightHeadroom_->setEnabled(c.lightOutputsWhenPossible);
+    if (lightRoomRow_)
+        lightRoomRow_->setVisible(c.lightOutputsWhenPossible);
     translatePrevis_->setChecked(c.translatePrevis);
     mergeCellConfig_->setChecked(c.mergeCellConfig);
     applyPlan_->setChecked(c.applyPatchPlan);
@@ -938,6 +965,8 @@ void CompilationPage::storeOptions()
     c.lightOutputsWhenPossible = light_->isChecked();
     c.lightHeadroom = static_cast<uint32_t>(lightHeadroom_->value());
     lightHeadroom_->setEnabled(c.lightOutputsWhenPossible);
+    if (lightRoomRow_)
+        lightRoomRow_->setVisible(c.lightOutputsWhenPossible);
     c.translatePrevis = translatePrevis_->isChecked();
     c.mergeCellConfig = mergeCellConfig_->isChecked();
     c.applyPatchPlan = applyPlan_->isChecked();
@@ -976,10 +1005,80 @@ void CompilationPage::updateButtons()
                    step(applicable, 2, "Exported") + "&nbsp;&nbsp;—&nbsp;&nbsp;" + step(false, 3, "Apply to game"));
 }
 
+void CompilationPage::updateImpact()
+{
+    if (!redirectImpact_)
+        return;
+    QSqlDatabase db = app_->readDb();
+    auto number = [&](const QString& sql, int column = 0) -> qint64 {
+        if (!db.isOpen())
+            return 0;
+        QSqlQuery q(db);
+        return q.exec(sql) && q.next() ? q.value(column).toLongLong() : 0;
+    };
+    auto show = [](QLabel* label, const QString& text, bool warn = false) {
+        label->setText(text);
+        label->setStyleSheet(warn ? "color:#f5c542;" : "color:#3ddc84;");
+        label->setVisible(!text.isEmpty());
+    };
+    const auto plugins = [](qint64 n) { return formatCount(n) + (n == 1 ? " plugin" : " plugins"); };
+    // New quests, dialogue and NPCs.
+    {
+        const qint64 kept = number("SELECT COUNT(*) FROM Plugins WHERE eligibility <> 'Eligible' AND eligibility_reason "
+                                   "LIKE '%Adds new quests, dialogue or NPCs%'");
+        show(questsImpact_, !newQuestsNpcs_->isChecked() && kept
+                                ? "Your load order: " + plugins(kept) + " stay in the load order because this is off."
+                                : QString());
+    }
+    // Placeholders for unused masters.
+    {
+        const qint64 waiting = number("SELECT COUNT(*) FROM Plugins WHERE eligibility <> 'Eligible' AND "
+                                      "eligibility_reason LIKE '%could compile with an empty placeholder%'");
+        const qint64 notHere = number("SELECT COUNT(*) FROM Plugins WHERE eligibility <> 'Eligible' AND "
+                                      "eligibility_reason LIKE '%empty placeholder%not possible here%'");
+        const qint64 compiled = number("SELECT COUNT(*) FROM Plugins WHERE eligibility = 'Eligible' AND "
+                                       "eligibility_reason LIKE '%empty placeholder plugin of the same name%'");
+        if (masterPlaceholders_->isChecked() && notHere)
+            show(placeholdersImpact_,
+                 "Not possible here: the output folder must be a mod inside Mod Organizer 2's mods folder (" +
+                     plugins(notHere) + " wait for it).",
+                 true);
+        else if (masterPlaceholders_->isChecked())
+            show(placeholdersImpact_, compiled ? "Your load order: " + plugins(compiled) + " compile with a placeholder."
+                                               : QString());
+        else
+            show(placeholdersImpact_, waiting ? "Your load order: " + plugins(waiting) + " would compile with this on."
+                                              : QString());
+    }
+    // Master Redirection.
+    {
+        const qint64 holders = number("SELECT COUNT(*) FROM Plugins WHERE redirect_note LIKE 'Would free%'");
+        const qint64 freed = number("SELECT COALESCE(SUM(holds_back), 0) FROM Plugins WHERE redirect_note LIKE 'Would free%'");
+        const qint64 needsMo2 = number("SELECT COUNT(*) FROM Plugins WHERE redirect_note LIKE 'Possible, but needs%'");
+        const qint64 redirected = number("SELECT COUNT(*) FROM Plugins WHERE eligibility_reason LIKE "
+                                         "'%Redirected (Master Redirection)%'");
+        if (redirectMasters_->isChecked() && redirected)
+            show(redirectImpact_, "Your load order: " + plugins(redirected) +
+                                      " stay as redirected copies, so the masters they use compile.");
+        else if (needsMo2 && !holders)
+            show(redirectImpact_,
+                 "Not possible here: the output folder must be a mod inside Mod Organizer 2's mods folder (" +
+                     plugins(needsMo2) + " could be redirected).",
+                 true);
+        else if (holders)
+            show(redirectImpact_, "Your load order: " + plugins(holders) + " could be redirected, freeing " +
+                                      plugins(freed) + " they hold back" +
+                                      (redirectMasters_->isChecked() ? " (Analyse again to see it)." : "."));
+        else
+            show(redirectImpact_, QString());
+    }
+}
+
 void CompilationPage::refresh()
 {
     loadOptions();
     selection_->refresh();
+    updateImpact();
     QSqlDatabase db = app_->readDb();
     const QString patchName = meta("patch_name");
     outputsModel_->setNumberColumns({1, 2, 3});

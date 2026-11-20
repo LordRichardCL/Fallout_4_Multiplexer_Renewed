@@ -185,7 +185,7 @@ Select a record to see the override chain and a grid of every field per plugin:
 
 Open **Compilation**:
 
-- **Compile new quests, dialogue and NPCs** (Advanced, on by default): plugins that add new quests, dialogue, scenes or NPCs compile like any other; their voice files and faces are copied under the new FormIDs, and start-game-enabled quests are listed in the outputs' `.seq` files. Turn it off (or pick **Safest**) to keep such plugins in the load order, for example in the middle of a playthrough: running quests are tied to their FormIDs, so a save made before compiling loses them. Overrides of quests, dialogue and NPCs still compile. CLI: `--no-new-quests-npcs`.
+- **New quests, dialogue and NPCs** (Compile more plugins, on by default): plugins that add new quests, dialogue, scenes or NPCs compile like any other; their voice files and faces are copied under the new FormIDs, and start-game-enabled quests are listed in the outputs' `.seq` files. Turn it off (or pick **Safest**) to keep such plugins in the load order, for example in the middle of a playthrough: running quests are tied to their FormIDs, so a save made before compiling loses them. Overrides of quests, dialogue and NPCs still compile. CLI: `--no-new-quests-npcs`.
 - **Plugins to compile** (after Scan and Analyse; used by the next Compile): every plugin that could be compiled, with a switch, its status and its record types.
   - **All eligible** (default): every plugin that can be compiled is, unless you switch it off (the same as excluding it on the Plugins page).
   - **Only the ones I choose**: nothing is compiled until you switch it on, so a mod you install later is never compiled by surprise. Use it to compile only some mods, such as weapons or armour. Switching to it starts from what compiles now.
@@ -204,7 +204,7 @@ Open **Compilation**:
 
 - **Merge compatible edits**: on by default. Turn it off for strict last-plugin-wins.
 - **ESL-flag outputs**: an output with 2,048 or fewer new records is ESL-flagged and takes no full slot. Outputs with new cells or worldspaces never are.
-- **Room to grow (light outputs)** (Advanced, 200 by default): a new output is ESL-flagged only when it leaves this many of the 2,048 new-record places free. An output keeps its light or full state on rebuilds (switching gives its records other FormIDs), so an output made light while nearly full would have to become a full plugin, and break saves, when a mod update adds a few records. An output that fits but without the room stays full, with an Info note in Validation saying why; more outputs spread the records thinner. Outputs that are light already are not affected. CLI: `--light-headroom N`.
+- **Room to grow** (Output, under Light outputs; 200 by default): a new output is ESL-flagged only when it leaves this many of the 2,048 new-record places free. An output keeps its light or full state on rebuilds (switching gives its records other FormIDs), so an output made light while nearly full would have to become a full plugin, and break saves, when a mod update adds a few records. An output that fits but without the room stays full, with an Info note in Validation saying why; more outputs spread the records thinner. Outputs that are light already are not affected. CLI: `--light-headroom N`.
 - **Undescribed data is never guessed at.** Record data is read field by field from layouts taken from xEdit, so every reference to another record (FormID) is known and moved to its new FormID. Bytes the layouts do not describe (a subrecord the definitions do not list, data past a known layout, a condition function xEdit does not know) are kept exactly as written, never rewritten. They are moved only when they provably mean the same in the output: every 4 bytes at any position are zero, or name the same plugin at the same position in the source's and the output's master lists. Otherwise the record's plugin is kept out (**Kept Out Automatically**, category *Undescribed Data*, naming the plugin, the record, the subrecord, the byte range and the value). There is no option to rewrite values because they look like FormIDs (an earlier "advanced" option was removed).
 - **Conflict resolution patch**: also writes `Multiplexer_Patch.esp`, similar to Wrye Bash's Bashed Patch. Plugins that stay in the load order still lose edits to last-plugin-wins: two mods adding to the same leveled list, form list or keyword list, or changing different fields of the same record. The patch carries the merged record instead, and respects winners you forced in the Conflict Centre.
   - It only overrides existing records, so it adds no FormIDs, is always ESL-flagged and takes no full load order slot.
@@ -218,11 +218,21 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 ## 6. Export and switch over
 
 **The Compilation page.** Options on the left, results on the right, and the actions at the bottom (Save Settings, Open Folder, Export, Apply to Game, Compile) with the progress of compile, export and apply. Every option has a one-line description; the **?** beside it explains it in full. **Presets** at the top right set the switches in one click; they never change the number of outputs, their name, the folder or the allocation:
-- **Recommended**: combine compatible changes, apply your patch choices, merge cell settings, translate previs files, build Multiplexer_Patch.esp.
+- **Recommended**: combine compatible changes, apply your patch choices, merge cell settings, translate previs files, build Multiplexer_Patch.esp, compile new quests, dialogue and NPCs.
 - **Safest**: combine compatible changes only.
 - **Custom**: shown when the switches match neither.
 
-**Patch** (Multiplexer_Patch.esp, patch only), **Advanced** (record allocation and rules, light outputs, broken references as null) and **How to install** (the steps for your mod manager) open with a click; closed, they show their current settings in one line. The results show the last build (plugins compiled, outputs, records), each output's size, errors, warnings and plugins kept out (each with a link), and the Output Plugins, Generated Records, FormID Mappings and Assets Used tables.
+Neither preset turns on light outputs, placeholders or Master Redirection: choose those yourself once a first build works.
+
+The options come in cards, top to bottom, each answering one question:
+- **Plugins to compile:** which plugins (all eligible, or only the ones you choose).
+- **Output:** how many output plugins, their name, the folder, and **Light outputs**. Its **Room to grow** appears while Light outputs is on.
+- **When mods change the same thing:** combining changes, your patch choices, cell settings, previs files.
+- **Compile more plugins:** new quests, dialogue and NPCs; placeholders for unused masters; Master Redirection. Under each switch, a line from the last Analyse says what it changes on your load order, for example "3 plugins could be redirected, freeing 7 plugins they hold back". It also says plainly when a switch cannot work with your setup. The two marked **Mod Organizer 2** need the output folder inside MO2's mods folder.
+
+![Compilation options](images/07b-compilation-options.png)
+
+**Patch** (Multiplexer_Patch.esp, patch only), **Advanced** (record allocation and rules, broken references as null) and **How to install** (the steps for your mod manager) open with a click; closed, they show their current settings in one line. The results show the last build (plugins compiled, outputs, records), each output's size, errors, warnings and plugins kept out (each with a link), and the Output Plugins, Generated Records, FormID Mappings and Assets Used tables.
 
 **Export** builds one installable mod, the same for every mod manager, in a folder of its own. Every export gets a new folder; an earlier export is never moved, renamed, deleted or changed:
 
@@ -264,7 +274,7 @@ Files the game reads (they mirror the `Data` folder layout because the game find
 | loose copies of meshes, textures and other files | without archive loaders, compiled plugins' archives load earlier (from the INI list); each file such an archive wins today is written loose so it keeps winning | Vortex / plain installs |
 | copies of scripts and configs | the Advanced Users Auto-Merger's relinked copies, which must override the originals | when the Auto-Merger is on |
 | archive loaders (same file name as the compiled plugin) | empty ESL-flagged plugins that keep a compiled mod's archives loading in place | MO2 with the output in the mods folder |
-| master placeholders (same file name as the compiled plugin) | the same empty ESL-flagged plugin, for a compiled master that plugins staying in the load order list but do not use (**Placeholders for unused masters**, Compilation page → Advanced; off by default) | MO2 with the output in the mods folder |
+| master placeholders (same file name as the compiled plugin) | the same empty ESL-flagged plugin, for a compiled master that plugins staying in the load order list but do not use (**Placeholders for unused masters**, Compilation page → Compile more plugins; off by default) | MO2 with the output in the mods folder |
 
 Files for you and for the next build (the game does not read them; nothing needs F4SE or any other runtime component). The build's records (`Multiplexer_FormMap.tsv` and the copy lists) are in `Data`, so they are installed with the package and the next scan finds them even if the `Multiplexer Output` folder was deleted; the notes (lists, INI line, reports) are next to `Data` and are not installed:
 
@@ -332,11 +342,11 @@ A plugin that stays in the load order keeps its masters there too. Patches often
 
 A master counts as unused only when none of the plugin's records overrides one of its records, sits in one of its groups, or names it in a FormID the definitions locate. A byte equal to the master's index anywhere in data the definitions do not describe counts as using it, and a plugin that cannot be read uses all its masters.
 
-With **Placeholders for unused masters** on (Compilation page → Advanced, or `--master-placeholders`), such a master compiles anyway, and an empty light plugin with its name keeps the plugins that list it loading. It is written like an archive loader, so it needs the same setup: Mod Organizer 2 with the output folder inside the mods folder, the output mod at the bottom of the left pane, and the master kept enabled. Anywhere else the master stays in the load order, and its reasons on the Plugins page say why. You can also remove the master from the plugin in xEdit (Clean Masters).
+With **Placeholders for unused masters** on (Compilation page → Compile more plugins, or `--master-placeholders`), such a master compiles anyway, and an empty light plugin with its name keeps the plugins that list it loading. It is written like an archive loader, so it needs the same setup: Mod Organizer 2 with the output folder inside the mods folder, the output mod at the bottom of the left pane, and the master kept enabled. Anywhere else the master stays in the load order, and its reasons on the Plugins page say why. You can also remove the master from the plugin in xEdit (Clean Masters).
 
 ### Master Redirection (advanced)
 
-A plugin that stays in the load order keeps its masters there too, even when they could compile. Frameworks kept by one quest mod or patch are the usual case. With **Master Redirection** on (Compilation page → Advanced, or `--redirect-masters`), such a plugin stays as a **copy in the output**, under the same name. The copy lists the output plugins instead of its compiled masters, and every FormID that names a compiled record is translated. Its masters then compile.
+A plugin that stays in the load order keeps its masters there too, even when they could compile. Frameworks kept by one quest mod or patch are the usual case. With **Master Redirection** on (Compilation page → Compile more plugins, or `--redirect-masters`), such a plugin stays as a **copy in the output**, under the same name. The copy lists the output plugins instead of its compiled masters, and every FormID that names a compiled record is translated. Its masters then compile.
 
 - **What the game shows does not change.** The copy loads after the outputs:
   - Its own records keep their FormIDs.

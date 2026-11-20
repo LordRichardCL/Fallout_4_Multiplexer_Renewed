@@ -59,12 +59,18 @@ private:
     QCheckBox* merge_;
     QCheckBox* light_;
     QSpinBox* lightHeadroom_ = nullptr;
+    QWidget* lightRoomRow_ = nullptr; // "Room to grow", shown while light outputs are on
     QCheckBox* translatePrevis_;
     QCheckBox* mergeCellConfig_;
     QCheckBox* applyPlan_;
     QCheckBox* brokenAsNull_;
     QCheckBox* masterPlaceholders_;
     QCheckBox* redirectMasters_ = nullptr;
+    // What each "Compile more plugins" switch changes on this load order (last analysis).
+    QLabel* questsImpact_ = nullptr;
+    QLabel* placeholdersImpact_ = nullptr;
+    QLabel* redirectImpact_ = nullptr;
+    void updateImpact();
     QCheckBox* newQuestsNpcs_;
     class PluginSelection* selection_ = nullptr;
     QCheckBox* patch_;

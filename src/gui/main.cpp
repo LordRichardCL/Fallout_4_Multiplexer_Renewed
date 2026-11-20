@@ -3,6 +3,7 @@
 #include "AppController.hpp"
 #include "Format.hpp"
 #include "MainWindow.hpp"
+#include "widgets/PluginSelection.hpp"
 #include "SetupDialog.hpp"
 #include "pages/PluginsPage.hpp"
 #include "Theme.hpp"
@@ -21,6 +22,7 @@
 #include <QPushButton>
 #include <QTableView>
 #include <QTabWidget>
+#include <QScrollArea>
 #include <QTimer>
 
 namespace {
@@ -106,6 +108,13 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
         QTimer::singleShot(300, &settle, &QEventLoop::quit);
         settle.exec();
         window.grab().save(outDir.filePath(QString("%1-%2.png").arg(i + 1, 2, 10, QChar('0')).arg(pages[i].toLower())));
+        if (pages[i] == "Compilation") // every option, top to bottom
+            for (auto* area : window.findChildren<QScrollArea*>())
+                if (area->isVisible() && area->widget() && area->widget()->findChild<gui::PluginSelection*>()) {
+                    auto* w = area->widget();
+                    w->resize(area->viewport()->width(), w->sizeHint().height());
+                    w->grab().save(outDir.filePath("07b-compilation-options.png"));
+                }
     }
 
     // Record types that block compilation, with the plugins the first one holds back.

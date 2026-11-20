@@ -79,7 +79,7 @@ Consequence: B′ may need, as masters, plugins whose records the merged winners
 
 ## As built (version 1)
 
-- **Switch:** Compilation page → Advanced → **Master Redirection** (off by default), or `--redirect-masters`. Opt-out per plugin: Plugins page → **Keep as it is (no redirection)**, or `--no-redirect <plugin>`.
+- **Switch:** Compilation page → Compile more plugins → **Master Redirection** (off by default), or `--redirect-masters`. Opt-out per plugin: Plugins page → **Keep as it is (no redirection)**, or `--no-redirect <plugin>`.
 - **Which plugins:** active plugins that stay (not the base game, Creation Club, plugins you excluded or opted out) and list a master that compiles, and that also meet all of these:
   - They are ESP files (an ESM loads before the outputs).
   - They have no missing masters.

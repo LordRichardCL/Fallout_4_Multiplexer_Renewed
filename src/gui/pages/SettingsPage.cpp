@@ -175,11 +175,18 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     l->addWidget(makeSectionCard("compile", "Analysis and compilation", &al));
     al->addWidget(makeSectionTitle("Never compile these plugins",
                                    "One plugin file name per line. These stay in the load order as they are, whatever "
-                                   "their eligibility. The Plugins page's \"Exclude from compilation\" adds to this "
-                                   "list."));
+                                   "their eligibility. It is the same list as the Plugins page's \"Exclude from "
+                                   "compilation\" and the switches under \"Plugins to compile\" on the Compilation "
+                                   "page (with \"All eligible\"): a change in any of them shows in all three."));
+    {
+        auto* hint = new QLabel("The same list as the switches on the Compilation page and Exclude on the Plugins page.");
+        hint->setObjectName("OptionDescription");
+        hint->setWordWrap(true);
+        al->addWidget(hint);
+    }
     excluded_ = new QPlainTextEdit;
     excluded_->setPlaceholderText("One plugin per line, e.g. MyMod.esp");
-    excluded_->setMaximumHeight(130);
+    excluded_->setMaximumHeight(90);
     al->addWidget(excluded_);
     creationClub_ = new ToggleSwitch("Allow compiling Creation Club plugins");
     allTypes_ = new ToggleSwitch("Show field differences for record types that are not merged (slower, display only)");

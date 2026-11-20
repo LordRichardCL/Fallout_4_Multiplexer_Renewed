@@ -7,7 +7,7 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 ### Master Redirection (advanced, new)
 - A framework that could compile, but stays because a plugin that stays uses its records, can now compile. That plugin stays as a copy in the output, with the same name, that points at the output plugins instead. The copy loads after the outputs, and the game shows the same thing as before.
 - Plugins whose cells have previs data qualify too: their previs files are translated into the copy's numbering.
-- It is off by default (Compilation page → Advanced) and works with Mod Organizer 2 only. It covers only plugins the app can copy exactly. Every copy is checked and read back, and switching the output mod off restores the original.
+- It is off by default (Compilation page → Compile more plugins) and works with Mod Organizer 2 only. It covers only plugins the app can copy exactly. Every copy is checked and read back, and switching the output mod off restores the original.
 
 ### Your saves are safer across rebuilds
 - **FormIDs stay put.** A rebuild keeps every FormID the build you play with gave. New records that older ones now use go beside them rather than forcing the old ones to move. If a FormID would still change, compiling stops with a **FormID Stability** error and asks first.
@@ -19,7 +19,7 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 - **Unused masters.** A plugin that stays but lists a master without using any of its records is reported. With **Placeholders for unused masters** on (Mod Organizer 2), that master compiles anyway.
 - **Plugin INIs** (`<plugin>.ini`) of compiled plugins are carried into the output's INI. Their settings end up with the same values, and a plugin is kept only if its INI would otherwise change a final value, or sets archive lists.
 - **Scripts read more precisely.** Plugin names are now followed through named constants, joined text, functions that return them, Auto property defaults, and function calls into other scripts. More plugins are cleared as safe, and anything that cannot be followed still keeps its plugin out.
-- **New quests, dialogue and NPCs** have their own switch (Compilation page → Advanced). Turn it off in the middle of a playthrough to keep such plugins as they are.
+- **New quests, dialogue and NPCs** have their own switch (Compilation page → Compile more plugins). Turn it off in the middle of a playthrough to keep such plugins as they are.
 
 ### You choose what compiles
 - **Plugins to compile** (Compilation page): compile everything eligible with a switch to leave some out, or **only the ones you choose**, such as just your weapon mods. A plugin left out keeps its masters in the load order too, and the list shows that straight away.
@@ -30,6 +30,7 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 - Asset tracing follows textures named directly inside meshes, not only those named in material files.
 
 ### Easier to use
+- **The Compilation page is regrouped into cards that each answer one question:** what to compile, the output, conflicts, compiling more plugins, patch and advanced. The switches that let more plugins compile say, under each one, what they would change on your load order.
 - **Plain status words** everywhere: Will compile, Stays in load order, Kept by you, Base game, Not enabled.
 - **Sort any table** by clicking a column header, and right-click a header to show or hide columns.
 - **Go to (Ctrl+K)** jumps to any page, plugin or record by typing part of its name. Plugin names in reasons are links.

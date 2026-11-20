@@ -301,6 +301,32 @@ private slots:
         QVERIFY(!app_->excludedPlugins().contains("Weapons.esp"));
     }
 
+    // "Compile more plugins" says what each switch would change on this load order, from the last analysis.
+    void compile_more_plugins_says_what_it_would_free()
+    {
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("UPDATE Plugins SET holds_back = 2, redirect_note = 'Would free them: turn on Master Redirection' "
+                    "WHERE name = 'Quest.esp'");
+        }
+        auto* page = window_->findChild<gui::CompilationPage*>();
+        QVERIFY(page);
+        page->refresh();
+        auto said = [&](const QString& start) {
+            for (auto* l : page->findChildren<QLabel*>())
+                if (!l->isHidden() && l->text().startsWith(start))
+                    return true;
+            return false;
+        };
+        QVERIFY(said("Your load order: 1 plugin could be redirected, freeing 2 plugins they hold back."));
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("UPDATE Plugins SET holds_back = NULL, redirect_note = NULL WHERE name = 'Quest.esp'");
+        }
+        page->refresh();
+        QVERIFY(!said("Your load order: 1 plugin could be redirected"));
+    }
+
     // After Analyse, a card says what will compile in plain words and its buttons open the pages.
     void summary_card_after_analysis()
     {
