@@ -13,6 +13,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
+#include <QFrame>
 #include <QEventLoop>
 #include <QFile>
 #include <QLineEdit>
@@ -73,6 +74,12 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
         // A second, incremental build so the screenshots show build-system state.
         runAndWait(&gui::AppController::runRebuild);
         runAndWait(&gui::AppController::runCheck);
+    }
+    // The summary card a finished task shows would cover every screenshot: saved once, then hidden.
+    if (auto* toast = window.findChild<QFrame*>("Toast")) {
+        if (!toast->isHidden())
+            window.grab().save(outDir.filePath("19-task-summary.png"));
+        toast->hide();
     }
 
     const QStringList pages = {"Dashboard", "Changes", "Plugins", "Conflicts", "Assets", "Dependencies",

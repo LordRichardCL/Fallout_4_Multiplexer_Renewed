@@ -1,6 +1,7 @@
 #include "MainWindow.hpp"
 
 #include "AppController.hpp"
+#include "Format.hpp"
 #include "Theme.hpp"
 #include "pages/AssetsPage.hpp"
 #include "pages/ChangesPage.hpp"
@@ -28,6 +29,11 @@
 #include <QPushButton>
 #include <QPainter>
 #include <QShortcut>
+#include <QTimer>
+
+#include <algorithm>
+#include <QFrame>
+#include <QResizeEvent>
 #include "widgets/Glossary.hpp"
 #include "widgets/QuickSearch.hpp"
 #include <QSqlQuery>
@@ -219,8 +225,10 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
     progress_->setFixedWidth(260);
     progress_->setTextVisible(false);
     progress_->hide();
-    cancel_ = new QPushButton("Cancel");
+    cancel_ = new QPushButton("Stop");
     cancel_->setObjectName("Danger");
+    cancel_->setIcon(lineIcon("block", QColor(0xff, 0xd6, 0xd6), 14));
+    cancel_->setToolTip("Stop the task that is running (nothing is written half-way: the results stay as before)");
     cancel_->hide();
     auto* logToggle = new QPushButton("Log");
     logToggle->setCheckable(true);
@@ -252,17 +260,33 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
     connect(app_, &AppController::stageStarted, this, [this](const QString& s) {
         stageLabel_->setText(s + "…");
         progress_->setRange(0, 0);
+        stageClock_.start();
     });
     connect(app_, &AppController::progressChanged, this, [this](qint64 done, qint64 total, const QString& detail) {
+        QString left;
         if (total > 0) {
             progress_->setRange(0, 1000);
             progress_->setValue(int(done * 1000 / total));
+            // Time left in this stage, once enough of it has run to tell.
+            const double f = double(done) / double(total);
+            const qint64 ms = stageClock_.isValid() ? stageClock_.elapsed() : 0;
+            if (f > 0.05 && f < 1.0 && ms > 3000) {
+                const qint64 rest = qint64(ms * (1.0 - f) / f / 1000.0);
+                left = rest < 60 ? QString("about %1 s left").arg(std::max<qint64>(rest, 1))
+                                 : QString("about %1 min left").arg((rest + 30) / 60);
+            }
         }
+        QString text = stageLabel_->text().section("…", 0, 0) + "…";
+        if (!left.isEmpty())
+            text += "  (" + left + ")";
         if (!detail.isEmpty())
-            stageLabel_->setText(stageLabel_->text().section("…", 0, 0) + "…  " + detail);
+            text += "  " + detail;
+        stageLabel_->setText(text);
     });
     connect(app_, &AppController::taskFinished, this, [this](const QString& task, bool ok, const QString& msg) {
         stageLabel_->setText(QString("%1 %2 — %3").arg(task, ok ? "complete" : "failed", msg));
+        if (ok)
+            showSummary(task, msg);
         if (!ok && msg != "Cancelled")
             QMessageBox::warning(this, task + " failed", msg);
     });
@@ -351,6 +375,152 @@ void MainWindow::refreshBadges()
     set("Validation", count("SELECT COUNT(*) FROM ValidationResults WHERE severity IN ('Error', 'Critical')"), "red");
     set("Advanced Users Auto-Merger", count("SELECT COUNT(*) FROM AutoMergePlugins WHERE status LIKE 'Kept out%'"), "red");
     nav_->viewport()->update();
+}
+
+void MainWindow::showSummary(const QString& task, const QString& message)
+{
+    QSqlDatabase db = app_->readDb();
+    auto count = [&](const QString& sql) -> int {
+        if (!db.isOpen())
+            return 0;
+        QSqlQuery q(db);
+        return q.exec(sql) && q.next() ? q.value(0).toInt() : 0;
+    };
+    auto meta = [&](const QString& key) -> QString {
+        if (!db.isOpen())
+            return {};
+        QSqlQuery q(db);
+        q.prepare("SELECT value FROM Meta WHERE key = ?");
+        q.addBindValue(key);
+        return q.exec() && q.next() ? q.value(0).toString() : QString();
+    };
+    QString title, text;
+    std::vector<std::pair<QString, QString>> actions; // (button, page)
+    const int active = count("SELECT COUNT(*) FROM Plugins WHERE active = 1");
+    const int will = count("SELECT COUNT(*) FROM Plugins WHERE eligibility = 'Eligible'");
+    const auto* plan = app_->pipeline() ? app_->pipeline()->patchPlan() : nullptr;
+    const int choices = plan ? int(plan->pending) : 0;
+    const int errors = count("SELECT COUNT(*) FROM ValidationResults WHERE severity IN ('Error', 'Critical')");
+    const int warnings = count("SELECT COUNT(*) FROM ValidationResults WHERE severity = 'Warning'");
+    if (task == "Scan") {
+        title = "Scan complete";
+        text = QString("%1 plugins in your load order. Next: Analyse, to see what can be compiled.").arg(formatCount(active));
+        actions = {{"Plugins", "Plugins"}};
+    } else if (task == "Analyse") {
+        title = "Analysis complete";
+        text = QString("%1 of %2 plugins will compile; %3 stay in the load order.")
+                   .arg(formatCount(will), formatCount(active), formatCount(std::max(0, active - will)));
+        if (choices)
+            text += QString(" %1 patch choice(s) wait for you.").arg(choices);
+        actions = {{"Plugins", "Plugins"}};
+        if (choices)
+            actions.push_back({"Review choices", "Conflicts"});
+        actions.push_back({"Compile", "Compilation"});
+    } else if (task == "Compile" || task == "Rebuild") {
+        title = task == "Rebuild" ? "Rebuild complete" : "Compile complete";
+        const int kept = count("SELECT COUNT(*) FROM Plugins WHERE eligibility_reason LIKE 'Kept out automatically%'");
+        text = QString("%1 plugins compiled into %2 output plugins.")
+                   .arg(meta("compiled_plugins").isEmpty() ? QString("—") : meta("compiled_plugins"),
+                        meta("output_plugins").isEmpty() ? QString("—") : meta("output_plugins"));
+        if (kept)
+            text += QString(" %1 kept out automatically (see their reasons on the Plugins page).").arg(kept);
+        if (errors || warnings)
+            text += QString(" Validation: %1 error(s), %2 warning(s).").arg(errors).arg(warnings);
+        if (errors || warnings)
+            actions.push_back({"Validation", "Validation"});
+        actions.push_back({"Export and install", "Compilation"});
+    } else if (task == "Export") {
+        title = "Export complete";
+        text = message + ". Next: install it (Compilation page, How to install), then start a new game.";
+        actions = {{"How to install", "Compilation"}};
+    } else {
+        return;
+    }
+    if (!summary_) {
+        summary_ = new QFrame(centralWidget());
+        summary_->setObjectName("Toast");
+        summary_->setStyleSheet("QFrame#Toast { background: #16241d; border: 1px solid #2f6b4c; border-radius: 10px; }");
+        summaryTimer_ = new QTimer(this);
+        summaryTimer_->setSingleShot(true);
+        connect(summaryTimer_, &QTimer::timeout, summary_, &QWidget::hide);
+    }
+    // Rebuilt each time: its buttons depend on the task.
+    if (auto* old = summary_->layout()) {
+        while (auto* item = old->takeAt(0)) {
+            if (auto* w = item->widget())
+                w->deleteLater();
+            else if (auto* sub = item->layout()) {
+                while (auto* si = sub->takeAt(0)) {
+                    if (si->widget())
+                        si->widget()->deleteLater();
+                    delete si;
+                }
+            }
+            delete item;
+        }
+        delete old;
+    }
+    auto* l = new QVBoxLayout(summary_);
+    l->setContentsMargins(16, 12, 12, 12);
+    l->setSpacing(6);
+    auto* head = new QHBoxLayout;
+    auto* icon = new QLabel;
+    icon->setPixmap(linePixmap(errors ? "warning" : "check", errors ? theme::kYellow : theme::kGreen, 18));
+    auto* t = new QLabel(title);
+    t->setObjectName("OptionTitle");
+    auto* close = new QPushButton("×");
+    close->setObjectName("LinkButton");
+    close->setFixedWidth(24);
+    close->setToolTip("Close");
+    connect(close, &QPushButton::clicked, summary_, &QWidget::hide);
+    head->addWidget(icon);
+    head->addWidget(t, 1);
+    head->addWidget(close);
+    l->addLayout(head);
+    auto* body = new QLabel(text);
+    body->setWordWrap(true);
+    body->setObjectName("OptionDescription");
+    l->addWidget(body);
+    auto* row = new QHBoxLayout;
+    row->addStretch(1);
+    for (const auto& [label, page] : actions) {
+        auto* b = makeButton(label);
+        connect(b, &QPushButton::clicked, this, [this, page = page] {
+            showPage(page);
+            summary_->hide();
+        });
+        row->addWidget(b);
+    }
+    l->addLayout(row);
+    // Sized from its contents (word wrap needs a width; the window may not have been shown yet).
+    const int width = 420, inner = width - 16 - 12;
+    body->setFixedWidth(inner);
+    int height = 12 + 12;                                                       // margins
+    height += std::max({18, t->sizeHint().height(), close->sizeHint().height()}); // title row
+    height += 6 + body->heightForWidth(inner);
+    if (!actions.empty()) {
+        QPushButton probe("X");
+        height += 6 + probe.sizeHint().height();
+    }
+    summary_->setFixedSize(width, height);
+    placeSummary();
+    summary_->show();
+    summary_->raise();
+    summaryTimer_->start(30000);
+}
+
+void MainWindow::placeSummary()
+{
+    if (!summary_ || !centralWidget())
+        return;
+    const auto area = centralWidget()->rect();
+    summary_->move(area.right() - summary_->width() - 20, area.bottom() - summary_->height() - 16);
+}
+
+void MainWindow::resizeEvent(QResizeEvent* e)
+{
+    QMainWindow::resizeEvent(e);
+    placeSummary();
 }
 
 void MainWindow::refreshAll()

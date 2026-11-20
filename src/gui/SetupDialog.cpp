@@ -200,6 +200,31 @@ SetupDialog::SetupDialog(AppController* app, QWidget* parent) : QDialog(parent),
     auto* right = new QVBoxLayout;
     right->setSpacing(8);
     body->addLayout(right, 2);
+    // What happens to the game, in the order it happens: the worry a first-time user has.
+    {
+        auto* card = new QFrame;
+        card->setObjectName("Card");
+        auto* cl = new QVBoxLayout(card);
+        cl->setContentsMargins(14, 12, 14, 12);
+        cl->setSpacing(4);
+        auto* t = new QLabel("What happens to your game");
+        t->setObjectName("SectionTitle");
+        cl->addWidget(t);
+        auto* steps = new QLabel(
+            "<ol style='margin-left:-20px'>"
+            "<li><b>Scan, Analyse, Compile</b> only read your mods.</li>"
+            "<li><b>Export</b> writes the outputs to a new folder and a zip, never over your mods.</li>"
+            "<li><b>Apply to Game</b> (or installing the zip) switches the compiled plugins off and the outputs on. "
+            "Every file it changes is backed up beside it first.</li>"
+            "<li><b>To undo</b>, switch the outputs off and the originals on, or copy a backup back "
+            "(Multiplexer_Instructions.txt has the steps). Your mods' files are never changed.</li>"
+            "</ol><p style='color:#8aa196'>Start a new game after switching over.</p>");
+        steps->setWordWrap(true);
+        steps->setTextFormat(Qt::RichText);
+        steps->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+        cl->addWidget(steps);
+        right->addWidget(card);
+    }
     auto* previewTitle = new QLabel("Load order that will be used");
     previewTitle->setObjectName("SectionTitle");
     right->addWidget(previewTitle);

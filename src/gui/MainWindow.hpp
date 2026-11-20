@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QMainWindow>
 #include <QMap>
 
@@ -10,6 +11,8 @@ class QProgressBar;
 class QPushButton;
 class QStackedWidget;
 class QDockWidget;
+class QFrame;
+class QTimer;
 
 namespace gui {
 
@@ -25,6 +28,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override;
 
 private:
     void addGroup(const QString& title);
@@ -42,9 +46,15 @@ private:
     std::vector<std::pair<QString, QString>> pageLabels_; // (label, page name), for quick search
     // Ctrl+K: jump to a page, plugin or record.
     void quickSearch();
+    // A card in the corner when a task finishes: what it did in plain words, and buttons to what needs you.
+    void showSummary(const QString& task, const QString& message);
+    void placeSummary();
+    QFrame* summary_ = nullptr;
+    QTimer* summaryTimer_ = nullptr;
     QProgressBar* progress_;
     QLabel* stageLabel_;
     QPushButton* cancel_;
+    QElapsedTimer stageClock_; // since the current stage started, for the time left
     QPlainTextEdit* log_;
     QDockWidget* logDock_;
 };

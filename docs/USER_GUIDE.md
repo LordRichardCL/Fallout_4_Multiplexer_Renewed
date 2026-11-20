@@ -24,6 +24,16 @@ Untick **Show this screen at start-up** to go straight to the Dashboard next tim
 
 **Finding your way around.** Every page starts with its icon, a title and one line saying what it is for. The longer explanation is behind the **?** next to the title (hover over it); options have their own **?** too. Options are switches with a short description under them. The page's main action is the green button; Save Settings is an ordinary button on the pages that have it, except on Settings itself.
 
+**Shortcuts and help.**
+- **Ctrl+K** (or **Go to…** under the navigation): type part of a page, plugin or record name (Editor ID) and press Enter to open it. A plugin opens on the Plugins page; a record with conflicts in the Conflict Centre; any other record in the record graph.
+- **F1** (or **Glossary**): what the words mean (plugin, master, override, ESL, ITM, ...).
+- **Ctrl+1 … Ctrl+9**: the pages in order.
+- Click a column header to sort a table by it. On the Plugins page, right-click the header to show or hide columns.
+- In a plugin's details, every plugin named (reasons, masters, required by) is a link that opens it.
+- While a task runs, the status bar shows the time left in the current step and a **Stop** button. When it finishes, a card in the corner says what it did in plain words, with buttons to what needs you (closes by itself after 30 seconds).
+
+**Plugin status words.** **Will compile**: goes into the outputs. **Stays in load order**: cannot be compiled, with the reason beside it (it holds something the compiler cannot reproduce, or a plugin that stays needs it as a master). **Kept by you**: excluded, or not among the plugins you chose. **Base game**, **Not enabled**, **Error**. (Reports and exported files keep the technical names: Eligible, Ineligible, Retained, Inactive.)
+
 **Settings** holds the same installation details plus everything else. Choose your installation type:
 
 | Type | What to enter |
