@@ -175,6 +175,7 @@ Select a record to see the override chain and a grid of every field per plugin:
 
 Open **Compilation**:
 
+- **Compile new quests, dialogue and NPCs** (Advanced, on by default): plugins that add new quests, dialogue, scenes or NPCs compile like any other; their voice files and faces are copied under the new FormIDs, and start-game-enabled quests are listed in the outputs' `.seq` files. Turn it off (or pick **Safest**) to keep such plugins in the load order, for example in the middle of a playthrough: running quests are tied to their FormIDs, so a save made before compiling loses them. Overrides of quests, dialogue and NPCs still compile. CLI: `--no-new-quests-npcs`.
 - **Plugins to compile** (after Scan and Analyse; used by the next Compile): every plugin that could be compiled, with a switch, its status and its record types.
   - **All eligible** (default): every plugin that can be compiled is, unless you switch it off (the same as excluding it on the Plugins page).
   - **Only the ones I choose**: nothing is compiled until you switch it on, so a mod you install later is never compiled by surprise. Use it to compile only some mods, such as weapons or armour. Switching to it starts from what compiles now.

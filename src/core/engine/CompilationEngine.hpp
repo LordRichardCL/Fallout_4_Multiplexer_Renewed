@@ -76,6 +76,9 @@ struct CompileOptions {
     bool archiveLoaders = false;
     // Placeholders for unused masters (opt-in; needs archive loaders): see AnalysisOptions::masterPlaceholders.
     bool unusedMasterPlaceholders = false;
+    // Advanced: compile plugins that add new quests, dialogue, scenes or NPCs (their voice files and FaceGen
+    // move with them). Off: such plugins stay in the load order; overrides of those types still compile.
+    bool compileNewQuestsAndNpcs = true;
     // Plugins an earlier build compiled (now switched off) that the user allows back into the load order
     // when this build cannot compile them. Any other such plugin stops the compilation (Pipeline).
     std::vector<std::string> allowReturn;

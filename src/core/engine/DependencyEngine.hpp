@@ -25,6 +25,8 @@ struct AnalysisOptions {
     // they are wanted but not possible.
     bool masterPlaceholders = false;
     std::string placeholdersOff;
+    // CompileOptions::compileNewQuestsAndNpcs.
+    bool newQuestsAndNpcs = true;
 };
 
 struct DependencyIssue {

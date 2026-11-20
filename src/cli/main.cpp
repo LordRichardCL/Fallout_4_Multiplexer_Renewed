@@ -109,6 +109,8 @@ Compile options:
   --broken-references-as-null  write references that cannot be written faithfully (missing master,
                        or a record a compiled plugin does not contain) as null and compile their
                        plugin (lossy); default: that plugin stays in the load order
+  --no-new-quests-npcs  keep plugins that add new quests, dialogue or NPCs in the load order
+                       (overrides of those still compile)
   --master-placeholders  compile masters that plugins staying in the load order list but use none
                        of the records of, keeping their names with empty placeholder plugins
                        (Mod Organizer 2 output inside the mods folder only)
@@ -159,7 +161,7 @@ struct Args {
 
 Args parseArgs(int argc, char** argv)
 {
-    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--merge-cell-config", "--apply-patch-plan", "--broken-references-as-null", "--master-placeholders", "--accept-formid-changes", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
+    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--merge-cell-config", "--apply-patch-plan", "--broken-references-as-null", "--master-placeholders", "--no-new-quests-npcs", "--accept-formid-changes", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
                                                    "--diagnostic-recorder", "--install", "--archive-loader",
                                                    "--values", "--tree", "--help", "--unfinished",
                                                    "--verbose", "-v"};
@@ -269,6 +271,7 @@ PipelineConfig makeConfig(const Args& a)
     c.applyPatchPlan = a.has("--apply-patch-plan");
     c.brokenReferencesAsNull = a.has("--broken-references-as-null");
     c.unusedMasterPlaceholders = a.has("--master-placeholders");
+    c.compileNewQuestsAndNpcs = !a.has("--no-new-quests-npcs");
     c.allowReturn = a.all("--allow-return");
     c.acceptFormIdChanges = a.has("--accept-formid-changes");
     c.patchOnly = a.has("--patch-only");

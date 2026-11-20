@@ -360,7 +360,7 @@ Each stage ships separately, keeps every existing test passing, and changes no m
 | **5. Next layouts by evidence** *(first batch done)* | Describe further types in the order **Plugins → Blocking Types** ranks them across real load orders. Each needs a definition check on your data and tests. Likely early candidates (check against the xEdit Fallout 4 definitions, not assumed): `AACT`, `DOBJ`, `COLL`, `SNCT`, `SOPM`, `ASPC`, `REVB`, `AECH`, `ANIO`, `BPTD`, `DEBR`, `IMGS`, `IMAD`, `LGTM`, `GDRY`, `LENS`, `MOVT`, `STAG`, `NOCM`, `LAYR`, `OVIS`, `PKIN`. | Medium per type, controlled by evidence | Fewer plugins blocked by base-object types. |
 | **6. Group structure** | Parent context in the index; nested-group writing; tests that round-trip cells and dialogue topics byte-for-byte. Still no compiling of these types. | Medium: core reader and writer | Foundation for any future world or quest work. |
 | **7. Tier 2 (analysis first)** *(started: NPC_ overrides, RACE and CLAS as Candidates)* | `NPC_` overrides, `RACE`, `CLAS`, `PACK`, `LVSP`, … Layouts, field-level analysis and definition checks first; compiling only for overrides of existing records (no new FormIDs, no FaceGen impact), each separately justified. | High | Gated individually. |
-| **Not planned** | Compiling new NPCs, quests, dialogue, scenes, cells, worldspaces, navmeshes and placed references. See `DEPENDENCY_SCENARIOS.md`: precombines, previs, FaceGen and voice paths, quest alias indexes and script name references tie them to their file. They stay **Preserve**, with full conflict analysis. | — | — |
+| **Superseded** | This row once said new NPCs, quests, dialogue, scenes, cells, worldspaces, navmeshes and placed references would not be compiled. They are: quests Q1–Q3, NPCs N1–N2, dialogue D1–D3, world W1–W4, navmeshes M1–M3 (below). What still ties a plugin to its file (precombine and previs data, filename references) keeps that plugin out case by case. New quests, dialogue and NPCs have an advanced switch (20 Nov 2026). | — | — |
 
 ### What this means for the weapon mod you tested
 
@@ -1276,3 +1276,23 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 - **Stop and ask.** When the previous build is in use (its outputs enabled, or plugins it compiled switched off) and any record it placed would get another FormID, compiling stops with a FormID Stability error. `CompileOptions::acceptFormIdChanges` (Compilation page dialog, `--accept-formid-changes`; never saved) turns it into a warning for that build.
 
 **Test:** `rebuilds_keep_the_formids_of_the_build_in_use`: build 1 with light outputs and allocation rules is switched over; ModG's form list then names a new keyword, which goes beside the list instead of moving it, and the outputs stay light with the setting off; build 3 with fewer outputs stops, and compiles once accepted. With the placement rule switched off the test fails (the list moves and the build stops), so it covers the rule.
+
+## New quests, dialogue and NPCs: the advanced switch (20 Nov 2026)
+
+**Where things stood.** New quests (Q1–Q3), dialogue with its voice files (D1–D3) and new NPCs with their FaceGen (N1–N2) have compiled by default since builds 58–63, with 0 errors in those builds. The stage table's "Not planned" row and the catalogue notes saying voice relocation is not implemented, dialogue is not compiled, and FaceGen keeps NPCs out were out of date and are corrected.
+
+**What compiling them involves** (all implemented):
+- new FormIDs in the outputs, with every reference rewritten through the field definitions (quest stages, objectives and aliases as one region; quest, alias, dialogue and scene script data decoded in full);
+- topics, responses and scenes written in their quest's and topic's groups (with containers where needed), the quest in the same output as its dialogue;
+- `seq\<output>.seq` for start-game-enabled quests;
+- voice files copied to `sound\voice\<output>\<voice type>\<new FormID>_*` and FaceGen to the output's folders under the new FormID (the face mesh keeps naming its textures by their original path, which stays installed);
+- scripts and configs naming the plugin, checked like every filename reference (the Auto-Merger rewrites what can be rewritten).
+
+**Remaining risks**, why it is worth a switch:
+- Running quests, their aliases and script state in a save are tied to the quest's FormID: a save made before compiling loses them (as for every compiled record: start a new game; save-safe rebuilds keep FormIDs from then on).
+- The copied face mesh needs the original mod's face textures to stay installed.
+- Quest-heavy mods are where a mistake costs the most: a broken quest can stop a playthrough.
+
+**Decision.** Keep it, with the switch **Compile new quests, dialogue and NPCs** (Compilation page, Advanced; `CompileOptions::compileNewQuestsAndNpcs`, CLI `--no-new-quests-npcs`). On by default, because builds in use rely on it: defaulting it off would return every such plugin to the load order (pin-back protection would stop the build until each is allowed back). The **Safest** preset turns it off. Off: a plugin adding new QUST, DIAL, INFO, SCEN, DLBR, DLVW or NPC_ records stays in the load order, with the types and counts in its reason; overrides of those types still compile (no new FormIDs, no voice or FaceGen paths). The setting is part of the settings a build is checked against.
+
+**Test:** `new_quests_and_npcs_follow_their_switch` (a new quest and an override of it, switch on and off).

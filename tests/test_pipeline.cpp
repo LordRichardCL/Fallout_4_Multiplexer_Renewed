@@ -1544,6 +1544,38 @@ TEST(earlier_builds_switched_off_plugins_stay_sources_without_the_database)
     }
 }
 
+// The advanced switch for new quests, dialogue and NPCs. ModQ adds a quest; ModQ2 overrides it. On (the
+// default) both compile. Off: ModQ stays in the load order with the reason; ModQ2 (an override) still
+// compiles; the setting is part of what a build is checked against.
+TEST(new_quests_and_npcs_follow_their_switch)
+{
+    auto root = buildInstall("newquests");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModQ.esp", {"Fallout4.esm"}, {record("QUST", 0x01000800, {zs("EDID", "ModQ_Quest")})});
+    writePlugin(data / "ModQ2.esp", {"Fallout4.esm", "ModQ.esp"},
+                {record("QUST", 0x01000800, {zs("EDID", "ModQ_QuestChanged")})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModQ.esp\n*ModQ2.esp\n");
+    auto cfg = configFor(root);
+    CHECK(cfg.compile.compileNewQuestsAndNpcs); // on by default
+    const auto on = ChangeDetector::settingsHash(cfg.compile, {}, "x", {});
+    for (bool enabled : {true, false}) {
+        cfg.compile.compileNewQuestsAndNpcs = enabled;
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        const auto& s = p.session();
+        const auto* q = s.findPlugin("ModQ.esp");
+        CHECK_EQ(p.compiledOutput()->isCompiled(q->index), enabled);
+        CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModQ2.esp")->index));
+        bool why = false;
+        for (const auto& r : q->reasons)
+            why |= r.find("Adds new quests, dialogue or NPCs: QUST (1)") != std::string::npos;
+        CHECK_EQ(why, !enabled);
+    }
+    CHECK(ChangeDetector::settingsHash(cfg.compile, {}, "x", {}) != on);
+}
+
 // Compiling only the plugins the user chooses. Only ModA: it stays anyway, because ModB (not chosen, so in
 // the load order) lists it as a master. ModA and ModB: both compile, ModC (not chosen) stays, with its
 // reason. The choice is part of the settings a build is checked against.

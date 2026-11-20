@@ -573,6 +573,7 @@ AnalysisOptions Pipeline::analysisOptions() const
 {
     AnalysisOptions a = config_.analysis;
     a.masterPlaceholders = config_.compile.unusedMasterPlaceholders;
+    a.newQuestsAndNpcs = config_.compile.compileNewQuestsAndNpcs;
     a.placeholdersOff.clear();
     if (a.masterPlaceholders && session_) {
         std::string off;

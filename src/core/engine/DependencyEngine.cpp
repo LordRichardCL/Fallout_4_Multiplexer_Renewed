@@ -234,6 +234,17 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
                     ++newOverrideOnly[r.plugin][r.signature];
     }
 
+    // New quests, dialogue, scenes and NPCs per plugin (for the advanced switch).
+    std::map<PluginIndex, std::map<Signature, size_t>> newQuestsNpcs;
+    if (!options.newQuestsAndNpcs) {
+        static const std::unordered_set<Signature> kTypes = {Signature("QUST"), Signature("DIAL"), Signature("INFO"),
+                                                             Signature("SCEN"), Signature("DLBR"), Signature("DLVW"),
+                                                             Signature("NPC_")};
+        for (const auto& r : session.records)
+            if (r.plugin == r.key.origin && kTypes.count(r.signature))
+                ++newQuestsNpcs[r.plugin][r.signature];
+    }
+
     // Places that name plugins by file name, grouped per plugin. Their classes decide, never their number.
     std::map<PluginIndex, std::vector<const PluginReference*>> nameRefs;
     for (const auto& r : session.nameReferences)
@@ -292,6 +303,17 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
             for (const auto& [s, n] : it->second) {
                 newOfOverrideTypes.push_back(s.str() + " (" + std::to_string(n) + ")");
                 block.types.push_back(s);
+            }
+        if (!options.newQuestsAndNpcs)
+            if (auto it = newQuestsNpcs.find(p.index); it != newQuestsNpcs.end()) {
+                std::vector<std::string> what;
+                for (const auto& [sig, n] : it->second)
+                    what.push_back(sig.str() + " (" + std::to_string(n) + ")");
+                p.eligibility = Eligibility::Ineligible;
+                block.otherReason = true; // the setting, not missing support
+                p.reasons.push_back("Adds new quests, dialogue or NPCs: " + join(what, ", ") +
+                                    ". Compiling them is off (Compilation page, Advanced: Compile new quests, dialogue "
+                                    "and NPCs)");
             }
         if (!newOfOverrideTypes.empty()) {
             p.eligibility = Eligibility::Ineligible;

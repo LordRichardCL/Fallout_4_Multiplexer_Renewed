@@ -69,7 +69,8 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                      "and build Multiplexer_Patch.esp. Light outputs and writing broken references as null stay off.");
     presets_->button("Safest")
         ->setToolTip("Combine compatible changes only: no patch choices, no cell merge, no previs translation, no "
-                     "patch, no light outputs, broken references never written as null.");
+                     "patch, no light outputs, broken references never written as null, and plugins that add new quests, "
+                     "dialogue or NPCs kept in the load order.");
     presets_->button("Custom")->setToolTip("Your own choice of switches below.");
     l->addWidget(makePageHeader("Compilation", "Turns your mods into a few output plugins, with the same game data.",
                                 {presets_}));
@@ -180,6 +181,15 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "order, so the game reads its own data unchanged (Kept Out Automatically: Broken reference). On: such "
         "references are written as null (00000000) and the plugin compiles; each is listed under Broken in "
         "Source. The game's own reading of these references is not verified, so this can lose data.");
+    newQuestsNpcs_ = new ToggleSwitch("Compile new quests, dialogue and NPCs");
+    newQuestsNpcs_->setToolTip(
+        "On (default): plugins that add new quests, dialogue, scenes or NPCs compile like any other. Their records "
+        "get new FormIDs in the outputs; voice files and FaceGen (faces) are copied under the new FormIDs, "
+        "start-game-enabled quests are listed in the outputs' .seq files, and scripts or configs that name the "
+        "plugin are checked as for every plugin. Off: such plugins stay in the load order, which is the safest "
+        "choice for quest-heavy load orders and saves in progress; overrides of quests, dialogue and NPCs still "
+        "compile. Switching it off after a build is in use returns those plugins to the load order (you are asked "
+        "first).");
     masterPlaceholders_ = new ToggleSwitch("Placeholders for unused masters");
     masterPlaceholders_->setToolTip(
         "A plugin that stays in the load order keeps its masters there too. Some list a master without using any "
@@ -257,6 +267,12 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     advancedSection_->body()->addWidget(makeOptionRow("Write broken references as null",
                                                       "Lets plugins with broken references compile",
                                                       brokenAsNull_->toolTip(), {lossy, brokenAsNull_}));
+    auto* advancedPill = new QLabel("advanced");
+    advancedPill->setObjectName("Pill");
+    advancedPill->setStyleSheet("background:#2a2614; color:#f5c542;");
+    advancedSection_->body()->addWidget(makeOptionRow("Compile new quests, dialogue and NPCs",
+                                                      "Off keeps plugins that add them in the load order",
+                                                      newQuestsNpcs_->toolTip(), {advancedPill, newQuestsNpcs_}));
     advancedSection_->body()->addWidget(makeOptionRow("Placeholders for unused masters",
                                                       "Compile masters that plugins staying in the load order list "
                                                       "but do not use (Mod Organizer 2)",
@@ -674,7 +690,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     connect(strategy_, &QComboBox::currentIndexChanged, this, [this] { storeOptions(); });
     connect(rules_, &QPlainTextEdit::textChanged, this, [this] { storeOptions(); });
     for (auto* c : {autoOutputs_, merge_, light_, translatePrevis_, mergeCellConfig_, applyPlan_, brokenAsNull_, patch_,
-                    patchOnly_, masterPlaceholders_})
+                    patchOnly_, masterPlaceholders_, newQuestsNpcs_})
         connect(c, &QCheckBox::toggled, this, [this] {
             storeOptions();
             updatePresetState();
@@ -696,10 +712,10 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
 
 namespace {
 struct Preset {
-    bool merge, plan, cells, previs, patch, patchOnly, light, brokenNull;
+    bool merge, plan, cells, previs, patch, patchOnly, light, brokenNull, newQuests;
 };
-const Preset kRecommended{true, true, true, true, true, false, false, false};
-const Preset kSafest{true, false, false, false, false, false, false, false};
+const Preset kRecommended{true, true, true, true, true, false, false, false, true};
+const Preset kSafest{true, false, false, false, false, false, false, false, false};
 } // namespace
 
 void CompilationPage::applyPreset(const QString& name)
@@ -717,6 +733,7 @@ void CompilationPage::applyPreset(const QString& name)
     patch_->setChecked(p.patch);
     light_->setChecked(p.light);
     brokenAsNull_->setChecked(p.brokenNull);
+    newQuestsNpcs_->setChecked(p.newQuests);
     updatePresetState();
 }
 
@@ -726,11 +743,11 @@ void CompilationPage::updatePresetState()
         return;
     const Preset now{merge_->isChecked(),  applyPlan_->isChecked(), mergeCellConfig_->isChecked(),
                      translatePrevis_->isChecked(), patch_->isChecked(), patchOnly_->isChecked(),
-                     light_->isChecked(), brokenAsNull_->isChecked()};
+                     light_->isChecked(), brokenAsNull_->isChecked(), newQuestsNpcs_->isChecked()};
     auto same = [&](const Preset& p) {
         return p.merge == now.merge && p.plan == now.plan && p.cells == now.cells && p.previs == now.previs &&
                p.patch == now.patch && p.patchOnly == now.patchOnly && p.light == now.light &&
-               p.brokenNull == now.brokenNull;
+               p.brokenNull == now.brokenNull && p.newQuests == now.newQuests;
     };
     presets_->setCurrent(same(kRecommended) ? "Recommended" : same(kSafest) ? "Safest" : "Custom");
 }
@@ -750,12 +767,12 @@ void CompilationPage::updateSummaries()
                                                       : "no patch");
     const int strategy = strategy_->currentData().toInt();
     advancedSection_->setSummary(
-        QString("%1 · light outputs %2 · broken references %3 · master placeholders %4")
+        QString("%1 · light outputs %2 · broken references %3 · master placeholders %4 · new quests and NPCs %5")
             .arg(strategy == int(AllocationStrategy::ByRecordType)   ? "grouped by record type"
                  : strategy == int(AllocationStrategy::UserDefined) ? "balanced with your rules"
                                                                     : "balanced allocation",
                  light_->isChecked() ? "on" : "off", brokenAsNull_->isChecked() ? "written as null" : "kept",
-                 masterPlaceholders_->isChecked() ? "on" : "off"));
+                 masterPlaceholders_->isChecked() ? "on" : "off", newQuestsNpcs_->isChecked() ? "on" : "off"));
 }
 
 namespace {
@@ -859,6 +876,7 @@ void CompilationPage::loadOptions()
     applyPlan_->setChecked(c.applyPatchPlan);
     brokenAsNull_->setChecked(c.brokenReferencesAsNull);
     masterPlaceholders_->setChecked(c.unusedMasterPlaceholders);
+    newQuestsNpcs_->setChecked(c.compileNewQuestsAndNpcs);
     patchOnly_->setChecked(c.patchOnly);
     patch_->setChecked(c.buildPatch || c.patchOnly);
     patch_->setEnabled(!c.patchOnly);
@@ -886,6 +904,7 @@ void CompilationPage::storeOptions()
     c.applyPatchPlan = applyPlan_->isChecked();
     c.brokenReferencesAsNull = brokenAsNull_->isChecked();
     c.unusedMasterPlaceholders = masterPlaceholders_->isChecked();
+    c.compileNewQuestsAndNpcs = newQuestsNpcs_->isChecked();
     c.patchOnly = patchOnly_->isChecked();
     c.buildPatch = c.patchOnly || patch_->isChecked();
     app_->config().exportOptions.outputDirectory = toPath(outputDir_->text().trimmed());
