@@ -12,6 +12,7 @@ add_library(fo4mx_gui STATIC
     widgets/GraphView.cpp
     widgets/Widgets.cpp
     widgets/PluginSelection.cpp
+    widgets/Glossary.cpp
     models/SqlModel.cpp
     models/GroupedSqlModel.cpp
     pages/Page.hpp

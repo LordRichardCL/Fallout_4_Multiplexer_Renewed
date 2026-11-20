@@ -55,15 +55,15 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
         if (f.open(QIODevice::WriteOnly | QIODevice::Text))
             f.write(exportText().toUtf8());
     });
-    chips_ = new FilterChips({"All", "ESM", "ESP", "ESL", "Generated", "Conflicting", "Disabled", "Eligible", "Ineligible",
+    chips_ = new FilterChips({"All", "ESM", "ESP", "ESL", "Generated", "Conflicting", "Disabled", "Will compile", "Stays",
                              "Holding Back", "Blocking Types"});
     chips_->setToolTip("Holding Back: plugins that stay in the load order and keep others there as their masters, "
                        "most first (those others would compile if they did). Blocking Types: record types the "
                        "compiler does not support yet, and how many plugins supporting each one would make "
                        "compilable");
     l->addWidget(chips_);
-    chips_->setToolTip(chips_->toolTip() + "\nIneligible: every plugin that will not be compiled (ineligible, retained, "
-                                           "inactive or unreadable), so Eligible + Ineligible = all plugins");
+    chips_->setToolTip(chips_->toolTip() + "\nStays: every plugin that will not be compiled (it cannot be, you kept it, "
+                                           "base game, not enabled or unreadable), so Will compile + Stays = all plugins");
 
     // Plugin analysis summary: every analysed plugin, eligible or not, by file type. Clicking a card
     // filters the table through the chips above.
@@ -72,8 +72,8 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
     sumRow->setContentsMargins(0, 0, 0, 0);
     sumRow->setSpacing(10);
     total_ = makeSummaryCard("Total Plugins", "All", theme::kText, false);
-    eligible_ = makeSummaryCard("Eligible", "Eligible", theme::kGreen, true);
-    ineligible_ = makeSummaryCard("Ineligible", "Ineligible", theme::kYellow, true);
+    eligible_ = makeSummaryCard("Will compile", "Will compile", theme::kGreen, true);
+    ineligible_ = makeSummaryCard("Stays in load order", "Stays", theme::kYellow, true);
     sumRow->addWidget(total_.frame, 2);
     sumRow->addWidget(eligible_.frame, 3);
     sumRow->addWidget(ineligible_.frame, 3);
@@ -84,6 +84,14 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
     styleTable(table_);
     model_ = new SqlModel(this);
     table_->setModel(model_);
+    enableColumnChooser(table_, {}, {10}, [this](int c, bool hidden) {
+        if (!generatedMode_ && !blockersMode_) {
+            if (hidden)
+                hiddenColumns_.insert(c);
+            else
+                hiddenColumns_.remove(c);
+        }
+    });
     split->addWidget(table_);
 
     auto* side = new QWidget;
@@ -217,18 +225,19 @@ void PluginsPage::updateSummary()
     eligible_.hint->setText(s.total ? "will be compiled" : " ");
     QStringList why;
     if (s.notEligibleIneligible)
-        why << QString("%1 ineligible").arg(formatCount(qint64(s.notEligibleIneligible)));
+        why << QString("%1 cannot compile").arg(formatCount(qint64(s.notEligibleIneligible)));
     if (s.retained)
-        why << QString("%1 retained").arg(formatCount(qint64(s.retained)));
+        why << QString("%1 base game or kept by you").arg(formatCount(qint64(s.retained)));
     if (s.inactive)
-        why << QString("%1 inactive").arg(formatCount(qint64(s.inactive)));
+        why << QString("%1 not enabled").arg(formatCount(qint64(s.inactive)));
     if (s.error)
         why << QString("%1 unreadable").arg(formatCount(qint64(s.error)));
     if (s.otherStatus)
         why << QString("%1 other").arg(formatCount(qint64(s.otherStatus)));
     ineligible_.hint->setText(why.isEmpty() ? QStringLiteral(" ") : why.join(" · "));
-    ineligible_.hint->setToolTip("Ineligible: holds something the compiler cannot reproduce. Retained: base game, "
-                                 "Creation Club or excluded. Inactive: not enabled. Unreadable: damaged or missing "
+    ineligible_.hint->setToolTip("Cannot compile: holds something the compiler cannot reproduce, or another plugin "
+                                 "that stays needs it as a master. Base game or kept by you: base game, Creation Club, "
+                                 "excluded or not chosen. Not enabled: switched off. Unreadable: damaged or missing "
                                  "masters.");
     // The card matching the current filter is raised slightly.
     const QString chip = chips_->current();
@@ -281,32 +290,34 @@ void PluginsPage::reload()
             where += " AND conflict_count > 0";
         else if (chip == "Disabled")
             where += " AND active = 0";
-        else if (chip == "Eligible")
+        else if (chip == "Will compile")
             where += " AND eligibility = 'Eligible'";
-        else if (chip == "Ineligible")
+        else if (chip == "Stays")
             where += " AND eligibility <> 'Eligible'"; // as the summary: everything that will not be compiled
         const bool holding = chip == "Holding Back";
         if (holding)
             where += " AND holds_back > 0";
-        sql = "SELECT load_order_hex AS '#', name AS 'Plugin Name', type AS Type, record_count AS 'Record Count', "
-              "conflict_count AS 'Conflict Count', master_count AS 'Master Count', status AS Status, "
-              "eligibility AS Eligibility, source_mod AS Mod, " +
+        // Whether it compiles comes first, in plain words, with the first reason beside it.
+        sql = "SELECT load_order_hex AS '#', name AS 'Plugin', " + plainStatusSql() +
+              " AS 'Compiles?', CASE WHEN eligibility = 'Eligible' THEN '' WHEN instr(eligibility_reason, '; ') > 0 "
+              "THEN substr(eligibility_reason, 1, instr(eligibility_reason, '; ') - 1) ELSE eligibility_reason END AS "
+              "Why, type AS Type, record_count AS Records, conflict_count AS Conflicts, master_count AS Masters, "
+              "source_mod AS Mod, " +
               QString(holding ? "holds_back AS 'Would Also Compile'" : "support AS Support") + ", id FROM Plugins WHERE " +
               where +
               (holding ? " ORDER BY holds_back DESC, name"
                        : " ORDER BY active DESC, CASE WHEN load_order < 0 THEN 99999 ELSE load_order END, name");
-        model_->setNumberColumns(holding ? QSet<int>{3, 4, 5, 9} : QSet<int>{3, 4, 5});
+        model_->setNumberColumns(holding ? QSet<int>{5, 6, 7, 9} : QSet<int>{5, 6, 7});
         model_->setBytesColumns({});
-        model_->setStatusColumns({6, 7});
+        model_->setStatusColumns({2});
     }
     model_->setMonoColumns({0});
     model_->load(app_->readDb(), sql, binds);
     summary_->setVisible(!generatedMode_ && !blockersMode_);
     updateSummary();
-    if (!generatedMode_ && !blockersMode_)
-        table_->hideColumn(10);
-    else
-        table_->showColumn(10);
+    // The plugin list hides the id and the columns you chose to hide; the other lists show every column.
+    for (int c = 0; c < model_->columnCount(); ++c)
+        table_->setColumnHidden(c, !generatedMode_ && !blockersMode_ && (c == 10 || hiddenColumns_.contains(c)));
     fitColumns(table_);
     if (blockersMode_) {
         QString held = meta("blocked_by_types"), all = meta("unlocked_by_all_types");
@@ -467,7 +478,7 @@ void PluginsPage::showDetails(int row)
         return;
     selectedPlugin_ = q.value(0).toString();
     auto v = [&](int i) { return q.value(i).toString().toHtmlEscaped(); };
-    QString elig = q.value(14).toString();
+    const QString elig = plainStatus(q.value(14).toString(), q.value(15).toString(), q.value(22).toInt() != 0);
     QColor ec = theme::statusText(elig);
     QString html;
     html += QString("<h2 style='color:#3ddc84;margin-bottom:2px'>%1</h2>").arg(v(0));
@@ -484,7 +495,7 @@ void PluginsPage::showDetails(int row)
                      formatCount(q.value(8).toLongLong()), formatCount(q.value(9).toLongLong()),
                      formatCount(q.value(10).toLongLong()), formatCount(q.value(11).toLongLong()),
                      formatCount(q.value(12).toLongLong()), formatCount(q.value(13).toLongLong()));
-    html += QString("<p><b>Compilation:</b> <span style='color:%1'>%2</span><br>%3</p>")
+    html += QString("<p><b>Compiles?</b> <span style='color:%1'>%2</span><br>%3</p>")
                 .arg(ec.isValid() ? ec.name() : "#d7e4dc", elig.toHtmlEscaped(),
                      v(15).replace("; ", "<br>"));
     if (q.value(23).toLongLong() > 0)

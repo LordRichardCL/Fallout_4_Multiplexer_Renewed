@@ -118,7 +118,7 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
 
     auto* split = new QSplitter(Qt::Vertical);
     table_ = new QTableView;
-    styleTable(table_);
+    styleTable(table_, false);
     model_ = new SqlModel(this);
     table_->setModel(model_);
     // Sorting runs in SQL: the view only shows the indicator and reports clicks.

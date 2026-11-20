@@ -2,6 +2,8 @@
 
 #include "pages/Page.hpp"
 
+#include <QSet>
+
 class QLineEdit;
 class QTableView;
 class QTextBrowser;
@@ -27,6 +29,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
+    QSet<int> hiddenColumns_{7, 9}; // plugin list columns hidden (right-click the header to change)
     struct SummaryCard {
         QFrame* frame = nullptr;
         QLabel* value = nullptr;

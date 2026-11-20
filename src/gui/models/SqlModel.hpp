@@ -5,6 +5,8 @@
 #include <QSqlDatabase>
 #include <QVariant>
 
+#include <functional>
+
 class QTableView;
 
 namespace gui {
@@ -24,13 +26,28 @@ public:
     QVariant value(int row, int column) const;
 
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
+    // Clicking a column header sorts by that column: the query runs again ordered by it (rows keep their
+    // columns, so value(row, column) stays right). Column -1: the query's own order.
+    void sort(int column, Qt::SortOrder order = Qt::AscendingOrder) override;
 
 private:
+    bool run();
     QSet<int> statusColumns_, numberColumns_, monoColumns_, bytesColumns_;
+    QSqlDatabase db_;
+    QString sql_;
+    QVariantList binds_;
+    int sortColumn_ = -1;
+    Qt::SortOrder sortOrder_ = Qt::AscendingOrder;
 };
 
 // Applies the standard table look (alternating rows, stretch last column...).
-void styleTable(QTableView* view);
+// `sortable`: clicking a header sorts (pages that sort in their own query pass false).
+void styleTable(QTableView* view, bool sortable = true);
+// A right-click menu on the header to show or hide columns; `hidden` start hidden, `never` are never
+// offered (key columns the page reads).
+// `changed` is told each change (column, now hidden).
+void enableColumnChooser(QTableView* view, const QSet<int>& hidden, const QSet<int>& never = {},
+                         std::function<void(int, bool)> changed = {});
 // Sizes columns to their content, capped so long text does not push others off screen.
 void fitColumns(QTableView* view, int maxWidth = 380);
 

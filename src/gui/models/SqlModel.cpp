@@ -5,6 +5,7 @@
 
 #include <QFontDatabase>
 #include <QHeaderView>
+#include <QMenu>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QTableView>
@@ -17,19 +18,45 @@ SqlModel::SqlModel(QObject* parent) : QSqlQueryModel(parent) {}
 
 bool SqlModel::load(QSqlDatabase db, const QString& sql, const QVariantList& binds)
 {
-    if (!db.isOpen()) {
+    db_ = db; // the column clicked last keeps sorting the new rows
+    sql_ = sql;
+    binds_ = binds;
+    return run();
+}
+
+void SqlModel::sort(int column, Qt::SortOrder order)
+{
+    if (column == sortColumn_ && order == sortOrder_)
+        return;
+    sortColumn_ = column;
+    sortOrder_ = order;
+    if (!sql_.isEmpty())
+        run();
+}
+
+bool SqlModel::run()
+{
+    if (!db_.isOpen()) {
         clear();
         return false;
     }
-    QSqlQuery q(db);
+    // Concatenated, not QString::arg: the query may contain % signs (LIKE patterns).
+    const QString sql = sortColumn_ < 0 ? sql_
+                                        : "SELECT * FROM (" + sql_ + ") ORDER BY " + QString::number(sortColumn_ + 1) +
+                                              (sortOrder_ == Qt::AscendingOrder ? " ASC" : " DESC");
+    QSqlQuery q(db_);
     q.setForwardOnly(false);
-    if (!q.prepare(sql)) {
+    if (sortColumn_ >= 0 && !q.prepare(sql)) { // a column the new query does not have: its own order
+        sortColumn_ = -1;
+        return run();
+    }
+    if (sortColumn_ < 0 && !q.prepare(sql)) {
         spdlog::warn("SQL prepare failed: {} ({})", q.lastError().text().toStdString(), sql.left(120).toStdString());
         clear();
         return false;
     }
-    for (int i = 0; i < binds.size(); ++i)
-        q.bindValue(i, binds[i]);
+    for (int i = 0; i < binds_.size(); ++i)
+        q.bindValue(i, binds_[i]);
     if (!q.exec()) {
         spdlog::warn("SQL failed: {}", q.lastError().text().toStdString());
         clear();
@@ -76,7 +103,7 @@ QVariant SqlModel::data(const QModelIndex& idx, int role) const
     return QSqlQueryModel::data(idx, role);
 }
 
-void styleTable(QTableView* view)
+void styleTable(QTableView* view, bool sortable)
 {
     view->setAlternatingRowColors(true);
     view->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -89,7 +116,38 @@ void styleTable(QTableView* view)
     view->horizontalHeader()->setStretchLastSection(true);
     view->horizontalHeader()->setHighlightSections(false);
     view->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    view->setSortingEnabled(false);
+    // No sort indicator until a header is clicked: the page's own order first.
+    view->horizontalHeader()->setSortIndicator(-1, Qt::AscendingOrder);
+    view->setSortingEnabled(sortable);
+}
+
+void enableColumnChooser(QTableView* view, const QSet<int>& hidden, const QSet<int>& never,
+                         std::function<void(int, bool)> changed)
+{
+    auto* h = view->horizontalHeader();
+    for (int c : hidden)
+        view->setColumnHidden(c, true);
+    h->setContextMenuPolicy(Qt::CustomContextMenu);
+    h->setToolTip("Right-click to show or hide columns");
+    QObject::connect(h, &QHeaderView::customContextMenuRequested, view, [view, h, never, changed](const QPoint& at) {
+        QMenu menu(view);
+        auto* model = view->model();
+        if (!model)
+            return;
+        for (int c = 0; c < model->columnCount(); ++c) {
+            if (never.contains(c))
+                continue;
+            auto* a = menu.addAction(model->headerData(c, Qt::Horizontal).toString());
+            a->setCheckable(true);
+            a->setChecked(!view->isColumnHidden(c));
+            QObject::connect(a, &QAction::toggled, view, [view, c, changed](bool on) {
+                view->setColumnHidden(c, !on);
+                if (changed)
+                    changed(c, !on);
+            });
+        }
+        menu.exec(h->mapToGlobal(at));
+    });
 }
 
 void fitColumns(QTableView* view, int maxWidth)

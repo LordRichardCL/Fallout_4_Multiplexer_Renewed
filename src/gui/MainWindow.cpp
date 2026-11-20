@@ -28,6 +28,7 @@
 #include <QPushButton>
 #include <QPainter>
 #include <QShortcut>
+#include "widgets/Glossary.hpp"
 #include <QSqlQuery>
 #include <QStyledItemDelegate>
 #include <QStackedWidget>
@@ -146,6 +147,16 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
     nav_->setMouseTracking(true);
     nav_->viewport()->setAttribute(Qt::WA_Hover);
     nl->addWidget(nav_, 1);
+    auto* glossary = new QPushButton("Glossary  (F1)");
+    glossary->setObjectName("LinkButton");
+    glossary->setStyleSheet("margin-left: 12px; margin-bottom: 4px;");
+    glossary->setCursor(Qt::PointingHandCursor);
+    glossary->setIcon(lineIcon("info", theme::kMuted, 14));
+    glossary->setToolTip("What the words in this app mean: plugin, master, override, ESL, ...");
+    connect(glossary, &QPushButton::clicked, this, [this] { showGlossary(this); });
+    nl->addWidget(glossary, 0, Qt::AlignLeft);
+    auto* f1 = new QShortcut(QKeySequence(Qt::Key_F1), this);
+    connect(f1, &QShortcut::activated, this, [this] { showGlossary(this); });
     auto* version = new QLabel("v" FO4MX_VERSION " · by Romewolf");
     version->setObjectName("NavFooter");
     nl->addWidget(version);

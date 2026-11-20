@@ -190,6 +190,14 @@ QColor statusTint(const QString& status)
 
 QColor statusText(const QString& status)
 {
+    if (status == "Will compile")
+        return kGreen;
+    if (status == "Stays in load order")
+        return kYellow;
+    if (status == "Kept by you")
+        return kBlue;
+    if (status == "Base game" || status == "Not enabled")
+        return kMuted;
     if (status == "Winning" || status == "Eligible" || status == "OK")
         return kGreen;
     if (status == "Replaced" || status == "Error" || status == "Critical" || status == "High" ||
