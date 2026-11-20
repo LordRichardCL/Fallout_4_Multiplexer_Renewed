@@ -141,6 +141,13 @@ private slots:
                                      "Not enabled"}));
         QCOMPARE(gui::plainStatus("Blocked", "Not chosen for compilation (only chosen plugins)", false),
                  QString("Kept by you"));
+        // Master Redirection: stays as a copy pointing at the outputs.
+        const QString reason = "Uses scripts that name plugins; Redirected (Master Redirection): it stays";
+        QCOMPARE(gui::plainStatus("Blocked", reason, false), QString("Stays, redirected"));
+        QVERIFY(q.exec("SELECT " + gui::plainStatusSql() +
+                       " FROM (SELECT 'Blocked' AS eligibility, '" + reason + "' AS eligibility_reason, 0 AS base_game)"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toString(), QString("Stays, redirected"));
     }
 
     // Clicking a header sorts by running the query again; LIKE patterns (% signs) and bindings survive it, and

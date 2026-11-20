@@ -180,6 +180,37 @@ private slots:
         QVERIFY(!QSettings().value("analysis/onlySelected").toBool());
     }
 
+    // Master Redirection and the light outputs' room to grow: set on the Compilation page, saved, kept across a
+    // restart. The per-plugin opt-out (Plugins page) is saved at once.
+    void redirection_and_light_headroom_are_saved()
+    {
+        auto* redirect = childWithText<QCheckBox>(compilation(), "Master Redirection");
+        QSpinBox* room = nullptr;
+        for (auto* sb : compilation()->findChildren<QSpinBox*>())
+            if (sb->suffix() == " records free")
+                room = sb;
+        QVERIFY(redirect && room);
+        QVERIFY(!redirect->isChecked());
+        QCOMPARE(room->value(), 200);
+        redirect->setChecked(true);
+        room->setValue(350);
+        QVERIFY(app_->config().compile.redirectMasters);
+        QCOMPARE(app_->config().compile.lightHeadroom, 350u);
+        app_->saveSettings();
+        app_->setRedirect("Quest.esp", false);
+        QCOMPARE(QSettings().value("compile/noRedirect").toStringList(), QStringList{"Quest.esp"});
+        start();
+        QVERIFY(app_->config().compile.redirectMasters);
+        QCOMPARE(app_->config().compile.lightHeadroom, 350u);
+        QCOMPARE(app_->notRedirected(), QStringList{"Quest.esp"});
+        QVERIFY(childWithText<QCheckBox>(compilation(), "Master Redirection")->isChecked());
+        app_->setRedirect("Quest.esp", true);
+        QVERIFY(app_->notRedirected().isEmpty());
+        app_->config().compile.redirectMasters = false;
+        app_->config().compile.lightHeadroom = 200;
+        app_->saveSettings();
+    }
+
     // Every page with options has a Save Settings button.
     void pages_with_options_have_save_settings()
     {
