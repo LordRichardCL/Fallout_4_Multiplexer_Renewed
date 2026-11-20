@@ -69,7 +69,7 @@ void Pipeline::openCache()
 
 uint64_t Pipeline::currentSettingsHash() const
 {
-    return ChangeDetector::settingsHash(*session_, config_.compile, config_.analysis.excludedPlugins);
+    return ChangeDetector::settingsHash(*session_, config_.compile, config_.analysis.selectionKey());
 }
 
 ChangeReport Pipeline::finishChangeReport(const std::optional<InstallSnapshot>& build, InstallSnapshot current,
@@ -97,7 +97,7 @@ ChangeReport Pipeline::checkForChanges(ProgressSink& progress)
         resolutions = w.resolutionStrings();
     }
     auto current = ChangeDetector::captureQuick(config_.install, build ? &*build : nullptr, progress);
-    uint64_t settings = ChangeDetector::settingsHash(config_.compile, config_.analysis.excludedPlugins,
+    uint64_t settings = ChangeDetector::settingsHash(config_.compile, config_.analysis.selectionKey(),
                                                      definitionsId(definitions(config_)),
                                                      std::move(resolutions));
     changes_ = finishChangeReport(build, std::move(current), settings);
@@ -242,7 +242,7 @@ void Pipeline::scan(ProgressSink& progress)
         CompileOptions effective = config_.compile;
         effective.forcedWinners = std::move(forced);
         changes_ = finishChangeReport(build, std::move(snapshot),
-                                      ChangeDetector::settingsHash(*session_, effective, config_.analysis.excludedPlugins));
+                                      ChangeDetector::settingsHash(*session_, effective, config_.analysis.selectionKey()));
         w.writeChanges(changes_);
     }
     try {
@@ -991,6 +991,10 @@ bool Pipeline::compile(ProgressSink& progress)
         for (const auto& p : session_->plugins) {
             if (config_.compile.patchOnly || !p.reactivated || compiled_->isCompiled(p.index) ||
                 session_->userRetained.count(p.key))
+                continue;
+            if (config_.analysis.onlySelected && // not chosen: the user's choice too
+                std::none_of(config_.analysis.selectedPlugins.begin(), config_.analysis.selectedPlugins.end(),
+                             [&](const std::string& n) { return toLower(n) == p.key; }))
                 continue;
             if (allowed.count(p.key)) {
                 validation_->fail(Severity::Warning, "Returning Plugins",

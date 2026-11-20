@@ -23,6 +23,17 @@
 
 namespace fo4mx {
 
+std::vector<std::string> AnalysisOptions::selectionKey() const
+{
+    std::vector<std::string> key = excludedPlugins;
+    if (onlySelected) {
+        key.push_back("only:");
+        for (const auto& p : selectedPlugins)
+            key.push_back("only:" + p);
+    }
+    return key;
+}
+
 std::vector<PluginIndex> DependencyEngine::dependents(const Session& session, PluginIndex plugin)
 {
     std::vector<PluginIndex> out;
@@ -357,6 +368,20 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
                     p.reasons.back() += ": turn on the Advanced Users Auto-Merger to compile it";
             }
         }
+    }
+
+    // Opt-in: a plugin that could compile but was not chosen stays in the load order (its own checks
+    // above still decide what the list shows for the ones that cannot).
+    if (options.onlySelected) {
+        std::unordered_set<std::string> chosen;
+        for (const auto& n : options.selectedPlugins)
+            chosen.insert(toLower(n));
+        for (auto& p : session.plugins)
+            if (p.eligibility == Eligibility::Eligible && !chosen.count(p.key)) {
+                p.eligibility = Eligibility::Retained;
+                p.reasons.push_back("Not chosen for compilation (only the plugins you choose are compiled)");
+                blocks[p.index].candidate = false;
+            }
     }
 
     // A plugin that stays in the load order keeps its masters in the load order too, unless it uses

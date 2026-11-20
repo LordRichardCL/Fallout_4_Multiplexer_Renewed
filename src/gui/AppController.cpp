@@ -274,6 +274,10 @@ void AppController::loadSettings()
     for (const auto& p : s.value("analysis/excluded").toStringList())
         config_.analysis.excludedPlugins.push_back(ss(p));
     config_.analysis.compileCreationClub = s.value("analysis/compileCreationClub", false).toBool();
+    config_.analysis.onlySelected = s.value("analysis/onlySelected", false).toBool();
+    config_.analysis.selectedPlugins.clear();
+    for (const auto& p : s.value("analysis/selected").toStringList())
+        config_.analysis.selectedPlugins.push_back(ss(p));
     config_.diagnosticRecorder = s.value("diagnostics/recorder", false).toBool();
     // MultiplexerDiagnosticRecorder.dll ships next to the application.
     config_.diagnosticRecorderDll =
@@ -355,6 +359,8 @@ void AppController::saveSettings()
     s.setValue("compile/outputDirectory", toQString(config_.exportOptions.outputDirectory));
     s.setValue("analysis/excluded", excludedPlugins());
     s.setValue("analysis/compileCreationClub", config_.analysis.compileCreationClub);
+    s.setValue("analysis/onlySelected", config_.analysis.onlySelected);
+    s.setValue("analysis/selected", chosenPlugins());
     s.setValue("diagnostics/recorder", config_.diagnosticRecorder);
     s.setValue("archives/f4seLoader", config_.f4seArchiveLoader);
     s.setValue("analysis/allTypes", config_.conflicts.analyseAllRecordTypes);
@@ -379,6 +385,64 @@ QStringList AppController::excludedPlugins() const
     for (const auto& p : config_.analysis.excludedPlugins)
         out << qs(p);
     return out;
+}
+
+QStringList AppController::chosenPlugins() const
+{
+    QStringList out;
+    for (const auto& p : config_.analysis.selectedPlugins)
+        out << qs(p);
+    return out;
+}
+
+namespace {
+void setMembership(std::vector<std::string>& list, const QStringList& plugins, bool in)
+{
+    for (const auto& plugin : plugins) {
+        const auto key = toLower(ss(plugin));
+        list.erase(std::remove_if(list.begin(), list.end(), [&](const std::string& p) { return toLower(p) == key; }),
+                   list.end());
+        if (in)
+            list.push_back(ss(plugin));
+    }
+}
+} // namespace
+
+void AppController::applySelection()
+{
+    // Saved at once (actions, not options), without saving other unsaved settings.
+    QSettings s;
+    s.setValue("analysis/excluded", excludedPlugins());
+    s.setValue("analysis/onlySelected", config_.analysis.onlySelected);
+    s.setValue("analysis/selected", chosenPlugins());
+    emit settingsChanged();
+    if (pipeline_ && pipeline_->scanned() && !busy_) {
+        pipeline_->config().analysis = config_.analysis;
+        pipeline_->refreshEligibility();
+        emit dataChanged();
+    }
+}
+
+void AppController::setExcludedMany(const QStringList& plugins, bool excluded)
+{
+    setMembership(config_.analysis.excludedPlugins, plugins, excluded);
+    applySelection();
+}
+
+void AppController::setOnlySelected(bool on)
+{
+    if (config_.analysis.onlySelected == on)
+        return;
+    config_.analysis.onlySelected = on;
+    applySelection();
+}
+
+void AppController::setChosen(const QStringList& plugins, bool chosen)
+{
+    setMembership(config_.analysis.selectedPlugins, plugins, chosen);
+    if (chosen) // switching one on undoes an exclusion
+        setMembership(config_.analysis.excludedPlugins, plugins, false);
+    applySelection();
 }
 
 void AppController::setExcluded(const QString& plugin, bool excluded)

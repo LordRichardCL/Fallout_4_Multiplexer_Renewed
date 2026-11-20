@@ -4,6 +4,7 @@
 #include "models/GroupedSqlModel.hpp"
 #include "models/SqlModel.hpp"
 #include "Theme.hpp"
+#include "widgets/PluginSelection.hpp"
 #include "widgets/Widgets.hpp"
 
 #include "engine/Exporter.hpp"
@@ -128,6 +129,8 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "changes an earlier one; \"Multiplexer Latest.txt\" names the latest.\n\n"
         "Advanced: a folder inside Mod Organizer 2's mods folder makes every export a mod of its own there; then "
         "compiled plugins that have archives are replaced by archive loaders instead of loose copies and INI entries.");
+    selection_ = new PluginSelection(app_);
+    ol->addWidget(selection_);
     {
         QVBoxLayout* body = nullptr;
         ol->addWidget(makeSectionCard("compile", "Output", &body));
@@ -917,6 +920,7 @@ void CompilationPage::updateButtons()
 void CompilationPage::refresh()
 {
     loadOptions();
+    selection_->refresh();
     QSqlDatabase db = app_->readDb();
     const QString patchName = meta("patch_name");
     outputsModel_->setNumberColumns({1, 2, 3});

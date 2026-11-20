@@ -1544,6 +1544,49 @@ TEST(earlier_builds_switched_off_plugins_stay_sources_without_the_database)
     }
 }
 
+// Compiling only the plugins the user chooses. Only ModA: it stays anyway, because ModB (not chosen, so in
+// the load order) lists it as a master. ModA and ModB: both compile, ModC (not chosen) stays, with its
+// reason. The choice is part of the settings a build is checked against.
+TEST(only_chosen_plugins_are_compiled)
+{
+    auto root = buildInstall("onlychosen");
+    auto cfg = configFor(root);
+    cfg.analysis.onlySelected = true;
+    auto hashOf = [&](const PipelineConfig& c) {
+        return ChangeDetector::settingsHash(c.compile, c.analysis.selectionKey(), "x", {});
+    };
+    {
+        cfg.analysis.selectedPlugins = {"ModA.esp"};
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const auto& s = p.session();
+        const auto* a = s.findPlugin("ModA.esp");
+        CHECK(a->eligibility != Eligibility::Eligible);
+        bool why = false;
+        for (const auto& r : a->reasons)
+            why |= r.find("Required as a master by ModB.esp") != std::string::npos;
+        CHECK(why);
+        CHECK(s.findPlugin("ModB.esp")->eligibility == Eligibility::Retained);
+    }
+    const auto onlyA = hashOf(cfg);
+    cfg.analysis.selectedPlugins = {"ModA.esp", "ModB.esp"};
+    CHECK(hashOf(cfg) != onlyA);
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    CHECK(p.compile());
+    CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModA.esp")->index));
+    CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModB.esp")->index));
+    const auto* c = s.findPlugin("ModC.esp");
+    CHECK(!p.compiledOutput()->isCompiled(c->index));
+    bool notChosen = false;
+    for (const auto& r : c->reasons)
+        notChosen |= r.find("Not chosen for compilation") != std::string::npos;
+    CHECK(notChosen || c->eligibility != Eligibility::Retained);
+}
+
 // Save-safe rebuilds. Build 1 (light outputs, form lists in output 1, keywords in output 3) is switched
 // over. ModG's form list then gains a new keyword of its own: the keyword goes beside the list (output 1)
 // instead of moving the list to output 3, and the outputs stay light although the setting is now off.

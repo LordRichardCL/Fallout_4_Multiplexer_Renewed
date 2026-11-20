@@ -53,6 +53,14 @@ public:
 
     QStringList excludedPlugins() const;
     void setExcluded(const QString& plugin, bool excluded);
+    // Which plugins are compiled (Compilation page): every eligible one not excluded, or only the chosen
+    // ones (opt-in). Like exclusions these are saved at once and applied to the current analysis.
+    void setExcludedMany(const QStringList& plugins, bool excluded);
+    bool onlySelected() const { return config_.analysis.onlySelected; }
+    QStringList chosenPlugins() const;
+    void setOnlySelected(bool on);
+    void setChosen(const QStringList& plugins, bool chosen);
+    void applySelection();
     void saveResolution(const QString& originPlugin, quint32 objectId, const QString& winnerPlugin);
     void clearResolution(const QString& originPlugin, quint32 objectId);
     // The compatibility patch plan: the user's choice for one change (action -1: back to the default,

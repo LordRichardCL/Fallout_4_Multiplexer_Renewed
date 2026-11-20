@@ -122,6 +122,8 @@ Compile options:
   --auto-merge         Advanced Users Auto-Merger: also compile plugins named in
                        scripts/configs that can be relinked, and write relinked copies
   --exclude PLUGIN     never compile PLUGIN (repeatable)
+  --only PLUGIN        compile only the plugins named (repeatable); every other plugin stays in the
+                       load order
   --out DIR            folder holding the exports (default: <game>\\Multiplexer Output); every export
                        goes into "Multiplexer Output DDMMYY HHMMSS" in it, with Multiplexer Output.zip
   --reports DIR        report folder
@@ -273,6 +275,8 @@ PipelineConfig makeConfig(const Args& a)
     c.autoMerge = a.has("--auto-merge");
     c.buildPatch = c.patchOnly || a.has("--patch");
     cfg.analysis.excludedPlugins = a.all("--exclude");
+    cfg.analysis.selectedPlugins = a.all("--only");
+    cfg.analysis.onlySelected = !cfg.analysis.selectedPlugins.empty();
     cfg.diagnosticRecorder = a.has("--diagnostic-recorder");
     cfg.diagnosticRecorderDll = g_exeDir / diagnostics::kRecorderDllName;
     cfg.f4seArchiveLoader = a.has("--archive-loader");

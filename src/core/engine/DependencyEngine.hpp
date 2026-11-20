@@ -11,6 +11,12 @@ namespace fo4mx {
 
 struct AnalysisOptions {
     std::vector<std::string> excludedPlugins; // never compile these
+    // Only the plugins the user chose are compiled (opt-in); every other plugin that could compile stays in
+    // the load order ("Not chosen"). Off: every eligible plugin not excluded is compiled.
+    bool onlySelected = false;
+    std::vector<std::string> selectedPlugins;
+    // The plugin names that identify the selection, for change detection ("only:<name>" entries).
+    std::vector<std::string> selectionKey() const;
     bool compileCreationClub = false;
     unsigned threads = 0;
     // Placeholders for unused masters (CompileOptions::unusedMasterPlaceholders, possible only where archive

@@ -6,6 +6,8 @@
 #include "pages/AutoMergerPage.hpp"
 #include "pages/CompilationPage.hpp"
 #include "pages/SettingsPage.hpp"
+#include "widgets/PluginSelection.hpp"
+#include "widgets/Widgets.hpp"
 
 #include <QCheckBox>
 #include <QCoreApplication>
@@ -152,6 +154,30 @@ private slots:
         QCOMPARE(app_->databasePath(), dir_.filePath("other.sqlite"));
         db->setText(before);
         app_->saveSettings();
+    }
+
+    // Plugins to compile: switching to "Only the ones I choose" is saved at once and survives a restart; a
+    // plugin switched on is chosen (and no longer excluded).
+    void plugin_selection_mode_and_choices_are_saved()
+    {
+        auto* mode = compilation()->findChild<gui::SegmentedControl*>();
+        gui::SegmentedControl* selectionMode = nullptr;
+        for (auto* c : compilation()->findChildren<gui::SegmentedControl*>())
+            if (c->button(gui::PluginSelection::kChosen))
+                selectionMode = c;
+        QVERIFY(mode && selectionMode);
+        QTest::mouseClick(selectionMode->button(gui::PluginSelection::kChosen), Qt::LeftButton);
+        QVERIFY(app_->onlySelected());
+        QVERIFY(QSettings().value("analysis/onlySelected").toBool());
+        app_->setExcluded("Weapons.esp", true);
+        app_->setChosen({"Weapons.esp"}, true);
+        QVERIFY(!app_->excludedPlugins().contains("Weapons.esp"));
+        start();
+        QVERIFY(app_->onlySelected());
+        QCOMPARE(app_->chosenPlugins(), QStringList{"Weapons.esp"});
+        app_->setChosen({"Weapons.esp"}, false);
+        app_->setOnlySelected(false);
+        QVERIFY(!QSettings().value("analysis/onlySelected").toBool());
     }
 
     // Every page with options has a Save Settings button.
