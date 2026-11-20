@@ -340,21 +340,60 @@ std::optional<MeshInfo> readNifInfo(const std::vector<uint8_t>& nif)
                 throw FormatError("bad block type name");
             t = r.readFixedString(len);
         }
+        std::vector<uint16_t> blockType(m.blockCount);
         for (uint32_t i = 0; i < m.blockCount; ++i) {
             uint16_t ti = r.read<uint16_t>() & 0x7FFF;
+            blockType[i] = ti;
             if (ti < types.size())
                 m.blockTypes[types[ti]]++;
         }
-        r.skip(static_cast<size_t>(m.blockCount) * 4); // block sizes
+        std::vector<uint32_t> blockSize(m.blockCount);
+        for (auto& sz : blockSize)
+            sz = r.read<uint32_t>();
         uint32_t stringCount = r.read<uint32_t>();
         r.skip(4); // max length
-        for (uint32_t i = 0; i < stringCount && i < 4096; ++i) {
+        bool stringsRead = true;
+        for (uint32_t i = 0; i < stringCount; ++i) {
             uint32_t len = r.read<uint32_t>();
-            if (len > 1024)
+            if (len > 4096) {
+                stringsRead = false;
                 break;
-            m.strings.push_back(r.readFixedString(len));
+            }
+            std::string s = r.readFixedString(len);
+            if (m.strings.size() < 4096)
+                m.strings.push_back(std::move(s));
         }
         m.complete = true;
+        // Blocks follow the groups. A texture set holds its textures as sized strings; every other block is
+        // skipped by its size.
+        if (stringsRead) {
+            const uint32_t groups = r.read<uint32_t>();
+            if (groups > 1u << 16)
+                throw FormatError("bad group count");
+            r.skip(static_cast<size_t>(groups) * 4);
+            size_t at = r.position();
+            for (uint32_t i = 0; i < m.blockCount; ++i) {
+                const bool textureSet = blockType[i] < types.size() && types[blockType[i]] == "BSShaderTextureSet";
+                if (at + blockSize[i] > nif.size())
+                    throw FormatError("block past the end of the file");
+                if (textureSet && blockSize[i] >= 4) {
+                    BinaryReader b(nif);
+                    b.seek(at);
+                    const uint32_t n = b.read<uint32_t>();
+                    for (uint32_t t = 0; t < n && t < 64; ++t) {
+                        const uint32_t len = b.read<uint32_t>();
+                        if (len > 1024 || b.position() + len > at + blockSize[i])
+                            throw FormatError("bad texture set");
+                        std::string tex = b.readFixedString(len);
+                        while (!tex.empty() && tex.back() == '\0')
+                            tex.pop_back();
+                        if (!tex.empty())
+                            m.embeddedTextures.push_back(std::move(tex));
+                    }
+                }
+                at += blockSize[i];
+            }
+        }
     } catch (const FormatError&) {
         // partial information is still useful
     }

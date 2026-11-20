@@ -37,6 +37,8 @@ struct MeshInfo {
     uint32_t blockCount = 0;
     std::map<std::string, uint32_t> blockTypes;
     std::vector<std::string> strings; // string table (node names, material paths)
+    // Textures named directly in the mesh (BSShaderTextureSet blocks, used when a shape has no material file).
+    std::vector<std::string> embeddedTextures;
     bool complete = false;
 };
 std::optional<MeshInfo> readNifInfo(const std::vector<uint8_t>& nif);

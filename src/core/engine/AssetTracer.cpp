@@ -77,13 +77,18 @@ AssetTrace AssetTracer::trace(Session& session, const CompiledOutput& compiled, 
         try {
             if (iendsWith(path, ".nif")) {
                 auto bytes = session.readAsset(path, 4 * 1024 * 1024);
-                if (auto m = preview::readNifInfo(bytes))
+                if (auto m = preview::readNifInfo(bytes)) {
                     for (const auto& s : m->strings) {
                         if (iendsWith(s, ".bgsm") || iendsWith(s, ".bgem"))
                             list.push_back({underRoot(s, "materials\\"), "Material"});
                         else if (iendsWith(s, ".dds"))
                             list.push_back({underRoot(s, "textures\\"), "Texture"});
                     }
+                    // Texture sets in the mesh itself (shapes without a material file).
+                    for (const auto& t : m->embeddedTextures)
+                        if (iendsWith(t, ".dds"))
+                            list.push_back({underRoot(t, "textures\\"), "Texture"});
+                }
             } else if (iendsWith(path, ".bgsm") || iendsWith(path, ".bgem")) {
                 auto bytes = session.readAsset(path);
                 if (auto m = preview::readMaterialInfo(bytes))

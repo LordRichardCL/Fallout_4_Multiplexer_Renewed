@@ -103,7 +103,6 @@ Every other plugin stays in the load order untouched, and the Plugins page tells
 - **Load order slots.** Outputs are full ESPs unless *Light outputs* is on and they fit the light range with room to grow (200 new records by default), so a later mod update does not force them to become full plugins.
 - **Previews.** BC6H/BC7 textures show metadata only; meshes show structure (blocks, materials), not a 3D view.
 - **Windows.** CI builds, tests and packages the Windows version (MSVC, Qt 6) on every push. The download is the workflow artifact.
-- **Mesh tracing.** Textures are traced through the materials (`.bgsm`/`.bgem`) a mesh names. Texture sets embedded directly in mesh blocks are not followed yet.
 
 ## Building
 

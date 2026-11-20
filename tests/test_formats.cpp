@@ -774,3 +774,80 @@ TEST(previs_file_id_table_is_read_from_its_header)
     CHECK(e.recognised);
     CHECK(e.ids.empty());
 }
+
+namespace {
+
+// A minimal Fallout 4 NIF: a header (string table naming a material) and two blocks, a node and a texture
+// set naming two textures directly.
+std::vector<uint8_t> nifWithTextureSet()
+{
+    std::vector<uint8_t> out;
+    auto u8 = [&](uint8_t v) { out.push_back(v); };
+    auto u16 = [&](uint16_t v) { for (int i = 0; i < 2; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i))); };
+    auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i))); };
+    auto bstr = [&](const std::string& s) { u8(static_cast<uint8_t>(s.size() + 1)); out.insert(out.end(), s.begin(), s.end()); u8(0); };
+    auto sized = [&](std::vector<uint8_t>& to, const std::string& s) {
+        for (int i = 0; i < 4; ++i)
+            to.push_back(static_cast<uint8_t>(s.size() >> (8 * i)));
+        to.insert(to.end(), s.begin(), s.end());
+    };
+    const std::string line = "Gamebryo File Format, Version 20.2.0.7\n";
+    out.insert(out.end(), line.begin(), line.end());
+    u32(0x14020007);
+    u8(1);
+    u32(12);  // user version
+    u32(2);   // blocks
+    u32(130); // Fallout 4
+    bstr("author");
+    bstr("process");
+    bstr("export");
+    bstr("C:\\max\\file.max");
+    const std::vector<std::string> types = {"NiNode", "BSShaderTextureSet"};
+    u16(static_cast<uint16_t>(types.size()));
+    for (const auto& t : types) {
+        u32(static_cast<uint32_t>(t.size()));
+        out.insert(out.end(), t.begin(), t.end());
+    }
+    std::vector<uint8_t> node(8, 0), set;
+    for (int i = 0; i < 4; ++i)
+        set.push_back(static_cast<uint8_t>(3u >> (8 * i)));
+    sized(set, "textures\\Mod\\Rock_d.dds");
+    sized(set, "Mod\\Rock_n.dds");
+    sized(set, "");
+    u16(0);
+    u16(1);
+    u32(static_cast<uint32_t>(node.size()));
+    u32(static_cast<uint32_t>(set.size()));
+    const std::vector<std::string> strings = {"Rock", "Materials\\Mod\\Rock.bgsm"};
+    u32(static_cast<uint32_t>(strings.size()));
+    u32(64);
+    for (const auto& s : strings) {
+        u32(static_cast<uint32_t>(s.size()));
+        out.insert(out.end(), s.begin(), s.end());
+    }
+    u32(0); // groups
+    out.insert(out.end(), node.begin(), node.end());
+    out.insert(out.end(), set.begin(), set.end());
+    return out;
+}
+
+} // namespace
+
+// Textures named in a mesh's texture set blocks (not its string table) are read too.
+TEST(nif_texture_sets_are_read)
+{
+    const auto nif = nifWithTextureSet();
+    auto m = preview::readNifInfo(nif);
+    CHECK(m.has_value());
+    if (!m)
+        return;
+    CHECK(m->complete);
+    CHECK_EQ(m->blockTypes["BSShaderTextureSet"], 1u);
+    CHECK(m->strings == (std::vector<std::string>{"Rock", "Materials\\Mod\\Rock.bgsm"}));
+    CHECK(m->embeddedTextures == (std::vector<std::string>{"textures\\Mod\\Rock_d.dds", "Mod\\Rock_n.dds"}));
+    // Truncated: what was read is kept, the texture set is not invented.
+    auto cut = nif;
+    cut.resize(cut.size() - 10);
+    auto partial = preview::readNifInfo(cut);
+    CHECK(partial && partial->complete && partial->embeddedTextures.empty());
+}
