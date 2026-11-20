@@ -162,10 +162,44 @@ std::string check(const ReferenceScanner::PluginNames& names, const std::string&
         rescanNames[toLower(outputNames[i])] = kOutputBase + static_cast<PluginIndex>(i);
     const auto after = ReferenceScanner::inspect(rescanNames, path, out);
 
+    // Names passed to another script's function: the copy alone cannot follow the call, so each is matched
+    // with the reference the load-order scan resolved for the same call (callee, argument, place).
+    using CallKey = std::tuple<std::string, int, std::string>;
+    std::map<CallKey, std::vector<const PluginReference*>> calls;
+    for (const auto& r : before)
+        if (!r.callee.empty())
+            calls[{r.callee, r.callArgument, r.location}].push_back(&r);
+    auto callsOf = [&](const PluginReference& r) -> const std::vector<const PluginReference*>* {
+        auto it = calls.find({r.callee, r.callArgument, r.location});
+        return it == calls.end() ? nullptr : &it->second;
+    };
+
     // 2. Every expected change is there, in a rewritable use, and nothing else names an output.
     Expected found;
     for (const auto& r : after)
-        if (r.plugin >= kOutputBase) {
+        if (r.plugin >= kOutputBase && !r.callee.empty()) {
+            const auto* was = callsOf(r);
+            bool planned = false;
+            for (const auto* b : was ? *was : std::vector<const PluginReference*>{}) {
+                if (b->cls != ReferenceClass::Rewritable)
+                    continue;
+                planned = true;
+                const std::string name = toLower(r.text);
+                if (!b->hasFormId) {
+                    found.insert({name, false, 0});
+                    continue;
+                }
+                // The FormID is the call's constant at the same argument as before.
+                size_t k = 0;
+                while (k < b->callLiterals.size() && b->callLiterals[k].second != b->pexFormIdOffset)
+                    ++k;
+                if (k >= b->callLiterals.size() || k >= r.callLiterals.size() || r.callLiterals[k].second == 0)
+                    return "the copy's call to " + r.callee + " no longer passes a constant FormID";
+                found.insert({name, true, static_cast<uint32_t>(r.callLiterals[k].first)});
+            }
+            if (!planned)
+                return "the copy names " + r.text + " in a call to " + r.callee + " that was not planned";
+        } else if (r.plugin >= kOutputBase) {
             // A named constant is classified by the scripts reading it across the load order (only
             // presence checks, when it was planned); in the copy alone it reads as a constant.
             if (r.cls != ReferenceClass::Rewritable && r.context != "constant property")
@@ -179,10 +213,17 @@ std::string check(const ReferenceScanner::PluginNames& names, const std::string&
     // 3. A compiled plugin is named only where it was left on purpose (a FormID the plugin does not
     //    define: the game found nothing before either), or where its name is safe.
     size_t left = 0;
-    for (const auto& r : after)
-        if (r.plugin < kOutputBase && compiledHere.count(r.plugin) && r.cls != ReferenceClass::Safe &&
-            r.context != "constant property") // left as it was: unread across the load order (Safe there)
+    for (const auto& r : after) {
+        if (r.plugin >= kOutputBase || !compiledHere.count(r.plugin))
+            continue;
+        bool safe = r.cls == ReferenceClass::Safe || r.context == "constant property"; // unread across the load order
+        if (!r.callee.empty())
+            if (const auto* was = callsOf(r))
+                for (const auto* b : *was)
+                    safe |= b->plugin == r.plugin && b->cls == ReferenceClass::Safe; // resolved Safe (only logged)
+        if (!safe)
             ++left;
+    }
     if (left != expectedLeft)
         return "the copy still depends on a compiled plugin's file name (" + std::to_string(left) + " references)";
 
@@ -190,14 +231,30 @@ std::string check(const ReferenceScanner::PluginNames& names, const std::string&
     //    plugin is still there. The only new safe one allowed is the original name left unused in a
     //    script's string table once its uses point at the output.
     std::multiset<RefKey> otherBefore, otherAfter, safeBefore, safeAfter;
+    // Calls into other scripts compare by the call itself (the copy alone cannot resolve them): every one
+    // naming another plugin, or a compiled plugin where it was not rewritten, must be there unchanged.
+    using RawCall = std::tuple<PluginIndex, std::string, int, std::string, std::string>;
+    std::multiset<RawCall> callsBefore, callsAfter;
+    for (const auto& r : before)
+        if (!r.callee.empty() && (!compiledHere.count(r.plugin) || r.cls != ReferenceClass::Rewritable))
+            callsBefore.insert({r.plugin, r.callee, r.callArgument, r.location, toLower(r.text)});
+    for (const auto& r : after)
+        if (!r.callee.empty() && r.plugin < kOutputBase)
+            callsAfter.insert({r.plugin, r.callee, r.callArgument, r.location, toLower(r.text)});
+    // A call resolved into several uses (a lookup and a presence check) is one call.
+    std::set<RawCall> uniqueBefore(callsBefore.begin(), callsBefore.end()), uniqueAfter(callsAfter.begin(), callsAfter.end());
+    if (uniqueBefore != uniqueAfter)
+        return "a call passing a plugin name to another script was changed";
     for (const auto& r : before) {
+        if (!r.callee.empty())
+            continue;
         if (!compiledHere.count(r.plugin))
             otherBefore.insert(keyOf(r));
         else if (r.cls == ReferenceClass::Safe)
             safeBefore.insert(keyOf(r));
     }
     for (const auto& r : after) {
-        if (r.plugin >= kOutputBase)
+        if (r.plugin >= kOutputBase || !r.callee.empty())
             continue;
         if (!compiledHere.count(r.plugin))
             otherAfter.insert(keyOf(r));
@@ -619,7 +676,17 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
             f.spelled = ReferenceScanner::originalSpelling(session, *entry);
             if (toLower(f.spelled) != f.path)
                 f.spelled.clear();
-            const auto before = ReferenceScanner::inspect(names, f.path, original);
+            // The file's references as it is; calls into other scripts as the load-order scan resolved them
+            // (the file alone cannot follow them).
+            const auto before = [&] {
+                auto refs = ReferenceScanner::inspect(names, f.path, original);
+                refs.erase(std::remove_if(refs.begin(), refs.end(), [](const PluginReference& r) { return !r.callee.empty(); }),
+                           refs.end());
+                for (const auto& r : session.nameReferences)
+                    if (!r.callee.empty() && r.assetPath == f.path)
+                        refs.push_back(r);
+                return refs;
+            }();
 
             Expected expected;
             size_t expectedLeft = 0;

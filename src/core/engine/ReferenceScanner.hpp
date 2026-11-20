@@ -54,7 +54,8 @@ public:
                                                 const std::vector<uint8_t>& bytes, const std::string& source = {},
                                                 std::vector<pex::PropertyRead>* propertyReads = nullptr,
                                                 std::pair<std::string, std::string>* extends = nullptr,
-                                                std::vector<std::string>* members = nullptr);
+                                                std::vector<std::string>* members = nullptr,
+                                                pex::Scan* summary = nullptr);
 
     // A plugin name in text, used as a whole name ("Armor.esp" is not found in "Power Armor.esp"),
     // with the "|FormID" that may follow it.

@@ -1321,3 +1321,15 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 - **Precedence check** (every compile round): the final value of every setting is worked out today (every active plugin's INI in load order) and after compiling (the INIs of plugins that stay, then the output's, which loads last). A compiled plugin that sets a setting whose final value would change stays in the load order (Kept Out Automatically: Plugin INI, naming the plugin that sets it later), and the compilation runs again.
 
 **Tests:** `plugin_inis_are_carried_into_the_output` (alone: carried; a later plugin that stays setting the same value: carried; another value: kept out with the reason) and `references_plugin_ini_is_carried` (was `references_plugin_ini_keeps_the_plugin`).
+
+## Plugin names passed to other scripts' functions (20 Nov 2026)
+
+**Found in the owner's Dependency Report of 18 Nov:** about 9 plugins stayed out (Unknown) because a script passes the plugin's name to a function: Faction Workshop Manager 2's MCM and FCOM Failsafe call their own global functions by their script name (`FactionPatch_FWM2MCM.BuildHamlet(...)`), which the flow did not follow (only calls on `self` were); Transfer Settlements (`GetPluginIndex`), IPARR (`system:game.IsModLoaded`) and Challenges pass it to another script.
+
+**Changes.**
+- A global function of the script itself called by its script name, or a method called on a variable of the script's own type, is followed like a call on `self` (into its parameter; a paired lookup there takes its FormID from the call site).
+- Every callable function gets a summary of where each of its String parameters goes (lookups, presence checks, logs, other uses, further calls), and the functions that pass two parameters straight to `Game.GetFormFromFile` are listed. A name passed to another script's function (a static call, or a method on a variable whose script type is known) is recorded with the callee, the argument and the call's constant integers.
+- Once every script is read, each such call is followed through the callee's summary (up to 4 levels): a paired lookup with a constant FormID at the call site is rewritable there (the name and that FormID, both in the caller); a presence check is rewritable; only logging is Safe. A lookup with a FormID of the callee's own (shared by every caller) or computed at run time, any other use, or a callee that is not a script in the load order (native or missing) stays Unknown, naming the callee and the use.
+- The Auto-Merger's check of each copy matches the copy's calls with the resolved references (the copy alone cannot follow them), reads the new FormID from the copy's call, and requires every other call naming a plugin to be unchanged.
+
+**Tests:** `references_followed_into_other_scripts_functions` (a lookup in another script with the FormID at the call site: rewritable, compiled, exported, and the caller's copy names the output and the new FormID; a presence check in another script; a callee that also returns the name; a callee not in the load order; an own function called by the script's name).

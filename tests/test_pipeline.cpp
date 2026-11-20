@@ -5130,6 +5130,144 @@ TEST(references_left_lookup_sharing_a_renamed_name)
     CHECK(std::filesystem::exists(copyIn(result.directory, "scripts/two.pex")));
 }
 
+// 6k. A plugin name passed to another script's function is followed into that function: a lookup there with
+//     the FormID passed beside the name (Paired.AddItem(name, id)) is rewritable at the call site; a presence
+//     check there (Flow.Check(name)) is rewritable; a callee that is not in the load order, or uses the name
+//     another way, leaves it unknown. A global function of the script itself called by its script name is
+//     followed like a call on self.
+namespace {
+// "Caller": OnInit calls <object>.<function>(args...) statically; a string argument is the plugin name.
+std::vector<uint8_t> staticCaller(const std::string& object, const std::string& function, const std::string& plugin,
+                                  std::optional<int32_t> formId, bool callSelfObject = false)
+{
+    std::vector<std::string> strings = {callSelfObject ? object : std::string("Caller"), "", "OnInit", "None",
+                                        object, function, "::nonevar", plugin};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0);
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint16_t>(1);
+    o.write<uint16_t>(2); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); // params, locals
+    o.write<uint16_t>(1);
+    auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    o.write<uint8_t>(0x19); ident(4); ident(5); ident(6);
+    o.write<uint8_t>(3); o.write<int32_t>(formId ? 2 : 1);
+    o.write<uint8_t>(2); o.write<uint16_t>(7);
+    if (formId) {
+        o.write<uint8_t>(3); o.write<int32_t>(*formId);
+    }
+    return pexFile(strings, strings[0], o.take());
+}
+} // namespace
+
+TEST(references_followed_into_other_scripts_functions)
+{
+    auto run = [](const std::string& name, const std::vector<std::pair<std::string, std::vector<uint8_t>>>& scripts) {
+        auto root = referenceInstall(name);
+        for (const auto& [file, bytes] : scripts)
+            writeBytes(root / "Game" / "Data" / "Scripts" / file, bytes);
+        auto p = std::make_unique<Pipeline>(configFor(root));
+        p->scan();
+        return p;
+    };
+    auto refsIn = [](const Pipeline& p, const std::string& script) {
+        std::vector<const PluginReference*> out;
+        for (const auto* r : referencesOf(p.session(), "ModS.esp"))
+            if (r->assetPath == script)
+                out.push_back(r);
+        return out;
+    };
+    {
+        // Paired.AddItem(asPlugin, aiFormID) calls GetFormFromFile(aiFormID, asPlugin).
+        auto p = run("refx_lookup", {{"Paired.pex", pairedLookupScript("Other.esp", 0x800)},
+                                     {"Caller.pex", staticCaller("Paired", "AddItem", "ModS.esp", 0x812)}});
+        const auto refs = refsIn(*p, "scripts\\caller.pex");
+        CHECK_EQ(refs.size(), size_t(1));
+        if (!refs.empty()) {
+            CHECK_EQ(refs[0]->cls, ReferenceClass::Rewritable);
+            CHECK(refs[0]->hasFormId && refs[0]->formId == 0x812u && refs[0]->pexFormIdOffset != 0);
+            CHECK(refs[0]->context.find("via paired.additem") != std::string::npos);
+        }
+        // Compiled with the Auto-Merger: the caller's copy names the output and the record's new FormID.
+        auto cfg = p->config();
+        cfg.compile.autoMerge = true;
+        Pipeline q(cfg);
+        q.scan();
+        q.analyse();
+        CHECK(q.compile());
+        const auto& s = q.session();
+        CHECK(q.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
+        auto result = q.exportOutputs();
+        CHECK_EQ(q.validation()->errors, uint64_t(0));
+        const auto copy = copyIn(result.directory, "scripts/caller.pex");
+        CHECK(std::filesystem::exists(copy));
+        std::ifstream in(copy, std::ios::binary);
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        auto sc = pex::scan(bytes);
+        CHECK(sc.ok);
+        const FormMapping* kw = nullptr;
+        for (const auto& m : q.compiledOutput()->mappings)
+            if (m.editorId == "ModS_Keyword")
+                kw = &m;
+        CHECK(kw != nullptr);
+        if (kw) {
+            CHECK(std::find(sc.strings.begin(), sc.strings.end(), kw->outputPlugin) != sc.strings.end());
+            bool found = false;
+            for (const auto& u : sc.uses)
+                if (u.use == pex::StringUse::CallArgument && sc.strings[u.string] == kw->outputPlugin)
+                    found = true;
+            CHECK(found);
+            // The FormID passed beside the name is the record's new one.
+            bool newId = false;
+            for (const auto& fl : sc.flows)
+                for (const auto& sk : fl.sinks)
+                    if (sk.kind == pex::ValueSink::Kind::Call && sk.literals.size() == 2 &&
+                        static_cast<uint32_t>(sk.literals[1].first) == kw->objectId)
+                        newId = true;
+            CHECK(newId);
+        }
+    }
+    {
+        // Flow.Check(asName): IsPluginInstalled(asName), and the name in a log line.
+        auto p = run("refx_presence", {{"Flow.pex", flowScript("Other.esp", 0x800)},
+                                       {"Caller.pex", staticCaller("Flow", "Check", "ModS.esp", std::nullopt)}});
+        const auto refs = refsIn(*p, "scripts\\caller.pex");
+        CHECK_EQ(refs.size(), size_t(1));
+        if (!refs.empty()) {
+            CHECK_EQ(refs[0]->cls, ReferenceClass::Rewritable);
+            CHECK(refs[0]->context.find("IsPluginInstalled via flow.check") != std::string::npos);
+        }
+    }
+    {
+        // Flow.Check with `leak`: it also returns the name (another use): unknown.
+        auto p = run("refx_other", {{"Flow.pex", flowScript("Other.esp", 0x800, true)},
+                                    {"Caller.pex", staticCaller("Flow", "Check", "ModS.esp", std::nullopt)}});
+        const auto refs = refsIn(*p, "scripts\\caller.pex");
+        CHECK(refs.size() == 1 && refs[0]->cls == ReferenceClass::Unknown &&
+              refs[0]->reason.find("flow.check") != std::string::npos);
+    }
+    {
+        // A callee that is not in the load order.
+        auto p = run("refx_missing", {{"Caller.pex", staticCaller("Nowhere", "Use", "ModS.esp", std::nullopt)}});
+        const auto refs = refsIn(*p, "scripts\\caller.pex");
+        CHECK(refs.size() == 1 && refs[0]->cls == ReferenceClass::Unknown &&
+              refs[0]->reason.find("not a script in the load order") != std::string::npos);
+    }
+    {
+        // Paired calls its own AddItem by its script name (Paired.AddItem(...)), not through self.
+        auto bytes = staticCaller("Paired", "AddItem", "ModS.esp", 0x812, true);
+        // One script holding both: reuse Paired's lookup function by calling it from a second script is
+        // covered above; here the own-name call is checked on the paired script itself.
+        auto refs = ReferenceScanner::inspect(kNames, "scripts\\paired.pex", pairedLookupScript("ModS.esp", 0x812, false, true));
+        CHECK_EQ(refs.size(), size_t(1));
+        if (!refs.empty()) {
+            CHECK_EQ(refs[0].cls, ReferenceClass::Rewritable);
+            CHECK(refs[0].hasFormId && refs[0].formId == 0x812u);
+        }
+        (void)bytes;
+    }
+}
+
 // 6j. A lookup through the script's own function (AddItem(asPlugin, aiFormID) calling
 //     GetFormFromFile(aiFormID, asPlugin)): the FormID is the constant at the call site, so the
 //     lookup is rewritable there. Read anywhere else in the function, it is not.

@@ -626,7 +626,8 @@ inline std::vector<uint8_t> twoPluginScript(const std::string& first, uint32_t f
 // A script looking records up through its own function, as mods do (PirateCompatUpdater):
 // OnInit calls self.AddItem("plugin", formId), and AddItem(asPlugin, aiFormID) calls
 // Game.GetFormFromFile(aiFormID, asPlugin). With `traceId`, AddItem also logs aiFormID (read twice).
-inline std::vector<uint8_t> pairedLookupScript(const std::string& plugin, uint32_t formId, bool traceId = false)
+inline std::vector<uint8_t> pairedLookupScript(const std::string& plugin, uint32_t formId, bool traceId = false,
+                                                bool byScriptName = false)
 {
     using namespace fo4mx;
     const std::vector<std::string> strings = {"Paired", "", "OnInit", "None", "AddItem", "asPlugin", "String",
@@ -646,7 +647,11 @@ inline std::vector<uint8_t> pairedLookupScript(const std::string& plugin, uint32
     o.write<uint16_t>(0); // params
     o.write<uint16_t>(0); // locals
     o.write<uint16_t>(1);
-    o.write<uint8_t>(0x17); ident(4); ident(11); ident(12); integer(2); str(15); integer(static_cast<int32_t>(formId));
+    if (byScriptName) { // Paired.AddItem(...): a global call by the script's own name
+        o.write<uint8_t>(0x19); ident(0); ident(4); ident(12); integer(2); str(15); integer(static_cast<int32_t>(formId));
+    } else {
+        o.write<uint8_t>(0x17); ident(4); ident(11); ident(12); integer(2); str(15); integer(static_cast<int32_t>(formId));
+    }
     // AddItem(asPlugin, aiFormID)
     o.write<uint16_t>(4); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
     o.write<uint16_t>(2); o.write<uint16_t>(5); o.write<uint16_t>(6); o.write<uint16_t>(7); o.write<uint16_t>(8);

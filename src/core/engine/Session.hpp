@@ -189,6 +189,11 @@ struct PluginReference {
     bool hasFormId = false;
     uint32_t formId = 0;
     size_t pexStringOffset = 0, pexFormIdOffset = 0;
+    // A name passed to another script's function (resolved once every script is read): the callee
+    // ("type.function"), the argument, and each argument's constant integer and offset (0: not constant).
+    std::string callee;
+    int callArgument = -1;
+    std::vector<std::pair<int32_t, size_t>> callLiterals;
 };
 using PluginNameReference = PluginReference; // earlier name
 

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -78,17 +79,22 @@ struct PropertyRead {
 // passed to one of the script's own functions) ends up, following the value through variables,
 // copies and the script's own function parameters.
 struct ValueSink {
-    enum class Kind : uint8_t { GetFormFromFile, IsPluginInstalled, Log, Other };
+    // Call: passed to another script's function (callee "type.function", argument index), followed once
+    // every script is read (Scan::paramSinks of the callee).
+    enum class Kind : uint8_t { GetFormFromFile, IsPluginInstalled, Log, Other, Call };
     Kind kind = Kind::Other;
     bool formIdLiteral = false; // GetFormFromFile with a constant FormID
     int32_t formId = 0;
     size_t formIdOffset = 0;
-    std::string what;           // the instruction or function, for Other
+    std::string what;           // the instruction or function, for Other; the callee ("type.function"), for Call
     std::string where;
+    int argument = -1;          // Call: the argument the value is
+    // Call: each argument's constant integer and its offset (offset 0: not a constant integer).
+    std::vector<std::pair<int32_t, size_t>> literals;
     bool operator<(const ValueSink& o) const
     {
-        return std::tie(kind, formIdOffset, formIdLiteral, what, where) <
-               std::tie(o.kind, o.formIdOffset, o.formIdLiteral, o.what, o.where);
+        return std::tie(kind, formIdOffset, formIdLiteral, what, where, argument) <
+               std::tie(o.kind, o.formIdOffset, o.formIdLiteral, o.what, o.where, o.argument);
     }
 };
 struct ValueFlow {
@@ -118,6 +124,11 @@ struct Scan {
     std::vector<PropertyRead> propertyReads;
     // Constants followed through variables and the script's own functions.
     std::vector<ValueFlow> flows;
+    // Where each String parameter of each of the script's functions goes (lower-case function name ->
+    // per parameter), for callers in other scripts; and the functions that pass two parameters straight to
+    // Game.GetFormFromFile(FormID parameter, name parameter).
+    std::map<std::string, std::vector<std::vector<ValueSink>>> paramSinks;
+    std::map<std::string, std::pair<size_t, size_t>> pairedLookups;
 };
 
 Scan scan(const std::vector<uint8_t>& bytes);

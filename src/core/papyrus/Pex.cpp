@@ -251,7 +251,8 @@ private:
         localTypes_.clear();
         for (uint16_t i = 0; i < params; ++i) {
             f.params.push_back(out_.strings[str()]);
-            localTypes_[lower(f.params.back())] = lower(out_.strings[str()]); // type
+            f.paramTypes.push_back(lower(out_.strings[str()]));
+            localTypes_[lower(f.params.back())] = f.paramTypes.back(); // type
         }
         const uint16_t locals = r_.read<uint16_t>();
         for (uint16_t i = 0; i < locals; ++i) {
@@ -259,6 +260,7 @@ private:
             f.locals.insert(local);
             localTypes_[lower(local)] = lower(out_.strings[str()]);
         }
+        f.types.insert(localTypes_.begin(), localTypes_.end());
         functions_.push_back(std::move(f));
         const uint16_t instructions = r_.read<uint16_t>();
         propertyVars_.clear();
@@ -566,11 +568,68 @@ public:
             if (lookups == 1 && m >= 0 && n >= 0 && m != n && reads[m] == 1 && !writes.count(m) && !writes.count(n))
                 pairedLookup[f] = {static_cast<size_t>(m), static_cast<size_t>(n)};
         }
+        // Each String parameter of each callable function, followed like a constant: what it reaches is
+        // that parameter's summary, for callers in other scripts.
+        std::vector<std::pair<size_t, size_t>> paramOrigin; // origin index -> (function, parameter)
+        const size_t firstParamOrigin = origins.size();
+        for (size_t f = 0; f < functions_.size(); ++f) {
+            const auto& F = functions_[f];
+            if (F.name.empty())
+                continue;
+            for (size_t i = 0; i < F.params.size(); ++i)
+                if (i < F.paramTypes.size() && F.paramTypes[i] == "string") {
+                    origins.push_back({0, 0, false, {}, {}});
+                    plain[std::to_string(f) + ":" + F.params[i]].insert(origins.size() - 1);
+                    paramOrigin.emplace_back(f, i);
+                }
+        }
         auto nodeOf = [&](size_t f, const std::string& n) {
             const auto& F = functions_[f];
             if (F.locals.count(n) || std::find(F.params.begin(), F.params.end(), n) != F.params.end())
                 return std::to_string(f) + ":" + n;
             return ":" + n;
+        };
+        auto literalsOf = [](const std::vector<Value>& va) {
+            std::vector<std::pair<int32_t, size_t>> out;
+            for (const auto& v : va)
+                out.emplace_back(v.integer, v.type == 3 ? v.offset : 0);
+            return out;
+        };
+        // A call of one of this script's own functions (on self, or by its script name): a paired lookup is
+        // recorded at the call site, every argument flows into its parameter.
+        auto callOwn = [&](size_t f, size_t callee, const std::vector<Value>& va, std::set<size_t>& p,
+                           std::set<size_t>& t, auto& add, auto& sink, auto& other, auto& of) {
+            (void)f;
+            if (auto pl = pairedLookup.find(callee);
+                pl != pairedLookup.end() && pl->second.first < va.size() && pl->second.second < va.size()) {
+                const Value& id = va[pl->second.first];
+                const Value& nm = va[pl->second.second];
+                std::set<size_t> names;
+                of(nm, names, t);
+                if (pluginLike(nm))
+                    names.insert(originOf(nm, false));
+                ValueSink s;
+                s.kind = ValueSink::Kind::GetFormFromFile;
+                s.formIdLiteral = id.type == 3;
+                s.formId = id.integer;
+                s.formIdOffset = id.offset;
+                sink(names, s);
+                other(t, "GetFormFromFile with text built from the name");
+            }
+            for (size_t k = 0; k < va.size(); ++k) {
+                if (k < functions_[callee].params.size()) {
+                    const auto param = std::to_string(callee) + ":" + functions_[callee].params[k];
+                    if (pluginLike(va[k]))
+                        add(plain, param, {originOf(va[k], false)});
+                    of(va[k], p, t);
+                    add(plain, param, p);
+                    add(text, param, t);
+                    continue;
+                }
+                of(va[k], p, t);
+                other(p, functions_[callee].name);
+                other(t, functions_[callee].name);
+            }
         };
         bool changed = true;
         for (int round = 0; changed && round < 32; ++round) {
@@ -623,6 +682,11 @@ public:
                             add(text, dest, p);
                             add(text, dest, t);
                         }
+                    } else if (in.op == kCallStatic && a.size() == 3 && a[0].type == 1 && a[1].type == 1 &&
+                               iequals(out_.strings[a[0].string], object_) &&
+                               byName.count(toLower(out_.strings[a[1].string]))) {
+                        // A global function of this script, called by its script name: as a call on self.
+                        callOwn(f, byName.at(toLower(out_.strings[a[1].string])), va, p, t, add, sink, other, of);
                     } else if (in.op == kCallStatic && a.size() == 3 && a[0].type == 1 && a[1].type == 1) {
                         const std::string type = out_.strings[a[0].string], fn = out_.strings[a[1].string];
                         const bool gfff = iequals(type, "Game") && iequals(fn, "GetFormFromFile") && va.size() == 2;
@@ -655,45 +719,58 @@ public:
                                 sink(p, s);
                                 other(t, "IsPluginInstalled with text built from the name");
                             } else {
-                                other(p, type + "." + fn);
-                                other(t, type + "." + fn);
+                                // Another script's function: followed once every script is read.
+                                ValueSink c;
+                                c.kind = ValueSink::Kind::Call;
+                                c.what = lower(type) + "." + lower(fn);
+                                c.argument = static_cast<int>(k);
+                                c.literals = literalsOf(va);
+                                sink(p, c);
+                                other(t, type + "." + fn + " with text built from the name");
                             }
                         }
+                        if (!gfff && !presence && !log)
+                            for (size_t k = 0; k < va.size(); ++k)
+                                if (pluginLike(va[k])) {
+                                    ValueSink c;
+                                    c.kind = ValueSink::Kind::Call;
+                                    c.what = lower(type) + "." + lower(fn);
+                                    c.argument = static_cast<int>(k);
+                                    c.literals = literalsOf(va);
+                                    sink({originOf(va[k], false)}, c);
+                                }
                     } else if (in.op == kCallMethod && a.size() == 3 && a[0].type == 1) {
                         const std::string fn = out_.strings[a[0].string];
-                        const bool own = a[1].type == 1 && iequals(out_.strings[a[1].string], "self");
-                        auto callee = own ? byName.find(toLower(fn)) : byName.end();
-                        if (callee != byName.end()) {
-                            if (auto pl = pairedLookup.find(callee->second);
-                                pl != pairedLookup.end() && pl->second.first < va.size() && pl->second.second < va.size()) {
-                                const Value& id = va[pl->second.first];
-                                const Value& nm = va[pl->second.second];
-                                std::set<size_t> names;
-                                of(nm, names, t);
-                                if (pluginLike(nm))
-                                    names.insert(originOf(nm, false));
-                                ValueSink s;
-                                s.kind = ValueSink::Kind::GetFormFromFile;
-                                s.formIdLiteral = id.type == 3;
-                                s.formId = id.integer;
-                                s.formIdOffset = id.offset;
-                                sink(names, s);
-                                other(t, "GetFormFromFile with text built from the name");
-                            }
+                        std::string receiver;
+                        if (a[1].type == 1) {
+                            const std::string rv = lower(out_.strings[a[1].string]);
+                            if (rv == "self")
+                                receiver = lower(object_);
+                            else if (auto it = F.types.find(rv); it != F.types.end())
+                                receiver = it->second;
+                            else if (auto it2 = objectTypes_.find(rv); it2 != objectTypes_.end())
+                                receiver = it2->second;
                         }
-                        for (size_t k = 0; k < va.size(); ++k) {
-                            if (callee != byName.end() && k < functions_[callee->second].params.size()) {
-                                const auto param = std::to_string(callee->second) + ":" + functions_[callee->second].params[k];
-                                if (pluginLike(va[k]))
-                                    add(plain, param, {originOf(va[k], false)});
+                        const bool own = receiver == lower(object_) && byName.count(toLower(fn));
+                        if (own) {
+                            callOwn(f, byName.at(toLower(fn)), va, p, t, add, sink, other, of);
+                        } else {
+                            for (size_t k = 0; k < va.size(); ++k) {
                                 of(va[k], p, t);
-                                add(plain, param, p);
-                                add(text, param, t);
-                                continue;
+                                if (pluginLike(va[k]))
+                                    p.insert(originOf(va[k], false));
+                                if (receiver.empty()) {
+                                    other(p, fn);
+                                } else {
+                                    ValueSink c;
+                                    c.kind = ValueSink::Kind::Call;
+                                    c.what = receiver + "." + lower(fn);
+                                    c.argument = static_cast<int>(k);
+                                    c.literals = literalsOf(va);
+                                    sink(p, c);
+                                }
+                                other(t, fn);
                             }
-                            of(va[k], p, t);
-                            other(p, fn);
-                            other(t, fn);
                         }
                     } else {
                         // Any other instruction reading a variable that holds the name: its destination
@@ -720,7 +797,20 @@ public:
                 }
             }
         }
-        for (auto& o : origins) {
+        for (size_t k = 0; k < paramOrigin.size(); ++k) {
+            const auto [f, i] = paramOrigin[k];
+            auto& per = out_.paramSinks[toLower(functions_[f].name)];
+            per.resize(functions_[f].params.size());
+            const auto& o = origins[firstParamOrigin + k];
+            per[i].assign(o.sinks.begin(), o.sinks.end());
+        }
+        for (const auto& [f, mn] : pairedLookup)
+            if (!functions_[f].name.empty())
+                out_.pairedLookups[toLower(functions_[f].name)] = mn;
+        for (size_t oi = 0; oi < origins.size(); ++oi) {
+            if (oi >= firstParamOrigin && oi < firstParamOrigin + paramOrigin.size())
+                continue; // a parameter's summary, not a constant
+            auto& o = origins[oi];
             ValueFlow vf;
             vf.string = o.string;
             vf.offset = o.offset;
@@ -746,7 +836,9 @@ private:
         std::string name; // callable name (default state), empty otherwise
         std::string where;
         std::vector<std::string> params;
+        std::vector<std::string> paramTypes; // lower case
         std::set<std::string> locals;
+        std::map<std::string, std::string> types; // lower-case parameter or local -> lower-case type
         std::vector<Instr> code;
     };
     std::vector<Function> functions_;

@@ -684,9 +684,12 @@ void flowReferences(std::vector<PluginReference>& out, const pex::ValueFlow& flo
     const pex::ValueSink* other = nullptr;
     const pex::ValueSink* runtime = nullptr;
     std::vector<const pex::ValueSink*> lookups;
+    std::vector<const pex::ValueSink*> calls;
     const pex::ValueSink* presence = nullptr;
     for (const auto& s : flow.sinks) {
-        if (s.kind == K::Other && !other)
+        if (s.kind == K::Call)
+            calls.push_back(&s);
+        else if (s.kind == K::Other && !other)
             other = &s;
         else if (s.kind == K::GetFormFromFile && !s.formIdLiteral && !runtime)
             runtime = &s;
@@ -709,6 +712,19 @@ void flowReferences(std::vector<PluginReference>& out, const pex::ValueFlow& flo
         out.push_back(std::move(r));
         return;
     }
+    // Passed to another script's function: resolved once every script is read (scan).
+    for (const auto* c : calls) {
+        auto r = make(Fact::PexOtherUse, plugin, path, format, text, c->where);
+        r.context = "function argument (" + c->what + ")";
+        r.reason = "passed to " + c->what + ", which is not followed (not a script in the load order)";
+        r.pexStringOffset = flow.offset;
+        r.callee = c->what;
+        r.callArgument = c->argument;
+        r.callLiterals = c->literals;
+        out.push_back(std::move(r));
+    }
+    if (lookups.empty() && !presence && !calls.empty())
+        return;
     if (lookups.empty() && !presence && flow.overridable) {
         // An Auto property: other scripts can read it, and the plugin's script data can set it.
         auto r = make(Fact::PexOtherUse, plugin, path, format, text, use.where);
@@ -758,7 +774,7 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
                                                        const std::vector<uint8_t>& bytes, const std::string& source,
                                                        std::vector<pex::PropertyRead>* propertyReads,
                                                        std::pair<std::string, std::string>* extends,
-                                                       std::vector<std::string>* members)
+                                                       std::vector<std::string>* members, pex::Scan* summary)
 {
     std::vector<PluginReference> out;
     const std::string format = extensionFormat(path);
@@ -769,6 +785,11 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
             *extends = {scan.objectName, scan.parentName};
         if (members && scan.ok)
             *members = scan.members;
+        if (summary && scan.ok) {
+            summary->objectName = scan.objectName;
+            summary->paramSinks = scan.paramSinks;
+            summary->pairedLookups = scan.pairedLookups;
+        }
         if (propertyReads && scan.ok)
             *propertyReads = std::move(scan.propertyReads);
         // A script that does not read back may read any property: each of its strings counts as a read
@@ -1214,6 +1235,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
     std::vector<std::vector<pex::PropertyRead>> reads(candidates.size());
     std::vector<std::pair<std::string, std::string>> extends(candidates.size()); // (script, parent)
     std::vector<std::vector<std::string>> members(candidates.size());            // its own functions, properties
+    std::vector<pex::Scan> summaries(candidates.size()); // where each function's String parameters go
     std::atomic<size_t> scanned{0};
     parallelFor(
         candidates.size(),
@@ -1223,7 +1245,7 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             try {
                 auto bytes = readOriginal(session, e);
                 found[i] = inspect(names, toLower(path), bytes, idx.modName(e.winner()), &reads[i], &extends[i],
-                                   &members[i]);
+                                   &members[i], &summaries[i]);
             } catch (const std::exception& ex) {
                 spdlog::debug("Could not read {}: {}", path, ex.what());
             }
@@ -1235,6 +1257,122 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
     for (auto& v : found)
         for (auto& r : v)
             session.nameReferences.push_back(std::move(r));
+
+    // Names passed to another script's function: followed into that function's parameter (its summary).
+    {
+        std::unordered_map<std::string, const pex::Scan*> byObject;
+        for (const auto& sm : summaries)
+            if (!sm.objectName.empty())
+                byObject.emplace(sm.objectName, &sm);
+        struct Resolved {
+            bool ok = true;
+            std::string why;
+            bool presence = false, logged = false;
+            std::vector<std::pair<int32_t, size_t>> lookups; // FormID constant at the call site, its offset
+        };
+        std::function<void(const std::string&, int, const std::vector<std::pair<int32_t, size_t>>&, int, Resolved&)>
+            follow = [&](const std::string& callee, int argument, const std::vector<std::pair<int32_t, size_t>>& literals,
+                         int depth, Resolved& res) {
+                const auto dot = callee.rfind('.');
+                const std::string object = dot == std::string::npos ? std::string() : callee.substr(0, dot);
+                const std::string fn = dot == std::string::npos ? callee : callee.substr(dot + 1);
+                const auto it = byObject.find(object);
+                if (it == byObject.end()) {
+                    res.ok = false;
+                    res.why = callee + " is not a script in the load order (native or missing), so what it does with "
+                                       "the name is unknown";
+                    return;
+                }
+                const auto& sm = *it->second;
+                if (auto pl = sm.pairedLookups.find(fn); pl != sm.pairedLookups.end() &&
+                                                         pl->second.second == static_cast<size_t>(argument)) {
+                    const size_t id = pl->second.first;
+                    if (id < literals.size() && literals[id].second != 0) {
+                        res.lookups.push_back(literals[id]);
+                    } else {
+                        res.ok = false;
+                        res.why = callee + " looks the record up with a FormID the call computes at run time";
+                        return;
+                    }
+                }
+                const auto ps = sm.paramSinks.find(fn);
+                if (ps == sm.paramSinks.end() || argument < 0 || static_cast<size_t>(argument) >= ps->second.size())
+                    return; // no String parameter there: only the paired lookup (if any) uses it
+                for (const auto& sk : ps->second[static_cast<size_t>(argument)]) {
+                    using K = pex::ValueSink::Kind;
+                    if (sk.kind == K::Log) {
+                        res.logged = true;
+                    } else if (sk.kind == K::IsPluginInstalled) {
+                        res.presence = true;
+                    } else if (sk.kind == K::GetFormFromFile) {
+                        res.ok = false;
+                        res.why = callee + " (" + sk.where + ") looks up " +
+                                  (sk.formIdLiteral ? "a fixed FormID of its own, shared by every caller"
+                                                    : "a FormID computed at run time") + " in the plugin passed to it";
+                    } else if (sk.kind == K::Call && depth < 4) {
+                        std::vector<std::pair<int32_t, size_t>> none(sk.literals.size(), {0, 0}); // callee's own constants
+                        follow(sk.what, sk.argument, none, depth + 1, res);
+                    } else {
+                        res.ok = false;
+                        res.why = callee + " (" + sk.where + ") uses it: " + (sk.what.empty() ? std::string("another way") : sk.what);
+                    }
+                    if (!res.ok)
+                        return;
+                }
+            };
+        std::vector<PluginReference> extra;
+        for (auto& r : session.nameReferences) {
+            if (r.callee.empty())
+                continue;
+            Resolved res;
+            follow(r.callee, r.callArgument, r.callLiterals, 0, res);
+            if (!res.ok) {
+                r.reason = "passed to " + r.callee + ": " + res.why;
+                continue;
+            }
+            const std::string via = "via " + r.callee;
+            if (res.lookups.empty() && !res.presence) {
+                r.cls = ReferenceClass::Safe;
+                r.reason = "passed to " + r.callee + ", which " +
+                           (res.logged ? std::string("only writes it to the log") : std::string("does not use it")) +
+                           ": nothing in the game depends on it";
+                continue;
+            }
+            PluginReference base = r;
+            bool first = true;
+            for (const auto& [id, offset] : res.lookups) {
+                PluginReference x = base;
+                x.cls = ReferenceClass::Rewritable;
+                x.kind = ReferenceKind::Papyrus;
+                x.hasFormId = true;
+                x.formId = static_cast<uint32_t>(id);
+                x.pexFormIdOffset = offset;
+                x.context = "Game.GetFormFromFile(" + formatFormId(x.formId) + ") " + via;
+                x.reason = "passed with FormID " + formatFormId(x.formId) + " to " + r.callee +
+                           ", which looks the record up with both: the call can name the output plugin and the "
+                           "record's new FormID";
+                if (first)
+                    r = x;
+                else
+                    extra.push_back(std::move(x));
+                first = false;
+            }
+            if (res.presence) {
+                PluginReference x = base;
+                x.cls = ReferenceClass::Rewritable;
+                x.kind = ReferenceKind::PluginName;
+                x.context = "Game.IsPluginInstalled " + via;
+                x.reason = "passed to " + r.callee + ", which checks that the plugin is installed: it can name the "
+                           "output plugin, which is installed";
+                if (first)
+                    r = x;
+                else
+                    extra.push_back(std::move(x));
+            }
+        }
+        for (auto& x : extra)
+            session.nameReferences.push_back(std::move(x));
+    }
 
     // Plugin name and FormID pairs: every read of the two members, in every script (evidence only).
     {
