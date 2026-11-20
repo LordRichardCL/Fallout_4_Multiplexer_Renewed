@@ -1333,3 +1333,9 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 - The Auto-Merger's check of each copy matches the copy's calls with the resolved references (the copy alone cannot follow them), reads the new FormID from the copy's call, and requires every other call naming a plugin to be unchanged.
 
 **Tests:** `references_followed_into_other_scripts_functions` (a lookup in another script with the FormID at the call site: rewritable, compiled, exported, and the caller's copy names the output and the new FormID; a presence check in another script; a callee that also returns the name; a callee not in the load order; an own function called by the script's name).
+
+## Review of the 20 Nov changes: three fixes
+
+- **Cross-script calls fail closed.** A plugin name passed to a native function (the game or F4SE implements it: no code), to a function the callee's script does not declare (inherited, or only in another state), or into a parameter that is neither String nor Var was followed into nothing and counted as "does not use it" (Safe). Each is now Unknown, naming the callee and why. Var parameters are followed like String ones. Test: the native case in `references_followed_into_other_scripts_functions`.
+- **Plugin INIs with archive settings stay.** The build lists compiled plugins' archives itself; a compiled plugin's INI carried into the output's INI (read after Fallout4Custom.ini and after plugins that stay) could replace that list, so a plugin whose INI sets anything in `[Archive]` stays in the load order (Plugin INI). Test: `references_plugin_ini_is_carried`.
+- **Plugins → Holding Back** no longer hides its "Would Also Compile" column (it shared a column position hidden by default in the plain list).

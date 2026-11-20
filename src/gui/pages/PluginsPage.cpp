@@ -385,9 +385,12 @@ void PluginsPage::reload()
     model_->load(app_->readDb(), sql, binds);
     summary_->setVisible(!generatedMode_ && !blockersMode_);
     updateSummary();
-    // The plugin list hides the id and the columns you chose to hide; the other lists show every column.
+    // The plugin list hides the id and the columns you chose to hide (never "Would Also Compile", the point of
+    // Holding Back); the other lists show every column.
+    const bool holdingNow = chips_->current() == "Holding Back";
     for (int c = 0; c < model_->columnCount(); ++c)
-        table_->setColumnHidden(c, !generatedMode_ && !blockersMode_ && (c == 10 || hiddenColumns_.contains(c)));
+        table_->setColumnHidden(c, !generatedMode_ && !blockersMode_ &&
+                                       (c == 10 || (hiddenColumns_.contains(c) && !(holdingNow && c == 9))));
     fitColumns(table_);
     if (blockersMode_) {
         QString held = meta("blocked_by_types"), all = meta("unlocked_by_all_types");

@@ -789,6 +789,7 @@ std::vector<PluginReference> ReferenceScanner::inspect(const PluginNames& names,
             summary->objectName = scan.objectName;
             summary->paramSinks = scan.paramSinks;
             summary->pairedLookups = scan.pairedLookups;
+            summary->functionParams = scan.functionParams;
         }
         if (propertyReads && scan.ok)
             *propertyReads = std::move(scan.propertyReads);
@@ -1284,6 +1285,27 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                     return;
                 }
                 const auto& sm = *it->second;
+                // Fail closed: a function the script does not have (inherited, or another state), a native one
+                // (no code to follow), or a parameter that cannot hold the name.
+                const auto sig = sm.functionParams.find(fn);
+                if (sig == sm.functionParams.end()) {
+                    res.ok = false;
+                    res.why = callee + " is not a function of that script (it may be inherited), so it is not followed";
+                    return;
+                }
+                if (sig->second.native) {
+                    res.ok = false;
+                    res.why = callee + " is a native function (implemented by the game or F4SE): what it does with "
+                                       "the name cannot be followed";
+                    return;
+                }
+                if (argument < 0 || static_cast<size_t>(argument) >= sig->second.paramTypes.size() ||
+                    (sig->second.paramTypes[static_cast<size_t>(argument)] != "string" &&
+                     sig->second.paramTypes[static_cast<size_t>(argument)] != "var")) {
+                    res.ok = false;
+                    res.why = callee + " takes the name in a parameter that is not followed";
+                    return;
+                }
                 if (auto pl = sm.pairedLookups.find(fn); pl != sm.pairedLookups.end() &&
                                                          pl->second.second == static_cast<size_t>(argument)) {
                     const size_t id = pl->second.first;
@@ -1296,8 +1318,8 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                     }
                 }
                 const auto ps = sm.paramSinks.find(fn);
-                if (ps == sm.paramSinks.end() || argument < 0 || static_cast<size_t>(argument) >= ps->second.size())
-                    return; // no String parameter there: only the paired lookup (if any) uses it
+                if (ps == sm.paramSinks.end() || static_cast<size_t>(argument) >= ps->second.size())
+                    return; // no other use of the parameter: only the paired lookup (if any)
                 for (const auto& sk : ps->second[static_cast<size_t>(argument)]) {
                     using K = pex::ValueSink::Kind;
                     if (sk.kind == K::Log) {

@@ -5247,6 +5247,23 @@ TEST(references_followed_into_other_scripts_functions)
               refs[0]->reason.find("flow.check") != std::string::npos);
     }
     {
+        // A native callee (no code: the game implements it) never counts as harmless.
+        const std::vector<std::string> strings = {"Nat", "", "Use", "None", "asName", "String"};
+        BinaryWriter o;
+        o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+        o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0);
+        o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint16_t>(1);
+        o.write<uint16_t>(2); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0);
+        o.write<uint8_t>(3); // global | native
+        o.write<uint16_t>(1); o.write<uint16_t>(4); o.write<uint16_t>(5); // asName : String
+        o.write<uint16_t>(0); o.write<uint16_t>(0);                     // locals, instructions
+        auto p = run("refx_native", {{"Nat.pex", pexFile(strings, "Nat", o.take())},
+                                     {"Caller.pex", staticCaller("Nat", "Use", "ModS.esp", std::nullopt)}});
+        const auto refs = refsIn(*p, "scripts\\caller.pex");
+        CHECK(refs.size() == 1 && refs[0]->cls == ReferenceClass::Unknown &&
+              refs[0]->reason.find("native function") != std::string::npos);
+    }
+    {
         // A callee that is not in the load order.
         auto p = run("refx_missing", {{"Caller.pex", staticCaller("Nowhere", "Use", "ModS.esp", std::nullopt)}});
         const auto refs = refsIn(*p, "scripts\\caller.pex");
@@ -8276,25 +8293,35 @@ TEST(archive_list_never_exceeds_what_the_game_reads)
 // named after no plugin is not a reference.
 TEST(references_plugin_ini_is_carried)
 {
-    auto root = referenceInstall("refpluginini");
-    writeFile(root / "Game" / "Data" / "ModS.ini", "[Archive]\nsResourceIndexFileList=Fallout4 - Textures1.ba2\n");
-    writeFile(root / "Game" / "Data" / "Unrelated.ini", "[General]\n");
-    auto cfg = configFor(root);
-    Pipeline p(cfg);
-    p.scan();
-    p.analyse();
-    const auto& s = p.session();
-    auto refs = referencesOf(s, "ModS.esp");
-    CHECK_EQ(refs.size(), size_t(1));
-    if (!refs.empty()) {
-        CHECK_EQ(refs[0]->cls, ReferenceClass::Safe);
-        CHECK_EQ(refs[0]->context, std::string("plugin INI"));
-        CHECK_EQ(refs[0]->assetPath, std::string("mods.ini"));
+    for (bool archive : {false, true}) {
+        auto root = referenceInstall(archive ? "refplugininiarc" : "refpluginini");
+        writeFile(root / "Game" / "Data" / "ModS.ini",
+                  archive ? "[Archive]\nsResourceIndexFileList=Fallout4 - Textures1.ba2\n" : "[Display]\nfFoo=1\n");
+        writeFile(root / "Game" / "Data" / "Unrelated.ini", "[General]\n");
+        auto cfg = configFor(root);
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const auto& s = p.session();
+        auto refs = referencesOf(s, "ModS.esp");
+        CHECK_EQ(refs.size(), size_t(1));
+        if (!refs.empty()) {
+            CHECK_EQ(refs[0]->cls, ReferenceClass::Safe);
+            CHECK_EQ(refs[0]->context, std::string("plugin INI"));
+            CHECK_EQ(refs[0]->assetPath, std::string("mods.ini"));
+        }
+        CHECK(referencesOf(s, "ModT.esp").empty());
+        CHECK(p.compile());
+        const auto* m = s.findPlugin("ModS.esp");
+        // Archive settings: the build manages the archive list, and this INI (read after it) could replace it.
+        CHECK_EQ(p.compiledOutput()->isCompiled(m->index), !archive);
+        if (archive) {
+            bool why = false;
+            for (const auto& r : m->reasons)
+                why |= r.find("Plugin INI") != std::string::npos && r.find("[Archive]") != std::string::npos;
+            CHECK(why);
+        }
     }
-    CHECK(referencesOf(s, "ModT.esp").empty());
-    CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
-    CHECK(p.compile());
-    CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
 }
 
 // "Clean" precombines: the precombined meshes take their geometry from <plugin> - Geometry.csg (indexed

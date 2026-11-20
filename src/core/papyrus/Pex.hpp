@@ -129,6 +129,13 @@ struct Scan {
     // Game.GetFormFromFile(FormID parameter, name parameter).
     std::map<std::string, std::vector<std::vector<ValueSink>>> paramSinks;
     std::map<std::string, std::pair<size_t, size_t>> pairedLookups;
+    // Every callable function (lower case): its parameter types (lower case) and whether it is native (no
+    // code: what it does with an argument cannot be followed).
+    struct Signature {
+        std::vector<std::string> paramTypes;
+        bool native = false;
+    };
+    std::map<std::string, Signature> functionParams;
 };
 
 Scan scan(const std::vector<uint8_t>& bytes);

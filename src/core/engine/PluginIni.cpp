@@ -83,6 +83,17 @@ std::map<PluginIndex, std::string> conflicts(const Session& session, const std::
                 for (const auto& e : entries)
                     after[{toLower(e.section), toLower(e.key)}] = {e.value, pi};
     std::map<PluginIndex, std::string> out;
+    // Archive settings: the build lists compiled plugins' archives itself (Fallout4Custom.ini, or the archive
+    // loader), and a plugin INI read after it could replace that list. Such a plugin stays.
+    for (const auto& [pi, entries] : inis)
+        if (isCompiled(pi))
+            for (const auto& e : entries)
+                if (toLower(e.section) == "archive") {
+                    out[pi] = "its INI (" + session.plugins[pi].baseName() + ".ini) sets [" + e.section + "] " + e.key +
+                              ": archive settings are managed by the build (the compiled plugins' archives are listed "
+                              "for them), and this INI, read after it, could replace that list";
+                    break;
+                }
     for (const auto& [key, now] : today) {
         const auto it = after.find(key);
         if (it != after.end() && it->second.value == now.value)

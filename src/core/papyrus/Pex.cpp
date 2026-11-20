@@ -243,9 +243,10 @@ private:
     {
         strs(2); // return type, doc
         r_.read<uint32_t>();
-        r_.read<uint8_t>();
+        const uint8_t flags = r_.read<uint8_t>(); // 1 global, 2 native
         const uint16_t params = r_.read<uint16_t>();
         Function f;
+        f.native = (flags & 2) != 0;
         f.name = functionName_;
         f.where = where_;
         localTypes_.clear();
@@ -577,7 +578,7 @@ public:
             if (F.name.empty())
                 continue;
             for (size_t i = 0; i < F.params.size(); ++i)
-                if (i < F.paramTypes.size() && F.paramTypes[i] == "string") {
+                if (i < F.paramTypes.size() && (F.paramTypes[i] == "string" || F.paramTypes[i] == "var")) {
                     origins.push_back({0, 0, false, {}, {}});
                     plain[std::to_string(f) + ":" + F.params[i]].insert(origins.size() - 1);
                     paramOrigin.emplace_back(f, i);
@@ -807,6 +808,9 @@ public:
         for (const auto& [f, mn] : pairedLookup)
             if (!functions_[f].name.empty())
                 out_.pairedLookups[toLower(functions_[f].name)] = mn;
+        for (const auto& F : functions_)
+            if (!F.name.empty())
+                out_.functionParams[toLower(F.name)] = {F.paramTypes, F.native};
         for (size_t oi = 0; oi < origins.size(); ++oi) {
             if (oi >= firstParamOrigin && oi < firstParamOrigin + paramOrigin.size())
                 continue; // a parameter's summary, not a constant
@@ -837,6 +841,7 @@ private:
         std::string where;
         std::vector<std::string> params;
         std::vector<std::string> paramTypes; // lower case
+        bool native = false;                 // implemented by the game: no code to follow
         std::set<std::string> locals;
         std::map<std::string, std::string> types; // lower-case parameter or local -> lower-case type
         std::vector<Instr> code;
