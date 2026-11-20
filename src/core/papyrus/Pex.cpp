@@ -208,7 +208,7 @@ private:
             const uint8_t flags = r_.read<uint8_t>();
             where_ = object_ + "." + property;
             if (flags & 4) {
-                autoVars_.insert(out_.strings[str()]); // the Auto property's variable: script data may set it
+                autoVars_[out_.strings[str()]] = object_ + "." + property; // script data may set it
             } else {
                 if (flags & 1) {
                     getter_ = true; // the read handler: a string it returns is the property's value
@@ -412,9 +412,9 @@ private:
         // line, a message, or somewhere that matters).
         if (op == 0x1B && args.size() == 3 && args[0].type == 1) {
             const auto* from = propertyOf(args[1]);
-            if (!from || (from->first.rfind("struct:", 0) != 0 && from->first.rfind("concat:", 0) != 0))
+            if (!from)
                 from = propertyOf(args[2]);
-            if (from && (from->first.rfind("struct:", 0) == 0 || from->first.rfind("concat:", 0) == 0)) {
+            if (from) {
                 const std::string base = from->first.rfind("concat:", 0) == 0 ? from->first : "concat:" + from->first;
                 propertyVars_[out_.strings[args[0].string]] = {base, from->second};
             }
@@ -497,6 +497,7 @@ public:
             size_t offset;
             bool overridable;
             std::set<ValueSink> sinks;
+            std::string property;
         };
         std::vector<Origin> origins;
         std::map<size_t, size_t> originAt;
@@ -505,13 +506,18 @@ public:
             if (it != originAt.end())
                 return it->second;
             originAt[v.offset] = origins.size();
-            origins.push_back({v.string, v.offset, overridable, {}});
+            origins.push_back({v.string, v.offset, overridable, {}, {}});
             return origins.size() - 1;
         };
         std::map<std::string, std::set<size_t>> plain, text; // variable -> origins (text: built from them)
         for (const auto& [name, v] : objectVars_)
-            if (pluginLike(v))
-                plain[":" + name].insert(originOf(v, autoVars_.count(name) > 0));
+            if (pluginLike(v)) {
+                    const auto a = autoVars_.find(name);
+                    const size_t o = originOf(v, a != autoVars_.end());
+                    if (a != autoVars_.end())
+                        origins[o].property = a->second;
+                    plain[":" + name].insert(o);
+                }
         std::map<std::string, size_t> byName;
         for (size_t f = 0; f < functions_.size(); ++f)
             if (!functions_[f].name.empty())
@@ -719,6 +725,7 @@ public:
             vf.string = o.string;
             vf.offset = o.offset;
             vf.overridable = o.overridable;
+            vf.property = o.property;
             vf.sinks.assign(o.sinks.begin(), o.sinks.end());
             out_.flows.push_back(std::move(vf));
         }
@@ -744,7 +751,7 @@ private:
     };
     std::vector<Function> functions_;
     std::map<std::string, Value> objectVars_;
-    std::set<std::string> autoVars_;
+    std::map<std::string, std::string> autoVars_; // an Auto property's variable -> "Object.Property"
     std::string functionName_;
     bool getter_ = false;
     // variable -> (property or function it holds, script type it was read from)

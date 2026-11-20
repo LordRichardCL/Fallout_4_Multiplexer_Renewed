@@ -1296,3 +1296,18 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 **Decision.** Keep it, with the switch **Compile new quests, dialogue and NPCs** (Compilation page, Advanced; `CompileOptions::compileNewQuestsAndNpcs`, CLI `--no-new-quests-npcs`). On by default, because builds in use rely on it: defaulting it off would return every such plugin to the load order (pin-back protection would stop the build until each is allowed back). The **Safest** preset turns it off. Off: a plugin adding new QUST, DIAL, INFO, SCEN, DLBR, DLVW or NPC_ records stays in the load order, with the types and counts in its reason; overrides of those types still compile (no new FormIDs, no voice or FaceGen paths). The setting is part of the settings a build is checked against.
 
 **Test:** `new_quests_and_npcs_follow_their_switch` (a new quest and an override of it, switch on and off).
+
+## Named constants: joined text, returning functions, Auto property defaults (20 Nov 2026)
+
+**Found in the owner's Dependency Report of 18 Nov.** 16 plugins stayed out under "constant property read by GetFormFromFile" and 2 under "Auto property default":
+- 13 because `TCMag_CoreScript.ScanModules` joins the constant into text (`strcat`): any join counted as an unknown use;
+- 2 (Mutations, Ghoulification) because `API.GetPluginName()` returns the constant: the return counted as an unknown use, and its callers were never looked at;
+- 1 (Challenges) because the constant is passed to a static function (cross-script arguments, next);
+- 2 because an Auto property's default could be set by the plugin's script data, "which this app does not check yet".
+
+**Changes.**
+- The Papyrus reader follows text joined from any property (`strcat`), as it already did for struct members; the join itself is not a use.
+- A constant's reads now include text joined from it (only logging or messages, by the called function's name, counts as harmless, as for SS2 pairs), and, for a function that returns it, the reads of that function's result by its callers (up to 4 levels). Each lookup is checked against the script that declares the member it reads (the constant, or the returning function).
+- An Auto property default used for lookups in its own script: those lookups carry the rewrite (as for any variable); the property itself is Safe when no other script reads it, and Compatibility Required, naming the reader, when one does. A record that sets the property to the plugin's own name is a reference of its own (script property in a record), so the record side was never unchecked.
+
+**Tests:** `references_named_constants_joined_or_returned` (logged join: rewritable; join passed to other code: unknown; returned through `API.GetPluginName()` to a presence check: rewritable) and `references_auto_property_defaults_by_their_readers`.

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <unordered_map>
 #include <unordered_set>
 #include <atomic>
@@ -723,13 +724,15 @@ void flowReferences(std::vector<PluginReference>& out, const pex::ValueFlow& flo
         return;
     }
     if (flow.overridable) {
-        auto r = make(Fact::PexOtherUse, plugin, path, format, text, use.where);
+        // Other scripts may read the Auto property: decided once every script is read (scan), from those
+        // reads. Its own lookups below carry the rewrite. A record setting the property to this plugin's
+        // name is a reference of its own (script property in a record).
+        auto r = make(Fact::PexOtherUse, plugin, path, format, text, flow.property.empty() ? use.where : flow.property);
         r.cls = ReferenceClass::CompatibilityRequired;
         r.context = "Auto property default";
-        r.reason = "the default value of an Auto property, used for GetFormFromFile or IsPluginInstalled; the "
-                   "plugin's script data can set the property to another value, which this app does not check yet";
+        r.reason = "the default value of an Auto property, used for GetFormFromFile or IsPluginInstalled; other "
+                   "scripts may read the property";
         out.push_back(std::move(r));
-        return;
     }
     for (const auto* s : lookups) {
         auto r = make(Fact::PexGetFormFixed, plugin, path, format, text, s->where);
@@ -1307,27 +1310,72 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             const auto dot = r.location.rfind('.');
             const std::string property = toLower(dot == std::string::npos ? r.location : r.location.substr(dot + 1));
             const std::string owner = toLower(r.location.substr(0, r.location.find('.')));
-            auto it = readers.find(property);
-            std::vector<Reader> own;
-            if (it != readers.end())
-                for (const auto& rd : it->second)
-                    if (reaches(rd.read->object, owner))
-                        own.push_back(rd);
+            // Every read of the constant: direct reads, text joined from it (strcat, followed by the reader),
+            // and, through a function that returns it (API.GetPluginName()), that function's callers.
+            struct Use {
+                const Reader* rd;
+                std::string member, owner; // what the read names, and the script that declares it
+                bool joined;               // text joined from the value
+            };
+            std::vector<Use> own;
+            std::set<std::pair<std::string, std::string>> visited;
+            std::function<void(const std::string&, const std::string&, int)> collect =
+                [&](const std::string& member, const std::string& from, int depth) {
+                    if (!visited.insert({member, from}).second)
+                        return;
+                    for (bool joined : {false, true}) {
+                        auto it = readers.find(joined ? "concat:" + member : member);
+                        if (it == readers.end())
+                            continue;
+                        for (const auto& rd : it->second) {
+                            if (!reaches(rd.read->object, from))
+                                continue;
+                            if (rd.read->opcode == "strcat")
+                                continue; // passes the text on; its result is read as concat:
+                            if (rd.read->opcode == "return" && !joined && depth < 4) {
+                                const std::string& w = rd.read->where; // Object[.State].Function
+                                collect(toLower(w.substr(w.rfind('.') + 1)), toLower(w.substr(0, w.find('.'))),
+                                        depth + 1);
+                                continue;
+                            }
+                            own.push_back({&rd, member, from, joined});
+                        }
+                    }
+                };
+            collect(property, owner, 0);
+            auto logging = [](const pex::PropertyRead& pr) {
+                const std::string fn = toLower(pr.function);
+                return !fn.empty() && (fn.find("trace") != std::string::npos || fn.find("log") != std::string::npos ||
+                                       fn.find("print") != std::string::npos ||
+                                       fn.find("notification") != std::string::npos ||
+                                       fn.find("messagebox") != std::string::npos);
+            };
             if (own.empty()) {
                 r.cls = ReferenceClass::Safe;
                 r.reason = "the value of the constant " + r.location + ", which no script in the load order reads";
                 continue;
             }
-            size_t gfff = 0, presence = 0, other = 0;
+            size_t gfff = 0, presence = 0, other = 0, logged = 0;
             const Reader* firstGfff = nullptr;
             const Reader* firstOther = nullptr;
-            for (const auto& rd : own) {
-                if (rd.read->use == pex::PropertyRead::Use::GetFormFromFile) {
+            for (const auto& u : own) {
+                const auto& rd = *u.rd;
+                if (u.joined) {
+                    if (logging(*rd.read)) {
+                        ++logged;
+                    } else {
+                        ++other;
+                        if (!firstOther)
+                            firstOther = &rd;
+                    }
+                } else if (rd.read->use == pex::PropertyRead::Use::GetFormFromFile) {
                     ++gfff;
                     if (!firstGfff)
                         firstGfff = &rd;
                 } else if (rd.read->use == pex::PropertyRead::Use::IsPluginInstalled) {
                     ++presence;
+                } else if (logging(*rd.read)) {
+                    ++logged;
                 } else {
                     ++other;
                     if (!firstOther)
@@ -1336,20 +1384,25 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
             }
             const std::string counts = std::to_string(own.size()) + " reads: " + std::to_string(gfff) +
                                        " GetFormFromFile, " + std::to_string(presence) + " IsPluginInstalled, " +
-                                       std::to_string(other) + " other";
-            // Read only by lookups with a constant FormID, made on the owner script itself (not a script
-            // it extends or one extending it, whose version may differ), and presence checks: the
+                                       std::to_string(logged) + " in log text, " + std::to_string(other) + " other";
+            // Read only by lookups with a constant FormID, made on the declaring script itself (not a script
+            // it extends or one extending it, whose version may differ), presence checks and log text: the
             // constant can name the output, and each lookup's FormID becomes the record's new one.
             bool exact = gfff > 0 && other == 0;
             std::string blocker; // the first read that is not rewritable, for the reason
-            for (const auto& rd : own) {
+            for (const auto& u : own) {
+                const auto& rd = *u.rd;
                 std::string why;
-                if (rd.read->use == pex::PropertyRead::Use::Other)
-                    why = "used by " + rd.read->opcode;
+                if (u.joined && !logging(*rd.read))
+                    why = "text joined from it is used by " + (rd.read->function.empty() ? rd.read->opcode : rd.read->function);
+                else if (u.joined)
+                    continue;
+                else if (rd.read->use == pex::PropertyRead::Use::Other && !logging(*rd.read))
+                    why = "used by " + (rd.read->function.empty() ? rd.read->opcode : rd.read->opcode + " " + rd.read->function);
                 else if (rd.read->use == pex::PropertyRead::Use::GetFormFromFile && !rd.read->formIdLiteral)
                     why = "GetFormFromFile with a FormID computed at run time";
                 else if (rd.read->use == pex::PropertyRead::Use::GetFormFromFile &&
-                         !certain(rd.read->object, owner, property))
+                         !certain(rd.read->object, u.owner, u.member))
                     why = rd.read->object.empty() ? "GetFormFromFile on an object whose script type is unknown"
                                                   : "GetFormFromFile on " + rd.read->object +
                                                         ", whose member of that name may not be this one";
@@ -1365,8 +1418,9 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                 r.reason = "the value of the constant " + r.location + " is only used by lookups with a constant FormID "
                            "on " + r.location.substr(0, r.location.find('.')) + " and presence checks (" + counts +
                            "): it can name the output plugin, and each lookup gets the record's new FormID";
-                for (const auto& rd : own) {
-                    if (rd.read->use != pex::PropertyRead::Use::GetFormFromFile)
+                for (const auto& u : own) {
+                    const auto& rd = *u.rd;
+                    if (u.joined || rd.read->use != pex::PropertyRead::Use::GetFormFromFile)
                         continue;
                     PluginReference rr;
                     rr.plugin = r.plugin;
@@ -1400,14 +1454,41 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                            firstOther->read->where + ", " + firstOther->read->opcode + ") in a way whose meaning cannot be "
                            "established (" + counts + ")";
             } else {
-                // Only presence checks read it: naming the output plugin, which is installed, keeps every
-                // check true, as the original was. The Auto-Merger rewrites the constant.
+                // Only presence checks (and log text) read it: naming the output plugin, which is installed,
+                // keeps every check true, as the original was. The Auto-Merger rewrites the constant.
                 r.cls = ReferenceClass::Rewritable;
                 r.kind = ReferenceKind::PluginName;
                 r.context = "constant property read by IsPluginInstalled";
                 r.reason = "the value of the constant " + r.location + " is only used for presence checks "
                            "(Game.IsPluginInstalled, " + counts + "): it can name the output plugin, which is installed";
             }
+        }
+        // Auto property defaults used for lookups in their own script: rewritable when no script reads the
+        // property (the lookups' references carry the rewrite).
+        for (auto& r : session.nameReferences) {
+            if (r.context != "Auto property default" || r.cls != ReferenceClass::CompatibilityRequired)
+                continue;
+            const auto dot = r.location.find('.');
+            if (dot == std::string::npos)
+                continue;
+            const std::string owner = toLower(r.location.substr(0, dot));
+            const std::string property = toLower(r.location.substr(dot + 1));
+            const Reader* reader = nullptr;
+            for (const char* prefix : {"", "concat:"})
+                if (auto it = readers.find(prefix + property); it != readers.end())
+                    for (const auto& rd : it->second)
+                        if (!reader && reaches(rd.read->object, owner))
+                            reader = &rd;
+            if (reader) {
+                r.reason = "the default value of the Auto property " + r.location +
+                           ", used for GetFormFromFile or IsPluginInstalled, is also read by " + reader->script + " (" +
+                           reader->read->where + "), which is not followed";
+                continue;
+            }
+            r.cls = ReferenceClass::Safe;
+            r.reason = "the default value of the Auto property " + r.location +
+                       ", which no other script reads: its own lookups carry the rewrite (a record setting the "
+                       "property to this plugin's name is a reference of its own)";
         }
         for (auto& rr : readerRefs)
             session.nameReferences.push_back(std::move(rr));

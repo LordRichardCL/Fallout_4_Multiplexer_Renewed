@@ -4410,6 +4410,157 @@ TEST(references_named_constants_by_their_readers)
     }
 }
 
+// 6c''. A named constant whose readers join it into text: only logged, the constant stays rewritable;
+//      passed on to other code, its meaning is unknown. A constant returned by a function
+//      (API.GetPluginName()) is decided by that function's callers.
+namespace {
+std::vector<uint8_t> joinedReader(bool logged)
+{
+    const std::vector<std::string> strings = {"Joined", "", "OnInit", "None", "sPluginModS", "kConsts", "::temp1",
+                                              "String", "::temp2", "Loading ", "Debug", "Trace", "::nonevar",
+                                              "Other", "Use"};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0); // structs, variables, properties
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint16_t>(1); // states, default state, functions
+    o.write<uint16_t>(2); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0);                                                     // params
+    o.write<uint16_t>(2); o.write<uint16_t>(6); o.write<uint16_t>(7); o.write<uint16_t>(8); o.write<uint16_t>(7);
+    o.write<uint16_t>(3);
+    auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    o.write<uint8_t>(0x1C); ident(4); ident(5); ident(6);                      // ::temp1 = kConsts.sPluginModS
+    o.write<uint8_t>(0x1B); ident(8); o.write<uint8_t>(2); o.write<uint16_t>(9); ident(6); // "Loading " + ...
+    o.write<uint8_t>(0x19); ident(logged ? 10 : 13); ident(logged ? 11 : 14); ident(12);
+    o.write<uint8_t>(3); o.write<int32_t>(1); ident(8);                       // Debug.Trace / Other.Use
+    return pexFile(strings, "Joined", o.take());
+}
+
+std::vector<uint8_t> apiScript()
+{
+    const std::vector<std::string> strings = {"API", "", "GetPluginName", "String", "sPluginModS", "kConsts", "::temp0"};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0);
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint16_t>(1);
+    o.write<uint16_t>(2); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0);
+    o.write<uint16_t>(1); o.write<uint16_t>(6); o.write<uint16_t>(3);
+    o.write<uint16_t>(2);
+    auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    o.write<uint8_t>(0x1C); ident(4); ident(5); ident(6); // ::temp0 = kConsts.sPluginModS
+    o.write<uint8_t>(0x1A); ident(6);                     // return ::temp0
+    return pexFile(strings, "API", o.take());
+}
+
+std::vector<uint8_t> apiCaller()
+{
+    const std::vector<std::string> strings = {"Caller2", "", "OnInit", "None", "API", "GetPluginName", "::temp0",
+                                              "String", "Game", "IsPluginInstalled", "::temp1", "Bool"};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); o.write<uint16_t>(0); o.write<uint16_t>(0);
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint16_t>(1);
+    o.write<uint16_t>(2); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0);
+    o.write<uint16_t>(2); o.write<uint16_t>(6); o.write<uint16_t>(7); o.write<uint16_t>(10); o.write<uint16_t>(11);
+    o.write<uint16_t>(2);
+    auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    o.write<uint8_t>(0x19); ident(4); ident(5); ident(6); o.write<uint8_t>(3); o.write<int32_t>(0); // API.GetPluginName()
+    o.write<uint8_t>(0x19); ident(8); ident(9); ident(10); o.write<uint8_t>(3); o.write<int32_t>(1); ident(6);
+    return pexFile(strings, "Caller2", o.take());
+}
+} // namespace
+
+TEST(references_named_constants_joined_or_returned)
+{
+    for (const char* how : {"logged", "joined", "returned"}) {
+        auto root = referenceInstall(std::string("refconstj_") + how);
+        auto data = root / "Game" / "Data";
+        writeBytes(data / "Scripts" / "Consts.pex", constantsScript("ModS.esp"));
+        if (std::string(how) == "returned") {
+            writeBytes(data / "Scripts" / "API.pex", apiScript());
+            writeBytes(data / "Scripts" / "Caller2.pex", apiCaller());
+        } else {
+            writeBytes(data / "Scripts" / "Joined.pex", joinedReader(std::string(how) == "logged"));
+        }
+        Pipeline p(configFor(root));
+        p.scan();
+        p.analyse();
+        const auto refs = referencesOf(p.session(), "ModS.esp");
+        CHECK_EQ(refs.size(), size_t(1));
+        if (refs.empty())
+            continue;
+        const auto* r = refs[0];
+        if (std::string(how) == "joined") {
+            CHECK_EQ(r->cls, ReferenceClass::Unknown);
+        } else {
+            CHECK_EQ(r->cls, ReferenceClass::Rewritable);
+            if (std::string(how) == "logged")
+                CHECK(r->reason.find("1 in log text") != std::string::npos);
+            else
+                CHECK(r->reason.find("1 IsPluginInstalled") != std::string::npos);
+        }
+    }
+}
+
+// 6d. The default of an Auto property used for a lookup in its own script: rewritable when no other
+//     script reads the property (its own lookup carries the rewrite); read by another script, it stays.
+namespace {
+std::vector<uint8_t> autoPropertyScript()
+{
+    const std::vector<std::string> strings = {"AutoProp", "", "::sPluginModS_var", "String", "ModS.esp", "sPluginModS",
+                                              "OnInit", "None", "Game", "GetFormFromFile", "::temp0", "Form"};
+    BinaryWriter o;
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint8_t>(0); o.write<uint32_t>(0); o.write<uint16_t>(1);
+    o.write<uint16_t>(0); // structs
+    o.write<uint16_t>(1); // variables: ::sPluginModS_var = "ModS.esp"
+    o.write<uint16_t>(2); o.write<uint16_t>(3); o.write<uint32_t>(0); o.write<uint8_t>(2); o.write<uint16_t>(4);
+    o.write<uint8_t>(0);
+    o.write<uint16_t>(1); // properties: sPluginModS, Auto
+    o.write<uint16_t>(5); o.write<uint16_t>(3); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(7);
+    o.write<uint16_t>(2);
+    o.write<uint16_t>(1); o.write<uint16_t>(1); o.write<uint16_t>(1); // states, default state, functions
+    o.write<uint16_t>(6); o.write<uint16_t>(7); o.write<uint16_t>(1); o.write<uint32_t>(0); o.write<uint8_t>(0);
+    o.write<uint16_t>(0);
+    o.write<uint16_t>(1); o.write<uint16_t>(10); o.write<uint16_t>(11);
+    o.write<uint16_t>(1);
+    auto ident = [&](uint16_t i) { o.write<uint8_t>(1); o.write<uint16_t>(i); };
+    o.write<uint8_t>(0x19); ident(8); ident(9); ident(10); o.write<uint8_t>(3); o.write<int32_t>(2);
+    o.write<uint8_t>(3); o.write<int32_t>(0x812); ident(2); // Game.GetFormFromFile(0x812, sPluginModS)
+    return pexFile(strings, "AutoProp", o.take());
+}
+} // namespace
+
+TEST(references_auto_property_defaults_by_their_readers)
+{
+    for (bool readElsewhere : {false, true}) {
+        auto root = referenceInstall(readElsewhere ? "refautoread" : "refautoalone");
+        auto data = root / "Game" / "Data";
+        writeBytes(data / "Scripts" / "AutoProp.pex", autoPropertyScript());
+        if (readElsewhere)
+            writeBytes(data / "Scripts" / "Reader.pex", readerScript("presence"));
+        auto cfg = configFor(root);
+        cfg.compile.autoMerge = true;
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const PluginReference* marker = nullptr;
+        size_t lookups = 0;
+        for (const auto* r : referencesOf(p.session(), "ModS.esp")) {
+            if (r->context == "Auto property default")
+                marker = r;
+            if (r->hasFormId && r->cls == ReferenceClass::Rewritable)
+                ++lookups;
+        }
+        CHECK(marker != nullptr);
+        if (!marker)
+            continue;
+        CHECK_EQ(lookups, size_t(1));
+        CHECK_EQ(marker->cls, readElsewhere ? ReferenceClass::CompatibilityRequired : ReferenceClass::Safe);
+        CHECK_EQ(p.session().findPlugin("ModS.esp")->eligibility == Eligibility::Eligible, !readElsewhere);
+    }
+}
+
 // 6c'. A function returning a plugin name (a mod naming itself) is a named constant too: its callers
 //     decide. Called only for a presence check: rewritable; called by nothing: Safe.
 TEST(references_functions_returning_a_plugin_name)

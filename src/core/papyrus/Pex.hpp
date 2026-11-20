@@ -95,6 +95,7 @@ struct ValueFlow {
     uint16_t string = 0;
     size_t offset = 0;         // the constant's string index (as StringUsage::offset)
     bool overridable = false;  // the default of an Auto property: the plugin's script data may set it
+    std::string property;      // for an Auto property: "Object.Property" (other scripts may read it)
     std::vector<ValueSink> sinks;
 };
 
