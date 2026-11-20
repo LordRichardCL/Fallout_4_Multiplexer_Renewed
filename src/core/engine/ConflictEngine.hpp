@@ -58,6 +58,7 @@ struct TracedChange {
     std::string item;   // list element (tokens until the report is finalised), "" for a whole field
     std::string before; // the parent version's value
     std::string after;  // the source's value
+    std::string position; // an element added to an ordered list (FLST): where ("after <element>", "first")
     PluginIndex source = kInvalidPlugin;
     ChangeOp op = ChangeOp::Set;
     ChangeStatus status = ChangeStatus::Survives;

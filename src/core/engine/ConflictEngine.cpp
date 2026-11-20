@@ -244,6 +244,7 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
                 t.item = ev.item;
                 t.before = ev.before;
                 t.after = ev.after;
+                t.position = ev.position;
                 t.source = inst[ev.version].plugin;
                 t.op = ev.op;
                 t.status = ev.status;
@@ -425,6 +426,7 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
             t.item = renderFormTokens(session, t.item);
             t.before = renderFormTokens(session, t.before);
             t.after = renderFormTokens(session, t.after);
+            t.position = renderFormTokens(session, t.position);
         }
         report.lostChanges += e.lostChanges;
         for (const auto& t : e.changes)

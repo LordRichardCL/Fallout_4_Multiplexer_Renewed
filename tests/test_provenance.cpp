@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <map>
 #include <optional>
 
 using namespace fo4mx;
@@ -664,4 +665,45 @@ TEST(struct_members_compete_and_fall_back)
     auto r = traceProvenance(opaqueChain, {0, 0, 0}, label, &RecordDefinitions::get());
     for (const auto& e : r.events)
         CHECK(e.member.empty() && e.opaque);
+}
+
+// Ordered lists (FLST): an element a plugin added keeps its place when carried. The base list is 1 2 3;
+// ModA (made against the base) adds 9 after 1 and 8 first; the winner (also against the base) adds 4 at the
+// end. Carried: 8 1 9 2 3 4 (each after the nearest element before it in ModA that the result has, the
+// first one before 1). The positions are traced, and a result holding 9 out of place does not hold it.
+TEST(ordered_list_elements_keep_their_place)
+{
+    std::vector<FieldSet> fl{list("FLST", "LNAM", {1, 2, 3}), list("FLST", "LNAM", {8, 1, 9, 2, 3}),
+                             list("FLST", "LNAM", {1, 2, 3, 4})};
+    auto p = traceProvenance(fl, {0, 0, 0}, label);
+    std::map<std::string, std::string> positions; // element -> position
+    for (const auto& e : p.events)
+        if (e.op == ChangeOp::Add)
+            positions[e.item] = e.position;
+    CHECK_EQ(positions.size(), size_t(3));
+    bool first = false, after = false;
+    for (const auto& [item, pos] : positions) {
+        first |= pos == "first";
+        after |= pos.rfind("after ", 0) == 0 && pos.find(label(FormKey{0, 1})) != std::string::npos;
+    }
+    CHECK(first && after);
+    auto lost = lostOf(p);
+    CHECK_EQ(lost.size(), size_t(2)); // 8 and 9: omitted by the winner
+    FieldSet r = fl.back();
+    CHECK(applyChanges(r, fl, lost).empty());
+    std::vector<uint32_t> ids;
+    for (const auto& f : r.fields)
+        if (f.isList())
+            for (const auto& item : f.items)
+                ids.push_back(item.subs[0].refs[0].second.objectId);
+    CHECK((ids == std::vector<uint32_t>{8, 1, 9, 2, 3, 4}));
+
+    // A result already holding 9 in another place (before 1) does not hold ModA's change: refused.
+    std::vector<const ChangeEvent*> nine;
+    for (const auto* e : lost)
+        if (e->position.rfind("after ", 0) == 0)
+            nine.push_back(e);
+    CHECK_EQ(nine.size(), size_t(1));
+    FieldSet m = list("FLST", "LNAM", {9, 1, 2, 3, 4});
+    CHECK_EQ(applyChanges(m, fl, nine).size(), size_t(1));
 }

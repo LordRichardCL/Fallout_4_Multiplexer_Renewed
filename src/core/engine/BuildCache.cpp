@@ -14,7 +14,7 @@ namespace fo4mx {
 
 namespace {
 
-constexpr uint32_t kFormatVersion = 14; // 14: partial structs described from complete xEdit layouts; 13: struct members traced one by one; 12: change ids; 11: compatibility classes; 10: change provenance of conflicts; 9: IPDS PNAM read per subrecord; 8: raw source value of every described reference; // 7: Version Control Info of every record; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
+constexpr uint32_t kFormatVersion = 15; // 15: position of elements added to ordered lists; 14: partial structs described from complete xEdit layouts; 13: struct members traced one by one; 12: change ids; 11: compatibility classes; 10: change provenance of conflicts; 9: IPDS PNAM read per subrecord; 8: raw source value of every described reference; // 7: Version Control Info of every record; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
                                        // 4: record-level classification of types that are not merged;
                                        // 5: record placement (cells, worldspaces, topics)
 
@@ -531,6 +531,7 @@ std::vector<uint8_t> serializeConflict(const Session& session, const ConflictEnt
         w.write<uint8_t>(static_cast<uint8_t>(t.kind));
         writeString(w, t.rule);
         plugins(t.requiredMasters);
+        writeString(w, tokens(t.position));
     }
     return names.finish(w);
 }
@@ -599,6 +600,7 @@ std::optional<ConflictEntry> deserializeConflict(const Session& session, std::sp
             t.kind = static_cast<CompatKind>(r.read<uint8_t>());
             t.rule = readString(r);
             t.requiredMasters = plugins();
+            t.position = tokens(readString(r));
         }
         return e;
     } catch (const std::exception&) {

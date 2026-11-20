@@ -459,9 +459,15 @@ RecordProvenance traceProvenance(const std::vector<FieldSet>& chain, const std::
                 }
                 rp.events.push_back(std::move(e));
             };
-            for (const auto& id : views[a].order) {
-                if (!views[p].has(id))
+            for (size_t k = 0; k < views[a].order.size(); ++k) {
+                const auto& id = views[a].order[k];
+                if (!views[p].has(id)) {
                     add(ChangeOp::Add, id, nullptr, views[a].items.at(id));
+                    if (ordered)
+                        rp.events.back().position =
+                            k == 0 ? std::string("first")
+                                   : "after " + describeItem(*shape, views[a].items.at(views[a].order[k - 1]));
+                }
                 else if (keyed && !itemEquivalent(*views[a].items.at(id), *views[p].items.at(id)))
                     add(ChangeOp::Modify, id, views[p].items.at(id), views[a].items.at(id));
             }
@@ -575,6 +581,30 @@ std::vector<std::string> commonOrder(const ListView& x, const ListView& y)
     return out;
 }
 
+size_t positionIn(const ListView& v, const std::string& id)
+{
+    return static_cast<size_t>(std::find(v.order.begin(), v.order.end(), id) - v.order.begin());
+}
+
+// The nearest element before `id` in `source` that `target` has (other than `id`), or "" when none.
+std::string anchorBefore(const ListView& source, const ListView& target, const std::string& id)
+{
+    const size_t at = positionIn(source, id);
+    for (size_t k = at; k-- > 0;)
+        if (source.order[k] != id && target.has(source.order[k]))
+            return source.order[k];
+    return {};
+}
+
+// The nearest element after `id` in `source` that `target` has, or "" when none.
+std::string anchorAfter(const ListView& source, const ListView& target, const std::string& id)
+{
+    for (size_t k = positionIn(source, id) + 1; k < source.order.size(); ++k)
+        if (target.has(source.order[k]))
+            return source.order[k];
+    return {};
+}
+
 bool holds(const FieldSet& result, const std::vector<FieldSet>& chain, const ChangeEvent& c)
 {
     const Field* src = c.version < chain.size() ? chain[c.version].find(c.fieldKey) : nullptr;
@@ -592,8 +622,17 @@ bool holds(const FieldSet& result, const std::vector<FieldSet>& chain, const Cha
     case ChangeOp::Remove: return !mine.has(c.identity);
     case ChangeOp::Add:
     case ChangeOp::Modify:
-        return mine.has(c.identity) && theirs.has(c.identity) &&
-               (!keyed || itemEquivalent(*mine.items.at(c.identity), *theirs.items.at(c.identity)));
+        if (!mine.has(c.identity) || !theirs.has(c.identity) ||
+            (keyed && !itemEquivalent(*mine.items.at(c.identity), *theirs.items.at(c.identity))))
+            return false;
+        if (c.op == ChangeOp::Add && listOrderMatters(chain[0].sig, *shape)) {
+            // In an ordered list the element must follow the nearest element before it in the source that
+            // the result has.
+            const auto anchor = anchorBefore(theirs, mine, c.identity);
+            if (!anchor.empty())
+                return positionIn(mine, c.identity) > positionIn(mine, anchor);
+        }
+        return true;
     case ChangeOp::Reorder: return commonOrder(mine, theirs) == commonOrder(theirs, mine);
     case ChangeOp::Set: break;
     }
@@ -675,10 +714,22 @@ std::vector<size_t> applyChanges(FieldSet& result, const std::vector<FieldSet>& 
             auto it = theirs.items.find(c->identity);
             if (it == theirs.items.end())
                 break;
-            if (const auto i = indexOf(c->identity); i >= 0)
+            if (const auto i = indexOf(c->identity); i >= 0) {
                 list.items[static_cast<size_t>(i)] = *it->second;
-            else
+            } else if (c->op == ChangeOp::Add && listOrderMatters(chain[0].sig, *shape)) {
+                // An ordered list: after the nearest element before it in the source that the list has, else
+                // before the nearest one after it, else at the end.
+                const auto before = anchorBefore(theirs, mine, c->identity);
+                const auto after = before.empty() ? anchorAfter(theirs, mine, c->identity) : std::string();
+                size_t at = list.items.size();
+                if (!before.empty())
+                    at = static_cast<size_t>(indexOf(before)) + 1;
+                else if (!after.empty())
+                    at = static_cast<size_t>(indexOf(after));
+                list.items.insert(list.items.begin() + static_cast<std::ptrdiff_t>(at), *it->second);
+            } else {
                 list.items.push_back(*it->second);
+            }
             break;
         }
         case ChangeOp::Remove:

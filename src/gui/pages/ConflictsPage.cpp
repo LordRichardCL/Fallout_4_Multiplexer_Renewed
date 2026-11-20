@@ -543,7 +543,8 @@ void ConflictsPage::showPlan()
     for (const auto& pe : rec->entries) {
         const auto& t = rec->conflict->changes[pe.change];
         const QString change = QString::fromStdString(
-            t.item.empty() ? t.before + " → " + t.after : std::string(fo4mx::changeOpName(t.op)) + " " + t.item);
+            (t.item.empty() ? t.before + " → " + t.after : std::string(fo4mx::changeOpName(t.op)) + " " + t.item) +
+            (t.position.empty() ? std::string() : " (" + t.position + ")"));
         const QString fate = QString::fromStdString(
             std::string(fo4mx::changeStatusName(t.status)) +
             (t.lostAt != fo4mx::kInvalidPlugin ? " (" + s.pluginName(t.lostAt) + ")" : std::string()));

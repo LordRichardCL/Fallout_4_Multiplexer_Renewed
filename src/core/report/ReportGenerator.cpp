@@ -368,6 +368,8 @@ std::string conflictReport(const ReportContext& ctx)
             const std::string src = s.pluginName(t.source);
             const std::string at = t.lostAt == kInvalidPlugin ? std::string("the winner") : s.pluginName(t.lostAt);
             std::string change = t.item.empty() ? t.before + " → " + t.after : std::string(changeOpName(t.op)) + " " + t.item;
+            if (!t.position.empty())
+                change += " (" + t.position + ")";
             std::string fate;
             switch (t.status) {
             case ChangeStatus::OmittedLater: fate = "not in " + at + ", which was not made with " + src + " as a master"; break;
@@ -434,6 +436,8 @@ std::string conflictReport(const ReportContext& ctx)
                 ++entryShown;
                 const auto& t = pr.conflict->changes[pe.change];
                 std::string change = t.item.empty() ? t.before + " → " + t.after : std::string(changeOpName(t.op)) + " " + t.item;
+            if (!t.position.empty())
+                change += " (" + t.position + ")";
                 h.row({s.formLabel(pr.conflict->key), t.field, change, s.pluginName(t.source), compatClassName(t.cls),
                        planActionName(pe.action), planDecisionName(pe.decision), pe.note},
                       {"mono"});
@@ -1040,6 +1044,8 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
                 to.set("operation", changeOpName(t.op));
                 to.set("before", t.before);
                 to.set("after", t.after);
+                if (!t.position.empty())
+                    to.set("position", t.position);
                 to.set("madeBy", s->pluginName(t.source));
                 to.set("status", changeStatusName(t.status));
                 if (t.lostAt != kInvalidPlugin)

@@ -341,6 +341,15 @@ Plugins
 ## 12. Smallest sensible milestone, tests and files
 
 **Phase 10 (struct members)** is implemented (18 Nov 2026). Further handlers in section 12's list (object templates, more ordered lists) wait on the open points of section 11.
+
+**Phase 10, ordered lists (FLST)** is implemented (20 Nov 2026). Section 11.3 keeps FLST order as data, so every FLST change stays Yellow (decided by the user); this phase makes carrying one faithful:
+- **Position traced.** An element added to an ordered list records where it was added: after the element before it in the adding version, or first (`ChangeEvent::position`, shown in the Conflict Report, its JSON `position`, and the plan tab). The change id does not include it, so saved decisions still match.
+- **Position carried.** `applyChanges` inserts the element after the nearest element before it in the source version that the result has; failing that, before the nearest one after it; failing that, at the end. Before, it was appended at the end, which changes every later index a script reads.
+- **Position checked.** A carried addition holds only when the result has the element after that anchor. A result that already holds it elsewhere (another plugin added it at another place) does not, and the record is written without the plan (fail closed).
+- Reorders keep their rule (the shared elements' slots are filled in the source's order).
+- Build cache format 15 (the position is cached with the traced changes).
+
+**Test:** `ordered_list_elements_keep_their_place` (two additions, one first and one in the middle, carried into a winner that appended its own; positions traced; an element already elsewhere refused). The existing reorder test is unchanged.
 - **Tracing.** With the record definitions, `traceProvenance` traces a struct field member by member when the conditions of section 11 item 5 hold. Each member is a value of its own: a change event carries the member's name (`item`), offset and size; its before and after values are described by type (numbers, floats, flags with their names, enum names, the record a FormID member names).
 - **Effect.** Two plugins changing different members of the same struct (one the value of an armour, another its weight) no longer compete: each change is Green when nothing else touches that member. The same member changed differently still competes (Yellow).
 - **Carrying.** `applyChanges` writes the member's bytes and the references inside it into the winner's field; the result must hold the field at the same size, otherwise the change is not held and the record is refused, as for any change.

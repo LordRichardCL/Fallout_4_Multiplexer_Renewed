@@ -112,6 +112,8 @@ To decide in the app: select a record in the **Conflict Centre** and open its **
 - its class and the rule that decided it;
 - an **In the patch** choice: *Default*, *Carry forward* or *Keep the winner's value*. Red and Unknown rows show *Never carried*.
 
+**Form lists (FLST)** keep their order: scripts and workshop menus read them by position, so every change to one is Yellow (your decision). An element a mod added shows where it went ("after 10mm Pistol", "first"). Carried, it goes in the same place: after the nearest element before it in that mod's list that the patched list also has (or before the nearest one after it, or at the end). A record whose list then holds the element somewhere else (for example, the winner already has it elsewhere) is not written from the plan.
+
 A choice is saved at once. The tab shows the record's status, any problem (for example two different values chosen for the same field), and the masters a patch would need. The tab needs Analyse to have run in this session. Compile again to write the result.
 
 To record a choice from the command line: `fo4mx plan <install options> carry|keep|default <Plugin.esp:OBJECTID> <change id>`. The ids are listed by `fo4mx plan` and in the Conflict Report's JSON. Choices are saved in `patch_plan_decisions.json` next to the database and kept across scans. **Apply the compatibility patch plan** (Compilation page, off by default; CLI `--apply-patch-plan`). With this on, compiling writes the plan:

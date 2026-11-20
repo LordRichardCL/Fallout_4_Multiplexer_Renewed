@@ -52,6 +52,9 @@ struct ChangeEvent {
     std::string member;
     uint16_t memberOffset = 0, memberSize = 0;
     bool isMember() const { return !member.empty(); }
+    // An element added to an ordered list (FLST): where it was added, described ("after <element>",
+    // "first"). Carried, it goes after the nearest element before it in the source that the result has.
+    std::string position;
 };
 
 struct RecordProvenance {
