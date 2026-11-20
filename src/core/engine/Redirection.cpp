@@ -71,7 +71,12 @@ void build(Session& session, const CompiledOutput& out, RedirectedPlugin& rp,
         for (const auto& [gi, idx] : mine) {
             const auto inst = session.instances(session.groups[gi]);
             const auto& r = inst[idx];
-            const bool later = idx + 1 < inst.size();
+            // A later plugin that stays wins over it, as today. A later compiled plugin counts only through the
+            // outputs: when they do not hold the record, its final version equals the last version of a plugin
+            // that stays (the compiler writes no override identical to it), which may be this one.
+            bool later = false;
+            for (size_t j = idx + 1; j < inst.size(); ++j)
+                later |= !out.isCompiled(inst[j].plugin);
             const bool held = out.indexByKey.count(r.key) != 0;
             if (r.key.origin == q) {
                 if (later || held)
@@ -113,7 +118,13 @@ void build(Session& session, const CompiledOutput& out, RedirectedPlugin& rp,
                 const auto* g = session.findGroup(k);
                 if (!g)
                     return fail("the container " + session.formLabel(k) + " of its records is not in the load order");
-                const auto& w = session.instances(*g).back();
+                // Not in the outputs: the game shows the last version of a plugin that stays (a compiled
+                // plugin's identical version was not written).
+                const auto chain = session.instances(*g);
+                size_t wi = chain.size() - 1;
+                while (wi > 0 && out.isCompiled(chain[wi].plugin))
+                    --wi;
+                const auto& w = chain[wi];
                 p.fields = fieldsOf(w);
                 p.placement = static_cast<Placement::Kind>(w.placement);
                 p.persistent = w.persistent;
@@ -172,6 +183,11 @@ void build(Session& session, const CompiledOutput& out, RedirectedPlugin& rp,
                 return fail(session.formLabel(k) + " refers to " + session.formLabel(rk) +
                             ", which is compiled but not in the outputs");
     }
+    // A master that is redirected too would load after the outputs as well, in an order the copies cannot
+    // both rely on.
+    for (PluginIndex m : retained)
+        if (session.redirected.count(m) && m != q)
+            return fail("its copy would need " + session.plugins[m].name + ", which is redirected too, as a master");
     std::vector<PluginIndex> retainedOrdered(retained.begin(), retained.end());
     std::sort(retainedOrdered.begin(), retainedOrdered.end(), [&](PluginIndex a, PluginIndex b) {
         return session.plugins[a].loadOrder < session.plugins[b].loadOrder;
@@ -289,7 +305,12 @@ void buildRedirected(Session& session, CompiledOutput& out)
     if (session.redirected.empty())
         return;
     std::unordered_map<PluginIndex, size_t> slot;
-    for (PluginIndex q : session.redirected) {
+    // In load order: the copies load after the outputs in the order the plugins loaded before.
+    std::vector<PluginIndex> ordered(session.redirected.begin(), session.redirected.end());
+    std::sort(ordered.begin(), ordered.end(), [&](PluginIndex a, PluginIndex b) {
+        return session.plugins[a].loadOrder < session.plugins[b].loadOrder;
+    });
+    for (PluginIndex q : ordered) {
         RedirectedPlugin rp;
         rp.plugin = q;
         rp.name = session.plugins[q].name;

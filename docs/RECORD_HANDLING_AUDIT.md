@@ -1356,3 +1356,10 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 **Compiler change:** a record that a compiled plugin defines is now always written to the outputs, even when its final version equals a later override by a plugin that stays. Before, it was skipped as identical, which was only reachable through the error path for plugins that stay and override compiled records.
 
 **Tests:** `master_redirection_lets_masters_of_plugins_that_stay_compile` and `master_redirection_writes_cells_as_today_and_leaves_unsafe_plugins_alone`.
+
+## Review of Master Redirection: four fixes
+
+- **Overrides a later compiled plugin repeats.** A record was left out of the copy whenever any later plugin changed it. When that later plugin is compiled and its version equals the redirected plugin's, the compiler writes no override, because it would be identical to a plugin that stays. Leaving the record out of the copy then let an earlier version win. Now only a later plugin that stays, or the outputs holding the record, leave it to others. A container the outputs do not hold is written as the last plugin that stays has it. Test: `master_redirection_light_plugin_several_outputs_and_identical_later_override`. It fails with the old rule.
+- **Copies in load order.** Copies were listed after the outputs in plugin-index order. They are now listed in the order the plugins loaded before.
+- **A copy that would need another redirected plugin as a master** (through a container's version today) is refused. Both copies load after the outputs, so neither order could be relied on.
+- **Apply checks that the copy is what the game loads.** If the original plugin's mod wins over the output mod in Mod Organizer 2, the original would load after the outputs with its compiled master switched off. Apply now refuses, naming the plugin. Test: in `master_redirection_lets_masters_of_plugins_that_stay_compile`.

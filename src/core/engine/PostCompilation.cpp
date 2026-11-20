@@ -304,6 +304,29 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
             d.warnings.push_back("this build loads compiled plugins' archives through the F4SE archive loader: always "
                                  "start the game through F4SE (f4se_loader.exe, or your mod manager's F4SE entry)");
         }
+        // Master Redirection copies: the original plugin must not win (plugins.txt puts it after the outputs,
+        // and its compiled master is switched off).
+        {
+            std::vector<fs::path> redirected;
+            for (const auto& rp : c.redirected)
+                if (rp.failure.empty()) {
+                    if (auto p = findPathCaseInsensitive(result.dataFolder, rp.name); !p.empty())
+                        redirected.push_back(p);
+                    else
+                        d.redirectedNotLoaded.push_back(rp.name + " (missing from the build)");
+                }
+            if (!redirected.empty() && kind == InstallKind::ModOrganizer2 && !session.install.profilePath.empty()) {
+                auto hidden = mo2::outputsNotVisible(session, redirected, assumeEnabledMod, result.dataFolder);
+                d.redirectedNotLoaded.insert(d.redirectedNotLoaded.end(), hidden.begin(), hidden.end());
+            }
+            if (!d.redirectedNotLoaded.empty())
+                d.blockers.push_back(std::to_string(d.redirectedNotLoaded.size()) +
+                                     " redirected plugin copy(ies) of this build are not the ones the game loads "
+                                     "(first: " + d.redirectedNotLoaded.front() +
+                                     "): the original plugin wins, and it needs a compiled master that is switched "
+                                     "off. Give the output mod a higher priority than the mods it conflicts with "
+                                     "(top of Mod Organizer's left pane is lowest; the output belongs at the bottom)");
+        }
         if (!d.relinkedNotLoaded.empty()) {
             std::string how;
             if (kind == InstallKind::Vortex)

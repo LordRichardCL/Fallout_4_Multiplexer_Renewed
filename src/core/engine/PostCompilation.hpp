@@ -45,6 +45,9 @@ struct DeploymentCheck {
     // Scripts and configs the Auto-Merger rewrote (MCM menus, GetFormFromFile scripts) whose copy is not
     // the one the game loads: another mod's original wins, and it still names a compiled plugin.
     std::vector<std::string> relinkedNotLoaded;
+    // Master Redirection copies the game does not load: the original plugin wins (it would load after the
+    // outputs with a compiled master it needs switched off).
+    std::vector<std::string> redirectedNotLoaded;
     // The F4SE archive loader and its list (when the build uses them) that the game does not see yet.
     std::vector<std::string> archiveLoaderNotLoaded;
     // Compiled plugins enabled in the plugins.txt on disk right now (they must be disabled).

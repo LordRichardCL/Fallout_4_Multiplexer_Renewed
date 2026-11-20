@@ -7310,7 +7310,19 @@ TEST(master_redirection_lets_masters_of_plugins_that_stay_compile)
         // Switched over: the output mod wins, plugins.txt as proposed. A rescan reads the original ModP in its
         // old place, after ModM.
         const std::string mod = pathToUtf8(result.packageRoot.filename());
+        // Apply refuses while the original ModP wins over the copy (it would load after the outputs with its
+        // compiled master switched off).
+        writeFile(m.profile / "modlist.txt", "# MO2\n+Mod P\n+" + mod + "\n+Mod M\n+Mod C\n+Mod B\n+Mod A\n");
+        {
+            const auto check = PostCompilation::check(s, *out, resultOf(p));
+            CHECK_EQ(check.redirectedNotLoaded.size(), size_t(1));
+            bool blocked = false;
+            for (const auto& b : check.blockers)
+                blocked |= b.find("redirected plugin copy") != std::string::npos;
+            CHECK(blocked);
+        }
         writeFile(m.profile / "modlist.txt", "# MO2\n+" + mod + "\n+Mod P\n+Mod M\n+Mod C\n+Mod B\n+Mod A\n");
+        CHECK(PostCompilation::check(s, *out, resultOf(p)).redirectedNotLoaded.empty());
         writeFile(m.profile / "plugins.txt", txt);
         Pipeline again(cfg);
         again.scan();
@@ -7429,6 +7441,89 @@ TEST(master_redirection_writes_cells_as_today_and_leaves_unsafe_plugins_alone)
                 CHECK(set.resolve(*ref, loadLE<uint32_t>(nameSub->data.data())) == set.identity(*thing));
             CHECK(thing->plugin.rfind("Dummy_Plugin_", 0) == 0);
         }
+    }
+}
+
+// Master Redirection, harder cases. ModP is light-flagged and its list names records of two compiled
+// plugins that go to different outputs: the copy lists both outputs and keeps the light flag and its own
+// object IDs. ModP also overrides a base game keyword that ModL (compiled, later) overrides the same way:
+// the outputs hold no override identical to ModP's, so the copy keeps ModP's (the game shows that version
+// today); leaving it out would let the base game's version win.
+TEST(master_redirection_light_plugin_several_outputs_and_identical_later_override)
+{
+    auto m = buildMo2Install("redirect_hard", "+Mod L\n+Mod P\n+Mod N\n+Mod M\n+Mod C\n+Mod B\n+Mod A\n");
+    const auto mods = m.inst / "mods";
+    writePlugin(mods / "Mod M" / "ModM.esp", {"Fallout4.esm"}, {record("KYWD", 0x01000800, {zs("EDID", "M_Keyword")})});
+    writePlugin(mods / "Mod N" / "ModN.esp", {"Fallout4.esm"}, {record("MISC", 0x01000800, {zs("EDID", "N_Thing")})});
+    writePlugin(mods / "Mod P" / "ModP.esp", {"Fallout4.esm", "ModM.esp", "ModN.esp"},
+                {record("FLST", 0x03000800, {zs("EDID", "P_List"), u32("LNAM", 0x01000800), u32("LNAM", 0x02000800)}),
+                 record("KYWD", 0x00000801, {zs("EDID", "BaseKeyword2_Changed")})},
+                RecordFlags::Light);
+    writePlugin(mods / "Mod L" / "ModL.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x00000801, {zs("EDID", "BaseKeyword2_Changed")})});
+    writeFile(m.profile / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModM.esp\n*ModN.esp\n*ModP.esp\n*ModL.esp\n");
+    auto cfg = m.cfg;
+    cfg.compile.redirectMasters = true;
+    cfg.compile.outputCount = 3;
+    cfg.compile.strategy = AllocationStrategy::UserDefined;
+    cfg.compile.rules = {{"KYWD", 1}, {"MISC", 2}};
+    cfg.analysis.onlySelected = true;
+    cfg.analysis.selectedPlugins = {"ModA.esp", "ModB.esp", "ModC.esp", "ModM.esp", "ModN.esp", "ModL.esp"};
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    const auto* modP = s.findPlugin("ModP.esp");
+    CHECK(modP && s.redirected.count(modP->index));
+    CHECK(p.compile());
+    const auto* out = p.compiledOutput();
+    for (const auto& [k, why] : s.redirectFailed)
+        std::printf("not redirected %s: %s\n", k.c_str(), why.c_str());
+    CHECK(out->isCompiled(s.findPlugin("ModM.esp")->index));
+    CHECK(out->isCompiled(s.findPlugin("ModN.esp")->index));
+    CHECK(out->isCompiled(s.findPlugin("ModL.esp")->index));
+    CHECK_EQ(out->redirected.size(), size_t(1));
+    if (out->redirected.empty())
+        return;
+    const auto& rp = out->redirected.front();
+    CHECK(rp.failure.empty());
+    CHECK_EQ(rp.ownVersions, size_t(2)); // the list and the keyword override
+    CHECK_EQ(rp.dropped, size_t(0));
+    size_t outputMasters = 0;
+    for (const auto& n : rp.masterNames)
+        outputMasters += n.rfind("Dummy_Plugin_", 0) == 0;
+    CHECK_EQ(outputMasters, size_t(2));
+    auto result = p.exportOutputs();
+    for (const auto& is : p.validation()->issues)
+        if (is.severity == Severity::Error)
+            std::printf("ERR %s: %s\n", is.category.c_str(), is.message.c_str());
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    CHECK_EQ(result.redirectedCopies.size(), size_t(1));
+    if (result.redirectedCopies.empty())
+        return;
+    CHECK(readPluginHeader(result.redirectedCopies.front()).record.flags & RecordFlags::Light);
+    auto files = result.pluginFiles;
+    files.push_back(result.redirectedCopies.front());
+    OutputSet set(files);
+    const auto* list = set.byEditorId("P_List");
+    const auto* mk = set.byEditorId("M_Keyword");
+    const auto* nt = set.byEditorId("N_Thing");
+    CHECK(list && mk && nt);
+    if (list && mk && nt) {
+        CHECK(mk->plugin != nt->plugin);
+        CHECK(set.identity(*list) == std::make_pair(std::string("ModP.esp"), uint32_t(0x800)));
+        std::vector<std::pair<std::string, uint32_t>> named;
+        for (const auto& sr : list->record.subrecords)
+            if (sr.signature == Signature("LNAM"))
+                named.push_back(set.resolve(*list, loadLE<uint32_t>(sr.data.data())));
+        CHECK(named == (std::vector<std::pair<std::string, uint32_t>>{set.identity(*mk), set.identity(*nt)}));
+    }
+    // The keyword override: in the copy (last), as ModP and ModL have it.
+    const auto* kw = set.byEditorId("BaseKeyword2_Changed");
+    CHECK(kw != nullptr);
+    if (kw) {
+        CHECK_EQ(kw->plugin, std::string("ModP.esp"));
+        CHECK(set.identity(*kw) == std::make_pair(std::string("Fallout4.esm"), uint32_t(0x801)));
     }
 }
 
