@@ -324,6 +324,8 @@ The comparison is always with your load order **as it was before this app change
 
 A plugin that stays in the load order keeps its masters there too, and their masters in turn. **Plugins → Holding Back** lists the plugins that stay and keep others there, most first; **Would Also Compile** is how many would compile if that plugin did (for example once its record types are supported, or if you allowed it). A plugin's details show the list. They also say when another plugin that stays keeps it as a master ("Kept by"), so compiling it would need that one first. Plugins kept by several plugins that stay are counted as **Shared** in the Dependency Report's "What plugins that stay hold back", and in no plugin's own count.
 
+The **Master Redirection** column says whether that switch would free them, before you turn it on. It reads "Would free them" when the plugin can be redirected. "Possible, but needs Mod Organizer 2" means the only obstacle is where the output goes. "Not possible" comes with the reason, for example data the app cannot place, precombines, or another plugin listing it as a master.
+
 ### Unused masters
 
 A plugin that stays in the load order keeps its masters there too. Patches often list a master without using any of its records. The **Dependency Report** (and the Dependency Graph's *Missing Requirements & Breakages* tab) lists each one as **Unused Master**: "C.esp lists A.esp as a master but uses none of its records".

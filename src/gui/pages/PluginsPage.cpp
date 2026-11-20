@@ -382,8 +382,8 @@ void PluginsPage::reload()
         sql = "SELECT load_order_hex AS '#', name AS 'Plugin', " + plainStatusSql() +
               " AS 'Compiles?', CASE WHEN eligibility = 'Eligible' THEN '' WHEN instr(eligibility_reason, '; ') > 0 "
               "THEN substr(eligibility_reason, 1, instr(eligibility_reason, '; ') - 1) ELSE eligibility_reason END AS "
-              "Why, type AS Type, record_count AS Records, conflict_count AS Conflicts, master_count AS Masters, "
-              "source_mod AS Mod, " +
+              "Why, type AS Type, record_count AS Records, conflict_count AS Conflicts, master_count AS Masters, " +
+              QString(holding ? "redirect_note AS 'Master Redirection'" : "source_mod AS Mod") + ", " +
               QString(holding ? "holds_back AS 'Would Also Compile'" : "support AS Support") + ", id FROM Plugins WHERE " +
               where +
               (holding ? " ORDER BY holds_back DESC, name"

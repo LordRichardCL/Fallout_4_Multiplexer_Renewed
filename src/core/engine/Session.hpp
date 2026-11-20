@@ -113,6 +113,8 @@ struct PluginInfo {
     std::vector<PluginIndex> holdsBack;
     size_t sharedHold = 0;
     PluginIndex heldBy = kInvalidPlugin;
+    // For a plugin that holds others back: whether Master Redirection would free them, or why not.
+    std::string redirectNote;
     std::vector<std::string> archives; // "<plugin> - *.ba2" archives that load with it
 
     bool isMaster() const; // ESM flag or .esm / .esl extension

@@ -593,10 +593,13 @@ AnalysisOptions Pipeline::analysisOptions() const
     a.redirectMasters = config_.compile.redirectMasters;
     a.noRedirect = config_.compile.noRedirect;
     a.redirectOff.clear();
-    if ((a.masterPlaceholders || a.redirectMasters) && session_) {
+    if (session_) { // also with both off: the Holding Back view says whether redirection would be possible
         std::string off;
-        if (loaderMod(&off).empty())
-            a.placeholdersOff = a.redirectOff = off;
+        if (loaderMod(&off).empty()) {
+            a.redirectOff = off;
+            if (a.masterPlaceholders)
+                a.placeholdersOff = off;
+        }
     }
     return a;
 }

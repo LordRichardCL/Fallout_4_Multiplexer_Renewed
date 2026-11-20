@@ -559,7 +559,7 @@ std::string dependencyReport(const ReportContext& ctx)
                    "compile\" counts the plugins only it keeps: they would compile if it did (for example once its "
                    "record types are supported). \"Shared\" counts those it keeps together with other plugins that "
                    "stay. The ones with the most are where support for their record types gains the most.");
-            h.tableStart({"Plugin", "Why it stays", "Would also compile", "Shared", "Plugins"});
+            h.tableStart({"Plugin", "Why it stays", "Would also compile", "Shared", "Plugins", "Master Redirection"});
             size_t shown = 0;
             for (auto pi : roots) {
                 if (shown++ >= ctx.maxRows)
@@ -569,7 +569,7 @@ std::string dependencyReport(const ReportContext& ctx)
                 for (auto h2 : p.holdsBack)
                     names.push_back(s.plugins[h2].name);
                 h.row({p.name, p.reasons.empty() ? std::string() : p.reasons.front(),
-                       formatCount(p.holdsBack.size()), formatCount(p.sharedHold), join(names, ", ")});
+                       formatCount(p.holdsBack.size()), formatCount(p.sharedHold), join(names, ", "), p.redirectNote});
             }
             h.tableEnd(std::min(shown, roots.size()), roots.size());
         }

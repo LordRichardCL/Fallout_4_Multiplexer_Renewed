@@ -7237,8 +7237,10 @@ TEST(master_redirection_lets_masters_of_plugins_that_stay_compile)
         CHECK(modP->eligibility != Eligibility::Eligible);
         CHECK_EQ(modM->eligibility == Eligibility::Eligible, on);
         CHECK_EQ(s.redirected.count(modP->index), size_t(on ? 1 : 0));
-        if (!on)
+        if (!on) { // Holding Back says what turning it on would do
+            CHECK_EQ(modP->redirectNote, std::string("Would free them: turn on Master Redirection"));
             continue;
+        }
         CHECK(p.compile());
         const auto* out = p.compiledOutput();
         for (const auto& [k, why] : s.redirectFailed)
@@ -7399,6 +7401,8 @@ TEST(master_redirection_writes_cells_as_today_and_leaves_unsafe_plugins_alone)
                 why |= r.find("Master Redirection cannot redirect ModP.esp") != std::string::npos &&
                        r.find(expect) != std::string::npos;
             CHECK(why);
+            if (c != Case::Listed) // listed by ModZ: ModZ keeps it, so it holds nothing back itself
+                CHECK(modP->redirectNote.rfind(c == Case::Package ? "Possible, but needs Mod Organizer 2" : "Not possible: ", 0) == 0);
             continue;
         }
         CHECK_EQ(modM->eligibility, Eligibility::Eligible);

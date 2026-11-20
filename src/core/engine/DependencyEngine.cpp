@@ -488,10 +488,50 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
     session.redirected.clear();
     std::vector<uint8_t> canRedirect(session.plugins.size(), 0);
     std::map<PluginIndex, std::string> redirectWhyNot;
+    std::unordered_set<std::string> keepAsIs;
+    for (const auto& n : options.noRedirect)
+        keepAsIs.insert(toLower(n));
+    // Why a plugin that stays cannot be redirected, from where it is and what lists it (empty: it can, if
+    // its own content allows).
+    auto structuralWhyNot = [&](const PluginInfo& q) -> std::string {
+        if (session.userRetained.count(q.key))
+            return "you excluded it";
+        if (keepAsIs.count(q.key))
+            return "you chose to keep it as it is";
+        if (auto f = session.redirectFailed.find(q.key); f != session.redirectFailed.end())
+            return f->second;
+        if (q.isMaster())
+            return "it is a master file (ESM), which loads before the outputs";
+        if (!q.missingMasters.empty())
+            return "it has missing masters";
+        if (!listedBy[q.index].empty())
+            return session.plugins[listedBy[q.index].front().first].name +
+                   " lists it as a master, and the copy loads after the outputs";
+        return {};
+    };
+    // Its own content (read once per scan, in parallel).
+    auto checkContent = [&](const std::vector<PluginIndex>& plugins) {
+        std::vector<PluginIndex> todo;
+        for (auto q : plugins)
+            if (!session.redirectCheck.count(q))
+                todo.push_back(q);
+        if (todo.empty())
+            return;
+        std::unordered_map<PluginIndex, size_t> slot;
+        for (size_t i = 0; i < todo.size(); ++i)
+            slot[todo[i]] = i;
+        std::vector<std::vector<uint32_t>> inst(todo.size());
+        for (uint32_t ri = 0; ri < session.records.size(); ++ri)
+            if (auto it = slot.find(session.records[ri].plugin); it != slot.end())
+                inst[it->second].push_back(ri);
+        std::vector<std::string> result(todo.size());
+        parallelFor(
+            todo.size(), [&](size_t i) { result[i] = redirectionBlock(session, todo[i], inst[i]); }, nullProgress(),
+            options.threads);
+        for (size_t i = 0; i < todo.size(); ++i)
+            session.redirectCheck[todo[i]] = result[i];
+    };
     if (options.redirectMasters && options.redirectOff.empty()) {
-        std::unordered_set<std::string> keep;
-        for (const auto& n : options.noRedirect)
-            keep.insert(toLower(n));
         std::vector<PluginIndex> todo;
         for (const auto& q : session.plugins) {
             if (!q.active || q.eligibility == Eligibility::Eligible || q.eligibility == Eligibility::Error ||
@@ -501,45 +541,16 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
                     return m != kInvalidPlugin && session.plugins[m].eligibility == Eligibility::Eligible;
                 }))
                 continue;
-            std::string why;
-            if (session.userRetained.count(q.key))
-                why = "you excluded it";
-            else if (keep.count(q.key))
-                why = "you chose to keep it as it is";
-            else if (auto f = session.redirectFailed.find(q.key); f != session.redirectFailed.end())
-                why = f->second;
-            else if (q.isMaster())
-                why = "it is a master file (ESM), which loads before the outputs";
-            else if (!q.missingMasters.empty())
-                why = "it has missing masters";
-            else if (!listedBy[q.index].empty())
-                why = session.plugins[listedBy[q.index].front().first].name +
-                      " lists it as a master, and the copy loads after the outputs";
-            if (!why.empty()) {
+            if (auto why = structuralWhyNot(q); !why.empty()) {
                 redirectWhyNot[q.index] = why;
                 continue;
             }
-            if (!session.redirectCheck.count(q.index))
-                todo.push_back(q.index);
+            todo.push_back(q.index);
             canRedirect[q.index] = 1;
         }
-        if (!todo.empty()) {
-            std::unordered_map<PluginIndex, size_t> slot;
-            for (size_t i = 0; i < todo.size(); ++i)
-                slot[todo[i]] = i;
-            std::vector<std::vector<uint32_t>> inst(todo.size());
-            for (uint32_t ri = 0; ri < session.records.size(); ++ri)
-                if (auto it = slot.find(session.records[ri].plugin); it != slot.end())
-                    inst[it->second].push_back(ri);
-            std::vector<std::string> result(todo.size());
-            parallelFor(
-                todo.size(), [&](size_t i) { result[i] = redirectionBlock(session, todo[i], inst[i]); },
-                nullProgress(), options.threads);
-            for (size_t i = 0; i < todo.size(); ++i)
-                session.redirectCheck[todo[i]] = result[i];
-        }
-        for (auto& [q, why] : session.redirectCheck)
-            if (canRedirect[q] && !why.empty()) {
+        checkContent(todo);
+        for (auto q : todo)
+            if (const auto& why = session.redirectCheck[q]; !why.empty()) {
                 canRedirect[q] = 0;
                 redirectWhyNot[q] = why;
             }
@@ -723,6 +734,35 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
                 }
             }
             session.plugins[root.index].sharedHold = shared;
+        }
+        // Whether Master Redirection would free what each such plugin holds back (shown before it is on).
+        std::vector<PluginIndex> holders;
+        for (auto& p : session.plugins) {
+            p.redirectNote.clear();
+            if (!p.holdsBack.empty() || p.sharedHold)
+                holders.push_back(p.index);
+        }
+        std::vector<PluginIndex> content;
+        for (auto q : holders) {
+            auto& p = session.plugins[q];
+            if (p.baseGame || p.creationClub || p.eligibility == Eligibility::Error) {
+                p.redirectNote = "Not possible: base game, Creation Club or unreadable";
+                continue;
+            }
+            if (auto why = structuralWhyNot(p); !why.empty()) {
+                p.redirectNote = "Not possible: " + why;
+                continue;
+            }
+            content.push_back(q);
+        }
+        checkContent(content);
+        for (auto q : content) {
+            auto& p = session.plugins[q];
+            const auto& why = session.redirectCheck[q];
+            p.redirectNote = !why.empty()                    ? "Not possible: " + why
+                             : !options.redirectOff.empty()  ? "Possible, but needs Mod Organizer 2 with the output in "
+                                                               "the mods folder (" + options.redirectOff + ")"
+                                                             : "Would free them: turn on Master Redirection";
         }
     }
 

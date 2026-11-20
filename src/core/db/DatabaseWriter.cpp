@@ -90,6 +90,7 @@ void DatabaseWriter::initSchema()
     ensureColumn("Plugins", "holds_back", "INTEGER");
     ensureColumn("Plugins", "holds_back_names");
     ensureColumn("Plugins", "held_by");
+    ensureColumn("Plugins", "redirect_note");
     ensureColumn("DependencyIssues", "cleaning", "INTEGER");
     for (const char* c : {"kind", "format", "text", "context", "location", "class", "reason"})
         ensureColumn("NameReferences", c);
@@ -110,7 +111,7 @@ void DatabaseWriter::writePlugins(const Session& session)
         "path, file_size, header_version, author, description, flags, localized, record_count, new_records, "
         "override_count, injected_count, itm_count, deleted_count, conflict_count, hard_conflict_count, master_count, "
         "status, eligibility, eligibility_reason, archives, record_types, support, holds_back, holds_back_names, "
-        "held_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        "held_by, redirect_note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     auto ms = db_.prepare(
         "INSERT INTO Masters(plugin_id, position, master_name, master_plugin_id, missing) VALUES(?,?,?,?,?)");
     for (const auto& p : session.plugins) {
@@ -151,7 +152,8 @@ void DatabaseWriter::writePlugins(const Session& session)
                 held.push_back(session.plugins[h].name);
             st.bind(32, static_cast<uint32_t>(p.holdsBack.size()))
                 .bind(33, join(held, ", "))
-                .bind(34, p.heldBy == kInvalidPlugin ? std::string() : session.plugins[p.heldBy].name);
+                .bind(34, p.heldBy == kInvalidPlugin ? std::string() : session.plugins[p.heldBy].name)
+                .bind(35, p.redirectNote);
         }
         st.run();
         for (size_t i = 0; i < p.header.masters.size(); ++i) {

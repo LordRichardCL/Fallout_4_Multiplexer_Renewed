@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS Plugins (
     support TEXT,
     holds_back INTEGER,
     holds_back_names TEXT,
-    held_by TEXT
+    held_by TEXT,
+    redirect_note TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_plugins_name ON Plugins(name);
 
