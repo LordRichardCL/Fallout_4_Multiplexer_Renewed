@@ -49,8 +49,8 @@ It is **not** a mod manager, load order sorter, Bash Patch replacement or runtim
 4. **Analyse**: conflicts, dependencies and compilation eligibility.
 5. Review the **Plugins**, **Conflicts**, **Assets** and **Dependencies** pages; force winners where you disagree.
 6. **Compile**: merges, allocates and rewrites in memory, then validates.
-7. **Export**: writes the output plugins plus `Multiplexer_FormMap.tsv`, `Multiplexer_Archives.ini`, `Multiplexer_DisablePlugins.txt` and a proposed `plugins.txt`.
-8. Enable the outputs, disable the compiled plugins (or use **Apply to MO2 Profile**, which backs up your files first), and merge the archive INI so compiled plugins' BA2s keep loading from where they are.
+7. **Export**: writes the output plugins plus `Multiplexer_FormMap.tsv`, `Multiplexer_Archives.ini`, `Multiplexer_DisablePlugins.txt`, a proposed `plugins.txt` and a zip of the output.
+8. **Apply to Game** shows what it will change, backs up your files, enables the outputs, switches the compiled plugins off and registers their archives (in `Fallout4Custom.ini`, or through the optional F4SE archive loader) so their BA2s keep loading from where they are. For Vortex it hands over the zip; for manual installs it explains each step.
 9. Play with the compiled output.
 10. Later, install, update or remove mods as usual. The app shows what changed since the build. **Rebuild** reuses everything that did not change.
 
@@ -67,7 +67,7 @@ WeaponExpansion - Main.ba2 ─────────────────�
 WeaponExpansion - Textures.ba2 ─────────────────► textures\weapons\10mm\10mm_d.dds
 ```
 
-The only runtime effect of disabling a compiled plugin is that Fallout 4 stops auto-loading the archives named after it (`WeaponExpansion - Main.ba2`). `Multiplexer_Archives.ini` registers those same archives, in their original location, so the assets keep loading. No copies are made. Each generated record's traceability view shows which assets depend on this registration.
+The only runtime effect of disabling a compiled plugin is that Fallout 4 stops auto-loading the archives named after it (`WeaponExpansion - Main.ba2`). Apply to Game registers those same archives, in their original location, so the assets keep loading (`Multiplexer_Archives.ini` is a copy of the line it writes). No copies are made. Each generated record's traceability view shows which assets depend on this registration.
 
 ## Build status and incremental rebuilds
 
@@ -83,28 +83,26 @@ See the [User Guide](docs/USER_GUIDE.md) for details.
 
 ## What can be compiled
 
-A plugin is compiled only when the compiled output can reproduce it exactly. In this release that means:
+A plugin is compiled only when the compiled output can reproduce it exactly, and the app proves that instead of assuming it:
 
-- all of its records are supported types:
-  - **Phase One:** `WEAP ARMO AMMO OMOD COBJ KYWD LVLI FLST INGR ALCH MISC BOOK NOTE KEYM FACT PERK SPEL MESG`;
-  - **Tier 1:** `ARMA OTFT LVLN CONT CMPO GLOB TXST MSWP INNR ENCH MGEF IPDS AORU STAT SCOL MSTT ACTI FURN DOOR LIGH TERM PROJ EXPL IPCT HAZD SNDR SOUN AVIF EQUP LSCR DMGT ZOOM AMDL ARTO EFSH MATO FLOR KSSM LCRT RFCT TRNS DFOB CLFM`;
-- no script or F4SE/MCM config refers to it by file name (`GetFormFromFile` etc.);
-- no FaceGen or voice folders are named after it;
-- it is not a master of a plugin that stays in the load order;
-- it is not the base game, DLC, Creation Club content, or on your exclusion list.
+- **Every record type of the game compiles** (items, actors, NPCs, quests and dialogue, cells, worldspaces, placed references, navmeshes, packages...), with four exceptions: the placed types `PBAR PBEA PCON PFLA` stay *Candidates* until a real load order confirms their layout. Every field of every record is decoded; a plugin with data the app cannot place stays.
+- **Files that find it by name** (scripts calling `GetFormFromFile`, MCM and F4SE configs, plugin INIs, FaceGen, voice folders, archives) are classified one by one: carried to the output (FaceGen, voices, archives, INIs), rewritten when you allow it (Advanced Users Auto-Merger), or a reason to keep it.
+- **A plugin that stays keeps its masters** in the load order, unless it provably uses none of their records (optional placeholders).
+- **New quests, dialogue and NPCs** compile by default; an advanced switch (or the **Safest** preset) keeps such plugins in the load order, for example in the middle of a playthrough.
+- Never the base game, DLC or Creation Club content, plugins you exclude, or plugins you did not choose when you compile only chosen ones.
 
-Every other plugin stays in the load order untouched, and the Plugins page tells you why. **Plugins → Blocking Types** ranks the unsupported record types in *your* load order by how many plugins supporting each one would make compilable. Mods that edit cells, NPCs, quests or dialogue are analysed fully but compiled in a later phase (`NPC_ QUST WRLD CELL REFR ACHR DIAL INFO`). [Dependency and Compilation Scenarios](docs/DEPENDENCY_SCENARIOS.md) explains the tiers.
+Every other plugin stays in the load order untouched, and the Plugins page tells you why; **Holding Back** shows which plugins that stay keep the most others out. [Dependency and Compilation Scenarios](docs/DEPENDENCY_SCENARIOS.md) explains the rules.
 
 **Validation → Check Record Definitions** (or `fo4mx check-definitions`) decodes every record of the supported types in your load order, base game included, and reports any field layout that looks wrong. Run it once after installing a new version.
 
 ## Important caveats
 
-- **Not yet tested against real game data.** The engine is covered by an automated test suite that builds synthetic installs (base master, mods, string tables, BA2s, an MO2 instance) and verifies every rewritten reference in the compiled plugins. It has not yet been run on a real Fallout 4 load order. The Phase One field layouts were written from community documentation; the validation engine measures how many decoded FormIDs resolve in your actual load order and flags any layout that looks wrong. **Run your first compilations on a test profile and inspect the output in FO4Edit.**
-- **New games recommended.** Records from compiled plugins receive new FormIDs, so existing saves that reference them will not find them. Recompiling reuses the previous FormIDs (from `Multiplexer_FormMap.tsv`) wherever dependencies allow, and warns when one has to change.
-- **Archives.** BA2s named after a compiled plugin (`MyMod - Main.ba2`) no longer load automatically once the plugin is disabled. Merge the generated `Multiplexer_Archives.ini` into `Fallout4Custom.ini`.
-- **Load order slots.** Outputs are full ESPs unless *ESL-flag outputs* is on and they fit the light range.
+- **Still early.** The record layouts were checked against real load orders (the Definition Check measures how many decoded FormIDs resolve in yours), and an automated test suite verifies every rewritten reference on synthetic installs, but few people have played on compiled output yet. **Run your first compilations on a test profile and inspect the output in FO4Edit.**
+- **New games recommended.** Records from compiled plugins receive new FormIDs, so saves made before compiling lose them. Saves made *with* a build are protected: a rebuild keeps every FormID the build in use gave (it stops and asks before any would change), and a compiled plugin never returns to the load order unasked.
+- **Archives.** BA2s named after a compiled plugin (`MyMod - Main.ba2`) no longer load automatically once the plugin is disabled. Apply to Game registers them (see above); the archive list in `Fallout4Custom.ini` is limited to 1,023 characters, and the optional F4SE archive loader lifts that limit.
+- **Load order slots.** Outputs are full ESPs unless *Light outputs* is on and they fit the light range with room to grow (200 new records by default), so a later mod update does not force them to become full plugins.
 - **Previews.** BC6H/BC7 textures show metadata only; meshes show structure (blocks, materials), not a 3D view.
-- **Windows.** CI builds, tests and packages the Windows version (MSVC, Qt 6) on every push. The download is the workflow artifact. The desktop app has not yet been used against a real Windows Fallout 4 installation.
+- **Windows.** CI builds, tests and packages the Windows version (MSVC, Qt 6) on every push. The download is the workflow artifact.
 - **Mesh tracing.** Textures are traced through the materials (`.bgsm`/`.bgem`) a mesh names. Texture sets embedded directly in mesh blocks are not followed yet.
 
 ## Building
@@ -171,6 +169,8 @@ docs/          specification, architecture, user guide, screenshots
 - [Architecture](docs/ARCHITECTURE.md): how the compiler works and why
 - [Dependency and Compilation Scenarios](docs/DEPENDENCY_SCENARIOS.md): what happens when compiled and retained plugins depend on each other
 - [User Guide](docs/USER_GUIDE.md)
+- [What's New](docs/WHATS_NEW.md): recent changes in plain words
+- [Master Redirection](docs/MASTER_REDIRECTION_DESIGN.md): a proposed feature, for review
 - [Diagnostic Recorder](docs/DIAGNOSTIC_RECORDER.md): the optional F4SE plugin that records what happens in game, and what Multiplexer recognises in its logs
 
 ## Related

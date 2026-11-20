@@ -83,7 +83,7 @@ Exterior labels hold Y in the low word and X in the high word. Inside a group, r
 
 ## Record definitions and the FormID decoder
 
-Rewriting references requires knowing exactly which bytes are FormIDs. `esp/RecordDefinitions.cpp` describes the supported record types for the 1.10.163 runtime profile (Phase One plus tier 1 base objects, effects, sounds and UI data; see the README for the list):
+Rewriting references requires knowing exactly which bytes are FormIDs. `esp/RecordDefinitions.cpp` describes every Fallout 4 record type for the 1.10.163 runtime profile (layouts from xEdit, confirmed against real load orders; `resources/record_catalogue.csv` lists each with its strategy):
 
 - simple kinds: `FormId`, `FormIdArray`, `Struct` (FormIDs at offsets), `StructArray`;
 - strings: `ZString`, and `LString`/`DLString`/`ILString` (localised);
@@ -187,10 +187,10 @@ A plugin is compiled only if disabling it and loading the outputs reproduces it 
 
 1. active, readable, no missing masters;
 2. not base game / DLC / Creation Club / user-excluded;
-3. every record is a compilable (Phase One) type;
-4. not referenced by file name from any script string table (`.pex`) or F4SE/MCM config;
-5. no FaceGen/voice asset folders named after it;
-6. **propagation**: any plugin that stays in the load order keeps all its masters in the load order too (iterated to a fixed point).
+3. every record is a compilable type (not a *Candidate*), and every field of it is decoded;
+4. every reference to it by file name (scripts, F4SE/MCM and tool configs, plugin INIs, plugin-named folders) is classified by `ReferenceScanner`: Safe (carried: FaceGen, voices, archives, INIs), Rewritable (Auto-Merger), or a reason to stay (Compatibility Required, Unsafe, Unknown); the most restrictive one decides;
+5. new quests, dialogue and NPCs only with their switch on, and only plugins the user chose when compiling chosen ones;
+6. **propagation**: any plugin that stays in the load order keeps all its masters in the load order too (iterated to a fixed point), unless it provably uses none of a master's records (placeholders, MO2 only).
 
 ## Compilation
 
