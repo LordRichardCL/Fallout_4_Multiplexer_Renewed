@@ -47,6 +47,7 @@ add_library(fo4mx_core STATIC
     engine/Exporter.cpp
     engine/PluginIni.cpp
     engine/Redirection.cpp
+    assets/BcDecode.cpp
     engine/FieldModel.cpp
     engine/MergeEngine.cpp
     engine/Mo2Support.cpp

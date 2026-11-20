@@ -26,7 +26,8 @@ struct Image {
 };
 
 std::optional<TextureInfo> readDdsInfo(const std::vector<uint8_t>& dds);
-// Decodes the top mip level. Returns nullopt for formats that are not supported (BC6H/BC7).
+// Decodes the top mip level (BC1-BC7, uncompressed RGBA/BGRA/R8; BC6H shown clamped to 0..1). Returns
+// nullopt for formats that are not supported.
 std::optional<Image> decodeDds(const std::vector<uint8_t>& dds, uint32_t maxDimension = 1024);
 
 struct MeshInfo {

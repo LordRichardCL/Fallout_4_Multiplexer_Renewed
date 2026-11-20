@@ -1,4 +1,5 @@
 #include "assets/AssetPreview.hpp"
+#include "assets/BcDecode.hpp"
 
 #include "util/Binary.hpp"
 #include "util/Text.hpp"
@@ -10,7 +11,7 @@ namespace fo4mx::preview {
 
 namespace {
 
-enum class Codec { None, BC1, BC2, BC3, BC4, BC5, RGBA8, BGRA8, BGRX8, R8 };
+enum class Codec { None, BC1, BC2, BC3, BC4, BC5, BC6HU, BC6HS, BC7, RGBA8, BGRA8, BGRX8, R8 };
 
 struct FormatDesc {
     Codec codec;
@@ -36,10 +37,10 @@ FormatDesc describeDxgi(uint32_t f)
     case 87: return {Codec::BGRA8, "B8G8R8A8"};
     case 88: return {Codec::BGRX8, "B8G8R8X8"};
     case 91: return {Codec::BGRA8, "B8G8R8A8 (sRGB)"};
-    case 95: return {Codec::None, "BC6H (unsigned)"};
-    case 96: return {Codec::None, "BC6H (signed)"};
-    case 98: return {Codec::None, "BC7"};
-    case 99: return {Codec::None, "BC7 (sRGB)"};
+    case 95: return {Codec::BC6HU, "BC6H (unsigned)"};
+    case 96: return {Codec::BC6HS, "BC6H (signed)"};
+    case 98: return {Codec::BC7, "BC7"};
+    case 99: return {Codec::BC7, "BC7 (sRGB)"};
     default: return {Codec::None, "DXGI format"};
     }
 }
@@ -244,6 +245,24 @@ std::optional<Image> decodeDds(const std::vector<uint8_t>& dds, uint32_t maxDime
                         px[i][3] = 255;
                     }
                 }
+                for (int i = 0; i < 16; ++i)
+                    put(bx * 4 + (i % 4), by * 4 + (i / 4), px[i]);
+            }
+        break;
+    }
+    case Codec::BC6HU:
+    case Codec::BC6HS:
+    case Codec::BC7: {
+        if (avail < static_cast<size_t>(bw) * bh * 16)
+            return std::nullopt;
+        for (uint32_t by = 0; by < bh; ++by)
+            for (uint32_t bx = 0; bx < bw; ++bx) {
+                const uint8_t* b = data + (static_cast<size_t>(by) * bw + bx) * 16;
+                uint8_t px[16][4];
+                if (p->codec == Codec::BC7)
+                    decodeBc7Block(b, px);
+                else
+                    decodeBc6hBlock(b, p->codec == Codec::BC6HS, px);
                 for (int i = 0; i < 16; ++i)
                     put(bx * 4 + (i % 4), by * 4 + (i / 4), px[i]);
             }

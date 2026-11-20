@@ -636,7 +636,8 @@ TEST(dds_decode_bc1_and_rgba)
     auto bc7 = makeDdsHeader(4, 4, 1, 98, false);
     bc7.resize(bc7.size() + 16);
     CHECK(preview::readDdsInfo(bc7)->format == "BC7");
-    CHECK(!preview::decodeDds(bc7).has_value());
+    CHECK(preview::decodeDds(bc7).has_value()); // decoded now (an all-zero block: reserved mode, transparent)
+    CHECK_EQ(int(preview::decodeDds(bc7)->rgba[3]), 0);
 }
 
 TEST(pex_and_config_plugin_names)
@@ -850,4 +851,118 @@ TEST(nif_texture_sets_are_read)
     cut.resize(cut.size() - 10);
     auto partial = preview::readNifInfo(cut);
     CHECK(partial && partial->complete && partial->embeddedTextures.empty());
+}
+
+namespace {
+
+// A DDS file (DX10 header) holding `blocks` 16-byte blocks in one row, 4 pixels high.
+std::vector<uint8_t> ddsRow(uint32_t dxgi, const std::vector<uint8_t>& blocks)
+{
+    const uint32_t w = static_cast<uint32_t>(blocks.size() / 16) * 4, h = 4;
+    std::vector<uint8_t> d(148, 0);
+    auto put = [&](size_t at, uint32_t v) { std::memcpy(d.data() + at, &v, 4); };
+    std::memcpy(d.data(), "DDS ", 4);
+    put(4, 124);
+    put(8, 0x1 | 0x2 | 0x4 | 0x1000 | 0x80000);
+    put(12, h);
+    put(16, w);
+    put(20, static_cast<uint32_t>(blocks.size()));
+    put(28, 1);
+    put(76, 32);
+    put(80, 4);
+    std::memcpy(d.data() + 84, "DX10", 4);
+    put(108, 0x1000);
+    put(128, dxgi);
+    put(132, 3);
+    put(140, 1);
+    d.insert(d.end(), blocks.begin(), blocks.end());
+    return d;
+}
+
+// The same pseudo-random blocks the references were made from, one per mode.
+std::vector<uint8_t> modeBlocks(size_t n, bool bc7, size_t skipBlocks = 0)
+{
+    uint32_t state = 12345;
+    for (size_t i = 0; i < skipBlocks * 16; ++i)
+        state = (state * 1103515245u + 12345u) & 0x7fffffffu;
+    std::vector<uint8_t> b(16 * n);
+    for (auto& v : b) {
+        state = (state * 1103515245u + 12345u) & 0x7fffffffu;
+        v = static_cast<uint8_t>((state >> 16) & 0xff);
+    }
+    static const uint8_t five[12] = {2, 6, 10, 14, 18, 22, 26, 30, 3, 7, 11, 15};
+    for (size_t k = 0; k < n; ++k) {
+        uint8_t& first = b[k * 16];
+        if (bc7)
+            first = static_cast<uint8_t>((first & ~((1u << (k + 1)) - 1)) | (1u << k));
+        else if (k < 2)
+            first = static_cast<uint8_t>((first & ~3u) | k);
+        else
+            first = static_cast<uint8_t>((first & ~31u) | five[k - 2]);
+    }
+    return b;
+}
+
+std::vector<uint8_t> fromHex(const std::string& h)
+{
+    std::vector<uint8_t> out;
+    for (size_t i = 0; i + 1 < h.size(); i += 2)
+        out.push_back(static_cast<uint8_t>(std::stoi(h.substr(i, 2), nullptr, 16)));
+    return out;
+}
+
+} // namespace
+
+// BC7 and BC6H previews: one block of every mode, compared with an independent decoder's output (Pillow
+// 12.3). BC7 is exact; BC6H (unsigned) within one step of rounding. Signed BC6H follows the Direct3D
+// specification (transformed endpoints sign-extended), which that decoder does not do, so it is not compared.
+TEST(dds_bc7_and_bc6h_decode)
+{
+    const std::string bc7 =
+        "62e326ff3cf6a2ff5f7b72ff5f7b72ffc0d5a4ff30be04ff36c204ff30be04ffa3b968ff4a29b5ffceff42ffceff42ff80ab"
+        "5effcdf163ff80ab5effa8cf60ff7a7da66da594e7524c33628a4c1c628a3e7fcdad5a74cded5a74e4ed3e7ff9ad81ad7df7"
+        "5ca2515959a14d4a4d9d401b9054479da37e42c7b6a63cef7d2c4d756bde08ff3069beff5f7b72ff49e479ffc0d5a4ffc0d5"
+        "a4ffd59dd5ff3cc504ffffb5bdff57d02effffb5bdff94f76bff12de5cffcdf163ffcdf163ffcdf163ff7a4ba66d4c33628a"
+        "7a62a66d7a4ba66d208ce46a3e7fb8ad208ccd6a5a74f9ed76aa70c760a3566b6ba6639879ab74d67d2c4d759054479d7d2c"
+        "4d757d2c4d752163d6ff3f6fa5ff54eb44ff49e479ff30be04ffb1fd81ffc6c6b2ffcbb8bdffffb5bdff57d02effd36864ff"
+        "57d02eff12de5cff80ab5effcdf163ff5b895bff7a94a66da54be752a51ce752a533e752208ce46a0497cd2a5a74f9ed3e7f"
+        "b8ad72a86cb94d9d401b79ab74d66ba66398b6a63cef7d2c4d75a37e42c7ba3041c38c8c29ff31d6e7ff54eb44ff37daccff"
+        "30be04ff23b704ff36c204ffbbe299ffffb5bdff57d02effd36864ff39bd10ff43bf67ffa6807cffcdf163ffcdf163ff2133"
+        "21a521c321a54c7d628aa54be752208ccd6a5a74f9ed5a74cded208ccd6a79ab74d67eac79e86fa768aa529e452db6a63cef"
+        "59aa9a69ba3041c39a585ea5";
+    const std::string bc6u =
+        "ff1043ffff12ffffff1100ffff12ffffe2ff09ff9cff0dffffff01ffffff02ff0b0016ff0b0016ff0a0015ff0a0015ff10ff"
+        "ffff10ffffff0fffffff0fffffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff"
+        "ff00ffffff00ffffff00ffff00ffffff00ffffff00ffffff00ffffffff00ceffff008dffff00a2ff0002ffff02ffffffffff"
+        "ffffffffffff00ffffffffffffffffffffff55ff29ff55ff29ffff1013ffff0f11ff000c0bffff0f0ffffa0603ffff0505ff"
+        "f90603fff80603ffff00b3ffff00b3ffff00b3ffff00b3ffff13ffffff0f00ffff0f00ffff1200ffff0000ffffff02ffffff"
+        "0affff0000ff0b0016ff0b0014ff0a0015ff0d0016ff10ffffff10ffffff10ffffff0fffffffff00ffffff00ffffff00ffff"
+        "ff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffff00ffffff00ffffff00ffffff00ff"
+        "ffffff00a2ff0001ffff0000ffff0002ffffffffffff00ffffff1effffffffffffffffffffffffffffff2bff10ffffffffff"
+        "ff1012ffff0f11ff010d0cff010d0cfff90603fffd0504ffff0505fffb0503ffff00b3ffff00b3ffff00b3ffff00b3ffff12"
+        "04ffff13ffffff1043ffff1200ffff0000ffff0200ffff0000ffffff05ff0c0016ff0a0015ff0a0015ff0c0016ff10ffffff"
+        "10ffffff10ffffff0fffffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff00ffffff02ffffff00"
+        "ffffff00ffffff00ffff00ffffff00ffffff00e9ffff00ffffff0002ffff0002ffff0000ffff0002ffffffffffffffffffff"
+        "02ffffff37ffffffffffffffffffffff55ff29ffffffffff190e0dff050d0dff520e0effff1215fffa0603fff90603ffff04"
+        "05fffd0504ffff00b3ffff00b3ffff00b3ffff00b3ffff12ffffff1200ffff14ffffff14ffffffff01ffffff02ffffff03ff"
+        "ffff01ff0a0015ff0b0014ff0c0016ff0c0016ff10ffffff10ffffff0fffffff10ffffffff00ffffff00ffffff00ffffff00"
+        "ffffff00ffffff00ffffff00ffffff00ffffff02ffffff02ffffff00ffffff00ffff00ffffff00ffffff00ffffff00ffffff"
+        "0001ffff0002ffff0000ffff0000ffffffffffff00ffffff1dffffffffffffff55ff29ffffffffffffffffffffffffffff0e"
+        "0effff1114ffff0f0fff000c0bfff90603ffff0505fff90603ffff0405ffff00b3ffff00b3ffff00b3ffff00b3ff";
+    auto img = preview::decodeDds(ddsRow(98, modeBlocks(8, true)));
+    CHECK(img.has_value());
+    if (img)
+        CHECK(img->rgba == fromHex(bc7));
+    auto hdr = preview::decodeDds(ddsRow(95, modeBlocks(14, false, 8))); // the stream continues after BC7
+    CHECK(hdr.has_value());
+    if (hdr) {
+        const auto want = fromHex(bc6u);
+        CHECK_EQ(hdr->rgba.size(), want.size());
+        int worst = 0;
+        for (size_t i = 0; i < want.size() && i < hdr->rgba.size(); ++i)
+            worst = std::max(worst, std::abs(int(hdr->rgba[i]) - int(want[i])));
+        CHECK(worst <= 1);
+    }
+    CHECK(preview::readDdsInfo(ddsRow(99, modeBlocks(8, true)))->decodable);
+    CHECK(preview::readDdsInfo(ddsRow(96, modeBlocks(14, false)))->decodable);
 }
