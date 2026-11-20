@@ -1544,6 +1544,96 @@ TEST(earlier_builds_switched_off_plugins_stay_sources_without_the_database)
     }
 }
 
+// Save-safe rebuilds. Build 1 (light outputs, form lists in output 1, keywords in output 3) is switched
+// over. ModG's form list then gains a new keyword of its own: the keyword goes beside the list (output 1)
+// instead of moving the list to output 3, and the outputs stay light although the setting is now off.
+// Build 3 has fewer outputs, so records of the build in use would get other FormIDs: it stops, until
+// accepted for that build.
+TEST(rebuilds_keep_the_formids_of_the_build_in_use)
+{
+    namespace fs = std::filesystem;
+    auto root = buildInstall("saferebuild");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModG.esp", {"Fallout4.esm"},
+                {record("FLST", 0x01000800, {zs("EDID", "ModG_List"), u32("LNAM", 0x00000800)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModG.esp\n");
+    auto cfg = configFor(root);
+    cfg.exportOptions.outputDirectory = data; // installed: the next scans see the outputs
+    cfg.compile.outputCount = 3;
+    cfg.compile.strategy = AllocationStrategy::UserDefined;
+    cfg.compile.rules = {{"FLST", 1}, {"KYWD", 3}};
+    cfg.compile.lightOutputsWhenPossible = true;
+    std::string listOutput;
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const bool ok1 = p.compile();
+        if (!ok1)
+            for (const auto& is : p.validation()->issues)
+                if (is.severity == Severity::Error)
+                    std::printf("ERR %s: %s\n", is.category.c_str(), is.message.c_str());
+        CHECK(ok1);
+        for (const auto& m : p.compiledOutput()->mappings)
+            if (m.editorId == "ModG_List")
+                listOutput = m.outputPlugin;
+        CHECK(!listOutput.empty());
+        auto result = p.exportOutputs();
+        fs::copy_file(result.pluginsTxt, root / "plugins.txt", fs::copy_options::overwrite_existing);
+    }
+    // ModG updated: its list now names a new keyword of its own.
+    writePlugin(data / "ModG.esp", {"Fallout4.esm"},
+                {record("FLST", 0x01000800, {zs("EDID", "ModG_List"), u32("LNAM", 0x00000800), u32("LNAM", 0x01000801)}),
+                 record("KYWD", 0x01000801, {zs("EDID", "ModG_NewKeyword")})});
+    auto second = cfg;
+    second.compile.lightOutputsWhenPossible = false;
+    {
+        Pipeline p(second);
+        p.scan();
+        p.analyse();
+        const bool ok2 = p.compile();
+        if (!ok2)
+            for (const auto& is : p.validation()->issues)
+                if (is.severity != Severity::Info)
+                    std::printf("ISSUE %s: %s\n", is.category.c_str(), is.message.c_str());
+        CHECK(ok2); // nothing the build in use placed changes FormID
+        std::string list, keyword;
+        for (const auto& m : p.compiledOutput()->mappings) {
+            if (m.editorId == "ModG_List")
+                list = m.outputPlugin;
+            if (m.editorId == "ModG_NewKeyword")
+                keyword = m.outputPlugin;
+        }
+        CHECK_EQ(list, listOutput);
+        CHECK_EQ(keyword, listOutput); // beside the list, not in output 3
+        for (const auto& op : p.compiledOutput()->outputs)
+            if (!op.records.empty() && !op.patch)
+                CHECK(op.light); // as in build 1
+        bool kept = false;
+        for (const auto& is : p.compiledOutput()->issues)
+            kept |= is.category == "FormID Stability" && is.severity == Severity::Info &&
+                    is.message.find("stays light") != std::string::npos;
+        CHECK(kept);
+        for (const auto& e : p.compiledOutput()->records)
+            CHECK(!e.formIdChanged);
+    }
+    for (bool accept : {false, true}) {
+        auto third = second;
+        third.compile.outputCount = 1;
+        third.compile.acceptFormIdChanges = accept;
+        Pipeline p(third);
+        p.scan();
+        p.analyse();
+        CHECK_EQ(p.compile(), accept);
+        bool stopped = false;
+        for (const auto& is : p.validation()->issues)
+            stopped |= is.category == "FormID Stability" &&
+                       is.severity == (accept ? Severity::Warning : Severity::Error) &&
+                       is.message.find("previous build placed would get other FormIDs") != std::string::npos;
+        CHECK(stopped);
+    }
+}
+
 // Pin-back protection: after switching over, a new plugin that stays (excluded) needs a compiled plugin as a
 // master. The build would return that plugin to the load order, which costs saves made with the last
 // build its records: compiling stops and names it, until the user allows it back.

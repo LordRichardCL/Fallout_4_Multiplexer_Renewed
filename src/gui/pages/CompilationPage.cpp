@@ -648,6 +648,8 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         if (task != "Check")
             stages_->finish(ok);
         updateButtons();
+        if (task == "Compile" || task == "Rebuild")
+            app_->config().compile.acceptFormIdChanges = false; // for one build only
         if (!ok && (task == "Compile" || task == "Rebuild"))
             reviewReturning();
     });
@@ -1039,8 +1041,27 @@ void CompilationPage::reviewReturning()
     std::vector<std::pair<QString, QString>> rows;
     while (q.next())
         rows.push_back({q.value(0).toString(), q.value(1).toString()});
-    if (rows.empty())
+    if (rows.empty()) {
+        // Records of the build in use would get other FormIDs.
+        QSqlQuery f(db);
+        f.exec("SELECT message FROM ValidationResults WHERE category = 'FormID Stability' AND severity = 'Error' "
+               "LIMIT 1");
+        if (!f.next())
+            return;
+        QMessageBox box(QMessageBox::Warning, "FormIDs would change",
+                        f.value(0).toString() +
+                            "\n\nCompile anyway? Choose this only if you will start a new game or accept that saves "
+                            "made with your current build lose those records. It applies to this build only.",
+                        QMessageBox::NoButton, this);
+        auto* anyway = box.addButton("Compile anyway", QMessageBox::DestructiveRole);
+        box.addButton("Not now", QMessageBox::RejectRole);
+        box.exec();
+        if (box.clickedButton() != anyway)
+            return;
+        app_->config().compile.acceptFormIdChanges = true;
+        app_->runCompile();
         return;
+    }
     QDialog dlg(this);
     dlg.setWindowTitle("Plugins would return to the load order");
     dlg.resize(760, 480);

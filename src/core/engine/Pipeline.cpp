@@ -1009,6 +1009,31 @@ bool Pipeline::compile(ProgressSink& progress)
                 p.name);
         }
     }
+    // Records the previous build placed that would get other FormIDs while that build is in use (its
+    // outputs enabled, or plugins it compiled switched off): saves made with it would lose them.
+    {
+        const bool inUse = std::any_of(session_->earlierBuilds.begin(), session_->earlierBuilds.end(),
+                                       [](const EarlierBuild& b) { return b.active; }) ||
+                           std::any_of(session_->plugins.begin(), session_->plugins.end(),
+                                       [](const PluginInfo& p) { return p.reactivated; });
+        size_t changed = 0;
+        std::string example;
+        for (const auto& e : compiled_->records)
+            if (e.formIdChanged && ++changed == 1)
+                example = session_->formLabel(e.key);
+        if (inUse && changed) {
+            const std::string what = std::to_string(changed) + " record(s) the previous build placed would get " +
+                                     "other FormIDs (e.g. " + example +
+                                     "; the FormID Stability warnings say why). Saves made with the previous build "
+                                     "would lose them.";
+            if (config_.compile.acceptFormIdChanges)
+                validation_->fail(Severity::Warning, "FormID Stability", what + " Accepted for this build.");
+            else
+                validation_->fail(Severity::Error, "FormID Stability",
+                                  what + " Compile anyway only if you start a new game or accept that loss (the "
+                                         "Compilation page asks; --accept-formid-changes on the command line).");
+        }
+    }
     exported_.reset();
     if (db_) {
         db::DatabaseWriter w(*db_);

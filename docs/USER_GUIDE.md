@@ -412,6 +412,13 @@ The plugins it compiled that are switched off are read as sources, and the Valid
 
 A plugin an earlier build compiled that this build keeps in the load order must be switched on again: **Apply to Game** does it, `Multiplexer_DisablePlugins.txt` lists it under "Enable these", and the switch-over check warns while it is still off.
 
+**FormIDs stay the same from build to build.** Saves refer to compiled records by the outputs' FormIDs, so a rebuild keeps every record where the build in use put it:
+- records keep their output and object ID (from the previous build's `Multiplexer_FormMap.tsv`);
+- a new record that a record of the previous build now refers to goes into the same output or an earlier one, so the older record does not have to move to a later output (a light output takes it only while it stays within the light range);
+- each output stays light (ESL) or full as it was in the previous build, whatever **Light outputs** says (that setting applies to new outputs), because switching changes the FormID of every record in it. It switches only when it must (more new records than a light plugin holds, or new cells or worldspaces).
+
+When a record of the build in use would still get another FormID (it had to move, the output count went down, an output had to switch), compiling stops with a **FormID Stability** error while that build is in use. The warnings above it say which records and why. The Compilation page asks whether to compile anyway (for this build only), or use `--accept-formid-changes`. Do that only if you will start a new game or accept that saves made with the current build lose those records.
+
 **Compiled plugins never return unasked.** Saves made with a build hold a compiled plugin's records under the outputs' FormIDs. If the next build cannot compile that plugin (most often because a new or updated plugin that stays in the load order needs it as a master, or the mod was updated with record types not supported yet), it would return to the load order, and those saves would lose what they used of it. So compiling stops with a **Returning Plugins** error that names each such plugin and why. The Compilation page then asks which may return: tick them and compile again (they are kept in the settings; save them with Save Settings). On the command line: `--allow-return <plugin>` (repeatable). Or remove or switch off what keeps it out and compile again. A plugin you exclude yourself (Plugins page) is your choice and is not stopped; neither is a patch-only build.
 
 ## Starting fresh

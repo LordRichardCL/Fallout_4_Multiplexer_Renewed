@@ -1263,3 +1263,16 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 **Rule.** After the last compile round, every plugin that is switched off because the last build compiled it (`reactivated`) and is not compiled now stops the compilation with a **Returning Plugins** error, naming it and its reasons (for a pinned master: the plugin that needs it). Not stopped: plugins the user excluded, patch-only builds, and plugins in `CompileOptions::allowReturn` (Warning instead). The GUI asks which may return when a compile stops for this (saved with the settings); the CLI takes `--allow-return PLUGIN`.
 
 **Test:** `compiled_plugins_do_not_return_to_the_load_order_unasked` (stops, names the new plugin that needs it; compiles once allowed). The existing earlier-build tests (rebuild after switching over, a plugin the user excludes) still pass.
+
+## Save-safe rebuilds (20 Nov 2026)
+
+**Risks found.**
+- A record of the previous build that gained a reference to a new record moved to the new record's output when that was later (outputs only reference earlier ones), getting a new FormID. Reported as a FormID Stability *warning* only.
+- An output that switched between light and full (the Light outputs setting changed, or the new-record count crossed the light range) kept every object ID, so nothing was reported, but the game gives a light plugin's records other FormIDs than a full plugin's: saves lost all of them silently.
+
+**Rules.**
+- **Append-only placement.** New records that records of the previous build reference (directly or through other new records) go into the same output as those records, or an earlier one; a light output takes them only while it stays within the light range. Then the existing dependency rule moves nothing that need not move.
+- **Light state kept.** An output that the previous build wrote (read from the installed output plugin) keeps its light or full state: light while it fits and has no new cells or worldspaces, full otherwise. A forced switch marks every record of the previous build in it as changed (FormID Stability warning); keeping a state the setting would change is an Info.
+- **Stop and ask.** When the previous build is in use (its outputs enabled, or plugins it compiled switched off) and any record it placed would get another FormID, compiling stops with a FormID Stability error. `CompileOptions::acceptFormIdChanges` (Compilation page dialog, `--accept-formid-changes`; never saved) turns it into a warning for that build.
+
+**Test:** `rebuilds_keep_the_formids_of_the_build_in_use`: build 1 with light outputs and allocation rules is switched over; ModG's form list then names a new keyword, which goes beside the list instead of moving it, and the outputs stay light with the setting off; build 3 with fewer outputs stops, and compiles once accepted. With the placement rule switched off the test fails (the list moves and the build stops), so it covers the rule.

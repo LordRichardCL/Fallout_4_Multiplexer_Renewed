@@ -1956,6 +1956,64 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             }
         }
 
+    // Each output's light state in the previous build, from its installed plugin: -1 unknown, 0 full, 1 light.
+    std::vector<int> previousLight(static_cast<size_t>(N), -1);
+    std::vector<uint8_t> hadPrevious(static_cast<size_t>(N), 0);
+    if (!previous.empty()) {
+        for (int o = 0; o < N; ++o)
+            for (const auto& p : session.plugins)
+                if (p.generated && iequals(p.name, out.outputs[static_cast<size_t>(o)].name))
+                    previousLight[static_cast<size_t>(o)] = p.isLight() ? 1 : 0;
+        for (int o : previousOutput)
+            if (o >= 0)
+                hadPrevious[static_cast<size_t>(o)] = 1;
+    }
+    constexpr size_t kLightCapacity = kLightPluginMaxObjectId - kFirstObjectId + 1;
+    // Append-only: new records that records the previous build placed reference go into the same output
+    // or an earlier one, so the placed records need not move (and keep their FormIDs). An output that was
+    // light takes them only while it stays within the light range.
+    if (!previous.empty()) {
+        std::vector<int> cap(out.records.size(), N);
+        std::vector<uint32_t> stack;
+        auto lower = [&](uint32_t d, int to) {
+            const auto& r = out.records[d];
+            if (previousOutput[d] >= 0 || r.patch || r.world || to >= cap[d])
+                return;
+            cap[d] = to;
+            stack.push_back(d);
+        };
+        for (uint32_t v = 0; v < out.records.size(); ++v)
+            if (previousOutput[v] >= 0 && !out.records[v].patch)
+                for (auto d : out.records[v].deps)
+                    lower(d, previousOutput[v]);
+        while (!stack.empty()) {
+            const uint32_t d = stack.back();
+            stack.pop_back();
+            for (auto dd : out.records[d].deps)
+                lower(dd, cap[d]);
+        }
+        std::vector<size_t> newIn(static_cast<size_t>(N), 0);
+        for (uint32_t v = 0; v < out.records.size(); ++v)
+            if (out.records[v].isNew && !out.records[v].patch)
+                ++newIn[static_cast<size_t>(pref[v])];
+        size_t pulled = 0;
+        for (uint32_t v = 0; v < out.records.size(); ++v) {
+            if (cap[v] >= N || pref[v] <= cap[v])
+                continue;
+            const auto to = static_cast<size_t>(cap[v]);
+            if (out.records[v].isNew && previousLight[to] == 1 && newIn[to] >= kLightCapacity)
+                continue;
+            if (out.records[v].isNew) {
+                --newIn[static_cast<size_t>(pref[v])];
+                ++newIn[to];
+            }
+            pref[v] = cap[v];
+            ++pulled;
+        }
+        if (pulled)
+            spdlog::info("{} new records placed beside the records of the previous build that use them", pulled);
+    }
+
     std::vector<std::vector<uint32_t>> worldClusters; // records that must share an output
     // Cells, worldspaces and placed references go into the last output in use (so everything they
     // reference comes before), in clusters that are never split: an interior cell with everything in
@@ -2096,14 +2154,41 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
 
     // ---- FormIDs --------------------------------------------------------------
     for (auto& op : out.outputs) {
+        const size_t oi = static_cast<size_t>(&op - out.outputs.data());
         // Never light with new cells or worldspaces: cells added by ESL-flagged plugins lose changes
         // across saves.
         const bool newWorld = std::any_of(op.records.begin(), op.records.end(), [&](uint32_t v) {
             return out.records[v].isNew &&
                    (out.records[v].sig == sig::CELL || out.records[v].sig == Signature("WRLD"));
         });
-        op.light = op.patch || (options.lightOutputsWhenPossible && !newWorld &&
-                                op.newRecords <= (kLightPluginMaxObjectId - kFirstObjectId + 1));
+        const bool fits = op.newRecords <= kLightCapacity;
+        op.light = op.patch || (options.lightOutputsWhenPossible && !newWorld && fits);
+        // An output keeps the light or full state it had in the previous build: switching changes the
+        // FormID the game gives every record in it.
+        if (!op.patch && oi < previousLight.size() && previousLight[oi] >= 0 && hadPrevious[oi]) {
+            const bool was = previousLight[oi] == 1;
+            op.light = was && !newWorld && fits;
+            if (op.light != was) {
+                size_t n = 0;
+                for (auto v : op.records)
+                    if (previousOutput[v] == static_cast<int>(oi)) {
+                        out.records[v].formIdChanged = true;
+                        ++n;
+                    }
+                addIssue(Severity::Warning, "FormID Stability",
+                         op.name + " was " + (was ? "light (ESL)" : "a full plugin") + " in the previous build and is " +
+                             (op.light ? "light" : "a full plugin") + " now (" +
+                             (newWorld ? "it holds new cells or worldspaces"
+                                       : std::to_string(op.newRecords) + " new records, more than a light plugin holds") +
+                             "): the game gives its " + std::to_string(n) +
+                             " records from the previous build other FormIDs, so saves made with it lose them");
+            } else if (op.light != (options.lightOutputsWhenPossible && !newWorld && fits)) {
+                addIssue(Severity::Info, "FormID Stability",
+                         op.name + " stays " + (op.light ? "light (ESL)" : "a full plugin") +
+                             " as in the previous build, so its records keep their FormIDs (the Light outputs "
+                             "setting applies to new outputs)");
+            }
+        }
         const uint32_t maxId = op.light ? kLightPluginMaxObjectId : 0x00FFFFFFu;
         std::set<uint32_t> used;
         for (auto v : op.records) {
