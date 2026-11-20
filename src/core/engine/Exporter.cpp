@@ -1,4 +1,5 @@
 #include "engine/Exporter.hpp"
+#include "engine/PluginIni.hpp"
 
 #include "engine/ValidationEngine.hpp"
 #include "esp/PluginFile.hpp"
@@ -657,6 +658,37 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
         for (auto pi : c.archiveLoaders)
             list += session.plugins[pi].name + "\n";
         writeText(r.directory / kLoadersFile, list);
+    }
+
+    // Data\<plugin>.ini of compiled plugins: their settings, in load order, in the last output's INI (read
+    // while it is loaded; the compiler kept out plugins whose settings would end with another value).
+    // INIs this app wrote for other outputs are removed.
+    {
+        std::string lastOutput;
+        for (const auto& op : c.outputs)
+            if (!op.records.empty() && !op.patch)
+                lastOutput = op.name;
+        std::vector<std::string> from;
+        const std::string ini = plugin_ini::merged(session, c.compiledPlugins, &from);
+        for (const auto& op : c.outputs) {
+            const std::string base = op.name.size() > 4 ? op.name.substr(0, op.name.size() - 4) : op.name;
+            const auto path = r.directory / utf8ToPath(base + ".ini");
+            if (!ini.empty() && op.name == lastOutput) {
+                if (!sameContent(path, std::vector<uint8_t>(ini.begin(), ini.end())))
+                    writeText(path, ini);
+                spdlog::info("Wrote {}.ini with the settings of {}", base, join(from, ", "));
+                continue;
+            }
+            std::error_code ec;
+            if (fs::exists(path, ec)) {
+                std::ifstream in(path);
+                std::string first;
+                std::getline(in, first);
+                in.close();
+                if (first.rfind(plugin_ini::kTag, 0) == 0)
+                    fs::remove(path, ec);
+            }
+        }
     }
 
     // Archives of compiled plugins without a loader no longer load with their plugin.

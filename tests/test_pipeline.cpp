@@ -1544,6 +1544,49 @@ TEST(earlier_builds_switched_off_plugins_stay_sources_without_the_database)
     }
 }
 
+// Data\<plugin>.ini of a compiled plugin: its settings go into the last output's INI. ModA's INI sets
+// [Display] fFoo=1. Alone, or with a later plugin that stays (ModC, excluded) setting the same value, ModA
+// compiles and the output's INI carries it; with ModC setting another value, ModA stays (its setting
+// would end with another value, as the outputs load last).
+TEST(plugin_inis_are_carried_into_the_output)
+{
+    for (const char* other : {"", "1", "2"}) {
+        auto root = buildInstall(std::string("pluginini") + (*other ? other : "none"));
+        auto data = root / "Game" / "Data";
+        writeFile(data / "ModA.ini", "[Display]\nfFoo=1\n; comment\n[General]\nbBar=0\n");
+        auto cfg = configFor(root);
+        if (*other) {
+            writeFile(data / "ModC.ini", std::string("[display]\nFFOO=") + other + "\n");
+            cfg.analysis.excludedPlugins = {"ModC.esp"};
+        }
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        const auto& s = p.session();
+        const auto* a = s.findPlugin("ModA.esp");
+        const bool compiles = std::string(other) != "2";
+        CHECK_EQ(p.compiledOutput()->isCompiled(a->index), compiles);
+        if (!compiles) {
+            bool why = false;
+            for (const auto& r : a->reasons)
+                why |= r.find("Plugin INI") != std::string::npos && r.find("ModC.esp") != std::string::npos;
+            CHECK(why);
+            continue;
+        }
+        auto result = p.exportOutputs();
+        std::string last;
+        for (const auto& op : p.compiledOutput()->outputs)
+            if (!op.records.empty() && !op.patch)
+                last = op.name.substr(0, op.name.size() - 4);
+        std::ifstream in(result.directory / (last + ".ini"), std::ios::binary);
+        const std::string ini((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK(ini.find("[Display]\nfFoo=1") != std::string::npos);
+        CHECK(ini.find("[General]\nbBar=0") != std::string::npos);
+        CHECK(ini.find("From ModA.ini") != std::string::npos);
+    }
+}
+
 // The advanced switch for new quests, dialogue and NPCs. ModQ adds a quest; ModQ2 overrides it. On (the
 // default) both compile. Off: ModQ stays in the load order with the reason; ModQ2 (an override) still
 // compiles; the setting is part of what a build is checked against.
@@ -8090,32 +8133,30 @@ TEST(archive_list_never_exceeds_what_the_game_reads)
             CHECK(text.size() - std::string("SResourceArchiveList2=").size() <= Exporter::kArchiveListLimit);
 }
 
-// Fallout 4 reads Data\<plugin>.ini only while that plugin is active: compiled and disabled, the mod's
-// settings would no longer apply. The plugin stays in the load order, with or without the Auto-Merger.
-TEST(references_plugin_ini_keeps_the_plugin)
+// Fallout 4 reads Data\<plugin>.ini only while that plugin is active: the reference is Safe, because the
+// compiler carries the settings into the output's INI (plugin_inis_are_carried_into_the_output); a file
+// named after no plugin is not a reference.
+TEST(references_plugin_ini_is_carried)
 {
     auto root = referenceInstall("refpluginini");
     writeFile(root / "Game" / "Data" / "ModS.ini", "[Archive]\nsResourceIndexFileList=Fallout4 - Textures1.ba2\n");
     writeFile(root / "Game" / "Data" / "Unrelated.ini", "[General]\n");
-    for (bool autoMerge : {false, true}) {
-        auto cfg = configFor(root);
-        cfg.compile.autoMerge = autoMerge;
-        Pipeline p(cfg);
-        p.scan();
-        p.analyse();
-        const auto& s = p.session();
-        auto refs = referencesOf(s, "ModS.esp");
-        CHECK_EQ(refs.size(), size_t(1));
-        if (!refs.empty()) {
-            CHECK_EQ(refs[0]->cls, ReferenceClass::CompatibilityRequired);
-            CHECK_EQ(refs[0]->context, std::string("plugin INI"));
-            CHECK_EQ(refs[0]->assetPath, std::string("mods.ini"));
-        }
-        CHECK(referencesOf(s, "ModT.esp").empty());
-        CHECK(s.findPlugin("ModS.esp")->eligibility != Eligibility::Eligible);
-        CHECK(p.compile());
-        CHECK(!p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
+    auto cfg = configFor(root);
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto& s = p.session();
+    auto refs = referencesOf(s, "ModS.esp");
+    CHECK_EQ(refs.size(), size_t(1));
+    if (!refs.empty()) {
+        CHECK_EQ(refs[0]->cls, ReferenceClass::Safe);
+        CHECK_EQ(refs[0]->context, std::string("plugin INI"));
+        CHECK_EQ(refs[0]->assetPath, std::string("mods.ini"));
     }
+    CHECK(referencesOf(s, "ModT.esp").empty());
+    CHECK_EQ(s.findPlugin("ModS.esp")->eligibility, Eligibility::Eligible);
+    CHECK(p.compile());
+    CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
 }
 
 // "Clean" precombines: the precombined meshes take their geometry from <plugin> - Geometry.csg (indexed

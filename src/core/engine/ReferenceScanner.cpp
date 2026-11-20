@@ -259,9 +259,11 @@ Rule rule(Fact f)
         return {K::FilePath, C::Unknown, "file name",
                 "a file named after the plugin: something may find it by the plugin's name"};
     case Fact::PluginIni:
-        return {K::FilePath, C::CompatibilityRequired, "plugin INI",
+        return {K::FilePath, C::Safe, "plugin INI",
                 "Fallout 4 reads Data\\<plugin>.ini (game settings for that mod) only while the plugin is active: "
-                "compiled and disabled, its settings would no longer apply"};
+                "compiled, its settings are carried into the output's own INI (Data\\<output>.ini), read while the "
+                "output is loaded; a plugin whose setting would then end with another value (a plugin that stays "
+                "sets it later in the load order) stays in the load order"};
     case Fact::PrecombineGeometry:
         return {K::FilePath, C::CompatibilityRequired, "precombine shared geometry",
                 "\"clean\" precombined meshes take their geometry from <plugin> - Geometry.csg (indexed by "

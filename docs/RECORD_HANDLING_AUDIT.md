@@ -1311,3 +1311,13 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 - An Auto property default used for lookups in its own script: those lookups carry the rewrite (as for any variable); the property itself is Safe when no other script reads it, and Compatibility Required, naming the reader, when one does. A record that sets the property to the plugin's own name is a reference of its own (script property in a record), so the record side was never unchecked.
 
 **Tests:** `references_named_constants_joined_or_returned` (logged join: rewritable; join passed to other code: unknown; returned through `API.GetPluginName()` to a presence check: rewritable) and `references_auto_property_defaults_by_their_readers`.
+
+## Plugin INIs carried into the output (20 Nov 2026)
+
+**Found in the owner's Dependency Report of 18 Nov:** 9 plugins stayed out because of `Data\<plugin>.ini` (TrueGrass, CustomCamera, StoryWealth Pip-Boy settings, NightTimeGodRays and others): the game reads a plugin's INI only while that plugin is active.
+
+**Rule** (`engine/PluginIni`). The reference is Safe; the compiler carries the settings:
+- **Export:** the compiled plugins' INI settings, in load order, go into the last output's own INI (`Data\<output>.ini`), which the game reads while that output is loaded. Settings outside any section are left out (the game does not read them). INIs this app wrote for other outputs are removed.
+- **Precedence check** (every compile round): the final value of every setting is worked out today (every active plugin's INI in load order) and after compiling (the INIs of plugins that stay, then the output's, which loads last). A compiled plugin that sets a setting whose final value would change stays in the load order (Kept Out Automatically: Plugin INI, naming the plugin that sets it later), and the compilation runs again.
+
+**Tests:** `plugin_inis_are_carried_into_the_output` (alone: carried; a later plugin that stays setting the same value: carried; another value: kept out with the reason) and `references_plugin_ini_is_carried` (was `references_plugin_ini_keeps_the_plugin`).

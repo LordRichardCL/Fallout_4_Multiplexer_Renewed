@@ -3,6 +3,7 @@
 #include "assets/AssetScanner.hpp"
 #include "engine/CompilationResult.hpp"
 #include "engine/Exporter.hpp"
+#include "engine/PluginIni.hpp"
 #include "engine/PostCompilation.hpp"
 #include "engine/OutputRuns.hpp"
 #include "reference/FormIdReference.hpp"
@@ -716,6 +717,16 @@ bool Pipeline::compile(ProgressSink& progress)
                                  "references as null\" (Compilation page, or --broken-references-as-null)")
                     .second)
                 ++isolated;
+        // Data\<plugin>.ini of compiled plugins: carried into an output's INI, read after every plugin that
+        // stays; a plugin whose setting would end with another value stays in the load order.
+        {
+            std::vector<uint8_t> flag(session_->plugins.size(), 0);
+            for (auto pi : compiled_->compiledPlugins)
+                flag[pi] = 1;
+            for (const auto& [pi, why] : plugin_ini::conflicts(*session_, flag))
+                if (session_->autoRetained.emplace(session_->plugins[pi].key, "Plugin INI: " + why).second)
+                    ++isolated;
+        }
         // Advanced Users Auto-Merger: plan and check the rewritten copies; a plugin whose copy fails a
         // check stays in the load order (fail closed) and the compilation runs again.
         if (autoMerge_)
