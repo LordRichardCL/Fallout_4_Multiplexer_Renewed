@@ -254,6 +254,7 @@ void AppController::loadSettings()
     c.mergeCellConfig = s.value("compile/mergeCellConfig", false).toBool();
     c.applyPatchPlan = s.value("compile/applyPatchPlan", false).toBool();
     c.brokenReferencesAsNull = s.value("compile/brokenReferencesAsNull", false).toBool();
+    c.unusedMasterPlaceholders = s.value("compile/unusedMasterPlaceholders", false).toBool();
     c.buildPatch = s.value("compile/patch", false).toBool();
     c.patchOnly = s.value("compile/patchOnly", false).toBool();
     c.autoMerge = s.value("compile/autoMerge", false).toBool();
@@ -334,6 +335,7 @@ void AppController::saveSettings()
     s.setValue("compile/mergeCellConfig", c.mergeCellConfig);
     s.setValue("compile/applyPatchPlan", c.applyPatchPlan);
     s.setValue("compile/brokenReferencesAsNull", c.brokenReferencesAsNull);
+    s.setValue("compile/unusedMasterPlaceholders", c.unusedMasterPlaceholders);
     s.setValue("compile/patch", c.buildPatch);
     s.setValue("compile/patchOnly", c.patchOnly);
     s.setValue("compile/autoMerge", c.autoMerge);

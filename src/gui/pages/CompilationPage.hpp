@@ -60,6 +60,7 @@ private:
     QCheckBox* mergeCellConfig_;
     QCheckBox* applyPlan_;
     QCheckBox* brokenAsNull_;
+    QCheckBox* masterPlaceholders_;
     QCheckBox* patch_;
     QCheckBox* patchOnly_;
     QLineEdit* outputDir_;

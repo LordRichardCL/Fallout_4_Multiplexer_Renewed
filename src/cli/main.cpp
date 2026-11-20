@@ -109,6 +109,9 @@ Compile options:
   --broken-references-as-null  write references that cannot be written faithfully (missing master,
                        or a record a compiled plugin does not contain) as null and compile their
                        plugin (lossy); default: that plugin stays in the load order
+  --master-placeholders  compile masters that plugins staying in the load order list but use none
+                       of the records of, keeping their names with empty placeholder plugins
+                       (Mod Organizer 2 output inside the mods folder only)
   --patch              also write Multiplexer_Patch.esp, merging conflicts between
                        plugins that stay in the load order (like a Bashed Patch)
   --patch-only         write only the patch; compile no plugins
@@ -150,7 +153,7 @@ struct Args {
 
 Args parseArgs(int argc, char** argv)
 {
-    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--merge-cell-config", "--apply-patch-plan", "--broken-references-as-null", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
+    static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--merge-cell-config", "--apply-patch-plan", "--broken-references-as-null", "--master-placeholders", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
                                                    "--diagnostic-recorder", "--install", "--archive-loader",
                                                    "--values", "--tree", "--help", "--unfinished",
                                                    "--verbose", "-v"};
@@ -259,6 +262,7 @@ PipelineConfig makeConfig(const Args& a)
     c.mergeCellConfig = a.has("--merge-cell-config");
     c.applyPatchPlan = a.has("--apply-patch-plan");
     c.brokenReferencesAsNull = a.has("--broken-references-as-null");
+    c.unusedMasterPlaceholders = a.has("--master-placeholders");
     c.patchOnly = a.has("--patch-only");
     c.autoMerge = a.has("--auto-merge");
     c.buildPatch = c.patchOnly || a.has("--patch");

@@ -177,6 +177,14 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         "order, so the game reads its own data unchanged (Kept Out Automatically: Broken reference). On: such "
         "references are written as null (00000000) and the plugin compiles; each is listed under Broken in "
         "Source. The game's own reading of these references is not verified, so this can lose data.");
+    masterPlaceholders_ = new ToggleSwitch("Placeholders for unused masters");
+    masterPlaceholders_->setToolTip(
+        "A plugin that stays in the load order keeps its masters there too. Some list a master without using any "
+        "of its records (common in patches). On: such a master compiles, and an empty light plugin with its name "
+        "(like an archive loader) keeps the plugin that lists it loading. A master counts as unused only when "
+        "none of the plugin's records overrides it, sits in its groups, or names it in a FormID; data the "
+        "definitions do not describe counts as using it. Mod Organizer 2 with the output folder in the mods "
+        "folder only, as for archive loaders. The Dependency Report lists every unused master either way.");
     planPending_ = new QLabel;
     planPending_->setObjectName("Pill");
     planPending_->setStyleSheet("background:#2a2614; color:#f5c542;");
@@ -246,6 +254,10 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     advancedSection_->body()->addWidget(makeOptionRow("Write broken references as null",
                                                       "Lets plugins with broken references compile",
                                                       brokenAsNull_->toolTip(), {lossy, brokenAsNull_}));
+    advancedSection_->body()->addWidget(makeOptionRow("Placeholders for unused masters",
+                                                      "Compile masters that plugins staying in the load order list "
+                                                      "but do not use (Mod Organizer 2)",
+                                                      masterPlaceholders_->toolTip(), {masterPlaceholders_}));
     ol->addWidget(advancedSection_);
 
     auto* installSection = new CollapsibleSection("install", "How to install");
@@ -655,7 +667,7 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     connect(strategy_, &QComboBox::currentIndexChanged, this, [this] { storeOptions(); });
     connect(rules_, &QPlainTextEdit::textChanged, this, [this] { storeOptions(); });
     for (auto* c : {autoOutputs_, merge_, light_, translatePrevis_, mergeCellConfig_, applyPlan_, brokenAsNull_, patch_,
-                    patchOnly_})
+                    patchOnly_, masterPlaceholders_})
         connect(c, &QCheckBox::toggled, this, [this] {
             storeOptions();
             updatePresetState();
@@ -731,11 +743,12 @@ void CompilationPage::updateSummaries()
                                                       : "no patch");
     const int strategy = strategy_->currentData().toInt();
     advancedSection_->setSummary(
-        QString("%1 · light outputs %2 · broken references %3")
+        QString("%1 · light outputs %2 · broken references %3 · master placeholders %4")
             .arg(strategy == int(AllocationStrategy::ByRecordType)   ? "grouped by record type"
                  : strategy == int(AllocationStrategy::UserDefined) ? "balanced with your rules"
                                                                     : "balanced allocation",
-                 light_->isChecked() ? "on" : "off", brokenAsNull_->isChecked() ? "written as null" : "kept"));
+                 light_->isChecked() ? "on" : "off", brokenAsNull_->isChecked() ? "written as null" : "kept",
+                 masterPlaceholders_->isChecked() ? "on" : "off"));
 }
 
 namespace {
@@ -838,6 +851,7 @@ void CompilationPage::loadOptions()
     mergeCellConfig_->setChecked(c.mergeCellConfig);
     applyPlan_->setChecked(c.applyPatchPlan);
     brokenAsNull_->setChecked(c.brokenReferencesAsNull);
+    masterPlaceholders_->setChecked(c.unusedMasterPlaceholders);
     patchOnly_->setChecked(c.patchOnly);
     patch_->setChecked(c.buildPatch || c.patchOnly);
     patch_->setEnabled(!c.patchOnly);
@@ -864,6 +878,7 @@ void CompilationPage::storeOptions()
     c.mergeCellConfig = mergeCellConfig_->isChecked();
     c.applyPatchPlan = applyPlan_->isChecked();
     c.brokenReferencesAsNull = brokenAsNull_->isChecked();
+    c.unusedMasterPlaceholders = masterPlaceholders_->isChecked();
     c.patchOnly = patchOnly_->isChecked();
     c.buildPatch = c.patchOnly || patch_->isChecked();
     app_->config().exportOptions.outputDirectory = toPath(outputDir_->text().trimmed());

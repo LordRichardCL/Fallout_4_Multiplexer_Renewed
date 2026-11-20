@@ -158,6 +158,11 @@ private:
     output::Location outputLocation() const;
     std::filesystem::path previousBuildDirectory() const;
     std::filesystem::path pendingOutputDirectory() const;
+    // The Mod Organizer 2 mod the next export writes into (archive loaders and master placeholders are
+    // written only there); empty, with the reason in `off`, when there is none.
+    std::string loaderMod(std::string* off) const;
+    // The analysis options, with whether master placeholders are possible for the next export.
+    AnalysisOptions analysisOptions() const;
     void markBuildFailed(const std::filesystem::path& directory, const std::filesystem::path& packageRoot,
                          const std::vector<std::filesystem::path>& written, const std::string& reason);
 

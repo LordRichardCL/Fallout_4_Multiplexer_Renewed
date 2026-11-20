@@ -6446,6 +6446,106 @@ Mo2Setup buildMo2Install(const std::string& name, const std::string& modlist = "
 
 } // namespace
 
+// A master that plugins staying in the load order list but use none of the records of. ModP lists ModM and
+// adds a keyword of its own; ModQ overrides ModM's keyword; ModR has undescribed data with a byte equal to
+// ModM's index. All three stay (excluded). Off: ModM stays with ModP, reported as an unused master. On
+// (Mod Organizer 2, output in the mods folder): ModM compiles and an empty light plugin with its name keeps
+// ModP loading. ModQ or ModR listing it keeps ModM in the load order either way.
+TEST(unused_masters_reported_and_given_placeholders)
+{
+    struct Case {
+        std::string name;
+        bool placeholders;
+        bool package; // the output is the installable package, not an MO2 mod
+        std::string other; // "", "ModQ.esp", "ModR.esp"
+    };
+    for (const auto& c : std::vector<Case>{{"um_off", false, false, ""},
+                                           {"um_on", true, false, ""},
+                                           {"um_package", true, true, ""},
+                                           {"um_used", true, false, "ModQ.esp"},
+                                           {"um_loose", true, false, "ModR.esp"}}) {
+        auto m = buildMo2Install(c.name, "+Mod R\n+Mod Q\n+Mod P\n+Mod M\n+Mod C\n+Mod B\n+Mod A\n");
+        writePlugin(m.inst / "mods" / "Mod M" / "ModM.esp", {"Fallout4.esm"},
+                    {record("KYWD", 0x01000800, {zs("EDID", "ModM_Keyword")})});
+        writePlugin(m.inst / "mods" / "Mod P" / "ModP.esp", {"Fallout4.esm", "ModM.esp"},
+                    {record("KYWD", 0x02000800, {zs("EDID", "ModP_Keyword")})});
+        writePlugin(m.inst / "mods" / "Mod Q" / "ModQ.esp", {"Fallout4.esm", "ModM.esp"},
+                    {record("KYWD", 0x01000800, {zs("EDID", "ModM_Keyword_Q")})});
+        writePlugin(m.inst / "mods" / "Mod R" / "ModR.esp", {"Fallout4.esm", "ModM.esp"},
+                    {record("KYWD", 0x02000800, {zs("EDID", "ModR_Keyword"), raw("XZZZ", {0x00, 0x01, 0x02, 0x03})})});
+        std::string plugins = "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModM.esp\n*ModP.esp\n";
+        if (!c.other.empty())
+            plugins += "*" + c.other + "\n";
+        writeFile(m.profile / "plugins.txt", plugins);
+        auto cfg = m.cfg;
+        cfg.compile.unusedMasterPlaceholders = c.placeholders;
+        cfg.analysis.excludedPlugins = {"ModP.esp", "ModQ.esp", "ModR.esp"};
+        if (c.package)
+            cfg.exportOptions.outputDirectory.clear();
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        const auto& s = p.session();
+        const auto* modM = s.findPlugin("ModM.esp");
+        const auto* modP = s.findPlugin("ModP.esp");
+        CHECK(modM && modP);
+        if (!modM || !modP)
+            continue;
+        CHECK_EQ(s.unusedMasters.count({modP->index, modM->index}), size_t(1));
+        if (!c.other.empty()) // the other plugin uses ModM
+            CHECK_EQ(s.unusedMasters.count({s.findPlugin(c.other)->index, modM->index}), size_t(0));
+        bool reported = false;
+        for (const auto& is : p.dependencies()->issues)
+            reported |= is.category == "Unused Master" && is.plugin == modP->index &&
+                        is.message.find("ModM.esp") != std::string::npos;
+        CHECK(reported);
+        const bool compiles = c.placeholders && !c.package && c.other.empty();
+        CHECK_EQ(modM->eligibility == Eligibility::Eligible, compiles);
+        if (!compiles) {
+            bool why = false;
+            for (const auto& r : modM->reasons)
+                why |= r.find("Required as a master by") != std::string::npos &&
+                       (r.find("uses none of its records") != std::string::npos) == c.other.empty();
+            CHECK(why);
+            if (c.package) {
+                bool notHere = false;
+                for (const auto& r : modM->reasons)
+                    notHere |= r.find("not possible here") != std::string::npos;
+                CHECK(notHere);
+            }
+            continue;
+        }
+        CHECK_EQ(s.masterPlaceholders.count(modM->index), size_t(1));
+        CHECK(p.compile());
+        const auto* out = p.compiledOutput();
+        CHECK(out->isCompiled(modM->index));
+        CHECK(out->hasArchiveLoader(modM->index));
+        CHECK_EQ(out->masterPlaceholders.size(), size_t(1));
+        bool noted = false;
+        for (const auto& f : p.validation()->issues)
+            noted |= f.category == "Master Placeholders" && f.message.find("ModP.esp") != std::string::npos;
+        CHECK(noted);
+        auto result = p.exportOutputs();
+        CHECK_EQ(p.validation()->errors, uint64_t(0));
+        bool found = false;
+        for (const auto& path : result.archiveLoaders)
+            if (path.filename() == "ModM.esp") {
+                found = true;
+                const auto h = readPluginHeader(path);
+                CHECK(h.record.flags & RecordFlags::Light);
+                CHECK(h.masters.empty());
+                CHECK(h.description.find("for plugins that list it as a master") != std::string::npos);
+                CHECK(OutputSet({path}).records.empty());
+            }
+        CHECK(found);
+        // ModM stays enabled (its placeholder loads in its place); ModP still loads after it.
+        const std::string txt = Exporter::proposedPluginsTxt(s, *out);
+        CHECK(txt.find("*ModM.esp") != std::string::npos);
+        CHECK(txt.find("*ModP.esp") != std::string::npos);
+        CHECK(txt.find("*ModM.esp") < txt.find("*ModP.esp"));
+    }
+}
+
 TEST(mo2_apply_enables_the_output_mod_and_switches_once_mo2_is_closed)
 {
     auto m = buildMo2Install("mo2_apply");

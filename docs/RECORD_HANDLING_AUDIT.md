@@ -1228,3 +1228,20 @@ WEAP DNAM, WEAP FNAM, WEAP CRDT, HAZD DNAM, STAT DNAM and ACTI RADR were partial
 **Where to see it.** Advanced Users Auto-Merger Report (HTML, TXT, JSON): "Plugin name and FormID pairs (evidence, report only)" with the verdict, the script properties holding pairs, the plugins kept out by nothing but pairs, and every read with its use. The log has one summary line. The rewrite itself is only worth building when the owner's report says "Clean" (or the reads not kept are understood).
 
 **Tests:** `pair_members_followed_through_a_script` and `pair_evidence_reports_how_scripts_use_the_pairs` (clean, and not clean when the script compares the name).
+
+## Unused masters and placeholders (20 Nov 2026)
+
+**Why.** A plugin that stays in the load order keeps every master it lists in the load order too. Patches often list masters they do not use (`DEPENDENCY_SCENARIOS.md`, scenario 4), and each such master stayed out of compilation for nothing.
+
+**Proof that a master is unused** (`DependencyEngine::mastersInUse`, per plugin, read from the plugin file). A master counts as used when any record of the plugin:
+- overrides one of its records (the record's FormID), or sits in a group of one (World, Cell, Topic or Quest Children labels);
+- has a FormID naming it in a place the definitions locate FormIDs (`formIdSlots`), or may (`probableSlots`);
+- has, in a subrecord with data the definitions do not describe, any byte equal to the master's index (it could be the top byte of a FormID naming it).
+
+A plugin that does not read counts as using all its masters. Nothing is guessed: only a master no part of the plugin can name is unused.
+
+**Rule.** For each plugin that compiles so far, the plugins that stay and list it are split into users and non-users. Any user keeps it in the load order, as before. Only non-users: with **Placeholders for unused masters** off (default), it stays, with the reason saying it could compile; on, it compiles and gets an archive loader (an empty light plugin with its name, master flag kept), with or without archives. So placeholders need what archive loaders need: Mod Organizer 2 with the output folder inside the mods folder. Elsewhere the master stays and the reason says why. The compiler writes an Error if a placeholder is needed where archive loaders are not written (eligibility prevents this).
+
+**Reporting.** Dependency Report: "Unused Master" (Info) for each pair, with what happened to the master. Validation Report: "Master Placeholders" (Info) for each placeholder written, naming the plugins it keeps loading. Plugins page: the master's reasons.
+
+**Test:** `unused_masters_reported_and_given_placeholders` (off; on with the export, the placeholder's header and plugins.txt order; the package output; a plugin overriding the master's record; a plugin with an undescribed byte equal to the master's index).

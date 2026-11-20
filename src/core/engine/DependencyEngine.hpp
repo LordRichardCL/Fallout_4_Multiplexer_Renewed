@@ -13,6 +13,12 @@ struct AnalysisOptions {
     std::vector<std::string> excludedPlugins; // never compile these
     bool compileCreationClub = false;
     unsigned threads = 0;
+    // Placeholders for unused masters (CompileOptions::unusedMasterPlaceholders, possible only where archive
+    // loaders are): a master that plugins staying in the load order list but use none of the records of is
+    // compiled, and an empty plugin with its name keeps them loading. `placeholdersOff` says why not, when
+    // they are wanted but not possible.
+    bool masterPlaceholders = false;
+    std::string placeholdersOff;
 };
 
 struct DependencyIssue {
@@ -61,6 +67,13 @@ public:
 
     // Plugins that list `plugin` as a master.
     static std::vector<PluginIndex> dependents(const Session& session, PluginIndex plugin);
+
+    // Which of `plugin`'s masters its records refer to, one entry per master in its header (1 = used). A
+    // master counts as used when the plugin overrides one of its records, holds a record in one of its
+    // groups, has a FormID naming it where the definitions locate (or may locate) FormIDs, or has a byte
+    // equal to its index in a subrecord with data the definitions do not describe. A plugin that does not
+    // read uses every master (fail closed).
+    static std::vector<uint8_t> mastersInUse(const Session& session, const PluginInfo& plugin);
 };
 
 } // namespace fo4mx

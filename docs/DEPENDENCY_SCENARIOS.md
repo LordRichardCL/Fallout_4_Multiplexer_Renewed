@@ -185,7 +185,7 @@ The vocabulary used below:
 **Today:**
 - Pinning and chain merging are implemented.
 - Hard conflicts already go to the last plugin in the original load order that changed the field (`MergeEngine`), so a retained C that loaded last keeps its values.
-- Not implemented: unnecessary-master detection and the ESL stub.
+- Unnecessary-master detection and the ESL stub: implemented (20 Nov 2026). Unused masters are reported as "Unused Master"; with **Placeholders for unused masters** on, the master compiles and an empty light plugin with its name is written (as an archive loader, MO2 only).
 
 ---
 
@@ -367,5 +367,5 @@ Ranked by impact; none of these is implemented yet.
 2. **Pin-back protection.** When a new or updated plugin would force a compiled plugin back into the load order, ask instead of doing it silently.
 3. **Append-only allocation** across rebuilds, with per-output headroom.
 4. **Pinning cost in the UI.** Show what each ineligible plugin blocks, including transitive pins.
-5. **Unnecessary-master detection**, and an optional header-only ESL stub for masters a retained plugin lists but never uses.
+5. **Unnecessary-master detection**, and an optional header-only ESL stub for masters a retained plugin lists but never uses. *Done (20 Nov 2026).*
 6. **Post-compilation archive winner check**, plus validation of assets that are served only by archives which will stop loading.

@@ -1,6 +1,7 @@
 #include "engine/DependencyEngine.hpp"
 
 #include "esp/FieldDecoder.hpp"
+#include "esp/PluginFile.hpp"
 
 #include "engine/BuildCache.hpp"
 #include "engine/Diagnosis.hpp"
@@ -12,6 +13,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <set>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -28,6 +30,61 @@ std::vector<PluginIndex> DependencyEngine::dependents(const Session& session, Pl
         if (std::find(p.masters.begin(), p.masters.end(), plugin) != p.masters.end())
             out.push_back(p.index);
     return out;
+}
+
+std::vector<uint8_t> DependencyEngine::mastersInUse(const Session& session, const PluginInfo& p)
+{
+    const size_t n = p.header.masters.size();
+    std::vector<uint8_t> used(n, 0);
+    size_t left = n;
+    auto mark = [&](uint32_t index) {
+        if (index < n && !used[index]) {
+            used[index] = 1;
+            --left;
+        }
+    };
+    try {
+        const auto file = PluginFile::load(p.path);
+        file.forEachRecord([&](const RecordLocation& loc) {
+            if (loc.header.signature == sig::TES4)
+                return true;
+            // The record itself, and the records whose groups hold it.
+            for (uint32_t id : {loc.header.formId, loc.world, loc.cell, loc.topic, loc.quest})
+                if (id)
+                    mark(id >> 24);
+            std::vector<uint8_t> inflated;
+            std::span<const uint8_t> data = loc.rawData;
+            if (loc.header.compressed()) {
+                inflated = Record::decompress(loc.header, loc.rawData);
+                data = inflated;
+            }
+            const auto subs = Record::parseSubrecords(data);
+            const auto layout = decodeLayout(session.defs, loc.header.signature, subs);
+            for (const auto* slots : {&layout.formIdSlots, &layout.probableSlots})
+                for (const auto& sl : *slots) {
+                    if (sl.sub >= subs.size() || sl.offset + 4 > subs[sl.sub].data.size())
+                        continue;
+                    uint32_t v = 0;
+                    std::memcpy(&v, subs[sl.sub].data.data() + sl.offset, 4);
+                    if (v)
+                        mark(v >> 24);
+                }
+            // Undescribed data: any byte equal to a master's index could be the top byte of a FormID
+            // naming it, so that master counts as used.
+            std::set<uint32_t> loose;
+            for (const auto& h : layout.heuristic)
+                loose.insert(h.sub);
+            for (uint32_t i : loose)
+                if (i < subs.size())
+                    for (uint8_t b : subs[i].data)
+                        mark(b);
+            return left > 0;
+        });
+    } catch (const std::exception& e) {
+        spdlog::debug("Masters of {} taken as used: {}", p.name, e.what());
+        std::fill(used.begin(), used.end(), 1);
+    }
+    return used;
 }
 
 namespace {
@@ -302,24 +359,98 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
         }
     }
 
-    // A plugin that stays in the load order keeps its masters in the load order too.
+    // A plugin that stays in the load order keeps its masters in the load order too, unless it uses
+    // none of a master's records and placeholders are on: then the master compiles and an empty plugin
+    // with its name satisfies the master list.
+    auto masterUse = [&](const PluginInfo& q) -> const std::vector<uint8_t>& {
+        auto it = session.masterUse.find(q.index);
+        if (it == session.masterUse.end())
+            it = session.masterUse.emplace(q.index, mastersInUse(session, q)).first;
+        return it->second;
+    };
+    {
+        // Read the plugins that may need it in parallel first: those that stay and list a plugin that
+        // compiles so far.
+        std::vector<PluginIndex> todo;
+        for (const auto& q : session.plugins) {
+            if (!q.active || q.eligibility == Eligibility::Eligible || session.masterUse.count(q.index))
+                continue;
+            if (std::any_of(q.masters.begin(), q.masters.end(), [&](PluginIndex m) {
+                    return m != kInvalidPlugin && session.plugins[m].eligibility == Eligibility::Eligible;
+                }))
+                todo.push_back(q.index);
+        }
+        std::vector<std::vector<uint8_t>> use(todo.size());
+        parallelFor(
+            todo.size(), [&](size_t i) { use[i] = mastersInUse(session, session.plugins[todo[i]]); }, nullProgress(),
+            options.threads);
+        for (size_t i = 0; i < todo.size(); ++i)
+            session.masterUse.emplace(todo[i], std::move(use[i]));
+    }
+    session.unusedMasters.clear();
+    session.masterPlaceholders.clear();
+    // Each plugin's dependents, with the entry of their master list naming it.
+    std::vector<std::vector<std::pair<PluginIndex, size_t>>> listedBy(session.plugins.size());
+    for (const auto& q : session.plugins)
+        if (q.active)
+            for (size_t i = 0; i < q.masters.size(); ++i)
+                if (q.masters[i] != kInvalidPlugin)
+                    listedBy[q.masters[i]].push_back({q.index, i});
+    const bool placeholders = options.masterPlaceholders && options.placeholdersOff.empty();
+    // The plugins that stay and list `m`, split into those that use it and those that do not.
+    auto listers = [&](PluginIndex m, std::vector<PluginIndex>& users, std::vector<PluginIndex>& nonUsers) {
+        users.clear();
+        nonUsers.clear();
+        for (const auto& [q, i] : listedBy[m]) {
+            const auto& qp = session.plugins[q];
+            if (qp.eligibility == Eligibility::Eligible)
+                continue;
+            const auto& use = masterUse(qp);
+            (i < use.size() && !use[i] ? nonUsers : users).push_back(q);
+        }
+    };
+    std::vector<PluginIndex> users, nonUsers;
     bool changed = true;
     while (changed) {
         changed = false;
-        for (auto& q : session.plugins) {
-            if (!q.active || q.eligibility == Eligibility::Eligible)
+        for (auto& mp : session.plugins) {
+            if (mp.eligibility != Eligibility::Eligible || listedBy[mp.index].empty())
                 continue;
-            for (auto m : q.masters) {
-                if (m == kInvalidPlugin)
-                    continue;
-                auto& mp = session.plugins[m];
-                if (mp.eligibility == Eligibility::Eligible) {
-                    mp.eligibility = Eligibility::Ineligible;
-                    mp.reasons.push_back("Required as a master by " + q.name + ", which stays in the load order");
-                    changed = true;
-                }
-            }
+            listers(mp.index, users, nonUsers);
+            if (users.empty() && (nonUsers.empty() || placeholders))
+                continue;
+            const auto& by = session.plugins[users.empty() ? nonUsers.front() : users.front()];
+            std::string why = "Required as a master by " + by.name + ", which stays in the load order";
+            if (users.empty())
+                why += "; it uses none of its records, so this plugin could compile with an empty placeholder "
+                       "keeping its name (" +
+                       (options.masterPlaceholders ? "not possible here: " + options.placeholdersOff
+                                                   : std::string("turn on \"Placeholders for unused masters\"")) +
+                       ")";
+            mp.eligibility = Eligibility::Ineligible;
+            mp.reasons.push_back(why);
+            changed = true;
         }
+    }
+    // Masters listed but not used by plugins that stay (for the report), and the placeholders needed.
+    for (const auto& q : session.plugins) {
+        if (!q.active || q.eligibility == Eligibility::Eligible)
+            continue;
+        auto it = session.masterUse.find(q.index);
+        if (it == session.masterUse.end())
+            continue;
+        for (size_t i = 0; i < q.masters.size() && i < it->second.size(); ++i)
+            if (!it->second[i] && q.masters[i] != kInvalidPlugin && !session.plugins[q.masters[i]].baseGame)
+                session.unusedMasters.insert({q.index, q.masters[i]});
+    }
+    for (const auto& [q, m] : session.unusedMasters) {
+        auto& mp = session.plugins[m];
+        if (mp.eligibility != Eligibility::Eligible)
+            continue;
+        session.masterPlaceholders.insert(m);
+        mp.reasons.push_back("Listed as a master by " + session.plugins[q].name +
+                             ", which stays in the load order and uses none of its records: compiled, with an empty "
+                             "placeholder plugin of the same name keeping " + session.plugins[q].name + " loading");
     }
 
     if (report) {
@@ -331,6 +462,33 @@ void DependencyEngine::evaluateEligibility(Session& session, const AnalysisOptio
                 report->eligibleRecords += p.recordCount;
             }
         reportBlockers(session, blocks, *report);
+        // Masters listed but not used by plugins that stay (xEdit's "Clean Masters" would remove them).
+        report->issues.erase(std::remove_if(report->issues.begin(), report->issues.end(),
+                                            [](const DependencyIssue& is) { return is.category == "Unused Master"; }),
+                             report->issues.end());
+        for (const auto& [q, m] : session.unusedMasters) {
+            DependencyIssue is;
+            is.severity = Severity::Info;
+            is.category = "Unused Master";
+            is.plugin = q;
+            const auto& qn = session.plugins[q].name;
+            const auto& mn = session.plugins[m].name;
+            is.message = qn + " lists " + mn + " as a master but uses none of its records";
+            if (session.masterPlaceholders.count(m))
+                is.cause = mn + " compiles; an empty placeholder plugin with its name keeps " + qn + " loading.";
+            else if (session.plugins[m].eligibility == Eligibility::Eligible)
+                is.cause = mn + " compiles.";
+            else if (!options.masterPlaceholders)
+                is.cause = mn + " stays in the load order because " + qn + " lists it. Turn on \"Placeholders for "
+                           "unused masters\" (Compilation page) to compile it, or remove the master from " + qn +
+                           " in xEdit (Clean Masters).";
+            else if (!options.placeholdersOff.empty())
+                is.cause = mn + " stays in the load order: placeholders are not possible here (" +
+                           options.placeholdersOff + ").";
+            else
+                is.cause = mn + " stays in the load order for another reason (see the Plugins page).";
+            report->issues.push_back(std::move(is));
+        }
     }
 }
 

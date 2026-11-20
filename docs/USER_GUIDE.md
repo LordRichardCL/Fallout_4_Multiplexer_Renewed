@@ -245,6 +245,7 @@ Files the game reads (they mirror the `Data` folder layout because the game find
 | loose copies of meshes, textures and other files | without archive loaders, compiled plugins' archives load earlier (from the INI list); each file such an archive wins today is written loose so it keeps winning | Vortex / plain installs |
 | copies of scripts and configs | the Advanced Users Auto-Merger's relinked copies, which must override the originals | when the Auto-Merger is on |
 | archive loaders (same file name as the compiled plugin) | empty ESL-flagged plugins that keep a compiled mod's archives loading in place | MO2 with the output in the mods folder |
+| master placeholders (same file name as the compiled plugin) | the same empty ESL-flagged plugin, for a compiled master that plugins staying in the load order list but do not use (**Placeholders for unused masters**, Compilation page → Advanced; off by default) | MO2 with the output in the mods folder |
 
 Files for you and for the next build (the game does not read them; nothing needs F4SE or any other runtime component). The build's records (`Multiplexer_FormMap.tsv` and the copy lists) are in `Data`, so they are installed with the package and the next scan finds them even if the `Multiplexer Output` folder was deleted; the notes (lists, INI line, reports) are next to `Data` and are not installed:
 
@@ -299,6 +300,14 @@ Then:
 With archive loaders (MO2) nothing changes: every archive keeps its position. Without them, archives listed in the INI load before every plugin's own archives. Once compiled plugins' archives move into that list, an archive of a plugin that stays could start winning a file it used to lose. The app does not let that happen: each file a compiled plugin's archive wins today is written loose into the output folder (a loose file wins over every archive), so the same version still wins (`Multiplexer_ArchiveWinners.tsv`). A plugin that would need more than 2,000 such copies, such as a LOD pack, stays in the load order instead (**Kept Out Automatically**, "Archive priority: N files…"), and the compilation runs again without it. With Mod Organizer 2 and the output inside the mods folder, archive loaders keep every archive in place, so nothing is kept out for this reason. With loose copies turned off, any remaining change is listed under **Archive Priority** (up to 50, with the full list in `Multiplexer_ArchivePriority.txt`).
 
 The comparison is always with your load order **as it was before this app changed the INI**: archives an earlier **Apply to Game** added count as their plugin's own. The app knows them from `Multiplexer_RegisteredArchives.txt` in the output folder, from the last build in its database, and from the oldest `Fallout4Custom.ini.multiplexer-backup-*` next to your INI (the INI before the first change). If you delete generated files between builds, keep those backups, or restore the oldest one first.
+
+### Unused masters
+
+A plugin that stays in the load order keeps its masters there too. Patches often list a master without using any of its records. The **Dependency Report** (and the Dependency Graph's *Missing Requirements & Breakages* tab) lists each one as **Unused Master**: "C.esp lists A.esp as a master but uses none of its records".
+
+A master counts as unused only when none of the plugin's records overrides one of its records, sits in one of its groups, or names it in a FormID the definitions locate. A byte equal to the master's index anywhere in data the definitions do not describe counts as using it, and a plugin that cannot be read uses all its masters.
+
+With **Placeholders for unused masters** on (Compilation page → Advanced, or `--master-placeholders`), such a master compiles anyway, and an empty light plugin with its name keeps the plugins that list it loading. It is written like an archive loader, so it needs the same setup: Mod Organizer 2 with the output folder inside the mods folder, the output mod at the bottom of the left pane, and the master kept enabled. Anywhere else the master stays in the load order, and its reasons on the Plugins page say why. You can also remove the master from the plugin in xEdit (Clean Masters).
 
 ### When some records cannot be compiled safely
 

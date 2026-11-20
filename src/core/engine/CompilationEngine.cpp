@@ -2500,12 +2500,23 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         for (const auto& a : AssetScanner::pluginArchiveNames(p, lang))
             if (session.vfs.find(toLower(a)))
                 archives.push_back(a);
-        if (archives.empty())
+        // A master that plugins staying in the load order still list: its name must stay loadable.
+        const bool placeholder = session.masterPlaceholders.count(pi) != 0;
+        if (archives.empty() && !placeholder)
             continue;
-        if (options.archiveLoaders)
+        if (options.archiveLoaders) {
             out.archiveLoaders.push_back(pi);
-        else
+            if (placeholder)
+                out.masterPlaceholders.push_back(pi);
+        } else {
             out.archivesToRegister.insert(out.archivesToRegister.end(), archives.begin(), archives.end());
+            if (placeholder) // eligibility allows this only where archive loaders are written
+                addIssue(Severity::Error, "Master Placeholders",
+                         p.name + " is compiled while plugins that stay in the load order list it as a master, but "
+                                  "no placeholder plugin can be written here (archive loaders are off): they would not "
+                                  "load",
+                         FormKey{}, p.name);
+        }
     }
 
     size_t used = std::count_if(out.outputs.begin(), out.outputs.end(),

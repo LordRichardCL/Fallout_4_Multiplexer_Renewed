@@ -620,7 +620,13 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
             h.record.formVersion = 131;
             h.version = 1.0f;
             h.author = kGeneratorAuthor;
-            h.description = std::string(kArchiveLoaderTag) + ": keeps the archives of " + p.name +
+            const bool placeholder =
+                std::find(c.masterPlaceholders.begin(), c.masterPlaceholders.end(), pi) != c.masterPlaceholders.end();
+            h.description = std::string(kArchiveLoaderTag) + ": keeps " +
+                            (placeholder ? "the name of " + p.name +
+                                               " for plugins that list it as a master (they use none of its records) "
+                                               "and its archives"
+                                         : "the archives of " + p.name) +
                             " loading at the same priority. Its records are in the Fallout 4 Multiplexer output plugins.";
             PluginWriter w;
             w.setHeader(h);

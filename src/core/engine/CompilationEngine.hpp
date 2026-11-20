@@ -74,6 +74,8 @@ struct CompileOptions {
     // of the same name (archive loaders) instead of the INI list. Only possible when the output
     // folder is a mod-manager mod that overrides the original files (Mod Organizer 2).
     bool archiveLoaders = false;
+    // Placeholders for unused masters (opt-in; needs archive loaders): see AnalysisOptions::masterPlaceholders.
+    bool unusedMasterPlaceholders = false;
     // Advanced Users Auto-Merger (opt-in): compile plugins whose names appear in scripts or configs
     // when every such file can be relinked, and write relinked copies into the output (AutoMerger).
     bool autoMerge = false;
@@ -191,6 +193,7 @@ struct CompiledOutput {
     std::vector<FormMapping> mappings;
     std::vector<std::string> archivesToRegister; // archives that must be listed in the INI
     std::vector<PluginIndex> archiveLoaders;      // compiled plugins replaced by an archive loader
+    std::vector<PluginIndex> masterPlaceholders;  // of those, the ones kept because plugins that stay list them
     // The F4SE archive loader supplies the archive list in full (no 1,023-character limit): export
     // ships it with the list, and Apply writes the whole list into the INI.
     bool f4seArchiveLoader = false;

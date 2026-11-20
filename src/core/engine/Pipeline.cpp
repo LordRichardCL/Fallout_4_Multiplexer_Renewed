@@ -226,7 +226,7 @@ void Pipeline::scan(ProgressSink& progress)
         }
     }
     AssetScanner::scan(*session_, config_.assets, progress);
-    DependencyEngine::evaluateEligibility(*session_, config_.analysis);
+    DependencyEngine::evaluateEligibility(*session_, analysisOptions());
 
     openDatabase();
     if (db_) {
@@ -487,7 +487,7 @@ void Pipeline::analyse(ProgressSink& progress)
     } else {
         autoMerge_.reset();
     }
-    dependencies_ = DependencyEngine::analyse(*session_, config_.analysis, progress);
+    dependencies_ = DependencyEngine::analyse(*session_, analysisOptions(), progress);
     CleaningEngine::analyse(*session_, *conflicts_, *dependencies_);
     // The Candidate types (described, not compiled yet) are checked against this load order every
     // time, so the Validation Report always says whether they are confirmed.
@@ -529,12 +529,65 @@ void Pipeline::setPlanDecision(FormKey record, const std::string& changeId, std:
         plan_ = buildPatchPlan(*session_, *conflicts_, planDecisions_);
 }
 
+std::string Pipeline::loaderMod(std::string* off) const
+{
+    std::string why;
+    std::string mod;
+    if (!config_.archiveLoaders) {
+        why = "archive loaders are turned off";
+    } else if (session_->install.config.kind != InstallKind::ModOrganizer2) {
+        why = std::string("the output is the installable package, the same for every mod manager (") +
+              installKindName(session_->install.config.kind) +
+              " here); archive loaders are only written when the output folder is a mod inside Mod Organizer "
+              "2's mods folder";
+    } else if (session_->install.modsPath.empty()) {
+        why = "Mod Organizer's mods folder is unknown";
+    } else {
+        const auto outputDir = pendingOutputDirectory();
+        // Windows paths differ in letter case and slash direction between MO2's INI and a folder
+        // picked by hand: compare them normalised.
+        auto norm = [](const std::filesystem::path& p) {
+            std::string g = toLower(pathToUtf8(std::filesystem::path(p).lexically_normal().generic_u8string()));
+            while (g.size() > 1 && g.back() == '/')
+                g.pop_back();
+            return g;
+        };
+        std::string mods = norm(session_->install.modsPath) + "/";
+        std::string out = norm(outputDir);
+        if (out.rfind(mods, 0) == 0 && out.size() > mods.size()) {
+            std::string rest = pathToUtf8(std::filesystem::path(outputDir).lexically_normal().generic_u8string());
+            rest = rest.substr(rest.size() - (out.size() - mods.size())); // original spelling
+            mod = rest.substr(0, rest.find('/'));
+        } else {
+            why = "the output is the installable package (" + pathToUtf8(outputDir) +
+                  "), the same for every mod manager; archive loaders are only written when the output folder "
+                  "is a mod inside Mod Organizer's mods folder (" + pathToUtf8(session_->install.modsPath) + ")";
+        }
+    }
+    if (off)
+        *off = why;
+    return mod;
+}
+
+AnalysisOptions Pipeline::analysisOptions() const
+{
+    AnalysisOptions a = config_.analysis;
+    a.masterPlaceholders = config_.compile.unusedMasterPlaceholders;
+    a.placeholdersOff.clear();
+    if (a.masterPlaceholders && session_) {
+        std::string off;
+        if (loaderMod(&off).empty())
+            a.placeholdersOff = off;
+    }
+    return a;
+}
+
 void Pipeline::refreshEligibility()
 {
     session_->userRetained.clear();
     for (const auto& name : config_.analysis.excludedPlugins)
         session_->userRetained.insert(toLower(name));
-    DependencyEngine::evaluateEligibility(*session_, config_.analysis,
+    DependencyEngine::evaluateEligibility(*session_, analysisOptions(),
                                           dependencies_ ? &*dependencies_ : nullptr);
     if (db_)
         db::DatabaseWriter(*db_).updatePlugins(*session_);
@@ -625,39 +678,9 @@ bool Pipeline::compile(ProgressSink& progress)
     // Mod Organizer 2 mod folder does. Anywhere else they would overwrite the originals.
     // Where the next export will write (it does not exist yet: every export gets a new folder).
     const auto outputDir = pendingOutputDirectory();
-    std::string outputMod;
     std::string loadersOff; // why archive loaders are not used, for the validation report
-    if (!config_.archiveLoaders) {
-        loadersOff = "archive loaders are turned off";
-    } else if (session_->install.config.kind != InstallKind::ModOrganizer2) {
-        loadersOff = std::string("the output is the installable package, the same for every mod manager (") +
-                     installKindName(session_->install.config.kind) +
-                     " here); archive loaders are only written when the output folder is a mod inside Mod Organizer "
-                     "2's mods folder";
-    } else if (session_->install.modsPath.empty()) {
-        loadersOff = "Mod Organizer's mods folder is unknown";
-    } else {
-        // Windows paths differ in letter case and slash direction between MO2's INI and a folder
-        // picked by hand: compare them normalised.
-        auto norm = [](const std::filesystem::path& p) {
-            std::string g = toLower(pathToUtf8(std::filesystem::path(p).lexically_normal().generic_u8string()));
-            while (g.size() > 1 && g.back() == '/')
-                g.pop_back();
-            return g;
-        };
-        std::string mods = norm(session_->install.modsPath) + "/";
-        std::string out = norm(outputDir);
-        if (out.rfind(mods, 0) == 0 && out.size() > mods.size()) {
-            std::string rest = pathToUtf8(std::filesystem::path(outputDir).lexically_normal().generic_u8string());
-            rest = rest.substr(rest.size() - (out.size() - mods.size())); // original spelling
-            outputMod = rest.substr(0, rest.find('/'));
-            options.archiveLoaders = true;
-        } else {
-            loadersOff = "the output is the installable package (" + pathToUtf8(outputDir) +
-                         "), the same for every mod manager; archive loaders are only written when the output folder "
-                         "is a mod inside Mod Organizer's mods folder (" + pathToUtf8(session_->install.modsPath) + ")";
-        }
-    }
+    const std::string outputMod = loaderMod(&loadersOff);
+    options.archiveLoaders = !outputMod.empty();
     // The F4SE archive loader: the archive list is not limited to what the game reads of the INI.
     std::string archiveLoaderOff;
     if (config_.f4seArchiveLoader) {
@@ -676,7 +699,7 @@ bool Pipeline::compile(ProgressSink& progress)
     if (autoMerge_)
         autoMerge_->keptOut.clear();
     for (int round = 0;; ++round) {
-        DependencyEngine::evaluateEligibility(*session_, config_.analysis, dependencies_ ? &*dependencies_ : nullptr);
+        DependencyEngine::evaluateEligibility(*session_, analysisOptions(), dependencies_ ? &*dependencies_ : nullptr);
         compiled_ = CompilationEngine::compile(*session_, options, progress);
         validation_ = ValidationEngine::validate(*session_, *compiled_, progress);
         size_t isolated = 0;
@@ -843,6 +866,16 @@ bool Pipeline::compile(ProgressSink& progress)
     if (db_ && !session_->autoRetained.empty())
         db::DatabaseWriter(*db_).updatePlugins(*session_);
 
+    for (auto pi : compiled_->masterPlaceholders) {
+        std::vector<std::string> by;
+        for (const auto& [q, m] : session_->unusedMasters)
+            if (m == pi)
+                by.push_back(session_->plugins[q].name);
+        validation_->fail(Severity::Info, "Master Placeholders",
+                          session_->plugins[pi].name + " is compiled; an empty placeholder plugin with its name keeps " +
+                              join(by, ", ") + " loading (they list it as a master but use none of its records). "
+                              "Keep " + session_->plugins[pi].name + " enabled.");
+    }
     if (!compiled_->archiveLoaders.empty()) {
         // The output mod must win over every mod whose plugin it replaces with a loader.
         const ModInfo* out = nullptr;

@@ -266,6 +266,14 @@ public:
     // Advanced Users Auto-Merger on: plugins whose references are only safe or rewritable are compiled.
     bool autoMergeEnabled = false;
     std::map<PluginIndex, ReferenceDecision> referenceDecisions;
+    // Which of a plugin's masters its records refer to (per entry of its header's master list, 1 = used,
+    // or cannot be shown unused); filled on demand by DependencyEngine.
+    std::map<PluginIndex, std::vector<uint8_t>> masterUse;
+    // (plugin that stays, master it lists but uses none of the records of), from the last eligibility pass.
+    std::set<std::pair<PluginIndex, PluginIndex>> unusedMasters;
+    // Masters that compile while plugins that stay still list them: an empty placeholder plugin with their
+    // name (an archive loader, with or without archives) keeps those plugins loading.
+    std::set<PluginIndex> masterPlaceholders;
     // Copies the Auto-Merger wrote into the output folder (path -> content hash, from its manifest).
     // They are never read as originals.
     std::unordered_map<std::string, uint64_t> relinkedCopies;
