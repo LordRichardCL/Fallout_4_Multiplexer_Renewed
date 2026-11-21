@@ -1087,7 +1087,7 @@ bool Pipeline::compile(ProgressSink& progress)
     }
     // This build compared with the previous one: what moves, what is new, what goes.
     comparison_.reset();
-    if (!config_.compile.previousFormMap.empty()) {
+    if (!config_.compile.previousFormMap.empty() && !config_.compile.patchOnly) { // patch only: nothing compiles
         BuildSide before;
         if (readBuildSide(config_.compile.previousFormMap.parent_path(), before)) {
             BuildSide after;
@@ -1568,9 +1568,12 @@ diagnostics::SaveCheckInput Pipeline::saveCheckInput() const
 {
     diagnostics::SaveCheckInput in;
     const auto& s = *session_;
-    for (const auto& p : s.plugins)
+    for (const auto& p : s.plugins) {
         if (p.generated)
             in.outputs.insert(p.name);
+        if (p.reactivated || p.behindLoader) // compiled by the last build
+            in.compiledBefore.insert(p.name);
+    }
     if (!compiled_) {
         for (auto pi : s.loadOrder)
             in.loadOrder.push_back(s.plugins[pi].name);

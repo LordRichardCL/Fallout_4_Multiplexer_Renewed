@@ -97,6 +97,15 @@ SupportBundleResult writeSupportBundle(const SupportBundleInputs& in, const fs::
     const fs::path stage = zip.parent_path() / (pathToUtf8(zip.stem()) + ".staging");
     fs::remove_all(stage, ec);
     fs::create_directories(stage, ec);
+    // The staging folder goes whatever happens (it sits beside the zip, on the Desktop by default).
+    struct Cleanup {
+        fs::path dir;
+        ~Cleanup()
+        {
+            std::error_code e;
+            fs::remove_all(dir, e);
+        }
+    } cleanup{stage};
 
     auto add = [&](const fs::path& from, const std::string& to) {
         std::error_code e;
@@ -105,6 +114,8 @@ SupportBundleResult writeSupportBundle(const SupportBundleInputs& in, const fs::
                 r.missing.push_back(to);
             return;
         }
+        if (std::find(r.included.begin(), r.included.end(), to) != r.included.end())
+            return; // the same report found in two places
         const fs::path dest = stage / utf8ToPath(to);
         fs::create_directories(dest.parent_path(), e);
         if (isText(from)) {
@@ -181,7 +192,6 @@ SupportBundleResult writeSupportBundle(const SupportBundleInputs& in, const fs::
         addText(readme, "README.txt");
     }
     writeZip(zip, stage, "");
-    fs::remove_all(stage, ec);
     return r;
 }
 

@@ -1495,6 +1495,20 @@ TEST(save_game_plugin_lists_are_read)
     CHECK(c.missing == std::vector<std::string>({"Dummy_Plugin_01.esp", "Small.esl"}));
     CHECK_EQ(c.recordsChanged, size_t(3));
     const auto text = diagnostics::formatSaveCheck(s, c, true);
+    // A save made with a build lists its archive loaders under the compiled plugins' names: compiling them again
+    // loses nothing (their records are in the outputs). Without an output in the save, it is a loss.
+    diagnostics::SaveGameInfo withBuild;
+    withBuild.plugins = {"Fallout4.esm", "Dummy_Plugin_01.esp"};
+    withBuild.lightPlugins = {"ModA.esp"};
+    diagnostics::SaveCheckInput again;
+    again.nextBuild = true;
+    again.loadOrder = {"Fallout4.esm", "Dummy_Plugin_01.esp"};
+    again.compiledAway = {"ModA.esp"};
+    again.outputs = {"Dummy_Plugin_01.esp"};
+    again.compiledBefore = {"ModA.esp"};
+    CHECK(diagnostics::checkSave(withBuild, again).safe);
+    withBuild.plugins = {"Fallout4.esm"};
+    CHECK(!diagnostics::checkSave(withBuild, again).safe);
     CHECK(text.find("would lose content") != std::string::npos);
     CHECK(text.find("ModA.esp") != std::string::npos);
 }

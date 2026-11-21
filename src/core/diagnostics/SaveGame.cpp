@@ -114,7 +114,16 @@ SaveGameInfo readSaveGame(const fs::path& file)
     std::vector<uint8_t> bytes(16u << 20);
     in.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     bytes.resize(static_cast<size_t>(in.gcount()));
-    return parseSaveGame(bytes);
+    try {
+        return parseSaveGame(bytes);
+    } catch (const std::runtime_error&) {
+        if (in.eof())
+            throw; // the whole file was read: it is damaged
+    }
+    // A larger screenshot: read all of it.
+    std::ifstream all(file, std::ios::binary);
+    std::vector<uint8_t> whole((std::istreambuf_iterator<char>(all)), std::istreambuf_iterator<char>());
+    return parseSaveGame(whole);
 }
 
 SaveCheck checkSave(const SaveGameInfo& save, const SaveCheckInput& in)
@@ -128,12 +137,21 @@ SaveCheck checkSave(const SaveGameInfo& save, const SaveCheckInput& in)
     std::set<std::string> outputs;
     for (const auto& o : in.outputs)
         outputs.insert(toLower(o));
+    std::set<std::string> before;
+    for (const auto& p : in.compiledBefore)
+        before.insert(toLower(p));
+    bool madeWithBuild = false;
+    for (const auto* list : {&save.plugins, &save.lightPlugins})
+        for (const auto& p : *list)
+            madeWithBuild |= outputs.count(toLower(p)) != 0;
     for (const auto* list : {&save.plugins, &save.lightPlugins})
         for (const auto& p : *list) {
             const std::string k = toLower(p);
             inSave.insert(k);
             if (outputs.count(k))
                 c.outputsInSave.push_back(p);
+            if (madeWithBuild && before.count(k))
+                continue; // an archive loader of the build the save was made with: its records are in the outputs
             if (away.count(k))
                 c.compiledAway.push_back(p);
             else if (!loading.count(k))

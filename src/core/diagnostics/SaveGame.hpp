@@ -36,6 +36,9 @@ struct SaveCheckInput {
     std::vector<std::string> loadOrder;    // plugins that will load with their records
     std::vector<std::string> compiledAway; // plugins the next build compiles (their records get new FormIDs)
     std::set<std::string> outputs;         // this app's output plugins (earlier builds' and the next one's)
+    // Plugins an earlier build compiled. A save made with that build (it lists its outputs) holds their records
+    // under the outputs' FormIDs; their names in it are that build's archive loaders, which hold no records.
+    std::set<std::string> compiledBefore;
     const BuildComparison* comparison = nullptr; // the next build against the previous one, when compiled
     bool nextBuild = false;                // compared with the next build (else with the load order now)
 };
