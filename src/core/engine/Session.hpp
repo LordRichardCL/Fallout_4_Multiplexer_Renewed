@@ -323,6 +323,13 @@ public:
     // Cells kept out for their precombine or previs data -> what their previs file and precombined
     // meshes hold (PrevisCheck, read-only evidence). Rebuilt by every compilation.
     std::map<FormKey, std::string> previsChecks;
+    // New cells kept out for that data -> whether stage PC2 of docs/PRECOMBINED_CELLS_DESIGN.md could move
+    // their files under an output's name and their new FormID, and why not (read only, rebuilt each compile).
+    struct NewCellAssessment {
+        bool movable = false;
+        std::string text;
+    };
+    std::map<FormKey, NewCellAssessment> newCellChecks;
     // Plugins whose navmesh data does not decode (plugin -> the first such record and why); worked
     // out once per scan, when navmeshes are compiled.
     std::optional<std::map<PluginIndex, std::string>> navmeshFaults;

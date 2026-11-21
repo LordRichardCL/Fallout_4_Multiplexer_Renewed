@@ -1678,6 +1678,15 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         } catch (const std::exception& ex) {
             session.previsChecks.emplace(k, "Previs check of " + session.formLabel(k) + " failed: " + ex.what());
         }
+        if (out.records[it->second].isNew && !session.newCellChecks.count(k)) {
+            Session::NewCellAssessment a;
+            try {
+                a.movable = assessNewCell(session, out.records[it->second], a.text);
+            } catch (const std::exception& ex) {
+                a.text = "Check of new cell " + session.formLabel(k) + " failed: " + ex.what();
+            }
+            session.newCellChecks.emplace(k, std::move(a));
+        }
     }
 
     // ---- Rewrite (dependency extraction) ------------------------------------------

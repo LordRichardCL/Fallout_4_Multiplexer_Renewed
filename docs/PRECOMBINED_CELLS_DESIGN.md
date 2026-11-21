@@ -1,6 +1,6 @@
 # Compiling New Cells with Precombine and Previs Data (design)
 
-Status: proposal, nothing implemented. It builds on facts already established on real load orders
+Status: PC1 (the read-only check) is implemented; PC2 and PC3 are proposals. It builds on facts already established on real load orders
 (`RECORD_HANDLING_AUDIT.md`, stages C2, P1, P2a and P2b, and the Version Control Info findings).
 
 ## The problem
@@ -62,21 +62,31 @@ The originals stay installed with their mod. The game no longer reads them once 
 
 These need one sample each, from the load order where the keep-outs occur, before anything is written:
 
-1. **The FormID in the file name.** Is it the cell's FormID with load order byte 00, or in the plugin's own
-   numbering (load order byte = master count)? xEdit's path builder and one plugin with masters answer this.
+1. **The FormID in the file name: settled.** It is the cell's FormID with load order byte 00. The Previs Check
+   builds that path (`meshes\precombined\<plugin>\<00xxxxxx>_<mesh>_OC.nif`), and on a real load order every
+   cell that lists meshes had all of them there (P2a, "Precombined meshes").
 2. **The root node name.** Does it always hold the same 8 digits as the file name? Does the game read it at
    all? Renaming is safe either way, but a mismatch must not be silently "fixed".
 3. **Physics meshes.** One `_Physics.nif`: confirm it holds no FormIDs.
-4. **Which keep-outs this frees.** A read-only **Precombined Cell Check** row per blocked cell should
-   say whether it is interior, whether a CSG or CDX file is present, whether every mesh named by `XCRI`
-   and the `.uvd` exist, and whether its `RVIS` cluster compiles with it. That gives the count of plugins
-   PC2 would free.
+4. **Which keep-outs this frees: built.** Every compile now writes a **Precombined Cell Check** row (Info) per
+   new cell that keeps its plugin out. Each row says:
+   - whether the cell is interior;
+   - whether a CSG or CDX file is installed;
+   - how many of the meshes `XCRI` names are installed, and with physics meshes;
+   - how many of the meshes read name the cell's FormID in their strings (point 2);
+   - whether its previs file is its own and readable.
+
+   It ends with "PC2 could move its files" or the reasons it stays. A summary row counts the cells and the
+   plugins that would no longer be kept out by their cells. Nothing changes what compiles.
+
+   A plugin with `- Geometry.csg` or `.cdx` installed is already kept out before compiling, by its filename
+   reference, so its cells never reach this check. The check repeats the rule as a guard.
 
 ## Stages
 
 | Stage | What | Changes what compiles? |
 |---|---|---|
-| PC1 | Precombined Cell Check rows (above); confirm points 1–3 on samples | No |
+| PC1 | Precombined Cell Check rows (above), built; points 2 and 3 to be read from a real build's rows and one sample | No |
 | PC2 | Interior new cells without CSG/CDX: mesh and previs copies, manifest, read-back, Switch back | Yes, for those plugins |
 | PC3 | Exterior cells whose whole `RVIS` cluster compiles into one output | Yes |
 

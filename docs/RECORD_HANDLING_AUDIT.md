@@ -1408,3 +1408,14 @@ The whole test suite also runs clean under AddressSanitizer and UndefinedBehavio
 - **Build cache:** each lookup and store prepared a new SQL statement (about 82,000 of each per compile). Statements are now prepared once. Entries (conflicts, merges, references, plugin indexes) are encoded and compressed on every thread, then stored in one transaction.
 - **Scan: record order.** About a million 64-byte records were sorted directly. Now small (key, position) entries are sorted and each record is moved once.
 - **Results database:** the bulk write uses a 128 MB page cache, back to the default afterwards. The two Editor ID indexes are dropped: the app searches Editor IDs by substring, which no index serves, and the Forms lookup scans either way. They cost about a second per million rows. Quick search over a million records takes 100–150 ms per query either way.
+
+## New cells with precombine data, stage PC1 (read only)
+
+The first stage of `docs/PRECOMBINED_CELLS_DESIGN.md`. For every new cell that keeps its plugin out for its precombine or previs data, a **Precombined Cell Check** row (Info) says whether its files could move under an output's name and the cell's new FormID. It reports:
+- interior or exterior;
+- `- Geometry.csg` or `.cdx` installed;
+- the meshes `XCRI` names that are installed, with their physics meshes;
+- whether each mesh read names the cell's FormID in its string table (its root node);
+- whether the previs file is its own and readable.
+
+A summary row counts the cells and plugins stage PC2 would free. The file-name question is settled by earlier evidence: precombined meshes use the cell's FormID with load order byte 00 under the cell's plugin's folder (P2a). Nothing changes what compiles. The next real build's rows decide PC2.

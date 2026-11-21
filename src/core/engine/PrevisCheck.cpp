@@ -3,6 +3,7 @@
 #include "engine/CompilationEngine.hpp"
 #include "engine/Session.hpp"
 #include "esp/PrevisFile.hpp"
+#include "assets/AssetPreview.hpp"
 #include "util/Binary.hpp"
 #include "util/Text.hpp"
 
@@ -310,6 +311,95 @@ std::string checkPrevis(Session& session, const EmittedRecord& e)
                    (absentCount > kShown ? ", ..." : "") + ".";
     }
     return out;
+}
+
+bool assessNewCell(Session& session, const EmittedRecord& e, std::string& text)
+{
+    const auto& plugin = session.plugins[e.key.origin];
+    const std::string id = hex8(e.key.objectId);
+    std::vector<std::string> blockers, facts;
+
+    const bool exterior = e.placement == Placement::Kind::WorldCell;
+    facts.push_back(exterior ? "exterior" : "interior");
+    if (exterior)
+        blockers.push_back("exterior cell (stage PC3)");
+
+    for (const std::string& file : {plugin.baseName() + " - Geometry.csg", plugin.baseName() + ".cdx"})
+        if (assetExists(session, normalizeAssetPath(file)))
+            blockers.push_back(file + " is installed (\"clean\" precombines load geometry by the plugin's name)");
+
+    std::vector<uint32_t> meshes;
+    if (const auto* s = subOf(e, Signature("XCRI")); s && s->bytes.size() >= 8) {
+        const uint32_t n = loadLE<uint32_t>(s->bytes.data());
+        for (uint32_t i = 0; i < n && 8 + 4 * size_t(i) + 4 <= s->bytes.size(); ++i)
+            meshes.push_back(loadLE<uint32_t>(s->bytes.data() + 8 + 4 * size_t(i)));
+    }
+    if (!meshes.empty()) {
+        const std::string folder =
+            "meshes\\precombined\\" + (iequals(plugin.name, "Fallout4.esm") ? std::string() : plugin.name + "\\");
+        size_t found = 0, physics = 0, named = 0, read = 0;
+        std::string otherName;
+        for (uint32_t m : meshes) {
+            const std::string base = folder + id + "_" + hex8(m);
+            const std::string oc = normalizeAssetPath(base + "_oc.nif");
+            if (!assetExists(session, oc))
+                continue;
+            ++found;
+            physics += assetExists(session, normalizeAssetPath(base + "_physics.nif"));
+            try {
+                if (auto info = preview::readNifInfo(session.readAsset(oc))) {
+                    ++read;
+                    bool hit = false;
+                    for (const auto& str : info->strings)
+                        hit |= toLower(str).find(toLower(id)) != std::string::npos;
+                    named += hit;
+                    if (!hit && otherName.empty() && !info->strings.empty())
+                        otherName = info->strings.front();
+                }
+            } catch (const std::exception&) {
+            }
+        }
+        facts.push_back(std::to_string(found) + " of " + std::to_string(meshes.size()) + " meshes found (" +
+                        std::to_string(physics) + " with a physics mesh), " + std::to_string(named) + " of " +
+                        std::to_string(read) + " read name the cell's FormID " + id);
+        if (found < meshes.size())
+            blockers.push_back(std::to_string(meshes.size() - found) + " mesh(es) XCRI names are not installed");
+        if (named < read)
+            blockers.push_back("a mesh's strings do not name the cell's FormID (first string: \"" + otherName +
+                               "\"): renaming it is not understood yet");
+        if (read < found)
+            blockers.push_back("a mesh could not be read");
+    }
+
+    const bool own = ownsPrevisFile(e);
+    const bool hasPrevisData = subOf(e, Signature("VISI")) || subOf(e, Signature("XPRI")) || !own;
+    if (!own) {
+        FormKey cluster = e.key;
+        if (const auto* s = subOf(e, Signature("RVIS")))
+            for (const auto& [off, k] : s->refs)
+                if (k.valid())
+                    cluster = k;
+        facts.push_back("in the previs file of " + session.formLabel(cluster) + " (" +
+                        session.pluginName(cluster.origin) + ")");
+        blockers.push_back("its previs file is another cell's (stage PC3)");
+    } else if (hasPrevisData) {
+        const std::string path = previsFilePath(session, e.key);
+        if (assetExists(session, path)) {
+            const auto file = readPrevisFile(session.readAsset(path));
+            facts.push_back("previs file " + path + (file.recognised ? " readable" : " not recognised"));
+            if (!file.recognised)
+                blockers.push_back("its previs file's layout is not recognised: " + file.problem);
+        } else {
+            facts.push_back("no previs file at " + path);
+        }
+    }
+
+    text = "New cell " + session.formLabel(e.key) + " of " + plugin.name + ": " + join(facts, "; ") + ". ";
+    if (blockers.empty())
+        text += "Stage PC2 could move its files under the output's name and its new FormID.";
+    else
+        text += "Stays out: " + join(blockers, "; ") + ".";
+    return blockers.empty();
 }
 
 } // namespace fo4mx

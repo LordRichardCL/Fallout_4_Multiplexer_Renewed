@@ -9896,3 +9896,90 @@ TEST(save_check_against_the_next_build)
     CHECK_EQ(c.compiledAway.size(), p.compiledOutput()->compiledPlugins.size());
     CHECK(c.missing.empty());
 }
+
+namespace {
+// A minimal Fallout 4 NIF whose string table holds `strings` (one NiNode block).
+std::vector<uint8_t> nifNaming(const std::vector<std::string>& strings)
+{
+    std::vector<uint8_t> out;
+    auto u8 = [&](uint8_t v) { out.push_back(v); };
+    auto u16 = [&](uint16_t v) { for (int i = 0; i < 2; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i))); };
+    auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(v >> (8 * i))); };
+    auto bstr = [&](const std::string& s) { u8(static_cast<uint8_t>(s.size() + 1)); out.insert(out.end(), s.begin(), s.end()); u8(0); };
+    const std::string line = "Gamebryo File Format, Version 20.2.0.7\n";
+    out.insert(out.end(), line.begin(), line.end());
+    u32(0x14020007);
+    u8(1);
+    u32(12);
+    u32(1);
+    u32(130);
+    bstr("author");
+    bstr("process");
+    bstr("export");
+    bstr("C:\\max\\file.max");
+    u16(1);
+    u32(6);
+    for (char ch : std::string("NiNode"))
+        out.push_back(static_cast<uint8_t>(ch));
+    u16(0);
+    u32(8);
+    u32(static_cast<uint32_t>(strings.size()));
+    u32(64);
+    for (const auto& s : strings) {
+        u32(static_cast<uint32_t>(s.size()));
+        out.insert(out.end(), s.begin(), s.end());
+    }
+    u32(0);
+    out.insert(out.end(), 8, 0);
+    return out;
+}
+} // namespace
+
+// Stage PC1 (read only): new cells kept out for their precombine data say whether their files could move.
+// ModN's interior cell has its mesh, which names the cell: movable. ModQ's mesh is not installed: stays.
+// (A plugin with "clean" precombine geometry, - Geometry.csg, is kept out before compiling, by its filename
+// reference.) Both plugins stay in the load order either way.
+TEST(new_cells_with_precombines_are_assessed)
+{
+    auto root = buildInstall("pc1");
+    auto data = root / "Game" / "Data";
+    std::vector<uint8_t> xcri(8 + 4, 0);
+    storeLE<uint32_t>(xcri.data(), 1);
+    storeLE<uint32_t>(xcri.data() + 8, 0x1234ABCD);
+    for (const char* name : {"ModN", "ModQ"})
+        writePlugin(data / (std::string(name) + ".esp"), {"Fallout4.esm"},
+                    {record("CELL", 0x01000801, {zs("EDID", std::string(name) + "Cell"), raw("XCRI", xcri)})});
+    const auto dir = data / "Meshes" / "Precombined" / "ModN.esp";
+    std::filesystem::create_directories(dir);
+    writeBytes(dir / "00000801_1234ABCD_OC.nif", nifNaming({"00000801_1234ABCD_OC", "Materials\\Rock.bgsm"}));
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModN.esp\n*ModQ.esp\n");
+    Pipeline p(configFor(root));
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK(p.session().autoRetained.count("modn.esp") == 1); // nothing moves yet
+    CHECK(p.session().autoRetained.count("modq.esp") == 1);
+    const auto& checks = p.session().newCellChecks;
+    CHECK_EQ(checks.size(), size_t(2));
+    bool n = false, q = false;
+    for (const auto& [cell, a] : checks) {
+        const std::string plugin = p.session().pluginName(cell.origin);
+        if (plugin == "ModN.esp") {
+            n = a.movable && a.text.find("interior") != std::string::npos &&
+                a.text.find("1 of 1 meshes found (0 with a physics mesh), 1 of 1 read name the cell's FormID") !=
+                    std::string::npos;
+            if (!n)
+                std::printf("ModN: %s\n", a.text.c_str());
+        }
+        if (plugin == "ModQ.esp")
+            q = !a.movable && a.text.find("1 mesh(es) XCRI names are not installed") != std::string::npos;
+    }
+    CHECK(n);
+    CHECK(q);
+    bool summary = false;
+    for (const auto& i : p.validation()->issues)
+        summary |= i.category == "Precombined Cell Check" &&
+                   i.message.find("1 of 2 new cells") != std::string::npos &&
+                   i.message.find("1 of 2 plugins would then no longer be kept out") != std::string::npos;
+    CHECK(summary);
+}

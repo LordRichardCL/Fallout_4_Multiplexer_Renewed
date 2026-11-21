@@ -720,6 +720,7 @@ bool Pipeline::compile(ProgressSink& progress)
     // plugins (or patch records) aside and compile again. Each round only ever removes work.
     session_->autoRetained.clear();
     session_->previsChecks.clear();
+    session_->newCellChecks.clear();
     session_->redirectFailed.clear();
     CompileOptions options = config_.compile;
     // The reviewed compatibility patch plan: the changes to carry, for the records that are Ready.
@@ -936,6 +937,29 @@ bool Pipeline::compile(ProgressSink& progress)
     for (const auto& [cell, text] : session_->previsChecks)
         validation_->fail(Severity::Info, "Previs Check", text, session_->pluginName(cell.origin),
                           session_->loadOrderFormId(cell));
+    // Stage PC1 (read only): which new cells' files could move, and the plugins that would no longer be kept
+    // out by their cells.
+    if (!session_->newCellChecks.empty()) {
+        std::map<PluginIndex, std::pair<size_t, size_t>> perPlugin; // movable, cells
+        for (const auto& [cell, a] : session_->newCellChecks) {
+            validation_->fail(Severity::Info, "Precombined Cell Check", a.text, session_->pluginName(cell.origin),
+                              session_->loadOrderFormId(cell));
+            auto& [movable, cells] = perPlugin[cell.origin];
+            movable += a.movable;
+            ++cells;
+        }
+        size_t cells = 0, movableCells = 0, plugins = 0;
+        for (const auto& [p, counts] : perPlugin) {
+            movableCells += counts.first;
+            cells += counts.second;
+            plugins += counts.first == counts.second;
+        }
+        validation_->fail(Severity::Info, "Precombined Cell Check",
+                          std::to_string(movableCells) + " of " + std::to_string(cells) +
+                              " new cells kept out for their precombine or previs data could have their files moved "
+                              "(stage PC2); " + std::to_string(plugins) + " of " + std::to_string(perPlugin.size()) +
+                              " plugins would then no longer be kept out by their cells. Nothing is moved yet.");
+    }
     for (const auto& [label, reason] : isolatedPatchRecords)
         validation_->fail(Severity::Warning, "Kept Out Automatically",
                           label + " was left out of the patch (last plugin wins for it): " + reason);

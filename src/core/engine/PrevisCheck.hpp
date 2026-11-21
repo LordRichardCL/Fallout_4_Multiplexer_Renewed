@@ -65,4 +65,10 @@ bool previsRecords(Session& session, const EmittedRecord& cell, std::vector<Form
 // changed: the result is reported so that what these files hold can be established on real data.
 std::string checkPrevis(Session& session, const EmittedRecord& cell);
 
+// Stage PC1 of docs/PRECOMBINED_CELLS_DESIGN.md, read only: for a new cell that keeps its plugin out, whether
+// its precombined meshes and previs file could move under an output's name and its new FormID (interior; no
+// "<plugin> - Geometry.csg" or "<plugin>.cdx"; every mesh XCRI names found, its root node naming the cell;
+// its previs file its own), and why not. Never changes what compiles.
+bool assessNewCell(Session& session, const EmittedRecord& cell, std::string& text);
+
 } // namespace fo4mx
