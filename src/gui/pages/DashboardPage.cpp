@@ -344,7 +344,7 @@ void DashboardPage::fillAttention(bool have)
     auto* d = makeButton("Diagnostics");
     connect(d, &QPushButton::clicked, this, [this] { emit navigate("Diagnostics"); });
     attention_->addWidget(makeAttentionRow("play", theme::kMuted, "After you play",
-                                           "Read the Diagnostic Recorder's log to see how the session went.", d));
+                                           "A crash, script errors or a save to check before loading: Diagnostics finds the mod behind it.", d));
     attentionCount_->setText(QString::number(count));
     attentionCount_->setVisible(count > 0);
 }
@@ -423,19 +423,18 @@ void DashboardPage::refresh()
         // Plugin slots: the game loads at most 254 full plugins; light ones have 4,096 of their own.
         const QString fullNow = meta("slots_full_now"), fullAfter = meta("slots_full_after");
         const QString lightNow = meta("slots_light_now"), lightAfter = meta("slots_light_after");
-        if (fullNow.isEmpty()) {
-            tiles_["slots"]->setValue("—", "of 254 plugin slots · after Scan");
-        } else if (fullAfter.isEmpty()) {
-            tiles_["slots"]->setValue(QString("%1 / 254").arg(fullNow),
-                                      QString("plugin slots · %1 light of 4,096 · Compile to see how many it frees")
-                                          .arg(n(lightNow)));
-        } else {
+        if (fullNow.isEmpty())
+            tiles_["slots"]->setValue("—", "plugin slots · after Scan");
+        else if (fullAfter.isEmpty())
+            tiles_["slots"]->setValue(QString("%1 / 254").arg(fullNow), "plugin slots used now");
+        else
             tiles_["slots"]->setValue(QString("%1 / 254").arg(fullAfter),
-                                      QString("plugin slots after the build (now %1) · light %2 of 4,096 (now %3)")
-                                          .arg(fullNow, n(lightAfter), n(lightNow)));
-        }
-        tiles_["slots"]->setToolTip("Fallout 4 loads at most 254 full plugins and 4,096 light (ESL) plugins. "
-                                    "Compiling frees the slots of the plugins it compiles; the outputs take a few.");
+                                      QString("plugin slots after the build · now %1").arg(fullNow));
+        tiles_["slots"]->setToolTip(QString("Fallout 4 loads at most 254 full plugins, and 4,096 light (ESL) plugins "
+                                            "besides. Compiling frees the slots of the plugins it compiles; the "
+                                            "outputs take a few.\n\nLight plugins: %1 of 4,096 now%2.")
+                                        .arg(lightNow.isEmpty() ? QString("—") : n(lightNow),
+                                             lightAfter.isEmpty() ? QString() : ", " + n(lightAfter) + " after the build"));
     }
     tiles_["conflicts"]->setValue(n(conflicts),
                                   conflicts.isEmpty() ? QString("conflicts · after Analyse")

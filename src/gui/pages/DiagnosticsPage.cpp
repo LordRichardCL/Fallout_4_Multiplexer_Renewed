@@ -17,6 +17,8 @@
 #include <set>
 
 #include "Format.hpp"
+#include "Theme.hpp"
+#include <QGridLayout>
 #include "widgets/Widgets.hpp"
 
 #include "engine/Exporter.hpp"
@@ -63,24 +65,76 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     auto* crash = makeButton("Read Crash Log", nullptr, "warning");
     crash->setToolTip("Read the newest Buffout 4 crash log (Documents\\My Games\\Fallout4\\F4SE\\Crash-*.log) and "
                       "name the original mod behind every output plugin FormID it mentions");
-    l->addWidget(makePageHeader("Diagnostics", "What happened while you played, and what it likely means.",
-                                {newest, openBtn, folder, check, save, crash, papyrus, saveCheck, bundle}, "diagnostics",
-                                "To record: turn on \"Prepare the Diagnostic Recorder\" in Settings, export, and "
-                                "install Multiplexer Output\\Diagnostic Recorder\\Multiplexer Diagnostic Recorder.zip "
-                                "as a mod. Start the game through F4SE; each session writes a log. Findings are likely "
-                                "causes with their evidence, not certainties; for crashes, keep a crash logger such as "
-                                "Buffout 4 as well. When a Multiplexer build is found, the game's load order is compared "
-                                "with the one it was built for."));
+    l->addWidget(makePageHeader("Diagnostics",
+                                "Something went wrong in the game? Find the mod behind it, or check a save first.",
+                                {}, "diagnostics"));
+
+    // The four tools, each with the situation it is for.
+    auto* tools = new QGridLayout;
+    tools->setSpacing(12);
+    auto tool = [&](int col, const QString& icon, const QColor& accent, const QString& title, const QString& when,
+                    QPushButton* button) {
+        auto* f = new QFrame;
+        f->setObjectName("Card");
+        auto* v = new QVBoxLayout(f);
+        v->setContentsMargins(14, 12, 14, 12);
+        v->setSpacing(6);
+        auto* head = new QHBoxLayout;
+        auto* ic = new QLabel;
+        ic->setPixmap(linePixmap(icon, accent, 18));
+        head->addWidget(ic);
+        auto* t = new QLabel("<b>" + title + "</b>");
+        head->addWidget(t, 1);
+        v->addLayout(head);
+        auto* d = new QLabel(when);
+        d->setWordWrap(true);
+        d->setObjectName("OptionDescription");
+        d->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        v->addWidget(d, 1);
+        v->addWidget(button, 0, Qt::AlignLeft);
+        tools->addWidget(f, 0, col);
+        tools->setColumnStretch(col, 1);
+    };
+    tool(0, "warning", theme::kRed, "The game crashed",
+         "Reads the newest Buffout 4 crash log and names the original mod behind every compiled record in it.", crash);
+    tool(1, "warning", theme::kYellow, "Scripts misbehave",
+         "Lists the most frequent Papyrus script errors and the mods behind the records they name.", papyrus);
+    tool(2, "validation", theme::kGreen, "Before loading a save",
+         "Says whether a save would lose anything with your load order, or with the build you just compiled.",
+         saveCheck);
+    tool(3, "export", theme::kBlue, "Asking for help",
+         "One zip with the reports, logs and readings to send. No mod files; your user name is taken out.", bundle);
+    l->addLayout(tools);
+
+    // The Diagnostic Recorder: its log, read into findings.
+    QVBoxLayout* rec = nullptr;
+    auto* recCard = makeSectionCard("diagnostics", "Diagnostic Recorder: how your last session went", &rec);
+    rec->setSpacing(8);
+    auto* recButtons = new QHBoxLayout;
+    recButtons->setSpacing(8);
+    for (auto* b : {newest, openBtn, folder, check, save})
+        recButtons->addWidget(b);
+    recButtons->addStretch();
+    auto* how = makeSectionTitle("How to record",
+                                 "Turn on \"Prepare the Diagnostic Recorder\" in Settings, export, and install "
+                                 "Multiplexer Output\\Diagnostic Recorder\\Multiplexer Diagnostic Recorder.zip as a "
+                                 "mod. Start the game through F4SE; each session writes a log. Findings are likely "
+                                 "causes with their evidence, not certainties; for crashes, keep a crash logger such "
+                                 "as Buffout 4 as well. When a Multiplexer build is found, the game's load order is "
+                                 "compared with the one it was built for.");
+    recButtons->addWidget(how);
+    rec->addLayout(recButtons);
 
     install_ = new QLabel;
     install_->setWordWrap(true);
     install_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    l->addWidget(install_);
+    rec->addWidget(install_);
 
-    summary_ = new QLabel("No log opened yet. <b>Open Newest Log</b> reads your latest session; the <b>?</b> above says how to record one.");
+    summary_ = new QLabel("No log opened yet. <b>Open Newest Log</b> reads your latest session; <b>How to record</b> "
+                          "says how to make one.");
     summary_->setWordWrap(true);
     summary_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    l->addWidget(summary_);
+    rec->addWidget(summary_);
 
     findings_ = new QTreeWidget;
     findings_->setColumnCount(4);
@@ -93,7 +147,8 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     findings_->header()->setSectionResizeMode(2, QHeaderView::Stretch);
     findings_->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     findings_->setColumnWidth(1, 360);
-    l->addWidget(findings_, 1);
+    rec->addWidget(findings_, 1);
+    l->addWidget(recCard, 1);
 
     connect(newest, &QPushButton::clicked, this, [this] {
         const auto file = dg::newestSession(dg::defaultRecorderFolder());

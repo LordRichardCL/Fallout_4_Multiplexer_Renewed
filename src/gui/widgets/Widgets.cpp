@@ -699,6 +699,7 @@ IconTile::IconTile(const QString& icon, const QColor& accent, QWidget* parent) :
     value_->setObjectName("TileValue");
     text_ = new QLabel(" ");
     text_->setObjectName("OptionDescription");
+    text_->setWordWrap(true);
     v->addWidget(value_);
     v->addWidget(text_);
     h->addLayout(v, 1);
