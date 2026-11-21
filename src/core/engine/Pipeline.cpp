@@ -1668,7 +1668,9 @@ Pipeline::Readiness Pipeline::readiness(const std::filesystem::path& save) const
             add(S::Pass, "Plugin slots", counts + ".");
     }
     // 4. The save to test with.
-    if (!save.empty()) {
+    if (save.empty())
+        add(S::Pass, "Your newest save", "No save found: testing with a new game is what the testing guide asks for.");
+    else {
         try {
             const auto info = diagnostics::readSaveGame(save);
             const auto in = saveCheckInput();

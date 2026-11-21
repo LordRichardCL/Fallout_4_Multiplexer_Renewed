@@ -524,8 +524,23 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
         if (!p)
             return;
         const auto r = p->readiness(fo4mx::diagnostics::newestSave());
-        QMessageBox box(r.ready() ? QMessageBox::Information : QMessageBox::Warning, "Ready to test?",
-                        QString::fromStdString(r.format()), QMessageBox::Ok, this);
+        using S = fo4mx::Pipeline::ReadinessItem::State;
+        QString html = QString("<p style='font-size:12pt'><b>%1</b></p><table cellspacing='0' cellpadding='5'>")
+                           .arg(r.ready() ? "Ready to test." : "Not ready yet: fix what is marked ✗ first.");
+        for (const auto& i : r.items) {
+            const QString mark = i.state == S::Pass   ? "<span style='color:#3ddc84'>✓</span>"
+                                 : i.state == S::Warn ? "<span style='color:#f2c94c'>!</span>"
+                                                      : "<span style='color:#ff6b6b'>✗</span>";
+            html += QString("<tr><td valign='top' style='font-size:12pt'>%1</td><td valign='top'><b>%2</b></td>"
+                            "<td valign='top'>%3</td></tr>")
+                        .arg(mark, QString::fromStdString(i.title).toHtmlEscaped(),
+                             QString::fromStdString(i.detail).toHtmlEscaped());
+        }
+        html += "</table><p>Then: <b>Apply to Game</b>, start a new game, and follow the testing guide. "
+                "<b>Switch Back</b> undoes Apply.</p>";
+        QMessageBox box(QMessageBox::NoIcon, "Ready to test?", html, QMessageBox::Ok, this);
+        box.setTextFormat(Qt::RichText);
+        box.setStyleSheet("QLabel { min-width: 620px; }");
         box.exec();
     });
     outer->addWidget(bar);

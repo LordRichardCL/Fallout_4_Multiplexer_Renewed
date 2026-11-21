@@ -10003,6 +10003,7 @@ TEST(readiness_before_apply)
         CHECK(r.ready());
         CHECK(r.format().find("OK    Plugin slots") != std::string::npos);
         CHECK(r.format().find("NOTE  Crash logger") != std::string::npos);
+        CHECK(r.format().find("OK    Your newest save: No save found") != std::string::npos);
     }
     writeFile(root / "Game" / "Data" / "F4SE" / "Plugins" / "Buffout4.dll", "dll");
     Pipeline p(cfg);

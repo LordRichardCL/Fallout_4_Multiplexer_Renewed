@@ -131,6 +131,19 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
                     w->resize(area->viewport()->width(), w->sizeHint().height());
                     w->grab().save(outDir.filePath("07b-compilation-options.png"));
                 }
+        if (pages[i] == "Compilation") // the Ready to Test? dialog
+            for (auto* b : window.findChildren<QPushButton*>())
+                if (b->isVisible() && b->text() == "Ready to Test?") {
+                    QTimer::singleShot(300, [&outDir] {
+                        if (auto* d = QApplication::activeModalWidget()) {
+                            d->grab().save(outDir.filePath("07c-ready-to-test.png"));
+                            if (auto* dlg = qobject_cast<QDialog*>(d))
+                                dlg->accept();
+                        }
+                    });
+                    b->click();
+                    break;
+                }
     }
 
     // Record types that block compilation, with the plugins the first one holds back.
