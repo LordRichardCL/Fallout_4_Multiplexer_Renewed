@@ -169,6 +169,7 @@ docs/          specification, architecture, user guide, screenshots
 - [Dependency and Compilation Scenarios](docs/DEPENDENCY_SCENARIOS.md): what happens when compiled and retained plugins depend on each other
 - [User Guide](docs/USER_GUIDE.md)
 - [What's New](docs/WHATS_NEW.md): recent changes in plain words
+- [In-Game Testing Guide](docs/TESTING_GUIDE.md): what to check in game after switching over, and what to send back
 - [Master Redirection](docs/MASTER_REDIRECTION_DESIGN.md): letting frameworks compile when a plugin that stays uses them (advanced)
 - [Diagnostic Recorder](docs/DIAGNOSTIC_RECORDER.md): the optional F4SE plugin that records what happens in game, and what Multiplexer recognises in its logs
 
