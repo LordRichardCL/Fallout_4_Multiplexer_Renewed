@@ -10,6 +10,7 @@
 #include "engine/BuildComparison.hpp"
 #include <set>
 #include "diagnostics/CrashLog.hpp"
+#include "diagnostics/PapyrusLog.hpp"
 #include "util/FileTransaction.hpp"
 #include "reference/FormIdReference.hpp"
 #include "engine/ReferenceIndex.hpp"
@@ -78,6 +79,9 @@ Usage:
                                             export's reports and records, logs, load order, the
                                             newest crash log and its reading, recorder log. No mod
                                             files; home folder and user name taken out
+  fo4mx papyrus-log <install> [Papyrus.0.log] [--limit N]
+                                            the Papyrus log read with the current load order: the
+                                            original mod behind every compiled record it names
   fo4mx crash-log [Crash-*.log] [--formmap <export>\\Data\\Multiplexer_FormMap.tsv]
                                             name the original mods behind a Buffout 4 crash log
                  delete exports in the output folder beyond the newest N (default
@@ -607,6 +611,34 @@ int cmdCrashLog(const Args& a)
     return 0;
 }
 
+// The Papyrus log read with the install's current load order and its latest build.
+int cmdPapyrusLog(const Args& a)
+{
+    auto cfg = makeConfig(a);
+    const auto file = a.positional.size() > 1 ? utf8ToPath(a.positional[1]) : diagnostics::defaultPapyrusLog();
+    std::ifstream in(file, std::ios::binary);
+    if (!in)
+        throw std::runtime_error("papyrus-log: cannot read " + pathToUtf8(file));
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    Pipeline p(cfg);
+    p.scan();
+    std::vector<FormMapping> map;
+    std::set<std::string> redirected;
+    const auto& install = p.session().install;
+    const auto loc = output::locate(cfg.exportOptions.outputDirectory, install.gamePath, install.dataPath, install.modsPath);
+    const auto root = output::latestRun(loc).value_or(loc.root);
+    std::printf("%s\n%s\n\n", pathToUtf8(file).c_str(),
+                diagnostics::readBuildMap(root, map, redirected)
+                    ? ("Read against the build in " + pathToUtf8(root)).c_str()
+                    : "No build found: compiled records are not translated.");
+    std::fputs(diagnostics::formatPapyrusReport(
+                   diagnostics::translatePapyrusLog(text, diagnostics::runtimeLoadOrder(p.session()), map, redirected),
+                   a.has("--limit") ? std::stoul(a.get("--limit")) : 100)
+                   .c_str(),
+               stdout);
+    return 0;
+}
+
 // The crash log read against a build (its Data folder or root holding Multiplexer_FormMap.tsv).
 std::string crashReadingAgainst(const std::filesystem::path& crashLog, const std::filesystem::path& build)
 {
@@ -973,6 +1005,8 @@ int main(int argc, char** argv)
             return cmdCompareBuilds(a);
         if (a.command == "support-bundle")
             return cmdSupportBundle(a);
+        if (a.command == "papyrus-log")
+            return cmdPapyrusLog(a);
         if (a.command == "crash-log")
             return cmdCrashLog(a);
         if (a.command == "switch-back")

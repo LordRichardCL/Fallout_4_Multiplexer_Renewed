@@ -15,7 +15,7 @@ A checklist for trying a build in the game, and what to send back when something
 |---|---|---|
 | Reaches the main menu | Yes | the crash log (Diagnostics → Read Crash Log → Save…), `Multiplexer_Instructions.txt` |
 | New game starts and the intro plays | Yes | as above, plus the Diagnostic Recorder log if installed |
-| Papyrus log has no `Cannot open store for class` lines for compiled mods | None | `Papyrus.0.log`, Validation report |
+| Papyrus log has no `Cannot open store for class` lines for compiled mods | None | `Papyrus.0.log` and its reading (Diagnostics → Read Papyrus Log), Validation report |
 
 ## 2. Compiled content works
 

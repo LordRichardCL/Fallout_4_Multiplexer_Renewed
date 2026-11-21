@@ -3,6 +3,7 @@
 #include "engine/SupportBundle.hpp"
 #include "engine/BuildComparison.hpp"
 #include "engine/EngineFiles.hpp"
+#include "diagnostics/PapyrusLog.hpp"
 #include <fstream>
 #include "esp/RecordDefinitions.hpp"
 #include "diagnostics/RecorderLog.hpp"
@@ -1338,4 +1339,53 @@ TEST(file_formid_token_is_strict)
     CHECK(!fileFormIdToken("00000800_00000801.dds"));   // two: not sure which
     CHECK(!fileFormIdToken("tree00000800.dds"));        // not its own word
     CHECK(!fileFormIdToken("tree_000008001.dds"));      // nine digits
+}
+
+// Papyrus log: FormIDs read with the load order, compiled records translated, errors counted by message.
+TEST(papyrus_log_names_the_original_mods)
+{
+    diagnostics::RuntimeLoadOrder lo;
+    lo.full = {"Fallout4.esm", "ModA.esp", "Dummy_Plugin_01.esp"};
+    lo.light = {"Small.esl"};
+    FormMapping m;
+    m.sourcePlugin = "Weapons.esp";
+    m.sourceObjectId = 0x812;
+    m.outputPlugin = "Dummy_Plugin_01.esp";
+    m.objectId = 0x000ABC;
+    m.editorId = "W_Gun";
+    m.sig = Signature("WEAP");
+    const std::string log =
+        "[11/21/2026 - 04:00:00PM] Papyrus log opened (PC)\n"
+        "[11/21/2026 - 04:00:01PM] error: Cannot call GetValue() on a None object, aborting function call\n"
+        "stack:\n"
+        "\t[W_Quest (02000ABC)].W_Script.OnInit() - \"W_Script.psc\" Line 12\n"
+        "[11/21/2026 - 04:00:02PM] error: Cannot call GetValue() on a None object, aborting function call\n"
+        "stack:\n"
+        "\t[Actor < (00000014)>].Actor.OnLoad() - \"<native>\" Line ?\n"
+        "[11/21/2026 - 04:00:03PM] warning: Property Foo on script Bar attached to  (FE000800) cannot be bound\n"
+        "[11/21/2026 - 04:00:04PM] error: Unable to find form 0x12 in Missing.esp\n";
+    const auto r = diagnostics::translatePapyrusLog(log, lo, {m}, {});
+    CHECK(r.recognised);
+    CHECK_EQ(r.errors, size_t(3));
+    CHECK_EQ(r.warnings, size_t(1));
+    CHECK_EQ(r.topErrors.size(), size_t(2));
+    CHECK_EQ(r.topErrors[0].count, size_t(2));
+    CHECK_EQ(r.translated, size_t(1));
+    CHECK(!r.refs.empty());
+    if (!r.refs.empty()) {
+        CHECK_EQ(r.refs[0].formId, std::string("02000ABC"));
+        CHECK_EQ(r.refs[0].source, std::string("Weapons.esp"));
+        CHECK_EQ(r.refs[0].name, std::string("W_Quest"));
+        CHECK_EQ(r.refs[0].inErrors, size_t(1));
+    }
+    bool player = false, light = false;
+    for (const auto& ref : r.refs) {
+        player |= ref.formId == "00000014" && ref.plugin == "Fallout4.esm" && ref.name == "Actor";
+        light |= ref.formId == "FE000800" && ref.plugin == "Small.esl" && ref.objectId == 0x800;
+    }
+    CHECK(player);
+    CHECK(light);
+    const auto text = diagnostics::formatPapyrusReport(r);
+    CHECK(text.find("compiled from Weapons.esp 000812 (W_Gun) [WEAP]") != std::string::npos);
+    CHECK(!diagnostics::translatePapyrusLog("hello\n", lo, {}, {}).recognised);
 }

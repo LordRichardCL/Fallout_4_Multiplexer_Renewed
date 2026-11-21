@@ -51,6 +51,7 @@ add_library(fo4mx_core STATIC
     engine/SupportBundle.cpp
     engine/BuildComparison.cpp
     diagnostics/CrashLog.cpp
+    diagnostics/PapyrusLog.cpp
     assets/BcDecode.cpp
     engine/FieldModel.cpp
     engine/MergeEngine.cpp

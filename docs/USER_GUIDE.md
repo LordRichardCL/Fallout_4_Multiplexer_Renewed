@@ -631,6 +631,12 @@ Logs are in `Documents\My Games\Fallout4\F4SE\MultiplexerDiagnosticRecorder` (th
 
 Once you play on compiled output, a crash log names the output plugins (`Dummy_Plugin_03.esp`) and their FormIDs, which say nothing about the mod behind them. **Diagnostics → Read Crash Log** reads the newest `Crash-*.log` from `Documents\My Games\Fallout4\F4SE` (or one you choose) against your latest build. Every FormID the log names is read with the log's own plugin list (the load order the game had). One that an output defines is translated through the build's FormID map to the original mod, object ID, Editor ID and type. A record of another plugin that the outputs change is marked, and so is a redirected copy. "Save…" keeps the reading as text, ready to send. Command line: `fo4mx crash-log [Crash-*.log] --formmap <export>\Data\Multiplexer_FormMap.tsv`.
 
+**Diagnostics → Read Papyrus Log** does the same for `Documents\My Games\Fallout4\Logs\Script\Papyrus.0.log`, where script errors are written. It shows:
+- the most frequent errors, counted once per message whatever object they name;
+- every object the log names by FormID, with the original mod behind each compiled record. Records named in errors are listed first.
+
+A Papyrus log has no plugin list of its own, so FormIDs are read with your current load order. Scan first, and read the log before you change the load order. Command line: `fo4mx papyrus-log <install> [Papyrus.0.log]`.
+
 **Diagnostics → Support Bundle…** saves one zip holding what it takes to look into a problem, ready to send:
 - the latest export's notes (`Multiplexer_Instructions.txt`, `Multiplexer_Build.json`...), its reports and the build's own records (FormID map, redirected copies);
 - this app's logs and your load order (`plugins.txt`, `loadorder.txt`, `modlist.txt`);

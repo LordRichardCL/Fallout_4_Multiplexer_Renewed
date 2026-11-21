@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include "pages/Page.hpp"
 
 #include "diagnostics/RecorderLog.hpp"
@@ -25,6 +27,9 @@ private:
     void readCrashLog(QString file);
     bool crashReading(const QString& file, QString* text) const;
     void showCrashReading(const QString& file, const QString& text);
+    void showReading(const QString& title, const QString& file, const QString& text, const QString& filter,
+                     const std::function<void(const QString&)>& again);
+    void readPapyrusLog(QString file);
     // One zip with what it takes to look into a problem (Support Bundle…).
     void makeSupportBundle();
     std::filesystem::path packageRoot() const;

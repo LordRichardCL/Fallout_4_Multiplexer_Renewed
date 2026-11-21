@@ -1,5 +1,7 @@
 #include "pages/DiagnosticsPage.hpp"
 #include "diagnostics/CrashLog.hpp"
+#include <functional>
+#include "diagnostics/PapyrusLog.hpp"
 #include <QStandardPaths>
 #include <QSettings>
 #include <QDate>
@@ -51,11 +53,14 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     bundle->setToolTip("One zip with what it takes to look into a problem: the latest build's reports and records, "
                        "this app's logs, your load order, the newest crash log with its reading, the newest recorder "
                        "log and the settings. No mod files; your home folder and user name are taken out.");
+    auto* papyrus = makeButton("Read Papyrus Log", nullptr, "warning");
+    papyrus->setToolTip("Reads Papyrus.0.log with your current load order and names the original mod behind every "
+                        "compiled record it mentions, with its most frequent errors.");
     auto* crash = makeButton("Read Crash Log", nullptr, "warning");
     crash->setToolTip("Read the newest Buffout 4 crash log (Documents\\My Games\\Fallout4\\F4SE\\Crash-*.log) and "
                       "name the original mod behind every output plugin FormID it mentions");
     l->addWidget(makePageHeader("Diagnostics", "What happened while you played, and what it likely means.",
-                                {newest, openBtn, folder, check, save, crash, bundle}, "diagnostics",
+                                {newest, openBtn, folder, check, save, crash, papyrus, bundle}, "diagnostics",
                                 "To record: turn on \"Prepare the Diagnostic Recorder\" in Settings, export, and "
                                 "install Multiplexer Output\\Diagnostic Recorder\\Multiplexer Diagnostic Recorder.zip "
                                 "as a mod. Start the game through F4SE; each session writes a log. Findings are likely "
@@ -104,6 +109,7 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     });
     connect(crash, &QPushButton::clicked, this, [this] { readCrashLog({}); });
     connect(bundle, &QPushButton::clicked, this, [this] { makeSupportBundle(); });
+    connect(papyrus, &QPushButton::clicked, this, [this] { readPapyrusLog({}); });
     connect(check, &QPushButton::clicked, this, [this] {
         showInstallStatus();
         const auto st = dg::checkRecorderInstall(app_->config().install.gamePath);
@@ -192,8 +198,14 @@ bool DiagnosticsPage::crashReading(const QString& file, QString* text) const
 
 void DiagnosticsPage::showCrashReading(const QString& file, const QString& text)
 {
+    showReading("Crash log", file, text, "Crash logs (*.log)", [this](const QString& f) { readCrashLog(f); });
+}
+
+void DiagnosticsPage::showReading(const QString& title, const QString& file, const QString& text,
+                                  const QString& filter, const std::function<void(const QString&)>& again)
+{
     QDialog dlg(this);
-    dlg.setWindowTitle("Crash log");
+    dlg.setWindowTitle(title);
     dlg.resize(820, 620);
     auto* v = new QVBoxLayout(&dlg);
     auto* view = new QPlainTextEdit(text);
@@ -211,7 +223,7 @@ void DiagnosticsPage::showCrashReading(const QString& file, const QString& text)
     v->addLayout(buttons);
     connect(close, &QPushButton::clicked, &dlg, &QDialog::accept);
     connect(saveText, &QPushButton::clicked, &dlg, [&] {
-        const QString f = QFileDialog::getSaveFileName(&dlg, "Save the crash log reading", file + ".multiplexer.txt",
+        const QString f = QFileDialog::getSaveFileName(&dlg, "Save the reading", file + ".multiplexer.txt",
                                                        "Text (*.txt)");
         QFile out(f);
         if (!f.isEmpty() && out.open(QIODevice::WriteOnly | QIODevice::Truncate))
@@ -219,14 +231,50 @@ void DiagnosticsPage::showCrashReading(const QString& file, const QString& text)
     });
     QString next;
     connect(other, &QPushButton::clicked, &dlg, [&] {
-        next = QFileDialog::getOpenFileName(&dlg, "Open a Buffout 4 crash log", QFileInfo(file).absolutePath(),
-                                            "Crash logs (*.log)");
+        next = QFileDialog::getOpenFileName(&dlg, "Open another " + title.toLower(),
+                                            QFileInfo(file).absolutePath(), filter);
         if (!next.isEmpty())
             dlg.accept();
     });
     dlg.exec();
     if (!next.isEmpty())
-        readCrashLog(next);
+        again(next);
+}
+
+void DiagnosticsPage::readPapyrusLog(QString file)
+{
+    auto* p = app_->pipeline();
+    if (!p || !p->scanned()) {
+        QMessageBox::information(this, "Papyrus log",
+                                 "Scan first: a Papyrus log has no plugin list, so it is read with your current load "
+                                 "order.");
+        return;
+    }
+    if (file.isEmpty()) {
+        const auto def = dg::defaultPapyrusLog();
+        file = std::filesystem::exists(def)
+                   ? toQString(def)
+                   : QFileDialog::getOpenFileName(this, "Open a Papyrus log", toQString(def.parent_path()),
+                                                  "Papyrus logs (*.log)");
+        if (file.isEmpty())
+            return;
+    }
+    QFile in(file);
+    if (!in.open(QIODevice::ReadOnly)) {
+        QMessageBox::warning(this, "Papyrus log", "Cannot read " + file);
+        return;
+    }
+    const QByteArray bytes = in.readAll();
+    std::vector<fo4mx::FormMapping> map;
+    std::set<std::string> redirected;
+    std::string buildNote = "No build found to read it against: compiled records are not translated.";
+    if (const auto root = packageRoot(); dg::readBuildMap(root, map, redirected))
+        buildNote = "Read against the build in " + fo4mx::pathToUtf8(root) + " (" + std::to_string(map.size()) +
+                    " FormID mappings).";
+    const auto report = dg::translatePapyrusLog(std::string_view(bytes.constData(), size_t(bytes.size())),
+                                                dg::runtimeLoadOrder(p->session()), map, redirected);
+    const QString text = QFileInfo(file).fileName() + "\n" + qs(buildNote) + "\n\n" + qs(dg::formatPapyrusReport(report));
+    showReading("Papyrus log", file, text, "Papyrus logs (*.log)", [this](const QString& f) { readPapyrusLog(f); });
 }
 
 void DiagnosticsPage::makeSupportBundle()
