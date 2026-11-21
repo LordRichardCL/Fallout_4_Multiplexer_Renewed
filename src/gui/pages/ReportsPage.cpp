@@ -35,6 +35,7 @@ fo4mx::ReportContext contextFor(AppController* app)
         ctx.compiled = p->compiledOutput();
         ctx.validation = p->reportValidation();
         ctx.autoMerge = p->autoMerge();
+        ctx.comparison = p->comparison();
     }
     ctx.maxRows = 2000;
     return ctx;

@@ -470,6 +470,15 @@ A plugin an earlier build compiled that this build keeps in the load order must 
 
 When a record of the build in use would still get another FormID (it had to move, the output count went down, an output had to switch), compiling stops with a **FormID Stability** error while that build is in use. The warnings above it say which records and why. The Compilation page asks whether to compile anyway (for this build only), or use `--accept-formid-changes`. Do that only if you will start a new game or accept that saves made with the current build lose those records.
 
+**What changes since the previous build.** Each compile is compared with the previous build (its `Multiplexer_FormMap.tsv` and `Multiplexer_CompiledPlugins.txt`). The **Compilation Report** has a *Changes since the previous build* section with:
+- how many records keep their FormID;
+- which records are new;
+- which move to another output plugin or are renumbered (new FormIDs);
+- which are no longer in the build;
+- which plugins compile for the first time, or are back in the load order.
+
+Validation shows the same counts as one *Build Comparison* line. Saves made with the previous build lose the records that move, are renumbered or are gone. To compare two exports later from the command line, use `fo4mx compare-builds <earlier export> <later export>`.
+
 **Compiled plugins never return unasked.** Saves made with a build hold a compiled plugin's records under the outputs' FormIDs. If the next build cannot compile that plugin (most often because a new or updated plugin that stays in the load order needs it as a master, or the mod was updated with record types not supported yet), it would return to the load order, and those saves would lose what they used of it. So compiling stops with a **Returning Plugins** error that names each such plugin and why. The Compilation page then asks which may return: tick them and compile again (they are kept in the settings; save them with Save Settings). On the command line: `--allow-return <plugin>` (repeatable). Or remove or switch off what keeps it out and compile again. A plugin you exclude yourself (Plugins page) is your choice and is not stopped; neither is a patch-only build.
 
 ## Starting fresh

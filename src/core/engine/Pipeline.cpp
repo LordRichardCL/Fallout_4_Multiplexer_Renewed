@@ -1085,6 +1085,34 @@ bool Pipeline::compile(ProgressSink& progress)
                                   " assets come from archives of compiled plugins; they keep loading from their "
                                   "original archives through Multiplexer_Archives.ini");
     }
+    // This build compared with the previous one: what moves, what is new, what goes.
+    comparison_.reset();
+    if (!config_.compile.previousFormMap.empty()) {
+        BuildSide before;
+        if (readBuildSide(config_.compile.previousFormMap.parent_path(), before)) {
+            BuildSide after;
+            after.mappings = compiled_->mappings;
+            for (auto pi : compiled_->compiledPlugins)
+                after.compiled.push_back(session_->plugins[pi].name);
+            for (const auto& op : compiled_->outputs)
+                if (!op.records.empty())
+                    after.outputs.push_back(op.name);
+            comparison_ = compareBuilds(before, after);
+            comparison_->previousSource = pathToUtf8(config_.compile.previousFormMap.parent_path());
+            const auto& cmp = *comparison_;
+            validation_->fail(Severity::Info, "Build Comparison",
+                              cmp.same() ? std::string("Same as the previous build: every record keeps its FormID")
+                                         : std::to_string(cmp.kept) + " record(s) keep their FormID, " +
+                                               std::to_string(cmp.added.size()) + " new, " +
+                                               std::to_string(cmp.moved.size() + cmp.renumbered.size()) +
+                                               " get another FormID, " + std::to_string(cmp.removed.size()) +
+                                               " no longer in the build; " + std::to_string(cmp.newlyCompiled.size()) +
+                                               " plugin(s) compiled for the first time, " +
+                                               std::to_string(cmp.returned.size()) +
+                                               " back in the load order (Compilation Report → Changes since the "
+                                               "previous build)");
+        }
+    }
     // Plugins the last build compiled (switched off since, so saves may hold their records under the
     // outputs' FormIDs) that this build would return to the load order, without the user asking for it:
     // stop and ask instead of doing it silently.
@@ -1526,6 +1554,7 @@ std::vector<std::filesystem::path> Pipeline::writeReports(const std::filesystem:
     ctx.compiled = compiledOutput();
     ctx.validation = reportValidation();
     ctx.autoMerge = autoMerge();
+    ctx.comparison = comparison();
     auto files = ReportGenerator::writeAll(ctx, directory);
     spdlog::info("Wrote {} report files to {}", files.size(), pathToUtf8(directory));
     return files;

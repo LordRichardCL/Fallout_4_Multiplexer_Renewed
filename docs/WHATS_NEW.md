@@ -4,6 +4,7 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 
 ## 21 November 2026
 
+- **What changes since the previous build:** the Compilation Report lists records that keep their FormID, are new, move or are renumbered, or are gone, and plugins compiled for the first time or back in the load order. Validation sums it up in one line. `fo4mx compare-builds` compares two exports.
 - **Support bundle:** Diagnostics → Support Bundle… saves one zip with the latest build's reports and records, the logs, your load order, the newest crash log and its reading, and the recorder log. It holds no mod files, and your home folder and user name are taken out.
 
 ## 20 November 2026

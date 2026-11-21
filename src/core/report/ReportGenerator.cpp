@@ -711,6 +711,56 @@ std::string compilationReport(const ReportContext& ctx)
     }
     h.tableEnd(c.compiledPlugins.size(), c.compiledPlugins.size());
 
+    if (const auto* cmp = ctx.comparison) {
+        h.h2("Changes since the previous build");
+        h.cards({{"Keep their FormID", formatCount(cmp->kept)},
+                 {"New", formatCount(cmp->added.size())},
+                 {"Moved to another output", formatCount(cmp->moved.size())},
+                 {"Renumbered", formatCount(cmp->renumbered.size())},
+                 {"No longer in the build", formatCount(cmp->removed.size())},
+                 {"Compiled for the first time", formatCount(cmp->newlyCompiled.size())},
+                 {"Back in the load order", formatCount(cmp->returned.size())}});
+        h.note(cmp->same() ? "Same as the previous build (" + cmp->previousSource +
+                                 "): every record keeps its output plugin and FormID."
+                           : "Compared with " + cmp->previousSource +
+                                 ". Saves made with that build hold FormIDs: records that move, are renumbered or "
+                                 "are no longer in the build are lost to them.");
+        if (!cmp->newlyCompiled.empty() || !cmp->returned.empty() || !cmp->outputsAdded.empty() ||
+            !cmp->outputsRemoved.empty()) {
+            h.tableStart({"Plugin", "Change"});
+            size_t n = 0;
+            for (const auto& p : cmp->newlyCompiled)
+                h.row({p, "Compiled for the first time"}), ++n;
+            for (const auto& p : cmp->returned)
+                h.row({p, "Back in the load order (no longer compiled)"}), ++n;
+            for (const auto& p : cmp->outputsAdded)
+                h.row({p, "New output plugin"}), ++n;
+            for (const auto& p : cmp->outputsRemoved)
+                h.row({p, "Output plugin no longer produced"}), ++n;
+            h.tableEnd(n, n);
+        }
+        const size_t changes = cmp->moved.size() + cmp->renumbered.size() + cmp->removed.size() + cmp->added.size();
+        if (changes) {
+            h.tableStart({"Change", "Source", "Source FormID", "Type", "Editor ID", "Before", "After"});
+            size_t shown = 0;
+            auto at = [](const FormMapping& m) { return m.outputPlugin + " " + formatFormId(m.objectId); };
+            auto row = [&](const char* what, const FormMapping& m, const std::string& before, const std::string& after) {
+                if (shown++ < ctx.maxRows)
+                    h.row({what, m.sourcePlugin, formatFormId(m.sourceObjectId), m.sig.str(), m.editorId, before, after},
+                          {"", "", "mono", "", "", "mono", "mono"});
+            };
+            for (const auto& ch : cmp->moved)
+                row("Moved", ch.after, at(ch.before), at(ch.after));
+            for (const auto& ch : cmp->renumbered)
+                row("Renumbered", ch.after, at(ch.before), at(ch.after));
+            for (const auto& m : cmp->removed)
+                row("No longer in the build", m, at(m), "");
+            for (const auto& m : cmp->added)
+                row("New", m, "", at(m));
+            h.tableEnd(std::min(ctx.maxRows, changes), changes);
+        }
+    }
+
     h.h2("FormID mappings");
     h.tableStart({"Source", "Source FormID", "Output", "New FormID", "Type", "Editor ID"});
     size_t shown = 0;
@@ -1307,6 +1357,23 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
         for (const auto& a : c.archivesToRegister)
             archives.push(a);
         root.set("archivesToRegister", archives);
+        if (const auto* cmp = ctx.comparison) {
+            json::Value o;
+            o.set("previous", cmp->previousSource);
+            o.set("kept", static_cast<uint64_t>(cmp->kept));
+            o.set("added", static_cast<uint64_t>(cmp->added.size()));
+            o.set("moved", static_cast<uint64_t>(cmp->moved.size()));
+            o.set("renumbered", static_cast<uint64_t>(cmp->renumbered.size()));
+            o.set("removed", static_cast<uint64_t>(cmp->removed.size()));
+            json::Value first, back;
+            for (const auto& n : cmp->newlyCompiled)
+                first.push(n);
+            for (const auto& n : cmp->returned)
+                back.push(n);
+            o.set("compiledForTheFirstTime", first);
+            o.set("backInTheLoadOrder", back);
+            root.set("comparedWithPreviousBuild", o);
+        }
         break;
     }
     case ReportKind::Validation: {

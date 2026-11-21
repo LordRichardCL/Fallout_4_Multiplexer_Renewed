@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/AutoMerger.hpp"
+#include "engine/BuildComparison.hpp"
 #include "engine/CompilationEngine.hpp"
 #include "engine/ConflictEngine.hpp"
 #include "engine/DependencyEngine.hpp"
@@ -29,6 +30,7 @@ struct ReportContext {
     const CompiledOutput* compiled = nullptr;
     const ValidationReport* validation = nullptr;
     const AutoMergeReport* autoMerge = nullptr; // Advanced Users Auto-Merger (when enabled)
+    const BuildComparison* comparison = nullptr; // this compile against the previous build
     size_t maxRows = 5000; // per table in HTML output
     ReportStyle style = ReportStyle::Rich;
 };

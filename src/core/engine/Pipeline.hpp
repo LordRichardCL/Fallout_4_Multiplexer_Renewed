@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/BuildComparison.hpp"
 #include "engine/PatchPlan.hpp"
 #include "assets/AssetScanner.hpp"
 #include "db/Database.hpp"
@@ -124,6 +125,8 @@ public:
     const std::optional<ExportResult>& exportResult() const { return exported_; }
     // Advanced Users Auto-Merger results (null when it is off or before Analyse).
     const AutoMergeReport* autoMerge() const { return autoMerge_ ? &*autoMerge_ : nullptr; }
+    // This compile compared with the previous build (when there is one).
+    const BuildComparison* comparison() const { return comparison_ ? &*comparison_ : nullptr; }
     db::Database* database() { return db_ ? db_.get() : nullptr; }
 
     // Re-evaluate eligibility after the user changes exclusions (no rescan needed).
@@ -192,6 +195,7 @@ private:
     std::string restoreProblem_;
     std::vector<std::string> restoreDetails_;
     std::optional<AutoMergeReport> autoMerge_;
+    std::optional<BuildComparison> comparison_;
     std::unique_ptr<BuildCache> cache_;
     AssetTrace assetTrace_;
     ChangeReport changes_;

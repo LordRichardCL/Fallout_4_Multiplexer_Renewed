@@ -7,6 +7,7 @@
 #include "engine/Pipeline.hpp"
 #include "engine/SwitchBack.hpp"
 #include "engine/SupportBundle.hpp"
+#include "engine/BuildComparison.hpp"
 #include <set>
 #include "diagnostics/CrashLog.hpp"
 #include "util/FileTransaction.hpp"
@@ -68,6 +69,10 @@ Usage:
   fo4mx ba2      <archive.ba2> [--extract PATH --to FILE]
   fo4mx clean-outputs <install> [--keep N] [--unfinished]
   fo4mx switch-back <install> [--yes]       undo the last Apply to Game from its backups
+  fo4mx compare-builds <earlier export> <later export>
+                                            what the later build changes: records new, moved,
+                                            renumbered or gone (FormIDs saves lose), plugins
+                                            compiled for the first time or back in the load order
   fo4mx support-bundle <install> [--out FILE.zip]
                                             one zip to send with a problem report: the latest
                                             export's reports and records, logs, load order, the
@@ -628,6 +633,27 @@ std::string crashReadingAgainst(const std::filesystem::path& crashLog, const std
            diagnostics::formatCrashReport(diagnostics::translateCrashLog(text, map, {}, redirected));
 }
 
+// Two exports compared: what the later one changes for saves made with the earlier one.
+int cmdCompareBuilds(const Args& a)
+{
+    if (a.positional.size() < 2)
+        throw std::runtime_error("compare-builds: two export folders required (earlier, later)");
+    auto side = [](const std::string& arg, BuildSide& out) {
+        const auto root = utf8ToPath(arg);
+        for (const auto& dir : {root / "Data", root})
+            if (readBuildSide(dir, out))
+                return;
+        throw std::runtime_error("compare-builds: no Multiplexer_FormMap.tsv in " + arg);
+    };
+    BuildSide before, after;
+    side(a.positional[0], before);
+    side(a.positional[1], after);
+    auto c = compareBuilds(before, after);
+    c.previousSource = a.positional[0];
+    std::fputs(formatBuildComparison(c, a.has("--limit") ? std::stoul(a.get("--limit")) : 200).c_str(), stdout);
+    return 0;
+}
+
 // One zip to send with a problem report (Diagnostics → Support Bundle… in the app).
 int cmdSupportBundle(const Args& a)
 {
@@ -943,6 +969,8 @@ int main(int argc, char** argv)
             return cmdDiagnose(a);
         if (a.command == "formid")
             return cmdFormId(a);
+        if (a.command == "compare-builds")
+            return cmdCompareBuilds(a);
         if (a.command == "support-bundle")
             return cmdSupportBundle(a);
         if (a.command == "crash-log")

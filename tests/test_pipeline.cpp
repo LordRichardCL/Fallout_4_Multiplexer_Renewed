@@ -1784,6 +1784,22 @@ TEST(rebuilds_keep_the_formids_of_the_build_in_use)
         CHECK(kept);
         for (const auto& e : p.compiledOutput()->records)
             CHECK(!e.formIdChanged);
+        // Compared with build 1: the list keeps its FormID, the new keyword is new, nothing moves.
+        const auto* cmp = p.comparison();
+        CHECK(cmp != nullptr);
+        if (cmp) {
+            CHECK(cmp->kept >= 1);
+            CHECK_EQ(cmp->added.size(), size_t(1));
+            CHECK_EQ(cmp->added[0].editorId, std::string("ModG_NewKeyword"));
+            CHECK(cmp->moved.empty() && cmp->renumbered.empty() && cmp->removed.empty());
+            CHECK(cmp->newlyCompiled.empty() && cmp->returned.empty());
+        }
+        ReportContext ctx;
+        ctx.session = &p.session();
+        ctx.compiled = p.compiledOutput();
+        ctx.comparison = cmp;
+        CHECK(ReportGenerator::text(ReportKind::Compilation, ctx).find("Changes since the previous build") !=
+              std::string::npos);
     }
     for (bool accept : {false, true}) {
         auto third = second;

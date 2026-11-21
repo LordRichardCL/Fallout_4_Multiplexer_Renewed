@@ -1,6 +1,7 @@
 #include "util/Zip.hpp"
 #include "diagnostics/CrashLog.hpp"
 #include "engine/SupportBundle.hpp"
+#include "engine/BuildComparison.hpp"
 #include <fstream>
 #include "esp/RecordDefinitions.hpp"
 #include "diagnostics/RecorderLog.hpp"
@@ -1284,4 +1285,43 @@ TEST(support_bundle_collects_and_redacts)
     CHECK_EQ(redactText("at " + home + "\\Data and C:/Users/Romewolf/x", {home}), std::string("at <user>\\Data and <user>/x"));
     CHECK_EQ(redactText("mod by Romewolf in \\Romewolf\\", {"\\Romewolf\\"}), std::string("mod by Romewolf in \\<user>\\"));
     std::filesystem::remove_all(dir);
+}
+
+// Build comparison: kept, new, moved to another output, renumbered, gone; plugins compiled for the first
+// time and back in the load order.
+TEST(build_comparison_sorts_every_record)
+{
+    auto m = [](const char* src, uint32_t sid, const char* out, uint32_t oid) {
+        FormMapping f;
+        f.sourcePlugin = src;
+        f.sourceObjectId = sid;
+        f.outputPlugin = out;
+        f.objectId = oid;
+        return f;
+    };
+    BuildSide before{{m("A.esp", 0x800, "Dummy_1.esp", 0x800), m("A.esp", 0x801, "Dummy_1.esp", 0x801),
+                      m("B.esp", 0x800, "Dummy_1.esp", 0x802), m("C.esp", 0x800, "Dummy_2.esp", 0x800)},
+                     {"A.esp", "B.esp", "C.esp"},
+                     {"Dummy_1.esp", "Dummy_2.esp"}};
+    BuildSide after{{m("a.esp", 0x800, "dummy_1.esp", 0x800), m("A.esp", 0x801, "Dummy_1.esp", 0x810),
+                     m("B.esp", 0x800, "Dummy_3.esp", 0x800), m("D.esp", 0x800, "Dummy_1.esp", 0x803)},
+                    {"A.esp", "B.esp", "D.esp"},
+                    {"Dummy_1.esp", "Dummy_3.esp"}};
+    const auto c = compareBuilds(before, after);
+    CHECK_EQ(c.kept, size_t(1)); // letter case does not count
+    CHECK_EQ(c.renumbered.size(), size_t(1));
+    CHECK_EQ(c.moved.size(), size_t(1));
+    CHECK_EQ(c.moved[0].after.outputPlugin, std::string("Dummy_3.esp"));
+    CHECK_EQ(c.removed.size(), size_t(1));
+    CHECK_EQ(c.removed[0].sourcePlugin, std::string("C.esp"));
+    CHECK_EQ(c.added.size(), size_t(1));
+    CHECK(c.newlyCompiled == std::vector<std::string>{"D.esp"});
+    CHECK(c.returned == std::vector<std::string>{"C.esp"});
+    CHECK(c.outputsAdded == std::vector<std::string>{"Dummy_3.esp"});
+    CHECK(c.outputsRemoved == std::vector<std::string>{"Dummy_2.esp"});
+    CHECK_EQ(c.formIdChanges(), size_t(3));
+    const auto text = formatBuildComparison(c, 10);
+    CHECK(text.find("back in the load order") != std::string::npos || text.find("Back in the load order") != std::string::npos);
+    CHECK(text.find("C.esp") != std::string::npos);
+    CHECK(compareBuilds(before, before).same());
 }
