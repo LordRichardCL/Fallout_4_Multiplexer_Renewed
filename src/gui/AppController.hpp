@@ -105,6 +105,10 @@ public:
     };
     bool previewApply(ApplyPreview* preview, QString* message);
     bool applyToProfile(const ApplyChoice& choice, QString* message);
+    // Switch back: undo the last Apply to Game from its backups (recorded in the folder holding the exports).
+    bool canSwitchBack() const;
+    bool previewSwitchBack(QString* text, QString* message);
+    bool switchBack(QString* message);
 
     // Last task's outcome, for the status bar.
     QString lastMessage() const { return lastMessage_; }
@@ -138,6 +142,7 @@ signals:
     void unsavedSettingsChanged(bool unsaved);
 
 private:
+    std::filesystem::path switchBackDirectory() const;
     void runTask(const QString& name, std::function<QString(fo4mx::ProgressSink&)> work);
     void ensurePipeline(bool fresh);
 

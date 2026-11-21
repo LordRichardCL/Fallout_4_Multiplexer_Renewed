@@ -79,6 +79,7 @@ private:
     QPushButton* compile_;
     QPushButton* export_;
     QPushButton* apply_;
+    QPushButton* switchBack_ = nullptr;
     QPushButton* openFolder_;
     StageIndicator* stages_;
     QLabel* summary_;

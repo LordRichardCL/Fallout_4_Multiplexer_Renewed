@@ -507,7 +507,12 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     pipe_->setObjectName("OptionDescription");
     bh->addWidget(pipe_);
     bh->addStretch();
-    for (auto* b : {saveSettings, openFolder_, export_, apply_, compile_})
+    switchBack_ = makeButton("Switch Back…");
+    switchBack_->setIcon(lineIcon("refresh", theme::kText, 15));
+    switchBack_->setToolTip("Undo the last Apply to Game: your load order, mod list and INI return to how they were "
+                            "before it, from the backups it made. Shown only when there is something to undo.");
+    switchBack_->hide();
+    for (auto* b : {saveSettings, openFolder_, export_, switchBack_, apply_, compile_})
         bh->addWidget(b);
     outer->addWidget(bar);
 
@@ -518,6 +523,22 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     });
     connect(compile_, &QPushButton::clicked, app_, &AppController::runCompile);
     connect(export_, &QPushButton::clicked, app_, &AppController::runExport);
+    connect(switchBack_, &QPushButton::clicked, this, [this] {
+        QString text, msg;
+        if (!app_->previewSwitchBack(&text, &msg)) {
+            QMessageBox::information(this, "Switch back", msg);
+            updateButtons();
+            return;
+        }
+        if (QMessageBox::question(this, "Switch back", text + "\n\nSwitch back now?") != QMessageBox::Yes)
+            return;
+        const bool ok = app_->switchBack(&msg);
+        if (ok)
+            QMessageBox::information(this, "Switch back", msg);
+        else
+            QMessageBox::warning(this, "Switch back", msg);
+        updateButtons();
+    });
     connect(apply_, &QPushButton::clicked, this, [this] {
         // First what will happen (nothing changes yet), then the user's confirmation.
         AppController::ApplyPreview preview;
@@ -992,6 +1013,8 @@ void CompilationPage::updateButtons()
     // Apply works on this session's export, or on the last build reopened after a scan (verified).
     const bool applicable = p && p->applySource();
     apply_->setEnabled(!busy && applicable);
+    switchBack_->setVisible(app_->canSwitchBack());
+    switchBack_->setEnabled(!busy);
     apply_->setToolTip(applicable ? QString()
                                   : QString("Export first, or after a restart Scan: the last export is reopened when it "
                                             "still matches the load order."));

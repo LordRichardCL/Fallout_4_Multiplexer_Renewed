@@ -5,6 +5,8 @@
 #include "engine/Exporter.hpp"
 #include "ba2/Ba2Archive.hpp"
 #include "engine/Pipeline.hpp"
+#include "engine/SwitchBack.hpp"
+#include "util/FileTransaction.hpp"
 #include "reference/FormIdReference.hpp"
 #include "engine/ReferenceIndex.hpp"
 #include "engine/OutputRuns.hpp"
@@ -62,6 +64,7 @@ Usage:
                  the record (xEdit's "Referenced By")
   fo4mx ba2      <archive.ba2> [--extract PATH --to FILE]
   fo4mx clean-outputs <install> [--keep N] [--unfinished]
+  fo4mx switch-back <install> [--yes]       undo the last Apply to Game from its backups
                  delete exports in the output folder beyond the newest N (default
                  5; never the latest), and with --unfinished also unfinished ones
                  (".tmp"). Only Multiplexer's own export folders; one in use is
@@ -169,7 +172,7 @@ Args parseArgs(int argc, char** argv)
     static const std::vector<std::string> flags = {"--vortex", "--no-merge", "--light", "--no-previs-translation", "--merge-cell-config", "--apply-patch-plan", "--broken-references-as-null", "--master-placeholders", "--redirect-masters", "--no-new-quests-npcs", "--accept-formid-changes", "--patch", "--patch-only", "--auto-merge", "--dry-run", "--no-cache",
                                                    "--diagnostic-recorder", "--install", "--archive-loader",
                                                    "--values", "--tree", "--help", "--unfinished",
-                                                   "--verbose", "-v"};
+                                                   "--yes", "--verbose", "-v"};
     Args a;
     for (int i = 1; i < argc; ++i) {
         std::string s = argv[i];
@@ -564,6 +567,37 @@ int cmdCleanOutputs(const Args& a)
     return 0;
 }
 
+// Undoes the last Apply to Game from its backups: shows the plan, applies it with --yes.
+int cmdSwitchBack(const Args& a)
+{
+    auto cfg = makeConfig(a);
+    const auto install = resolveInstall(cfg.install);
+    const auto loc = output::locate(cfg.exportOptions.outputDirectory, install.gamePath, install.dataPath, install.modsPath);
+    FileTransaction tx("Switch back");
+    const auto plan = switch_back::plan(tx, loc.root);
+    if (!plan.nothing.empty()) {
+        std::printf("%s.\n", plan.nothing.c_str());
+        return 0;
+    }
+    for (const auto& p : plan.problems)
+        std::printf("Problem: %s\n", p.c_str());
+    if (!plan.possible)
+        return 1;
+    std::printf("Undo Apply to Game of %s (build %s):\n", plan.record.when.c_str(), plan.record.build.c_str());
+    for (const auto& l : tx.summary())
+        std::printf("  %s\n", l.c_str());
+    for (const auto& c : plan.changedSince)
+        std::printf("  changed since Apply (switching back replaces that change too): %s\n", c.c_str());
+    if (!a.has("--yes")) {
+        std::printf("Nothing changed. Run again with --yes to switch back (close your mod manager first).\n");
+        return 0;
+    }
+    tx.apply();
+    switch_back::markSwitchedBack(loc.root);
+    std::printf("Switched back; backups of what was replaced are kept next to each file.\n");
+    return 0;
+}
+
 int cmdFormId(const Args& a)
 {
     if (a.positional.size() < 2)
@@ -809,6 +843,8 @@ int main(int argc, char** argv)
             return cmdDiagnose(a);
         if (a.command == "formid")
             return cmdFormId(a);
+        if (a.command == "switch-back")
+            return cmdSwitchBack(a);
         if (a.command == "clean-outputs")
             return cmdCleanOutputs(a);
         if (a.command == "scan" || a.command == "analyse" || a.command == "analyze" || a.command == "plan" || a.command == "compile" ||

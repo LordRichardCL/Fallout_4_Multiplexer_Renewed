@@ -7,6 +7,7 @@
 #include "engine/CompilationResult.hpp"
 #include "engine/Exporter.hpp"
 #include "engine/Pipeline.hpp"
+#include "engine/SwitchBack.hpp"
 #include "engine/BuildRecord.hpp"
 #include "engine/PostCompilation.hpp"
 #include "engine/VortexSupport.hpp"
@@ -7599,6 +7600,71 @@ TEST(master_redirection_translates_previs_files_of_its_cells)
         CHECK(set.resolve(*cell, id(0x154)) == set.identity(*ref)); // read in the copy's numbering
         CHECK(set.resolve(*cell, id(0x158)) == set.identity(*thing));
         CHECK(id(0x154) != 0x03000801u);
+    }
+}
+
+// Switch back: undoes the last Apply to Game from its backups. Profile files return to exactly what they held
+// before; a file changed after Apply is reported (switching back replaces that change too); a second switch
+// back finds nothing to do; switching back is itself backed up.
+TEST(switch_back_restores_the_setup_before_apply)
+{
+    auto m = buildMo2Install("switch_back");
+    Pipeline p(m.cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    p.exportOutputs();
+    auto r = resultOf(p);
+    const auto modName = mo2::outputModName(p.session(), p.exportResult()->packageRoot);
+    const auto records = p.exportResult()->outputRoot;
+    const std::string modlistBefore = slurp(m.profile / "modlist.txt");
+    const std::string pluginsBefore = slurp(m.profile / "plugins.txt");
+    {
+        FileTransaction tx("Switch back");
+        const auto plan = switch_back::plan(tx, records);
+        CHECK(!plan.possible);
+        CHECK(!plan.nothing.empty()); // nothing applied yet
+    }
+    {
+        ApplyOptions o;
+        o.enableOutputMod = modName;
+        FileTransaction tx("Apply to Game");
+        auto plan = PostCompilation::planApply(tx, p.session(), *p.compiledOutput(), r, records, o);
+        CHECK(plan.check.blockers.empty());
+        tx.apply();
+        switch_back::record(tx, records, p.exportResult()->runName);
+    }
+    CHECK(slurp(m.profile / "plugins.txt") != pluginsBefore);
+    CHECK(slurp(m.profile / "modlist.txt") != modlistBefore);
+    const auto last = switch_back::latest(records);
+    CHECK(last.has_value());
+    if (!last)
+        return;
+    CHECK_EQ(last->build, p.exportResult()->runName);
+    CHECK(!last->files.empty());
+    // A change after Apply (as the mod manager would make one).
+    writeFile(m.profile / "plugins.txt", slurp(m.profile / "plugins.txt") + "*Extra.esp\n");
+    {
+        FileTransaction tx("Switch back");
+        const auto plan = switch_back::plan(tx, records);
+        CHECK(plan.possible);
+        CHECK(plan.problems.empty());
+        CHECK_EQ(plan.changedSince.size(), size_t(1));
+        tx.apply();
+        switch_back::markSwitchedBack(records);
+        bool backedUp = false;
+        for (const auto& b : tx.backups())
+            backedUp |= b.filename().string().rfind("plugins.txt.multiplexer-backup-", 0) == 0;
+        CHECK(backedUp); // the switch back can be undone too
+    }
+    CHECK_EQ(slurp(m.profile / "plugins.txt"), pluginsBefore);
+    CHECK_EQ(slurp(m.profile / "modlist.txt"), modlistBefore);
+    {
+        FileTransaction tx("Switch back");
+        const auto plan = switch_back::plan(tx, records);
+        CHECK(!plan.possible);
+        CHECK(plan.nothing.find("already switched back") != std::string::npos);
+        CHECK(tx.empty());
     }
 }
 

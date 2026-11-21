@@ -30,6 +30,7 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 - Asset tracing follows textures named directly inside meshes, not only those named in material files.
 
 ### Easier to use
+- **Switch back** undoes the last Apply to Game in one click: your load order, mod list and INI return to exactly how they were, from Apply's backups.
 - **The Compilation page is regrouped into cards that each answer one question:** what to compile, the output, conflicts, compiling more plugins, patch and advanced. The switches that let more plugins compile say, under each one, what they would change on your load order.
 - **Plain status words** everywhere: Will compile, Stays in load order, Kept by you, Base game, Not enabled.
 - **Sort any table** by clicking a column header, and right-click a header to show or hide columns.

@@ -149,6 +149,9 @@ public:
     };
     ApplySource applySource() const;
 
+    // The folder holding the exports (where Apply to Game records what it changed, for Switch back).
+    std::filesystem::path outputRoot() const;
+
 private:
     // This app's own files that stay open while it runs (results database, build cache): never moved
     // to an output backup and never packaged, even when they sit in the output folder.

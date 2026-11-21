@@ -1,4 +1,5 @@
 #include "AppController.hpp"
+#include "engine/SwitchBack.hpp"
 
 #include "diagnostics/RecorderPackage.hpp"
 
@@ -925,6 +926,14 @@ bool AppController::applyToProfile(const ApplyChoice& choice, QString* message)
         }
         s.releaseFiles(); // Windows cannot rename a plugin this app has open
         tx.apply();
+        // What changed, so Switch back can undo it (recording never undoes the Apply).
+        try {
+            fo4mx::switch_back::record(tx, src.exported->outputRoot.empty() ? pipeline_->outputRoot()
+                                                                            : src.exported->outputRoot,
+                                       src.exported->runName);
+        } catch (const std::exception& e) {
+            spdlog::warn("Could not record Apply to Game for Switch back: {}", e.what());
+        }
         // Report only what was actually done.
         QStringList done;
         size_t ghosted = 0;
@@ -968,6 +977,88 @@ bool AppController::applyToProfile(const ApplyChoice& choice, QString* message)
         }
         if (plan.check.blockers.empty())
             *message += "\n\nStart a new game with this build.";
+        return true;
+    } catch (const std::exception& e) {
+        *message = "Nothing was changed (every completed step was undone): " + QString::fromUtf8(e.what());
+        return false;
+    }
+}
+
+std::filesystem::path AppController::switchBackDirectory() const
+{
+    if (!pipeline_ || !pipeline_->scanned())
+        return {};
+    const auto src = pipeline_->applySource();
+    if (src && src.exported && !src.exported->outputRoot.empty())
+        return src.exported->outputRoot;
+    return pipeline_->outputRoot();
+}
+
+bool AppController::canSwitchBack() const
+{
+    const auto dir = switchBackDirectory();
+    if (dir.empty())
+        return false;
+    const auto last = fo4mx::switch_back::latest(dir);
+    return last && !last->switchedBack;
+}
+
+bool AppController::previewSwitchBack(QString* text, QString* message)
+{
+    const auto dir = switchBackDirectory();
+    if (dir.empty()) {
+        *message = "Scan first, so the output folder is known.";
+        return false;
+    }
+    fo4mx::FileTransaction tx("Switch back (preview)");
+    const auto plan = fo4mx::switch_back::plan(tx, dir);
+    if (!plan.nothing.empty()) {
+        *message = qs(plan.nothing) + ".";
+        return false;
+    }
+    if (!plan.problems.empty()) {
+        *message = "Switching back is not possible:\n" + bullet(plan.problems);
+        return false;
+    }
+    QStringList t;
+    t << QString("Undo Apply to Game of %1 (build %2): your load order, mod list and INI return to how they were "
+                 "before it.")
+             .arg(qs(plan.record.when), qs(plan.record.build));
+    t << "" << "These files will change (each is backed up first; all or nothing):" << bullet(tx.summary());
+    if (!plan.changedSince.empty())
+        t << "" << "Changed since Apply (by your mod manager or by hand); switching back replaces those changes too:"
+          << bullet(plan.changedSince);
+    t << "" << "The output mod and its files stay where they are; nothing is deleted.";
+    *text = t.join("\n");
+    return true;
+}
+
+bool AppController::switchBack(QString* message)
+{
+    const auto dir = switchBackDirectory();
+    if (dir.empty()) {
+        *message = "Scan first, so the output folder is known.";
+        return false;
+    }
+    if (pipeline_ && managerIsRunning(pipeline_->session())) {
+        *message = "Close your mod manager first: it writes its own files when it exits and would undo the change.";
+        return false;
+    }
+    try {
+        fo4mx::FileTransaction tx("Switch back");
+        const auto plan = fo4mx::switch_back::plan(tx, dir);
+        if (!plan.possible) {
+            *message = plan.nothing.empty() ? "Switching back is not possible:\n" + bullet(plan.problems)
+                                            : qs(plan.nothing) + ".";
+            return false;
+        }
+        if (pipeline_)
+            pipeline_->session().releaseFiles();
+        tx.apply();
+        fo4mx::switch_back::markSwitchedBack(dir);
+        *message = "Switched back: your setup is as it was before Apply to Game (backups of what was replaced are "
+                   "kept next to each file). Scan again before the next build.";
+        emit dataChanged();
         return true;
     } catch (const std::exception& e) {
         *message = "Nothing was changed (every completed step was undone): " + QString::fromUtf8(e.what());

@@ -584,6 +584,13 @@ std::string Pipeline::loaderMod(std::string* off) const
     return mod;
 }
 
+std::filesystem::path Pipeline::outputRoot() const
+{
+    if (!session_)
+        return {};
+    return outputLocation().root;
+}
+
 AnalysisOptions Pipeline::analysisOptions() const
 {
     AnalysisOptions a = config_.analysis;
