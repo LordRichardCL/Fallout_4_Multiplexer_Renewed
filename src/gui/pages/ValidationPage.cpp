@@ -1,4 +1,5 @@
 #include "pages/ValidationPage.hpp"
+#include <algorithm>
 #include <QUrl>
 
 #include "Format.hpp"
@@ -193,6 +194,23 @@ void ValidationPage::reload()
                  binds);
     model_->setHeaderData(1, Qt::Horizontal, "Check");
     fitColumns(table_, 640);
+    // Message and Likely Cause share what the other columns leave, so both are in view without scrolling
+    // sideways (the details panel below shows them in full).
+    {
+        auto* h = table_->horizontalHeader();
+        const int avail = table_->viewport()->width();
+        int others = 0;
+        for (int c = 0; c < h->count(); ++c)
+            if (c != 2 && c != 3 && !h->isSectionHidden(c))
+                others += h->sectionSize(c);
+        const int room = avail - others - 4;
+        const int both = h->sectionSize(2) + h->sectionSize(3);
+        if (room > 300 && both > room) {
+            const int message = std::max(200, room * 3 / 5);
+            h->resizeSection(2, message);
+            h->resizeSection(3, std::max(160, room - message));
+        }
+    }
 }
 
 } // namespace gui

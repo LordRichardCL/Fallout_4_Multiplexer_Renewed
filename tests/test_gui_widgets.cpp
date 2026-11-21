@@ -445,6 +445,24 @@ private slots:
             db.exec("DELETE FROM ValidationResults");
         }
     }
+
+    // The Dashboard's steps are its actions: Review opens the Conflict Centre, Play & check Diagnostics.
+    void dashboard_steps_open_their_pages()
+    {
+        window_->showPage("Dashboard");
+        auto* journey = currentPage()->findChild<gui::JourneyView*>();
+        QVERIFY(journey);
+        emit journey->stepActivated(2); // Scan, Analyse, Review, Compile, Install, Play & check
+        QCOMPARE(currentPage()->objectName().isEmpty() ? QString(currentPage()->metaObject()->className())
+                                                       : currentPage()->objectName(),
+                 QString("gui::ConflictsPage"));
+        window_->showPage("Dashboard");
+        emit journey->stepActivated(5);
+        QCOMPARE(QString(currentPage()->metaObject()->className()), QString("gui::DiagnosticsPage"));
+        // No duplicate Scan/Analyse buttons in the header any more.
+        window_->showPage("Dashboard");
+        QVERIFY(!childWithText<QPushButton>(currentPage(), "Validate"));
+    }
 };
 
 QTEST_MAIN(GuiWidgetsTest)

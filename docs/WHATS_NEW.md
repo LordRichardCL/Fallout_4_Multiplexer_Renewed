@@ -4,6 +4,9 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 
 ## 21 November 2026
 
+- **Calmer Dashboard:** the steps are the actions (click Scan, Analyse, Review...), so the row of buttons above them is gone; the status line also says when patch choices are waiting; the plugin slots tile has its own icon.
+- **Why a plugin cannot compile** shows in full under the Compilation page's plugin list when you select it.
+- **Diagnostics** explains the Diagnostic Recorder until a log is opened, instead of showing an empty table; **Validation** keeps Message and Likely Cause in view.
 - **Ready to Test?** beside Apply to Game checks validation, the export, plugin slots, your newest save, F4SE and a crash logger before you switch over.
 - **The support bundle holds a whole test session:** the Papyrus log and its reading, a check of your newest save, the build comparison and the Precombined Cell Check rows, besides the crash log.
 - **Readings warn about old logs:** a crash or Papyrus log written before the build was exported is flagged, since its FormIDs may belong to another build.

@@ -52,33 +52,8 @@ DashboardPage::DashboardPage(AppController* app, QWidget* parent) : Page(app, pa
     l->setContentsMargins(28, 22, 28, 22);
     l->setSpacing(14);
 
-    // Header: the page's quick actions stay available, small, on the right.
-    auto* scan = makeButton("Scan");
-    auto* analyse = makeButton("Analyse");
-    auto* compile = makeButton("Compile");
-    auto* validate = makeButton("Validate");
-    auto* reports = makeButton("Reports");
-    scan->setIcon(lineIcon("scan", theme::kText, 15));
-    analyse->setIcon(lineIcon("analyse", theme::kText, 15));
-    compile->setIcon(lineIcon("compile", theme::kText, 15));
-    validate->setIcon(lineIcon("validation", theme::kText, 15));
-    reports->setIcon(lineIcon("reports", theme::kText, 15));
-    scan->setToolTip("Read the load order, plugins, archives and loose files");
-    analyse->setToolTip("Find conflicts, dependencies and what can be compiled");
-    compile->setToolTip("Open the Compilation page");
-    validate->setToolTip("Compile and show the validation results");
-    reports->setToolTip("Open the reports");
-    connect(scan, &QPushButton::clicked, app_, &AppController::runScan);
-    connect(analyse, &QPushButton::clicked, app_, &AppController::runAnalyse);
-    connect(compile, &QPushButton::clicked, this, [this] { emit navigate("Compilation"); });
-    connect(validate, &QPushButton::clicked, this, [this] {
-        app_->runCompile();
-        emit navigate("Validation");
-    });
-    connect(reports, &QPushButton::clicked, this, [this] { emit navigate("Reports"); });
-    for (auto* b : {scan, analyse, compile, validate})
-        connect(app_, &AppController::busyChanged, b, [b](bool busy) { b->setEnabled(!busy); });
-    auto* header = makePageHeader("Dashboard", "", {scan, analyse, compile, validate, reports});
+    // Header. The actions are the steps below (click one) and the button in the status card: one place each.
+    auto* header = makePageHeader("Dashboard", "");
     subtitle_ = header->findChild<QLabel*>("PageSubtitle");
     l->addWidget(header);
 
@@ -127,7 +102,23 @@ DashboardPage::DashboardPage(AppController* app, QWidget* parent) : Page(app, pa
     auto* jl = new QVBoxLayout(jc);
     jl->setContentsMargins(16, 16, 16, 10);
     journey_ = new JourneyView;
+    journey_->setAccessibleName("Steps: click one to run it or open its page");
     jl->addWidget(journey_);
+    connect(journey_, &JourneyView::stepActivated, this, [this](int i) {
+        if (i < 0 || i >= stepKeys_.size() || app_->busy())
+            return;
+        const QString key = stepKeys_[i];
+        if (key == "scan")
+            app_->runScan();
+        else if (key == "analyse")
+            app_->runAnalyse();
+        else if (key == "review")
+            emit navigate("Conflicts");
+        else if (key == "compile" || key == "install")
+            emit navigate("Compilation");
+        else if (key == "play")
+            emit navigate("Diagnostics");
+    });
     l->addWidget(jc);
 
     // Four headline numbers.
@@ -139,7 +130,7 @@ DashboardPage::DashboardPage(AppController* app, QWidget* parent) : Page(app, pa
         QColor accent;
     } tileDefs[] = {{"plugins", "plugins", theme::kGreen},
                     {"outputs", "compile", theme::kBlue},
-                    {"slots", "plugins", theme::kBlue},
+                    {"slots", "dashboard", theme::kBlue},
                     {"conflicts", "conflicts", theme::kYellow},
                     {"validation", "validation", theme::kGreen}};
     for (const auto& t : tileDefs) {
@@ -235,6 +226,9 @@ void DashboardPage::fillHero(bool have)
         title = "Your game is up to date";
         detail = QString("Last build %1 · checked %2 · nothing has changed since")
                      .arg(when(meta("build_reference").toLongLong()), when(meta("build_checked").toLongLong()));
+        // Patch choices still waiting do not make the build out of date, but are worth saying here too.
+        if (const auto* plan = app_->pipeline() ? app_->pipeline()->patchPlan() : nullptr; plan && plan->pending)
+            detail += QString(" · %1 patch choice(s) waiting (Review)").arg(formatCount(qint64(plan->pending)));
     } else if (status == "Changes Detected") {
         title = "Some files changed";
         detail = QString("Assets changed since the build %1. The compiled records are still valid.")
@@ -409,6 +403,18 @@ void DashboardPage::refresh()
     const bool exported = !meta("export_written").isEmpty() || (!status.isEmpty() && status != "Not Built");
     steps.push_back({"install", "Install", exported ? "exported" : "export and apply", exported ? S::Done : S::Pending});
     steps.push_back({"play", "Play & check", "read the game's logs", S::Pending});
+    const QMap<QString, QString> actions = {
+        {"scan", "Scan: read the load order, plugins, archives and loose files again"},
+        {"analyse", "Analyse: find conflicts, dependencies and what can be compiled"},
+        {"review", "Open the Conflict Centre to review patch choices"},
+        {"compile", "Open the Compilation page"},
+        {"install", "Open the Compilation page: Export, Ready to Test? and Apply to Game"},
+        {"play", "Open Diagnostics: crash and Papyrus logs, save check, support bundle"}};
+    stepKeys_.clear();
+    for (auto& st : steps) {
+        stepKeys_ << st.icon;
+        st.action = actions.value(st.icon);
+    }
     journey_->setSteps(std::move(steps));
 
     // Headline numbers.

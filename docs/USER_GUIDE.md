@@ -54,7 +54,7 @@ Optional overrides: a different `plugins.txt`, a different INI folder, and the s
 
 **The Dashboard** shows, from the top:
 - the build's status in one line, with the one button that matters now (Scan my mods, Compile or Rebuild; Check again and Review Changes once there is a build);
-- the steps from Scan to Play & check: done steps are green, the one waiting on you is amber;
+- the steps from Scan to Play & check: done steps are green, the one waiting on you is amber. **Click a step** to run it (Scan, Analyse) or open its page (Review: Conflicts; Compile and Install: Compilation; Play & check: Diagnostics); with the keyboard, Tab to the steps, arrows and Enter;
 - five numbers: plugins (and how many are compiled), output plugins, **plugin slots**, conflicts (and how many need a choice), validation errors and warnings. Fallout 4 loads at most 254 full plugins and 4,096 light (ESL) ones. Plugin slots shows the full plugins in your load order now and, after Compile, how many the build leaves (compiled plugins go, the outputs and archive loaders come in), with the light ones beside them;
 - **Needs your attention**: each item in one sentence with a button to the page that handles it (patch choices waiting, plugins kept out, validation errors, more than 254 full plugins now or after the build, missing masters, worldspaces whose large references were left as they are);
 - your load order at a glance (how plugins are handled, kinds of conflicts) and, under **All numbers**, every count: mods, plugins by type, archives, loose files, records, asset conflicts, eligible plugins and outputs.

@@ -1,4 +1,7 @@
 #include "widgets/Widgets.hpp"
+#include <QHelpEvent>
+#include <QToolTip>
+#include <QKeyEvent>
 
 #include "Theme.hpp"
 
@@ -621,6 +624,69 @@ QFrame* makeSectionCard(const QString& icon, const QString& title, QVBoxLayout**
 JourneyView::JourneyView(QWidget* parent) : QWidget(parent)
 {
     setMinimumHeight(104);
+    setMouseTracking(true);
+    setFocusPolicy(Qt::TabFocus);
+}
+
+int JourneyView::stepAt(QPoint pos) const
+{
+    if (steps_.empty() || width() <= 0)
+        return -1;
+    const int i = int(pos.x() / (width() / double(steps_.size())));
+    return i >= 0 && i < int(steps_.size()) && !steps_[size_t(i)].action.isEmpty() ? i : -1;
+}
+
+void JourneyView::mouseMoveEvent(QMouseEvent* e)
+{
+    const int i = stepAt(e->position().toPoint());
+    if (i != hover_) {
+        hover_ = i;
+        setCursor(i >= 0 ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        update();
+    }
+}
+
+void JourneyView::leaveEvent(QEvent*)
+{
+    hover_ = -1;
+    update();
+}
+
+void JourneyView::mouseReleaseEvent(QMouseEvent* e)
+{
+    if (e->button() == Qt::LeftButton)
+        if (const int i = stepAt(e->position().toPoint()); i >= 0)
+            emit stepActivated(i);
+}
+
+void JourneyView::keyPressEvent(QKeyEvent* e)
+{
+    const int n = int(steps_.size());
+    if (n == 0)
+        return QWidget::keyPressEvent(e);
+    if (e->key() == Qt::Key_Left || e->key() == Qt::Key_Right) {
+        focusStep_ = (focusStep_ + (e->key() == Qt::Key_Right ? 1 : n - 1)) % n;
+        update();
+    } else if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter || e->key() == Qt::Key_Space) &&
+               !steps_[size_t(focusStep_)].action.isEmpty()) {
+        emit stepActivated(focusStep_);
+    } else {
+        QWidget::keyPressEvent(e);
+    }
+}
+
+bool JourneyView::event(QEvent* e)
+{
+    if (e->type() == QEvent::ToolTip) {
+        auto* he = static_cast<QHelpEvent*>(e);
+        const int i = stepAt(he->pos());
+        if (i >= 0)
+            QToolTip::showText(he->globalPos(), steps_[size_t(i)].action, this);
+        else
+            QToolTip::hideText();
+        return true;
+    }
+    return QWidget::event(e);
 }
 
 void JourneyView::setSteps(std::vector<Step> steps)
@@ -657,6 +723,11 @@ void JourneyView::paintEvent(QPaintEvent*)
         const auto& s = steps_[i];
         const double cx = colW * (i + 0.5);
         const QColor c = colorOf(s.state);
+        if (i == hover_ || (hasFocus() && i == focusStep_)) {
+            p.setPen(QPen(QColor(0x8a, 0xa1, 0x96), 1, hasFocus() && i == focusStep_ ? Qt::DashLine : Qt::SolidLine));
+            p.setBrush(QColor(0x3d, 0xdc, 0x84, 18));
+            p.drawEllipse(QPointF(cx, cy), r + 8, r + 8);
+        }
         if (s.state == State::Attention) {
             p.setPen(Qt::NoPen);
             p.setBrush(QColor(0xf5, 0xc5, 0x42, 30));

@@ -38,6 +38,7 @@ private:
     QPushButton* checkNow_;
     QPushButton* rebuild_;
     QPushButton* scanBig_;
+    QStringList stepKeys_; // the steps shown, by icon key
     JourneyView* journey_;
     QMap<QString, IconTile*> tiles_;
     QVBoxLayout* attention_;

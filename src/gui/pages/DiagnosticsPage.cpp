@@ -115,7 +115,6 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     recButtons->setSpacing(8);
     for (auto* b : {newest, openBtn, folder, check, save})
         recButtons->addWidget(b);
-    recButtons->addStretch();
     auto* how = makeSectionTitle("How to record",
                                  "Turn on \"Prepare the Diagnostic Recorder\" in Settings, export, and install "
                                  "Multiplexer Output\\Diagnostic Recorder\\Multiplexer Diagnostic Recorder.zip as a "
@@ -123,7 +122,9 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
                                  "causes with their evidence, not certainties; for crashes, keep a crash logger such "
                                  "as Buffout 4 as well. When a Multiplexer build is found, the game's load order is "
                                  "compared with the one it was built for.");
+    recButtons->addSpacing(8);
     recButtons->addWidget(how);
+    recButtons->addStretch();
     rec->addLayout(recButtons);
 
     install_ = new QLabel;
@@ -131,8 +132,7 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     install_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     rec->addWidget(install_);
 
-    summary_ = new QLabel("No log opened yet. <b>Open Newest Log</b> reads your latest session; <b>How to record</b> "
-                          "says how to make one.");
+    summary_ = new QLabel;
     summary_->setWordWrap(true);
     summary_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     rec->addWidget(summary_);
@@ -149,6 +149,18 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     findings_->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     findings_->setColumnWidth(1, 360);
     rec->addWidget(findings_, 1);
+    // Until a log is opened: what the section is for and how to get a log, instead of an empty table.
+    noLog_ = new QLabel("<p><b>No session opened yet.</b></p><p>The Diagnostic Recorder is an optional F4SE plugin that "
+                        "writes what happens while you play: which plugins and archives the game loaded, and the "
+                        "errors it met. <b>Open Newest Log</b> reads your latest session; <b>How to record</b> says "
+                        "how to install it.</p><p>For a crash, script errors or a save, the cards above work without "
+                        "it.</p>");
+    noLog_->setWordWrap(true);
+    noLog_->setObjectName("OptionDescription");
+    noLog_->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    rec->addWidget(noLog_, 1);
+    findings_->hide();
+    summary_->hide();
     l->addWidget(recCard, 1);
 
     connect(newest, &QPushButton::clicked, this, [this] {
@@ -465,6 +477,9 @@ void DiagnosticsPage::makeSupportBundle()
 void DiagnosticsPage::open(const QString& file)
 {
     file_ = file;
+    noLog_->hide();
+    findings_->show();
+    summary_->show();
     session_ = dg::loadRecorderLog(toPath(file));
     std::optional<dg::PackageContext> package;
     if (const auto root = packageRoot(); !root.empty())

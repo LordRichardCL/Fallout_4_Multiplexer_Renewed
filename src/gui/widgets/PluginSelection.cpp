@@ -101,7 +101,8 @@ PluginSelection::PluginSelection(AppController* app, QWidget* parent) : QFrame(p
     table_->setColumnCount(5);
     table_->setHorizontalHeaderLabels({"Compile", "Plugin", "Status", "Records", "Record types"});
     table_->verticalHeader()->hide();
-    table_->setSelectionMode(QAbstractItemView::NoSelection);
+    table_->setSelectionMode(QAbstractItemView::SingleSelection);
+    table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table_->setAlternatingRowColors(true);
     table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
@@ -112,6 +113,20 @@ PluginSelection::PluginSelection(AppController* app, QWidget* parent) : QFrame(p
     table_->setColumnWidth(1, 170);
     table_->setColumnWidth(2, 170);
     l->addWidget(table_);
+    // The selected plugin's whole status: the table cuts long reasons short.
+    detail_ = new QLabel;
+    detail_->setObjectName("OptionDescription");
+    detail_->setWordWrap(true);
+    detail_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    detail_->hide();
+    l->addWidget(detail_);
+    connect(table_, &QTableWidget::currentCellChanged, this, [this](int row) {
+        auto* name = row >= 0 ? table_->item(row, 1) : nullptr;
+        auto* status = row >= 0 ? table_->item(row, 2) : nullptr;
+        detail_->setVisible(name && status);
+        if (name && status)
+            detail_->setText("<b>" + name->text().toHtmlEscaped() + ":</b> " + status->toolTip().toHtmlEscaped());
+    });
     empty_ = new QLabel("Run Scan and Analyse to list the plugins.");
     empty_->setObjectName("OptionDescription");
     l->addWidget(empty_);
@@ -202,6 +217,8 @@ void PluginSelection::fillTable()
 {
     filling_ = true;
     table_->setRowCount(0);
+    if (detail_)
+        detail_->hide();
     const QString text = search_->text().trimmed();
     const QString type = type_->currentData().toString();
     const int show = show_->currentIndex();
@@ -255,7 +272,7 @@ void PluginSelection::fillTable()
     on_->setEnabled(have);
     off_->setEnabled(have);
     summary_->setText(!have ? QString()
-                            : QString("%1 will compile · %2 switched off · %3 cannot compile (hover a status for why)%4")
+                            : QString("%1 will compile · %2 switched off · %3 cannot compile (select a plugin for why)%4")
                                   .arg(formatCount(qint64(compiling)), formatCount(qint64(switchedOff)),
                                        formatCount(qint64(cannot)),
                                        app_->onlySelected() ? QString(" · only the plugins you switch on are compiled")

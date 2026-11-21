@@ -170,16 +170,29 @@ public:
     struct Step {
         QString icon, title, detail;
         State state = State::Pending;
+        QString action; // tooltip: what clicking the step does; empty = not clickable
     };
     explicit JourneyView(QWidget* parent = nullptr);
     void setSteps(std::vector<Step> steps);
     QSize sizeHint() const override { return {800, 104}; }
+    int stepAt(QPoint pos) const;
+
+signals:
+    // A step was clicked (or chosen with the keyboard: Tab to the view, arrows, Enter).
+    void stepActivated(int index);
 
 protected:
     void paintEvent(QPaintEvent*) override;
+    void mouseMoveEvent(QMouseEvent* e) override;
+    void mouseReleaseEvent(QMouseEvent* e) override;
+    void keyPressEvent(QKeyEvent* e) override;
+    void leaveEvent(QEvent*) override;
+    bool event(QEvent* e) override;
 
 private:
     std::vector<Step> steps_;
+    int hover_ = -1;
+    int focusStep_ = 0;
 };
 
 // A number with an icon tile and one line of text under it.

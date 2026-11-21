@@ -49,6 +49,7 @@ private:
     QPushButton* off_;
     QTableWidget* table_;
     QLabel* empty_;
+    QLabel* detail_ = nullptr; // the selected plugin's full status
     std::vector<Row> rows_;
     bool filling_ = false;
 };

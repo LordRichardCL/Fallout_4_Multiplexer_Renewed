@@ -33,6 +33,7 @@ private:
     bool papyrusReading(const QString& file, QString* text) const;
     QString saveCheckReading(const QString& file) const;
     void checkSaveGame(QString file);
+    QLabel* noLog_ = nullptr; // shown until a recorder log is opened
     // One zip with what it takes to look into a problem (Support Bundle…).
     void makeSupportBundle();
     std::filesystem::path packageRoot() const;
