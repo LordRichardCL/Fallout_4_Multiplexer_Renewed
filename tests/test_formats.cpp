@@ -1,4 +1,6 @@
 #include "util/Zip.hpp"
+#include "diagnostics/CrashLog.hpp"
+#include "engine/CompilationEngine.hpp"
 #include <cstdio>
 #include <cstring>
 #include "Fixtures.hpp"
@@ -965,4 +967,82 @@ TEST(dds_bc7_and_bc6h_decode)
     }
     CHECK(preview::readDdsInfo(ddsRow(99, modeBlocks(8, true)))->decodable);
     CHECK(preview::readDdsInfo(ddsRow(96, modeBlocks(14, false)))->decodable);
+}
+
+// A Buffout 4 crash log read against a build: FormIDs in an output are translated to the original mod through
+// the FormID map, using the log's own load order (full and light slots); a record an output changes is
+// marked; one in an output but not in the map is counted apart.
+TEST(crash_log_names_the_original_mods)
+{
+    const std::string log =
+        "Fallout 4 v1.10.163\n"
+        "Buffout 4 v1.28.6\n"
+        "\n"
+        "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x7FF6A1B2C3D4 Fallout4.exe+1234567\n"
+        "\n"
+        "PROBABLE CALL STACK:\n"
+        "\t[ 0] 0x7FF6A1B2C3D4 Fallout4.exe+1234567\n"
+        "\n"
+        "REGISTERS:\n"
+        "\tRAX 0x1F2E3D4C5B60 (TESObjectWEAP*)\n"
+        "\t\tName: \"Laser Musket\"\n"
+        "\t\tFlags: 0x00000000\n"
+        "\t\tFormID: 0x0A000805\n"
+        "\t\tFormType: kWEAP (43)\n"
+        "\t\tFile: \"Dummy_Plugin_01.esp\"\n"
+        "\tRBX 0x1F2E3D4C5B70 (TESObjectREFR*)\n"
+        "\t\tName: \"Sanctuary Hills\"\n"
+        "\t\tFormID: 0x0001F669\n"
+        "\t\tFormType: kREFR (64)\n"
+        "\t\tModified by: \"Fallout4.esm\" -> \"Dummy_Plugin_01.esp\"\n"
+        "\tRCX 0x1F2E3D4C5B80 (BGSKeyword*)\n"
+        "\t\tFormID: 0xFE001801\n"
+        "\t\tFormType: kKYWD (4)\n"
+        "\tRDX 0x1F2E3D4C5B90 (TESNPC*)\n"
+        "\t\tFormID: 0x0A000999\n"
+        "\n"
+        "STACK:\n"
+        "\t[RSP+38  ] 0x1F2E3D4C5BA0 (TESObjectWEAP*)\n"
+        "\t\tFormID: 0x0A000805\n"
+        "\n"
+        "PLUGINS:\n"
+        "\t[00]     Fallout4.esm\n"
+        "\t[0A]     Dummy_Plugin_01.esp\n"
+        "\t[FE:001] Dummy_Plugin_02.esp\n";
+    std::vector<FormMapping> map(2);
+    map[0].sourcePlugin = "LaserMod.esp";
+    map[0].sourceObjectId = 0x1234;
+    map[0].outputPlugin = "Dummy_Plugin_01.esp";
+    map[0].objectId = 0x805;
+    map[0].sig = Signature("WEAP");
+    map[0].editorId = "LaserMusketMk2";
+    map[1].sourcePlugin = "KeywordPack.esp";
+    map[1].sourceObjectId = 0x810;
+    map[1].outputPlugin = "Dummy_Plugin_02.esp";
+    map[1].objectId = 0x801;
+    map[1].sig = Signature("KYWD");
+    const auto r = diagnostics::translateCrashLog(log, map, {}, {});
+    CHECK(r.recognised);
+    CHECK_EQ(r.pluginsListed, size_t(3));
+    CHECK_EQ(r.outputsLoaded.size(), size_t(2));
+    CHECK_EQ(r.refs.size(), size_t(4)); // the weapon once
+    CHECK_EQ(r.translated, size_t(2));
+    CHECK_EQ(r.untranslated, size_t(1)); // 0A000999: an output, not in the map
+    if (r.refs.size() == 4) {
+        CHECK_EQ(r.refs[0].source, std::string("LaserMod.esp"));
+        CHECK_EQ(r.refs[0].sourceObjectId, 0x1234u);
+        CHECK_EQ(r.refs[0].name, std::string("Laser Musket"));
+        CHECK_EQ(r.refs[0].type, std::string("kWEAP (43)"));
+        CHECK(r.refs[0].where.find("RAX") != std::string::npos);
+        CHECK_EQ(r.refs[1].plugin, std::string("Fallout4.esm"));
+        CHECK(!r.refs[1].inOutput);
+        CHECK(r.refs[1].changedByOutput);
+        CHECK_EQ(r.refs[2].plugin, std::string("Dummy_Plugin_02.esp")); // light slot FE:001
+        CHECK_EQ(r.refs[2].objectId, 0x801u);
+        CHECK_EQ(r.refs[2].source, std::string("KeywordPack.esp"));
+    }
+    const std::string text = diagnostics::formatCrashReport(r);
+    CHECK(text.find("compiled from LaserMod.esp 001234 (LaserMusketMk2) [WEAP]") != std::string::npos);
+    CHECK(text.find("changed by the compiled outputs") != std::string::npos);
+    CHECK(!diagnostics::translateCrashLog("just some text", map, {}, {}).recognised);
 }

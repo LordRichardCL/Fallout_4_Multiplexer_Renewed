@@ -1,4 +1,13 @@
 #include "pages/DiagnosticsPage.hpp"
+#include "diagnostics/CrashLog.hpp"
+#include "engine/CompilationEngine.hpp"
+#include "util/Platform.hpp"
+#include "util/Text.hpp"
+#include <QDialog>
+#include <QFileInfo>
+#include <QHBoxLayout>
+#include <QPlainTextEdit>
+#include <set>
 
 #include "Format.hpp"
 #include "widgets/Widgets.hpp"
@@ -34,8 +43,11 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     folder->setAccessibleName("Open Log Folder");
     auto* save = makeButton("Save Report…", nullptr, "export");
     auto* check = makeButton("Check Installation", nullptr, "check");
+    auto* crash = makeButton("Read Crash Log", nullptr, "warning");
+    crash->setToolTip("Read the newest Buffout 4 crash log (Documents\\My Games\\Fallout4\\F4SE\\Crash-*.log) and "
+                      "name the original mod behind every output plugin FormID it mentions");
     l->addWidget(makePageHeader("Diagnostics", "What happened while you played, and what it likely means.",
-                                {newest, openBtn, folder, check, save}, "diagnostics",
+                                {newest, openBtn, folder, check, save, crash}, "diagnostics",
                                 "To record: turn on \"Prepare the Diagnostic Recorder\" in Settings, export, and "
                                 "install Multiplexer Output\\Diagnostic Recorder\\Multiplexer Diagnostic Recorder.zip "
                                 "as a mod. Start the game through F4SE; each session writes a log. Findings are likely "
@@ -82,6 +94,7 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
         if (!f.isEmpty())
             open(f);
     });
+    connect(crash, &QPushButton::clicked, this, [this] { readCrashLog({}); });
     connect(check, &QPushButton::clicked, this, [this] {
         showInstallStatus();
         const auto st = dg::checkRecorderInstall(app_->config().install.gamePath);
@@ -116,6 +129,83 @@ std::filesystem::path DiagnosticsPage::packageRoot() const
     if (auto latest = fo4mx::output::latestRun(loc))
         return *latest;
     return loc.root;
+}
+
+void DiagnosticsPage::readCrashLog(QString file)
+{
+    if (file.isEmpty()) {
+        const auto newest = dg::newestCrashLog();
+        file = newest.empty() ? QFileDialog::getOpenFileName(this, "Open a Buffout 4 crash log",
+                                                             toQString(fo4mx::platform::fallout4DocumentsDir() / "F4SE"),
+                                                             "Crash logs (*.log)")
+                              : toQString(newest);
+        if (file.isEmpty())
+            return;
+    }
+    QFile in(file);
+    if (!in.open(QIODevice::ReadOnly)) {
+        QMessageBox::warning(this, "Crash log", "Cannot read " + file);
+        return;
+    }
+    const QByteArray bytes = in.readAll();
+    // The latest build's FormID map and redirected copies (its Data folder, or the folder itself).
+    std::vector<fo4mx::FormMapping> map;
+    std::set<std::string> redirected;
+    std::string buildNote = "No Multiplexer build found: FormIDs are shown with their plugins only.";
+    if (const auto root = packageRoot(); !root.empty())
+        for (const auto& dir : {root / "Data", root}) {
+            const auto formMap = dir / "Multiplexer_FormMap.tsv";
+            if (!std::filesystem::exists(formMap))
+                continue;
+            map = fo4mx::CompilationEngine::readFormMap(formMap);
+            QFile r(toQString(dir / "Multiplexer_Redirected.tsv"));
+            if (r.open(QIODevice::ReadOnly))
+                for (const auto& line : QString::fromUtf8(r.readAll()).split('\n'))
+                    if (!line.startsWith('#') && !line.trimmed().isEmpty())
+                        redirected.insert(ss(line.section('\t', 0, 0).trimmed()));
+            buildNote = "Read against the build in " + fo4mx::pathToUtf8(root) + " (" + std::to_string(map.size()) +
+                        " FormID mappings).";
+            break;
+        }
+    const auto report = dg::translateCrashLog(std::string_view(bytes.constData(), size_t(bytes.size())), map, {}, redirected);
+    const QString text = toQString(std::filesystem::path(ss(file)).filename()) + "\n" + qs(buildNote) + "\n\n" +
+                         qs(dg::formatCrashReport(report));
+
+    QDialog dlg(this);
+    dlg.setWindowTitle("Crash log");
+    dlg.resize(820, 620);
+    auto* v = new QVBoxLayout(&dlg);
+    auto* view = new QPlainTextEdit(text);
+    view->setReadOnly(true);
+    view->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    v->addWidget(view, 1);
+    auto* buttons = new QHBoxLayout;
+    auto* other = makeButton("Open Another…", nullptr, "folder");
+    auto* saveText = makeButton("Save…", nullptr, "export");
+    auto* close = makeButton("Close");
+    buttons->addWidget(other);
+    buttons->addStretch();
+    buttons->addWidget(saveText);
+    buttons->addWidget(close);
+    v->addLayout(buttons);
+    connect(close, &QPushButton::clicked, &dlg, &QDialog::accept);
+    connect(saveText, &QPushButton::clicked, &dlg, [&] {
+        const QString f = QFileDialog::getSaveFileName(&dlg, "Save the crash log reading", file + ".multiplexer.txt",
+                                                       "Text (*.txt)");
+        QFile out(f);
+        if (!f.isEmpty() && out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            out.write(text.toUtf8());
+    });
+    QString next;
+    connect(other, &QPushButton::clicked, &dlg, [&] {
+        next = QFileDialog::getOpenFileName(&dlg, "Open a Buffout 4 crash log", QFileInfo(file).absolutePath(),
+                                            "Crash logs (*.log)");
+        if (!next.isEmpty())
+            dlg.accept();
+    });
+    dlg.exec();
+    if (!next.isEmpty())
+        readCrashLog(next);
 }
 
 void DiagnosticsPage::open(const QString& file)

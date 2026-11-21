@@ -21,6 +21,8 @@ public:
 
 private:
     void open(const QString& file);
+    // Buffout 4 crash log read against the latest build (empty: the newest one, else ask).
+    void readCrashLog(QString file);
     std::filesystem::path packageRoot() const;
 
     void showInstallStatus();

@@ -6,6 +6,8 @@
 #include "ba2/Ba2Archive.hpp"
 #include "engine/Pipeline.hpp"
 #include "engine/SwitchBack.hpp"
+#include <set>
+#include "diagnostics/CrashLog.hpp"
 #include "util/FileTransaction.hpp"
 #include "reference/FormIdReference.hpp"
 #include "engine/ReferenceIndex.hpp"
@@ -65,6 +67,8 @@ Usage:
   fo4mx ba2      <archive.ba2> [--extract PATH --to FILE]
   fo4mx clean-outputs <install> [--keep N] [--unfinished]
   fo4mx switch-back <install> [--yes]       undo the last Apply to Game from its backups
+  fo4mx crash-log [Crash-*.log] [--formmap <export>\\Data\\Multiplexer_FormMap.tsv]
+                                            name the original mods behind a Buffout 4 crash log
                  delete exports in the output folder beyond the newest N (default
                  5; never the latest), and with --unfinished also unfinished ones
                  (".tmp"). Only Multiplexer's own export folders; one in use is
@@ -567,6 +571,31 @@ int cmdCleanOutputs(const Args& a)
     return 0;
 }
 
+// A Buffout 4 crash log read against a build's FormID map: the original mod behind each output FormID.
+int cmdCrashLog(const Args& a)
+{
+    std::filesystem::path file = a.positional.empty() ? diagnostics::newestCrashLog() : utf8ToPath(a.positional[0]);
+    if (file.empty())
+        throw std::runtime_error("crash-log: no crash log given, and none in Documents\\My Games\\Fallout4\\F4SE");
+    std::ifstream in(file, std::ios::binary);
+    if (!in)
+        throw std::runtime_error("crash-log: cannot read " + pathToUtf8(file));
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::vector<FormMapping> map;
+    std::set<std::string> redirected;
+    if (a.has("--formmap")) {
+        const auto fm = utf8ToPath(a.get("--formmap"));
+        map = CompilationEngine::readFormMap(fm);
+        std::ifstream r(fm.parent_path() / "Multiplexer_Redirected.tsv");
+        for (std::string line; std::getline(r, line);)
+            if (!line.empty() && line[0] != '#')
+                redirected.insert(line.substr(0, line.find('\t')));
+    }
+    std::printf("%s\n%s", pathToUtf8(file).c_str(),
+                diagnostics::formatCrashReport(diagnostics::translateCrashLog(text, map, {}, redirected)).c_str());
+    return 0;
+}
+
 // Undoes the last Apply to Game from its backups: shows the plan, applies it with --yes.
 int cmdSwitchBack(const Args& a)
 {
@@ -843,6 +872,8 @@ int main(int argc, char** argv)
             return cmdDiagnose(a);
         if (a.command == "formid")
             return cmdFormId(a);
+        if (a.command == "crash-log")
+            return cmdCrashLog(a);
         if (a.command == "switch-back")
             return cmdSwitchBack(a);
         if (a.command == "clean-outputs")
