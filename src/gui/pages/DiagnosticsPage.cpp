@@ -2,6 +2,7 @@
 #include "diagnostics/CrashLog.hpp"
 #include <functional>
 #include "diagnostics/PapyrusLog.hpp"
+#include "diagnostics/SaveGame.hpp"
 #include <QStandardPaths>
 #include <QSettings>
 #include <QDate>
@@ -53,6 +54,9 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     bundle->setToolTip("One zip with what it takes to look into a problem: the latest build's reports and records, "
                        "this app's logs, your load order, the newest crash log with its reading, the newest recorder "
                        "log and the settings. No mod files; your home folder and user name are taken out.");
+    auto* saveCheck = makeButton("Check a Save…", nullptr, "validation");
+    saveCheck->setToolTip("Compares the plugins a save was made with against your load order, or the load order "
+                          "after the build you just compiled: says whether the save would lose anything.");
     auto* papyrus = makeButton("Read Papyrus Log", nullptr, "warning");
     papyrus->setToolTip("Reads Papyrus.0.log with your current load order and names the original mod behind every "
                         "compiled record it mentions, with its most frequent errors.");
@@ -60,7 +64,7 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     crash->setToolTip("Read the newest Buffout 4 crash log (Documents\\My Games\\Fallout4\\F4SE\\Crash-*.log) and "
                       "name the original mod behind every output plugin FormID it mentions");
     l->addWidget(makePageHeader("Diagnostics", "What happened while you played, and what it likely means.",
-                                {newest, openBtn, folder, check, save, crash, papyrus, bundle}, "diagnostics",
+                                {newest, openBtn, folder, check, save, crash, papyrus, saveCheck, bundle}, "diagnostics",
                                 "To record: turn on \"Prepare the Diagnostic Recorder\" in Settings, export, and "
                                 "install Multiplexer Output\\Diagnostic Recorder\\Multiplexer Diagnostic Recorder.zip "
                                 "as a mod. Start the game through F4SE; each session writes a log. Findings are likely "
@@ -110,6 +114,7 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     connect(crash, &QPushButton::clicked, this, [this] { readCrashLog({}); });
     connect(bundle, &QPushButton::clicked, this, [this] { makeSupportBundle(); });
     connect(papyrus, &QPushButton::clicked, this, [this] { readPapyrusLog({}); });
+    connect(saveCheck, &QPushButton::clicked, this, [this] { checkSaveGame({}); });
     connect(check, &QPushButton::clicked, this, [this] {
         showInstallStatus();
         const auto st = dg::checkRecorderInstall(app_->config().install.gamePath);
@@ -275,6 +280,34 @@ void DiagnosticsPage::readPapyrusLog(QString file)
                                                 dg::runtimeLoadOrder(p->session()), map, redirected);
     const QString text = QFileInfo(file).fileName() + "\n" + qs(buildNote) + "\n\n" + qs(dg::formatPapyrusReport(report));
     showReading("Papyrus log", file, text, "Papyrus logs (*.log)", [this](const QString& f) { readPapyrusLog(f); });
+}
+
+void DiagnosticsPage::checkSaveGame(QString file)
+{
+    auto* p = app_->pipeline();
+    if (!p || !p->scanned()) {
+        QMessageBox::information(this, "Save check", "Scan first: a save is checked against your load order.");
+        return;
+    }
+    if (file.isEmpty()) {
+        const auto newest = dg::newestSave();
+        const auto folder = fo4mx::platform::fallout4DocumentsDir() / "Saves";
+        file = QFileDialog::getOpenFileName(this, "Choose a save to check",
+                                            toQString(newest.empty() ? folder : newest), "Fallout 4 saves (*.fos)");
+        if (file.isEmpty())
+            return;
+    }
+    QString text;
+    try {
+        const auto save = dg::readSaveGame(toPath(file));
+        const auto in = p->saveCheckInput();
+        text = QFileInfo(file).fileName() + "\n" + qs(dg::formatSaveCheck(save, dg::checkSave(save, in), in.nextBuild));
+        if (!in.nextBuild)
+            text += "\nCompile first to check it against the next build instead.\n";
+    } catch (const std::exception& e) {
+        text = QFileInfo(file).fileName() + "\n" + QString("Cannot read it: ") + e.what();
+    }
+    showReading("Save check", file, text, "Fallout 4 saves (*.fos)", [this](const QString& f) { checkSaveGame(f); });
 }
 
 void DiagnosticsPage::makeSupportBundle()

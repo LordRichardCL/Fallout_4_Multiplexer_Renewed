@@ -9873,3 +9873,26 @@ TEST(slot_usage_now_and_after_the_build)
     CHECK_EQ(after.full, now.full - compiledFull + outFull);
     CHECK_EQ(after.light, now.light - compiledLight + outLight + c.archiveLoaders.size());
 }
+
+// A save made before compiling: the build compiles plugins it holds, so it would lose them.
+TEST(save_check_against_the_next_build)
+{
+    auto root = buildInstall("savecheck");
+    auto cfg = configFor(root);
+    Pipeline p(cfg);
+    p.scan();
+    diagnostics::SaveGameInfo save;
+    for (auto pi : p.session().loadOrder)
+        (p.session().plugins[pi].isLight() ? save.lightPlugins : save.plugins).push_back(p.session().plugins[pi].name);
+    auto in = p.saveCheckInput();
+    CHECK(!in.nextBuild);
+    CHECK(diagnostics::checkSave(save, in).safe);
+    p.analyse();
+    CHECK(p.compile());
+    in = p.saveCheckInput();
+    CHECK(in.nextBuild);
+    const auto c = diagnostics::checkSave(save, in);
+    CHECK(!c.safe);
+    CHECK_EQ(c.compiledAway.size(), p.compiledOutput()->compiledPlugins.size());
+    CHECK(c.missing.empty());
+}

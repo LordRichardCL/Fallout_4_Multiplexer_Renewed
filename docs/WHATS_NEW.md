@@ -4,6 +4,7 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 
 ## 21 November 2026
 
+- **Check a save before you load it:** Diagnostics → Check a Save… compares the plugins a save was made with against your load order, or the one after the build you just compiled, and says what the save would lose.
 - **Plugin slots on the Dashboard:** full plugins now and after the build, out of the game's 254 (and light ones out of 4,096), with a warning when a load order is over the limit.
 - **Papyrus logs name the real mod:** Diagnostics → Read Papyrus Log lists the most frequent script errors and translates every compiled record the log names back to its original mod.
 - **LOD billboards move with their records:** a plugin whose `textures\terrain\lodgen\<plugin>` files are all named after its own records can now compile; the export copies each billboard under the output's name and the record's new FormID.

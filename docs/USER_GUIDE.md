@@ -637,6 +637,14 @@ Once you play on compiled output, a crash log names the output plugins (`Dummy_P
 
 A Papyrus log has no plugin list of its own, so FormIDs are read with your current load order. Scan first, and read the log before you change the load order. Command line: `fo4mx papyrus-log <install> [Papyrus.0.log]`.
 
+**Diagnostics → Check a Save…** says whether a save would lose anything. It reads the plugins the save was made with and compares them with your load order. After Compile, it compares them with the load order the build would give instead. It lists:
+- plugins the save holds that will no longer load;
+- plugins the build compiles. Their records get new FormIDs in the outputs, so a save made while they were in the load order loses what it holds of them: start a new game, or leave them out of compiling;
+- records of the build the save was made with that the next build moves, renumbers or drops (see *Changes since the previous build*);
+- plugins new to the save (usually fine).
+
+It compares plugin lists only and does not read what the save holds of each plugin. Command line: `fo4mx check-save <install> [save.fos] [--next]`. It exits with code 2 when the save would lose something.
+
 **Diagnostics → Support Bundle…** saves one zip holding what it takes to look into a problem, ready to send:
 - the latest export's notes (`Multiplexer_Instructions.txt`, `Multiplexer_Build.json`...), its reports and the build's own records (FormID map, redirected copies);
 - this app's logs and your load order (`plugins.txt`, `loadorder.txt`, `modlist.txt`);

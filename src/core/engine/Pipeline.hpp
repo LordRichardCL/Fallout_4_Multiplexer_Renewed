@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/BuildComparison.hpp"
+#include "diagnostics/SaveGame.hpp"
 #include "engine/PatchPlan.hpp"
 #include "assets/AssetScanner.hpp"
 #include "db/Database.hpp"
@@ -127,6 +128,8 @@ public:
     const AutoMergeReport* autoMerge() const { return autoMerge_ ? &*autoMerge_ : nullptr; }
     // This compile compared with the previous build (when there is one).
     const BuildComparison* comparison() const { return comparison_ ? &*comparison_ : nullptr; }
+    // What a save is checked against: the load order after this compile when there is one, else now.
+    diagnostics::SaveCheckInput saveCheckInput() const;
     db::Database* database() { return db_ ? db_.get() : nullptr; }
 
     // Re-evaluate eligibility after the user changes exclusions (no rescan needed).

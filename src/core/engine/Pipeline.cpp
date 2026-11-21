@@ -1561,3 +1561,34 @@ std::vector<std::filesystem::path> Pipeline::writeReports(const std::filesystem:
 }
 
 } // namespace fo4mx
+
+namespace fo4mx {
+
+diagnostics::SaveCheckInput Pipeline::saveCheckInput() const
+{
+    diagnostics::SaveCheckInput in;
+    const auto& s = *session_;
+    for (const auto& p : s.plugins)
+        if (p.generated)
+            in.outputs.insert(p.name);
+    if (!compiled_) {
+        for (auto pi : s.loadOrder)
+            in.loadOrder.push_back(s.plugins[pi].name);
+        return in;
+    }
+    in.nextBuild = true;
+    in.comparison = comparison();
+    for (auto pi : s.loadOrder)
+        if (!s.plugins[pi].generated && !compiled_->isCompiled(pi))
+            in.loadOrder.push_back(s.plugins[pi].name);
+    for (const auto& op : compiled_->outputs)
+        if (!op.records.empty()) {
+            in.loadOrder.push_back(op.name);
+            in.outputs.insert(op.name);
+        }
+    for (auto pi : compiled_->compiledPlugins)
+        in.compiledAway.push_back(s.plugins[pi].name);
+    return in;
+}
+
+} // namespace fo4mx

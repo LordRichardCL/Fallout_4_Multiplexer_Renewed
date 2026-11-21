@@ -47,7 +47,8 @@ If something is missing or broken, note the mod, the item or NPC, and where. Sen
 
 1. Save, quit, load: everything is still there.
 2. Update or add one small mod, then **Scan → Analyse → Compile → Export → Apply** again. Compiling must not stop with *FormID Stability* or *Returning Plugins* unless the build says why.
-3. Load the save from step 1: compiled items, NPCs and quests from before are still there.
+3. Before loading, Diagnostics → **Check a Save…** on the save from step 1 should say nothing is lost.
+4. Load the save from step 1: compiled items, NPCs and quests from before are still there.
 
 ## 5. When something goes wrong
 

@@ -4,6 +4,7 @@
 #include "engine/BuildComparison.hpp"
 #include "engine/EngineFiles.hpp"
 #include "diagnostics/PapyrusLog.hpp"
+#include "diagnostics/SaveGame.hpp"
 #include <fstream>
 #include "esp/RecordDefinitions.hpp"
 #include "diagnostics/RecorderLog.hpp"
@@ -1388,4 +1389,112 @@ TEST(papyrus_log_names_the_original_mods)
     const auto text = diagnostics::formatPapyrusReport(r);
     CHECK(text.find("compiled from Weapons.esp 000812 (W_Gun) [WEAP]") != std::string::npos);
     CHECK(!diagnostics::translatePapyrusLog("hello\n", lo, {}, {}).recognised);
+}
+
+namespace {
+// A small save as the game writes it: header, a 2x1 screenshot, the plugin lists.
+std::vector<uint8_t> fakeSave(const std::vector<std::string>& full, const std::vector<std::string>& light)
+{
+    std::vector<uint8_t> b;
+    auto put = [&](const void* p, size_t n) { b.insert(b.end(), (const uint8_t*)p, (const uint8_t*)p + n); };
+    auto u8 = [&](uint8_t v) { put(&v, 1); };
+    auto u16 = [&](uint16_t v) { put(&v, 2); };
+    auto u32 = [&](uint32_t v) { put(&v, 4); };
+    auto str = [&](const std::string& s) { u16(uint16_t(s.size())); put(s.data(), s.size()); };
+    put("FO4_SAVEGAME", 12);
+    const size_t sizeAt = b.size();
+    u32(0);
+    const size_t start = b.size();
+    u32(15);
+    u32(42);
+    str("Nora");
+    u32(23);
+    str("Sanctuary Hills");
+    str("1d.2h.3m");
+    str("HumanRace");
+    u16(1);
+    float f = 10.f;
+    put(&f, 4);
+    put(&f, 4);
+    uint64_t t = 0;
+    put(&t, 8);
+    u32(2);
+    u32(1);
+    const uint32_t header = uint32_t(b.size() - start);
+    std::memcpy(b.data() + sizeAt, &header, 4);
+    for (int i = 0; i < 8; ++i)
+        u8(0xAB); // screenshot
+    u8(68);
+    str("1.10.984.0");
+    const size_t infoAt = b.size();
+    u32(0);
+    const size_t infoStart = b.size();
+    u8(uint8_t(full.size()));
+    for (const auto& p : full)
+        str(p);
+    u16(uint16_t(light.size()));
+    for (const auto& p : light)
+        str(p);
+    const uint32_t info = uint32_t(b.size() - infoStart);
+    std::memcpy(b.data() + infoAt, &info, 4);
+    for (int i = 0; i < 40; ++i)
+        u8(0); // the file location table and the rest
+    return b;
+}
+} // namespace
+
+// Saves: the header and plugin lists are read; a damaged save is refused, never read past its end.
+TEST(save_game_plugin_lists_are_read)
+{
+    const auto bytes = fakeSave({"Fallout4.esm", "ModA.esp", "Dummy_Plugin_01.esp"}, {"Small.esl"});
+    const auto s = diagnostics::parseSaveGame(bytes);
+    CHECK_EQ(s.player, std::string("Nora"));
+    CHECK_EQ(s.level, uint32_t(23));
+    CHECK_EQ(s.saveNumber, uint32_t(42));
+    CHECK_EQ(s.gameVersion, std::string("1.10.984.0"));
+    CHECK(s.plugins == std::vector<std::string>({"Fallout4.esm", "ModA.esp", "Dummy_Plugin_01.esp"}));
+    CHECK(s.lightPlugins == std::vector<std::string>{"Small.esl"});
+    size_t refused = 0;
+    for (size_t n = 0; n < bytes.size() - 40; ++n) {
+        try {
+            (void)diagnostics::parseSaveGame(std::vector<uint8_t>(bytes.begin(), bytes.begin() + n));
+        } catch (const std::runtime_error&) {
+            ++refused;
+        }
+    }
+    CHECK_EQ(refused, bytes.size() - 40); // every cut before the end of the plugin list
+    auto bad = bytes;
+    bad[0] = 'X';
+    bool threw = false;
+    try {
+        (void)diagnostics::parseSaveGame(bad);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    CHECK(threw);
+
+    // Against the load order now: nothing missing. After a build compiling ModA: lost under its FormIDs.
+    diagnostics::SaveCheckInput now;
+    now.loadOrder = {"Fallout4.esm", "moda.esp", "Dummy_Plugin_01.esp", "Small.esl", "New.esp"};
+    now.outputs = {"Dummy_Plugin_01.esp"};
+    auto c = diagnostics::checkSave(s, now);
+    CHECK(c.safe);
+    CHECK(c.added == std::vector<std::string>{"New.esp"});
+    CHECK_EQ(c.outputsInSave.size(), size_t(1));
+    diagnostics::SaveCheckInput next;
+    next.nextBuild = true;
+    next.loadOrder = {"Fallout4.esm", "Dummy_Plugin_02.esp"};
+    next.compiledAway = {"ModA.esp"};
+    next.outputs = {"Dummy_Plugin_01.esp", "Dummy_Plugin_02.esp"};
+    BuildComparison cmp;
+    cmp.removed.resize(3);
+    next.comparison = &cmp;
+    c = diagnostics::checkSave(s, next);
+    CHECK(!c.safe);
+    CHECK(c.compiledAway == std::vector<std::string>{"ModA.esp"});
+    CHECK(c.missing == std::vector<std::string>({"Dummy_Plugin_01.esp", "Small.esl"}));
+    CHECK_EQ(c.recordsChanged, size_t(3));
+    const auto text = diagnostics::formatSaveCheck(s, c, true);
+    CHECK(text.find("would lose content") != std::string::npos);
+    CHECK(text.find("ModA.esp") != std::string::npos);
 }

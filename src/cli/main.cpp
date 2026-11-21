@@ -11,6 +11,7 @@
 #include <set>
 #include "diagnostics/CrashLog.hpp"
 #include "diagnostics/PapyrusLog.hpp"
+#include "diagnostics/SaveGame.hpp"
 #include "util/FileTransaction.hpp"
 #include "reference/FormIdReference.hpp"
 #include "engine/ReferenceIndex.hpp"
@@ -79,6 +80,10 @@ Usage:
                                             export's reports and records, logs, load order, the
                                             newest crash log and its reading, recorder log. No mod
                                             files; home folder and user name taken out
+  fo4mx check-save <install> [save.fos] [--next]
+                                            whether a save would lose anything: its plugins against
+                                            the load order now, or with --next after compiling the
+                                            next build (analyses and compiles; nothing is written)
   fo4mx papyrus-log <install> [Papyrus.0.log] [--limit N]
                                             the Papyrus log read with the current load order: the
                                             original mod behind every compiled record it names
@@ -611,6 +616,26 @@ int cmdCrashLog(const Args& a)
     return 0;
 }
 
+// A save's plugins against the load order now, or after the next build (--next).
+int cmdCheckSave(const Args& a)
+{
+    auto cfg = makeConfig(a);
+    const auto file = a.positional.size() > 1 ? utf8ToPath(a.positional[1]) : diagnostics::newestSave();
+    if (file.empty())
+        throw std::runtime_error("check-save: no save given, and none in Documents\\My Games\\Fallout4\\Saves");
+    const auto save = diagnostics::readSaveGame(file);
+    Pipeline p(cfg);
+    p.scan();
+    if (a.has("--next")) {
+        p.analyse();
+        p.compile();
+    }
+    const auto in = p.saveCheckInput();
+    const auto check = diagnostics::checkSave(save, in);
+    std::printf("%s\n%s", pathToUtf8(file).c_str(), diagnostics::formatSaveCheck(save, check, in.nextBuild).c_str());
+    return check.safe ? 0 : 2;
+}
+
 // The Papyrus log read with the install's current load order and its latest build.
 int cmdPapyrusLog(const Args& a)
 {
@@ -1005,6 +1030,8 @@ int main(int argc, char** argv)
             return cmdCompareBuilds(a);
         if (a.command == "support-bundle")
             return cmdSupportBundle(a);
+        if (a.command == "check-save")
+            return cmdCheckSave(a);
         if (a.command == "papyrus-log")
             return cmdPapyrusLog(a);
         if (a.command == "crash-log")

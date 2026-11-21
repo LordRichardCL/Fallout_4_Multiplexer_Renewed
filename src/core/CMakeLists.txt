@@ -53,6 +53,7 @@ add_library(fo4mx_core STATIC
     engine/SlotUsage.cpp
     diagnostics/CrashLog.cpp
     diagnostics/PapyrusLog.cpp
+    diagnostics/SaveGame.cpp
     assets/BcDecode.cpp
     engine/FieldModel.cpp
     engine/MergeEngine.cpp
