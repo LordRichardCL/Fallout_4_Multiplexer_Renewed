@@ -24,6 +24,7 @@
 #include "engine/ReferenceScanner.hpp"
 #include "esp/LayoutCheck.hpp"
 #include "report/ReportGenerator.hpp"
+#include "engine/SlotUsage.hpp"
 #include "esp/FieldDecoder.hpp"
 #include "esp/PluginFile.hpp"
 #include "papyrus/Pex.hpp"
@@ -9846,4 +9847,29 @@ TEST(lod_billboards_move_with_their_records)
         CHECK_EQ(result.lodBillboardFiles, size_t(2));
         CHECK(std::filesystem::exists(result.directory / "Multiplexer_LODBillboards.tsv"));
     }
+}
+
+// Plugin slots: now (the active load order) and after the build (compiled plugins gone, outputs in).
+TEST(slot_usage_now_and_after_the_build)
+{
+    auto root = buildInstall("slots");
+    auto cfg = configFor(root);
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    const auto& s = p.session();
+    const auto& c = *p.compiledOutput();
+    const auto now = slotsNow(s);
+    CHECK_EQ(now.full + now.light, s.loadOrder.size());
+    size_t compiledFull = 0, compiledLight = 0, outFull = 0, outLight = 0;
+    for (auto pi : c.compiledPlugins)
+        ++(s.plugins[pi].isLight() ? compiledLight : compiledFull);
+    for (const auto& op : c.outputs)
+        if (!op.records.empty())
+            ++(op.light ? outLight : outFull);
+    CHECK(compiledFull + compiledLight > 0);
+    const auto after = slotsAfter(s, c);
+    CHECK_EQ(after.full, now.full - compiledFull + outFull);
+    CHECK_EQ(after.light, now.light - compiledLight + outLight + c.archiveLoaders.size());
 }

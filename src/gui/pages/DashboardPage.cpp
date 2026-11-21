@@ -139,6 +139,7 @@ DashboardPage::DashboardPage(AppController* app, QWidget* parent) : Page(app, pa
         QColor accent;
     } tileDefs[] = {{"plugins", "plugins", theme::kGreen},
                     {"outputs", "compile", theme::kBlue},
+                    {"slots", "plugins", theme::kBlue},
                     {"conflicts", "conflicts", theme::kYellow},
                     {"validation", "validation", theme::kGreen}};
     for (const auto& t : tileDefs) {
@@ -315,6 +316,17 @@ void DashboardPage::fillAttention(bool have)
     if (keptOut > 0)
         add("block", theme::kRed, QString("%1 plugin(s) kept out of compiling").arg(formatCount(qint64(keptOut))),
             "Another file needs their name. They stay in your load order.", "See why", "Advanced Users Auto-Merger");
+    {
+        const QString after = meta("slots_full_after");
+        const int fullNow = meta("slots_full_now").toInt();
+        const int fullAfter = after.toInt();
+        if (!after.isEmpty() && fullAfter > 254)
+            add("warning", theme::kRed, QString("Still %1 full plugins after the build").arg(fullAfter),
+                "The game loads at most 254. See what keeps plugins in the load order.", "Holding Back", "Plugins");
+        else if (after.isEmpty() && fullNow > 254)
+            add("warning", theme::kRed, QString("%1 full plugins: over the game's 254").arg(fullNow),
+                "Compile to free slots; the game cannot load this load order as it is.", "Compile", "Compilation");
+    }
     const int missing = scalar("SELECT COUNT(*) FROM Plugins WHERE active = 1 AND status = 'Missing Masters'").toInt();
     if (missing > 0)
         add("warning", theme::kRed, QString("%1 plugin(s) are missing masters").arg(missing),
@@ -407,6 +419,24 @@ void DashboardPage::refresh()
     const qint64 bytes = scalar("SELECT SUM(size_bytes) FROM CompilationGroups").toLongLong();
     tiles_["outputs"]->setValue(n(outputs), outputs.isEmpty() ? QString("output plugins · after Compile")
                                                               : QString("output plugins · %1").arg(formatBytes(bytes)));
+    {
+        // Plugin slots: the game loads at most 254 full plugins; light ones have 4,096 of their own.
+        const QString fullNow = meta("slots_full_now"), fullAfter = meta("slots_full_after");
+        const QString lightNow = meta("slots_light_now"), lightAfter = meta("slots_light_after");
+        if (fullNow.isEmpty()) {
+            tiles_["slots"]->setValue("—", "of 254 plugin slots · after Scan");
+        } else if (fullAfter.isEmpty()) {
+            tiles_["slots"]->setValue(QString("%1 / 254").arg(fullNow),
+                                      QString("plugin slots · %1 light of 4,096 · Compile to see how many it frees")
+                                          .arg(n(lightNow)));
+        } else {
+            tiles_["slots"]->setValue(QString("%1 / 254").arg(fullAfter),
+                                      QString("plugin slots after the build (now %1) · light %2 of 4,096 (now %3)")
+                                          .arg(fullNow, n(lightAfter), n(lightNow)));
+        }
+        tiles_["slots"]->setToolTip("Fallout 4 loads at most 254 full plugins and 4,096 light (ESL) plugins. "
+                                    "Compiling frees the slots of the plugins it compiles; the outputs take a few.");
+    }
     tiles_["conflicts"]->setValue(n(conflicts),
                                   conflicts.isEmpty() ? QString("conflicts · after Analyse")
                                   : plan && plan->pending

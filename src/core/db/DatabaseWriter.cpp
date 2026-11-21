@@ -1,4 +1,5 @@
 #include "db/DatabaseWriter.hpp"
+#include "engine/SlotUsage.hpp"
 
 #include "db/Schema.hpp"
 #include "engine/Diagnosis.hpp"
@@ -345,6 +346,13 @@ void DatabaseWriter::writeScan(const Session& session, ProgressSink& progress)
              "CREATE INDEX IF NOT EXISTS idx_chains_key ON OverrideChains(origin_plugin_id, object_id);");
     tx.commit();
     setMeta("game_path", pathToUtf8(session.install.gamePath));
+    {
+        const auto now = slotsNow(session);
+        setMeta("slots_full_now", std::to_string(now.full));
+        setMeta("slots_light_now", std::to_string(now.light));
+        setMeta("slots_full_after", ""); // until the next compile
+        setMeta("slots_light_after", "");
+    }
     setMeta("install_kind", installKindName(session.install.config.kind));
     setMeta("game_version", session.install.gameVersion);
     setMeta("runtime_profile", session.defs.profileName());
@@ -537,6 +545,9 @@ void DatabaseWriter::writeCompilation(const Session& session, const CompiledOutp
     setMeta("merges_computed", std::to_string(compiled.mergesComputed));
     setMeta("compiled_records", std::to_string(compiled.records.size()));
     setMeta("output_plugins", std::to_string(used));
+    const auto after = slotsAfter(session, compiled);
+    setMeta("slots_full_after", std::to_string(after.full));
+    setMeta("slots_light_after", std::to_string(after.light));
 }
 
 void DatabaseWriter::writeValidation(const std::string& stage, const ValidationReport& report, bool clearPrevious)

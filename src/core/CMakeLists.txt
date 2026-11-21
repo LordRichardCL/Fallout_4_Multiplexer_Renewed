@@ -50,6 +50,7 @@ add_library(fo4mx_core STATIC
     engine/SwitchBack.cpp
     engine/SupportBundle.cpp
     engine/BuildComparison.cpp
+    engine/SlotUsage.cpp
     diagnostics/CrashLog.cpp
     diagnostics/PapyrusLog.cpp
     assets/BcDecode.cpp
