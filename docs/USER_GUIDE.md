@@ -343,6 +343,8 @@ The **Master Redirection** column says whether that switch would free them, befo
 
 A plugin that stays in the load order keeps its masters there too. Patches often list a master without using any of its records. The **Dependency Report** (and the Dependency Graph's *Missing Requirements & Breakages* tab) lists each one as **Unused Master**: "C.esp lists A.esp as a master but uses none of its records".
 
+The Dependency Graph draws a whole load order of up to 200 plugins. Above that, a drawing of every plugin cannot be read, so it shows the plugin you type (press Enter) or click, with its masters and the plugins that need it.
+
 A master counts as unused only when none of the plugin's records overrides one of its records, sits in one of its groups, or names it in a FormID the definitions locate. A byte equal to the master's index anywhere in data the definitions do not describe counts as using it, and a plugin that cannot be read uses all its masters.
 
 With **Placeholders for unused masters** on (Compilation page → Compile more plugins, or `--master-placeholders`), such a master compiles anyway, and an empty light plugin with its name keeps the plugins that list it loading. It is written like an archive loader, so it needs the same setup: Mod Organizer 2 with the output folder inside the mods folder, the output mod at the bottom of the left pane, and the master kept enabled. Anywhere else the master stays in the load order, and its reasons on the Plugins page say why. You can also remove the master from the plugin in xEdit (Clean Masters).
@@ -489,7 +491,7 @@ When you start a **new build** of the app for the first time, it clears the prev
 
 ## Keeping the build up to date
 
-When the app starts it compares your mod space with the last exported build. The Dashboard's status line shows:
+When the app starts it compares your mod space with the last exported build. While it is open it watches `plugins.txt`, Mod Organizer 2's mod list and load order, and the mods and Data folders. A few seconds after one of them changes, it compares again quietly: no summary card, one line in the status bar. A mod updated inside its own folder is only noticed at the next start or **Check Now**. The Dashboard's status line shows:
 
 - **Your game is up to date** (Up To Date): nothing that matters changed.
 - **Some files changed** (Changes Detected): only assets changed (new textures, an updated loose-file mod). The compiled plugins are still correct.
@@ -633,6 +635,7 @@ Once you play on compiled output, a crash log names the output plugins (`Dummy_P
 
 **Diagnostics → Read Papyrus Log** does the same for `Documents\My Games\Fallout4\Logs\Script\Papyrus.0.log`, where script errors are written. It shows:
 - the most frequent errors, counted once per message whatever object they name;
+- the scripts in errors (from call stacks, "Cannot open store for class" lines and `.psc` names), each with the mod that provides it, and which ones the game could not load;
 - every object the log names by FormID, with the original mod behind each compiled record. Records named in errors are listed first.
 
 A Papyrus log has no plugin list of its own, so FormIDs are read with your current load order. Scan first, and read the log before you change the load order. Command line: `fo4mx papyrus-log <install> [Papyrus.0.log]`.

@@ -1,4 +1,6 @@
 #pragma once
+#include <QTimer>
+#include <QFileSystemWatcher>
 
 #include "engine/Pipeline.hpp"
 
@@ -30,6 +32,8 @@ public:
     // are made (and call settingsEdited()), so they survive navigating between pages; saveSettings()
     // persists them and survives a restart. Pages show what is here, never keep their own copy.
     fo4mx::PipelineConfig& config() { return config_; }
+    // The name of the quiet changes check that runs when a watched file changes (watchInstall).
+    static constexpr const char* kAutoCheck = "Auto check";
     void loadSettings();
     // Persists the whole settings state (QSettings) and applies it to the pipeline.
     void saveSettings();
@@ -126,6 +130,10 @@ public slots:
     void runDefinitionCheck();
     // On startup: check for changes when a previous build exists.
     void checkOnStartup();
+    // Watches plugins.txt, the mod list and the mods and Data folders while the app is open: a few seconds
+    // after one changes, the changes check runs again quietly ("Auto check": no summary card), so the
+    // Dashboard says a rebuild is needed without a restart. Only once a build exists.
+    void watchInstall();
     void cancel();
 
 signals:
@@ -158,6 +166,12 @@ private:
     std::unique_ptr<QtProgress> progress_;
     QThread* worker_ = nullptr;
     bool busy_ = false;
+    QFileSystemWatcher* watcher_ = nullptr;
+    QTimer* watchDelay_ = nullptr;
+    bool watchPending_ = false; // a change came in while a task ran
+    void watchedChange(const QString& path);
+    void autoCheck();
+    bool hasBuild() const;
     QString lastMessage_;
     QString connectionName_ = "fo4mx-ui";
     std::shared_ptr<void> logSink_;

@@ -52,10 +52,60 @@ std::string messageOf(const std::string& line, size_t at)
 
 } // namespace
 
+namespace {
+
+bool scriptChar(char ch)
+{
+    return std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == ':';
+}
+
+// The script names a line gives: "].Script.Function(" in a stack, class "X" in "Cannot open store", "X.psc".
+std::vector<std::pair<std::string, bool>> scriptsIn(const std::string& line) // (name, missing)
+{
+    std::vector<std::pair<std::string, bool>> out;
+    for (size_t p = line.find("]."); p != std::string::npos; p = line.find("].", p + 2)) {
+        size_t e = p + 2;
+        while (e < line.size() && scriptChar(line[e]))
+            ++e;
+        if (e < line.size() && line[e] == '.' && e > p + 2)
+            out.push_back({line.substr(p + 2, e - p - 2), false});
+    }
+    const std::string lower = toLower(line);
+    if (auto at = lower.find("cannot open store for class \""); at != std::string::npos) {
+        const size_t b = at + 29;
+        const size_t e = line.find('"', b);
+        if (e != std::string::npos && e > b)
+            out.push_back({line.substr(b, e - b), true});
+    }
+    for (size_t p = lower.find(".psc\""); p != std::string::npos; p = lower.find(".psc\"", p + 5)) {
+        size_t b = p;
+        while (b > 0 && line[b - 1] != '"' && line[b - 1] != '\\' && line[b - 1] != '/')
+            --b;
+        if (p > b)
+            out.push_back({line.substr(b, p - b), false});
+    }
+    return out;
+}
+
+} // namespace
+
+ScriptOwner scriptOwnerOf(const Session& session)
+{
+    return [&session](const std::string& path) -> std::string {
+        if (const auto* e = session.assets.find(path))
+            return session.assets.modName(e->winner());
+        if (const auto* f = session.vfs.find(path))
+            return session.vfs.winnerName(*f);
+        return {};
+    };
+}
+
 PapyrusReport translatePapyrusLog(std::string_view text, const RuntimeLoadOrder& lo,
-                                  const std::vector<FormMapping>& formMap, const std::set<std::string>& redirectedIn)
+                                  const std::vector<FormMapping>& formMap, const std::set<std::string>& redirectedIn,
+                                  const ScriptOwner& scriptOwner)
 {
     PapyrusReport r;
+    std::map<std::string, size_t> scriptIndex;
     std::set<std::string> outputs, redirected;
     std::map<std::pair<std::string, uint32_t>, const FormMapping*> byOutput;
     for (const auto& m : formMap) {
@@ -99,6 +149,30 @@ PapyrusReport translatePapyrusLog(std::string_view text, const RuntimeLoadOrder&
         }
         if (isError || r.errors || r.warnings)
             r.recognised = true;
+        {
+            std::set<std::string> seenHere;
+            for (const auto& [name, missing] : scriptsIn(line)) {
+                const std::string key = toLower(name);
+                if (!seenHere.insert(key).second)
+                    continue;
+                auto [it, fresh] = scriptIndex.try_emplace(key, r.scripts.size());
+                if (fresh) {
+                    PapyrusScript sc;
+                    sc.name = name;
+                    if (scriptOwner) {
+                        std::string path = "scripts\\" + key + ".pex";
+                        std::replace(path.begin(), path.end(), ':', '\\');
+                        sc.mod = scriptOwner(path);
+                    }
+                    r.scripts.push_back(std::move(sc));
+                }
+                auto& sc = r.scripts[it->second];
+                ++sc.mentions;
+                if (isError || inStack)
+                    ++sc.inErrors;
+                sc.missing |= missing;
+            }
+        }
         // "(0A001234)": 8 hex digits in parentheses.
         for (size_t p = line.find('('); p != std::string::npos; p = line.find('(', p + 1)) {
             if (p + 10 > line.size() || line[p + 9] != ')')
@@ -154,6 +228,11 @@ PapyrusReport translatePapyrusLog(std::string_view text, const RuntimeLoadOrder&
     for (const auto& ref : r.refs)
         if (ref.inOutput)
             ++(ref.source.empty() ? r.untranslated : r.translated);
+    std::stable_sort(r.scripts.begin(), r.scripts.end(), [](const PapyrusScript& a, const PapyrusScript& b) {
+        if (a.inErrors != b.inErrors)
+            return a.inErrors > b.inErrors;
+        return a.mentions > b.mentions;
+    });
     std::stable_sort(r.topErrors.begin(), r.topErrors.end(),
                      [](const PapyrusMessage& a, const PapyrusMessage& b) { return a.count > b.count; });
     std::stable_sort(r.refs.begin(), r.refs.end(), [](const PapyrusFormRef& a, const PapyrusFormRef& b) {
@@ -184,6 +263,24 @@ std::string formatPapyrusReport(const PapyrusReport& r, size_t limit)
         o += "\nMost frequent errors:\n";
         for (size_t i = 0; i < r.topErrors.size() && i < 20; ++i)
             o += "  " + std::to_string(r.topErrors[i].count) + "x  " + r.topErrors[i].text + "\n";
+    }
+    {
+        std::vector<const PapyrusScript*> list;
+        for (const auto& sc : r.scripts)
+            if (sc.inErrors || sc.missing)
+                list.push_back(&sc);
+        if (!list.empty()) {
+            o += "\nScripts in errors, and the mod that provides each:\n";
+            for (size_t i = 0; i < list.size() && i < limit; ++i) {
+                const auto& sc = *list[i];
+                o += "  " + sc.name + "  " +
+                     (sc.mod.empty() ? std::string("(no installed mod provides it)") : sc.mod) + "  (" +
+                     std::to_string(sc.inErrors) + " in errors)" +
+                     (sc.missing ? std::string("  the game could not load it") : std::string()) + "\n";
+            }
+            if (list.size() > limit)
+                o += "  ... and " + std::to_string(list.size() - limit) + " more\n";
+        }
     }
     if (!r.refs.empty()) {
         o += "\nObjects (compiled records first, then those in errors):\n";

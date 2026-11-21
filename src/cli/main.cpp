@@ -657,7 +657,8 @@ int cmdPapyrusLog(const Args& a)
                     ? ("Read against the build in " + pathToUtf8(root)).c_str()
                     : "No build found: compiled records are not translated.");
     std::fputs(diagnostics::formatPapyrusReport(
-                   diagnostics::translatePapyrusLog(text, diagnostics::runtimeLoadOrder(p.session()), map, redirected),
+                   diagnostics::translatePapyrusLog(text, diagnostics::runtimeLoadOrder(p.session()), map, redirected,
+                                                   diagnostics::scriptOwnerOf(p.session())),
                    a.has("--limit") ? std::stoul(a.get("--limit")) : 100)
                    .c_str(),
                stdout);

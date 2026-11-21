@@ -299,6 +299,28 @@ void DependenciesPage::buildPluginGraph()
             edges.push_back({from, to, from + " requires " + to});
     }
 
+    // A whole load order of hundreds of plugins cannot be read as one drawing: then only the plugin searched
+    // for, with its masters and dependents, is drawn.
+    constexpr int kMaxDrawn = 200;
+    const bool tooMany = names.size() > kMaxDrawn;
+    neighbourhoodOnly_->setEnabled(!tooMany);
+    if (tooMany) {
+        const QSignalBlocker block(neighbourhoodOnly_);
+        neighbourhoodOnly_->setChecked(true);
+    }
+    pluginSearch_->setPlaceholderText(tooMany ? "Type a plugin's name and press Enter…" : "Find plugin…");
+    neighbourhoodOnly_->setToolTip(tooMany ? QString("%1 plugins are too many to draw at once: the graph shows one "
+                                                     "plugin with its masters and dependents.")
+                                                 .arg(formatCount(qint64(names.size())))
+                                           : QString());
+    if (tooMany && focusPlugin_.isEmpty()) {
+        pluginGraph_->setGraph({}, {}, {});
+        pluginDetails_->setHtml(QString("<p><b>%1 plugins are too many to draw at once.</b></p><p style='color:#8aa196'>"
+                                        "Type a plugin's name above, or open a plugin from the Plugins page, to see "
+                                        "it with its masters and the plugins that need it.</p>")
+                                    .arg(formatCount(qint64(names.size()))));
+        return;
+    }
     QSet<QString> include;
     bool neighbourhood = neighbourhoodOnly_->isChecked() && !focusPlugin_.isEmpty();
     QString focus;

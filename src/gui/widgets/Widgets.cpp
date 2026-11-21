@@ -702,7 +702,11 @@ IconTile::IconTile(const QString& icon, const QColor& accent, QWidget* parent) :
     text_->setWordWrap(true);
     v->addWidget(value_);
     v->addWidget(text_);
+    v->addStretch();
     h->addLayout(v, 1);
+    // Room for a value and two lines of text, the same for every tile, so a hint that wraps (large counts)
+    // neither overlaps the value nor leaves the tiles uneven.
+    setFixedHeight(92);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 }
 

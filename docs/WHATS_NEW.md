@@ -4,6 +4,10 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 
 ## 21 November 2026
 
+- **The status updates while the app is open:** editing your load order, mod list, or adding and removing mods is noticed within seconds, without a restart.
+- **Papyrus readings name the script's mod:** scripts in errors are listed with the mod that provides each one, and those the game could not load at all.
+- **Large load orders:** the Dashboard's tiles keep the same size whatever the counts, the Dependency Graph shows one plugin with its neighbours above 200 plugins, and long lists in the Plugins page's details stop at 50 with a count of the rest.
+- **Design:** [compiling new cells with precombine and previs data](PRECOMBINED_CELLS_DESIGN.md), the largest group of plugins still kept out.
 - **Diagnostics is easier to find your way in:** four cards say which tool is for which situation (the game crashed, scripts misbehave, before loading a save, asking for help); the Diagnostic Recorder has its own section. The Dashboard fits the window again.
 - **Check a save before you load it:** Diagnostics → Check a Save… compares the plugins a save was made with against your load order, or the one after the build you just compiled, and says what the save would lose.
 - **Plugin slots on the Dashboard:** full plugins now and after the build, out of the game's 254 (and light ones out of 4,096), with a warning when a load order is over the limit.

@@ -284,6 +284,10 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
         stageLabel_->setText(text);
     });
     connect(app_, &AppController::taskFinished, this, [this](const QString& task, bool ok, const QString& msg) {
+        if (task == AppController::kAutoCheck) { // quiet: the Dashboard and status line say it
+            stageLabel_->setText(ok ? "Checked for changes after a file changed: " + msg : QString());
+            return;
+        }
         stageLabel_->setText(QString("%1 %2 — %3").arg(task, ok ? "complete" : "failed", msg));
         if (ok)
             showSummary(task, msg);

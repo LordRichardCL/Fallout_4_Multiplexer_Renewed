@@ -18,6 +18,8 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDialog>
+#include <QDir>
+#include <QFile>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
@@ -350,6 +352,59 @@ private slots:
         // A failed task shows no card.
         emit app_->taskFinished("Scan", false, "Cancelled");
         QVERIFY(toast->isHidden());
+    }
+
+    // The changes check that runs when a watched file changes is quiet: no summary card, no dialog, a line in
+    // the status bar.
+    void auto_check_is_quiet()
+    {
+        emit app_->taskFinished(gui::AppController::kAutoCheck, true, "Requires Rebuild — 1 change(s)");
+        for (auto* f : window_->findChildren<QFrame*>())
+            if (f->objectName() == "Toast")
+                QVERIFY(f->isHidden());
+        emit app_->taskFinished(gui::AppController::kAutoCheck, false, "no install");
+        QVERIFY(!QApplication::activeModalWidget());
+    }
+
+    // Editing plugins.txt while the app is open starts the changes check a few seconds later, once a build
+    // exists; nothing happens before there is one.
+    void editing_the_load_order_starts_a_check()
+    {
+        QDir root(dir_.filePath("install"));
+        root.mkpath("Game/Data");
+        QFile esm(root.filePath("Game/Data/Fallout4.esm"));
+        QVERIFY(esm.open(QIODevice::WriteOnly));
+        esm.close();
+        const QString plugins = root.filePath("plugins.txt");
+        auto write = [&](const QByteArray& text) {
+            QFile f(plugins);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            f.write(text);
+        };
+        write("*Weapons.esp\n");
+        auto& cfg = app_->config();
+        cfg.install.kind = fo4mx::InstallKind::Standalone;
+        cfg.install.gamePath = gui::toPath(root.filePath("Game"));
+        cfg.install.pluginsFile = gui::toPath(plugins);
+        app_->watchInstall();
+        QStringList started;
+        connect(app_.get(), &gui::AppController::taskStarted, this, [&](const QString& t) { started << t; });
+
+        write("*Weapons.esp\n*Armour.esp\n"); // no build yet: no check
+        QTest::qWait(5500);
+        QVERIFY(!started.contains(gui::AppController::kAutoCheck));
+
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("INSERT INTO Snapshots (kind, created, data) VALUES ('build', 1, '{}')");
+        }
+        write("*Weapons.esp\n");
+        QTRY_VERIFY_WITH_TIMEOUT(started.contains(gui::AppController::kAutoCheck), 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(!app_->busy(), 20000);
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("DELETE FROM Snapshots");
+        }
     }
 };
 

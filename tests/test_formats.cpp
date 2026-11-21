@@ -1389,6 +1389,22 @@ TEST(papyrus_log_names_the_original_mods)
     const auto text = diagnostics::formatPapyrusReport(r);
     CHECK(text.find("compiled from Weapons.esp 000812 (W_Gun) [WEAP]") != std::string::npos);
     CHECK(!diagnostics::translatePapyrusLog("hello\n", lo, {}, {}).recognised);
+    // Scripts named in errors, with the mod providing each; one the game could not load.
+    const std::string log2 = log +
+        "[11/21/2026 - 04:00:05PM] error: Cannot open store for class \"SS2:Quests:Missing\", missing file?\n";
+    const auto r2 = diagnostics::translatePapyrusLog(log2, lo, {m}, {}, [](const std::string& path) {
+        return path == "scripts\\w_script.pex" ? std::string("Weapons Pack") : std::string();
+    });
+    bool owned = false, missing = false;
+    for (const auto& sc : r2.scripts) {
+        owned |= sc.name == "W_Script" && sc.mod == "Weapons Pack" && sc.inErrors >= 1;
+        missing |= sc.name == "SS2:Quests:Missing" && sc.missing && sc.mod.empty();
+    }
+    CHECK(owned);
+    CHECK(missing);
+    const auto text2 = diagnostics::formatPapyrusReport(r2);
+    CHECK(text2.find("W_Script  Weapons Pack") != std::string::npos);
+    CHECK(text2.find("the game could not load it") != std::string::npos);
 }
 
 namespace {

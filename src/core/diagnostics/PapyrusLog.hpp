@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -48,16 +49,32 @@ struct PapyrusMessage {
     size_t count = 0;
 };
 
+// A script the log names (in a call stack, a "Cannot open store" error, a .psc file), with the mod that
+// provides its compiled file scripts\<name>.pex.
+struct PapyrusScript {
+    std::string name;     // "Namespace:Script" as the game names it
+    std::string mod;      // the mod providing scripts\namespace\script.pex; "" when none does
+    size_t mentions = 0;
+    size_t inErrors = 0;
+    bool missing = false; // "Cannot open store for class": the game did not find it
+};
+
 struct PapyrusReport {
     bool recognised = false; // has Papyrus log lines
     size_t lines = 0, errors = 0, warnings = 0;
     std::vector<PapyrusMessage> topErrors;   // most frequent first
     std::vector<PapyrusFormRef> refs;        // translated first, then most mentioned
     size_t translated = 0, untranslated = 0; // in an output: found in the map or not
+    std::vector<PapyrusScript> scripts;      // most in errors first
 };
 
+// `scriptOwner`: the mod providing a script file ("scripts\\ns\\name.pex"), "" when none does; optional.
+using ScriptOwner = std::function<std::string(const std::string& pexPath)>;
 PapyrusReport translatePapyrusLog(std::string_view text, const RuntimeLoadOrder& loadOrder,
-                                  const std::vector<FormMapping>& formMap, const std::set<std::string>& redirected);
+                                  const std::vector<FormMapping>& formMap, const std::set<std::string>& redirected,
+                                  const ScriptOwner& scriptOwner = {});
+// The owner lookup for a scanned session: loose files and archives, the winning mod.
+ScriptOwner scriptOwnerOf(const Session& session);
 std::string formatPapyrusReport(const PapyrusReport& report, size_t limit = 100);
 
 // The session's active load order, numbered as the game numbers it.

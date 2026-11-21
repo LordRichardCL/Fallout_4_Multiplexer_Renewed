@@ -43,6 +43,10 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
     cfg.exportOptions.outputDirectory = gui::toPath(args.value("out"));
     cfg.compile.outputCount = 10;
     cfg.compile.autoMerge = args.isSet("auto-merge");
+    if (args.isSet("archive-loader-dll")) { // the F4SE archive loader, with this DLL in place of the shipped one
+        controller.config().f4seArchiveLoader = true;
+        controller.config().archiveLoaderDll = gui::toPath(args.value("archive-loader-dll"));
+    }
     // Applies the install and results database given (tasks use the settings state; the database in use
     // is the saved one), as the run tasks' own save did before.
     controller.saveSettings();
@@ -237,7 +241,7 @@ int main(int argc, char** argv)
     QCommandLineParser args;
     args.addHelpOption();
     args.addVersionOption();
-    for (const char* opt : {"screenshots", "game", "mo2", "plugins", "ini-dir", "db", "out", "record"})
+    for (const char* opt : {"screenshots", "game", "mo2", "plugins", "ini-dir", "db", "out", "record", "archive-loader-dll"})
         args.addOption(QCommandLineOption(opt, QString("Developer screenshot mode: %1").arg(opt), "value"));
     args.addOption(QCommandLineOption("check-only", "Developer screenshot mode: only check for changes"));
     args.addOption(QCommandLineOption("auto-merge", "Developer screenshot mode: turn the Auto-Merger on"));

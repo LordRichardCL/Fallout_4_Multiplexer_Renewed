@@ -619,7 +619,11 @@ void PluginsPage::showDetails(int row)
     while (d.next())
         dependents << d.value(0).toString().toHtmlEscaped();
     html += "<p><b>Required by (" + QString::number(dependents.size()) + "):</b><br>" +
-            (dependents.isEmpty() ? "none" : linked(dependents.mid(0, 50).join("<br>"))) + "</p>";
+            (dependents.isEmpty() ? "none" : linked(dependents.mid(0, 50).join("<br>"))) +
+            (dependents.size() > 50 ? QString("<br>… and %1 more (the Dependencies page lists them all)")
+                                          .arg(dependents.size() - 50)
+                                    : QString()) +
+            "</p>";
 
     // Every place the plugin's file name appears, with its classification.
     QSqlQuery n(db);

@@ -332,7 +332,8 @@ void DiagnosticsPage::readPapyrusLog(QString file)
         buildNote = "Read against the build in " + fo4mx::pathToUtf8(root) + " (" + std::to_string(map.size()) +
                     " FormID mappings).";
     const auto report = dg::translatePapyrusLog(std::string_view(bytes.constData(), size_t(bytes.size())),
-                                                dg::runtimeLoadOrder(p->session()), map, redirected);
+                                                dg::runtimeLoadOrder(p->session()), map, redirected,
+                                                dg::scriptOwnerOf(p->session()));
     const QString text = QFileInfo(file).fileName() + "\n" + qs(buildNote) + "\n\n" + qs(dg::formatPapyrusReport(report));
     showReading("Papyrus log", file, text, "Papyrus logs (*.log)", [this](const QString& f) { readPapyrusLog(f); });
 }

@@ -1,4 +1,5 @@
 #include "AppController.hpp"
+#include <QFileInfo>
 #include "engine/SwitchBack.hpp"
 
 #include "diagnostics/RecorderPackage.hpp"
@@ -597,6 +598,12 @@ void AppController::runTask(const QString& name, std::function<QString(ProgressS
         emit busyChanged(false);
         emit taskFinished(name, *ok, *message);
         emit dataChanged();
+        if (name == "Scan" || name == "Rebuild")
+            watchInstall(); // the install the scan read
+        if (watchPending_ && watchDelay_) {
+            watchPending_ = false;
+            watchDelay_->start();
+        }
     });
     worker_->start();
 }
@@ -705,6 +712,81 @@ void AppController::runRebuild()
     });
 }
 
+bool AppController::hasBuild() const
+{
+    if (!std::filesystem::exists(activeDatabase_))
+        return false;
+    try {
+        db::Database db(activeDatabase_);
+        return db.scalar("SELECT COUNT(*) FROM Snapshots WHERE kind = 'build'").value_or(0) > 0;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+void AppController::watchInstall()
+{
+    if (!watcher_) {
+        watcher_ = new QFileSystemWatcher(this);
+        watchDelay_ = new QTimer(this);
+        watchDelay_->setSingleShot(true);
+        watchDelay_->setInterval(4000); // mod managers write several files in a row
+        connect(watcher_, &QFileSystemWatcher::fileChanged, this, &AppController::watchedChange);
+        connect(watcher_, &QFileSystemWatcher::directoryChanged, this, &AppController::watchedChange);
+        connect(watchDelay_, &QTimer::timeout, this, &AppController::autoCheck);
+    }
+    std::vector<std::filesystem::path> paths;
+    try {
+        const auto install = pipeline_ && pipeline_->scanned() ? pipeline_->session().install
+                                                               : fo4mx::resolveInstall(config_.install);
+        paths = {install.pluginsFile, install.dataPath};
+        if (!install.profilePath.empty())
+            for (const char* f : {"modlist.txt", "loadorder.txt"})
+                paths.push_back(install.profilePath / f);
+        if (!install.modsPath.empty())
+            paths.push_back(install.modsPath);
+    } catch (const std::exception& e) {
+        spdlog::debug("Not watching the install: {}", e.what());
+        return;
+    }
+    if (!watcher_->files().isEmpty())
+        watcher_->removePaths(watcher_->files());
+    if (!watcher_->directories().isEmpty())
+        watcher_->removePaths(watcher_->directories());
+    for (const auto& p : paths) {
+        std::error_code ec;
+        if (!p.empty() && std::filesystem::exists(p, ec))
+            watcher_->addPath(toQString(p));
+    }
+}
+
+void AppController::watchedChange(const QString& path)
+{
+    // An editor or mod manager that replaces the file drops it from the watch: add it back.
+    if (QFileInfo::exists(path) && !watcher_->files().contains(path) && !watcher_->directories().contains(path))
+        watcher_->addPath(path);
+    if (busy_) {
+        watchPending_ = true; // a running task (Apply, Export) may be the one writing: check after it
+        return;
+    }
+    watchDelay_->start();
+}
+
+void AppController::autoCheck()
+{
+    if (busy_) {
+        watchPending_ = true;
+        return;
+    }
+    if (!hasBuild())
+        return;
+    ensurePipeline(false);
+    runTask(kAutoCheck, [this](ProgressSink& p) {
+        auto r = pipeline_->checkForChanges(p);
+        return QString("%1 — %2 change(s) since the last build").arg(qs(buildStatusName(r.status))).arg(r.items.size());
+    });
+}
+
 void AppController::checkOnStartup()
 {
     if (!std::filesystem::exists(activeDatabase_))
@@ -714,6 +796,7 @@ void AppController::checkOnStartup()
         db::DatabaseWriter(db).initSchema();
         if (db.scalar("SELECT COUNT(*) FROM Snapshots WHERE kind = 'build'").value_or(0) > 0)
             runCheck();
+        watchInstall();
     } catch (const std::exception& e) {
         spdlog::warn("Startup change check skipped: {}", e.what());
     }
