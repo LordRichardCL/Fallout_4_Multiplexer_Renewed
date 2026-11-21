@@ -1,5 +1,6 @@
 #include "util/Zip.hpp"
 #include "diagnostics/CrashLog.hpp"
+#include "engine/SupportBundle.hpp"
 #include <fstream>
 #include "esp/RecordDefinitions.hpp"
 #include "diagnostics/RecorderLog.hpp"
@@ -1236,8 +1237,51 @@ TEST(path_lookup_is_case_insensitive)
     std::ofstream(dir / "Scripts" / "Sub" / "MyQuest.pex") << "x";
     PathLookup lookup;
     CHECK_EQ(lookup.find(dir, "scripts\\sub\\myquest.pex"), dir / "Scripts" / "Sub" / "MyQuest.pex");
-    CHECK_EQ(lookup.find(dir, "SCRIPTS/SUB/MYQUEST.PEX"), findPathCaseInsensitive(dir, "scripts\\sub\\myquest.pex"));
+    // The same file (on Windows findPathCaseInsensitive may keep the spelling it was given).
+    CHECK(std::filesystem::equivalent(lookup.find(dir, "SCRIPTS/SUB/MYQUEST.PEX"),
+                                      findPathCaseInsensitive(dir, "scripts\\sub\\myquest.pex")));
     CHECK(lookup.find(dir, "scripts\\other.pex").empty());
     CHECK(lookup.find(dir, "scripts\\..\\x").empty());
+    std::filesystem::remove_all(dir);
+}
+
+// Support bundle: the export's notes, reports and build records, logs, load order, crash log and its reading,
+// settings; never plugins or archives; the home folder and user name taken out of every text file.
+TEST(support_bundle_collects_and_redacts)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "fo4mx_bundle";
+    std::filesystem::remove_all(dir);
+    const auto pkg = dir / "Multiplexer Output 211126 120000";
+    std::filesystem::create_directories(pkg / "Data");
+    std::filesystem::create_directories(pkg / "Multiplexer Reports");
+    const std::string home = "C:\\Users\\Romewolf";
+    std::ofstream(pkg / "Multiplexer_Instructions.txt") << "Install from " << home << "\\Downloads\\x.zip\n";
+    std::ofstream(pkg / "Data" / "Multiplexer_FormMap.tsv") << "# map\nModA.esp\t000800\tDummy_Plugin_01.esp\t000800\n";
+    std::ofstream(pkg / "Data" / "Dummy_Plugin_01.esp") << "TES4";
+    std::ofstream(pkg / "Data" / "ModA - Main.ba2") << "BTDX";
+    std::ofstream(pkg / "Multiplexer Reports" / "ValidationReport.txt") << "path C:/Users/Romewolf/Games\n";
+    std::ofstream(dir / "multiplexer.log") << "scanning " << home << "\\Fallout 4\\Data\n";
+    std::ofstream(dir / "plugins.txt") << "*ModA.esp\n";
+    SupportBundleInputs in;
+    in.packageRoot = pkg;
+    in.logs = {dir / "multiplexer.log", dir / "missing.log"};
+    in.loadOrder = {dir / "plugins.txt"};
+    in.settings = {{"install/gamePath", home + "\\Fallout 4"}};
+    in.redact = {home};
+    const auto r = writeSupportBundle(in, dir / "bundle.zip");
+    CHECK(std::filesystem::file_size(dir / "bundle.zip") > 100);
+    auto has = [&](const std::string& f) { return std::find(r.included.begin(), r.included.end(), f) != r.included.end(); };
+    CHECK(has("export/Multiplexer_Instructions.txt"));
+    CHECK(has("export/Multiplexer_FormMap.tsv"));
+    CHECK(has("reports/ValidationReport.txt"));
+    CHECK(has("logs/multiplexer.log"));
+    CHECK(has("load order/plugins.txt"));
+    CHECK(has("settings.txt"));
+    CHECK(has("README.txt"));
+    for (const auto& f : r.included)
+        CHECK(!iendsWith(f, ".esp") && !iendsWith(f, ".ba2"));
+    CHECK(std::find(r.missing.begin(), r.missing.end(), "logs/missing.log") != r.missing.end());
+    CHECK_EQ(redactText("at " + home + "\\Data and C:/Users/Romewolf/x", {home}), std::string("at <user>\\Data and <user>/x"));
+    CHECK_EQ(redactText("mod by Romewolf in \\Romewolf\\", {"\\Romewolf\\"}), std::string("mod by Romewolf in \\<user>\\"));
     std::filesystem::remove_all(dir);
 }

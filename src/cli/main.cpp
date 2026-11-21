@@ -6,6 +6,7 @@
 #include "ba2/Ba2Archive.hpp"
 #include "engine/Pipeline.hpp"
 #include "engine/SwitchBack.hpp"
+#include "engine/SupportBundle.hpp"
 #include <set>
 #include "diagnostics/CrashLog.hpp"
 #include "util/FileTransaction.hpp"
@@ -67,6 +68,11 @@ Usage:
   fo4mx ba2      <archive.ba2> [--extract PATH --to FILE]
   fo4mx clean-outputs <install> [--keep N] [--unfinished]
   fo4mx switch-back <install> [--yes]       undo the last Apply to Game from its backups
+  fo4mx support-bundle <install> [--out FILE.zip]
+                                            one zip to send with a problem report: the latest
+                                            export's reports and records, logs, load order, the
+                                            newest crash log and its reading, recorder log. No mod
+                                            files; home folder and user name taken out
   fo4mx crash-log [Crash-*.log] [--formmap <export>\\Data\\Multiplexer_FormMap.tsv]
                                             name the original mods behind a Buffout 4 crash log
                  delete exports in the output folder beyond the newest N (default
@@ -596,6 +602,71 @@ int cmdCrashLog(const Args& a)
     return 0;
 }
 
+// The crash log read against a build (its Data folder or root holding Multiplexer_FormMap.tsv).
+std::string crashReadingAgainst(const std::filesystem::path& crashLog, const std::filesystem::path& build)
+{
+    std::ifstream in(crashLog, std::ios::binary);
+    if (!in)
+        return {};
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::vector<FormMapping> map;
+    std::set<std::string> redirected;
+    std::string note = "No build to read it against (no Multiplexer_FormMap.tsv found).";
+    for (const auto& dir : {build / "Data", build}) {
+        if (build.empty() || !std::filesystem::exists(dir / "Multiplexer_FormMap.tsv"))
+            continue;
+        map = CompilationEngine::readFormMap(dir / "Multiplexer_FormMap.tsv");
+        std::ifstream r(dir / "Multiplexer_Redirected.tsv");
+        for (std::string line; std::getline(r, line);)
+            if (!line.empty() && line[0] != '#')
+                redirected.insert(line.substr(0, line.find('\t')));
+        note = "Read against the build in " + pathToUtf8(build) + " (" + std::to_string(map.size()) +
+               " FormID mappings).";
+        break;
+    }
+    return pathToUtf8(crashLog.filename()) + "\n" + note + "\n\n" +
+           diagnostics::formatCrashReport(diagnostics::translateCrashLog(text, map, {}, redirected));
+}
+
+// One zip to send with a problem report (Diagnostics → Support Bundle… in the app).
+int cmdSupportBundle(const Args& a)
+{
+    SupportBundleInputs in;
+    auto cfg = makeConfig(a);
+    try {
+        const auto install = resolveInstall(cfg.install);
+        const auto loc = output::locate(cfg.exportOptions.outputDirectory, install.gamePath, install.dataPath,
+                                        install.modsPath);
+        in.packageRoot = output::latestRun(loc).value_or(loc.root);
+        std::error_code ec;
+        for (const auto& f : {install.pluginsFile, install.profilePath / "loadorder.txt", install.profilePath / "modlist.txt"})
+            if (!f.empty() && std::filesystem::is_regular_file(f, ec))
+                in.loadOrder.push_back(f);
+    } catch (const std::exception& e) {
+        std::printf("No install found (%s): the bundle holds the logs and crash log only.\n", e.what());
+    }
+    in.reportDirectory = cfg.reportDirectory;
+    std::error_code ec;
+    const auto logs = platform::applicationDataDir() / "logs";
+    for (auto it = std::filesystem::directory_iterator(logs, ec); !ec && it != std::filesystem::directory_iterator();
+         it.increment(ec))
+        if (it->is_regular_file(ec))
+            in.logs.push_back(it->path());
+    in.crashLog = diagnostics::newestCrashLog();
+    if (!in.crashLog.empty())
+        in.crashReading = crashReadingAgainst(in.crashLog, in.packageRoot);
+    in.recorderSession = diagnostics::newestSession(diagnostics::defaultRecorderFolder());
+    const auto out = a.has("--out") ? utf8ToPath(a.get("--out"))
+                                    : std::filesystem::current_path() /
+                                          ("Multiplexer Support " + output::runStamp() + ".zip");
+    const auto r = writeSupportBundle(in, out);
+    std::printf("Wrote %s (%zu files). No mod files; home folder and user name taken out.\n", pathToUtf8(out).c_str(),
+                r.included.size());
+    for (const auto& m : r.missing)
+        std::printf("  not found: %s\n", m.c_str());
+    return 0;
+}
+
 // Undoes the last Apply to Game from its backups: shows the plan, applies it with --yes.
 int cmdSwitchBack(const Args& a)
 {
@@ -872,6 +943,8 @@ int main(int argc, char** argv)
             return cmdDiagnose(a);
         if (a.command == "formid")
             return cmdFormId(a);
+        if (a.command == "support-bundle")
+            return cmdSupportBundle(a);
         if (a.command == "crash-log")
             return cmdCrashLog(a);
         if (a.command == "switch-back")

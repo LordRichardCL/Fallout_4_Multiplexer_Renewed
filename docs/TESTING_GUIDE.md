@@ -52,12 +52,13 @@ If something is missing or broken, note the mod, the item or NPC, and where. Sen
 ## 5. When something goes wrong
 
 1. **Switch Back** first, if you want your game back at once.
-2. **Crash:** Diagnostics → Read Crash Log names the original mod behind each output FormID. Save the reading and send it with the crash log.
-3. **Not a crash, but wrong:** note what and where, then send:
+2. **Easiest:** Diagnostics → **Support Bundle…** puts everything below (crash log and its reading, reports, instructions, recorder log, load order) in one zip. Send it with a note of what happened and where.
+3. **Crash:** Diagnostics → Read Crash Log names the original mod behind each output FormID. Save the reading and send it with the crash log.
+4. **Not a crash, but wrong:** note what and where, then send (or the support bundle):
    - the Reports folder of the export (`Multiplexer Reports`);
    - `Multiplexer_Instructions.txt`;
    - the Diagnostic Recorder log, if installed.
-4. **To narrow it down:** exclude the suspected mod (Plugins page), rebuild, and test again. Or compile only some mods ("Only the ones I choose" on the Compilation page) and widen the selection step by step.
+5. **To narrow it down:** exclude the suspected mod (Plugins page), rebuild, and test again. Or compile only some mods ("Only the ones I choose" on the Compilation page) and widen the selection step by step.
 
 ## What results help most
 

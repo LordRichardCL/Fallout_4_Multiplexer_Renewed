@@ -48,6 +48,7 @@ add_library(fo4mx_core STATIC
     engine/PluginIni.cpp
     engine/Redirection.cpp
     engine/SwitchBack.cpp
+    engine/SupportBundle.cpp
     diagnostics/CrashLog.cpp
     assets/BcDecode.cpp
     engine/FieldModel.cpp

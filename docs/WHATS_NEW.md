@@ -2,6 +2,10 @@
 
 Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has the details of each.
 
+## 21 November 2026
+
+- **Support bundle:** Diagnostics → Support Bundle… saves one zip with the latest build's reports and records, the logs, your load order, the newest crash log and its reading, and the recorder log. It holds no mod files, and your home folder and user name are taken out.
+
 ## 20 November 2026
 
 ### Master Redirection (advanced, new)

@@ -1,5 +1,9 @@
 #include "pages/DiagnosticsPage.hpp"
 #include "diagnostics/CrashLog.hpp"
+#include <QStandardPaths>
+#include <QSettings>
+#include <QDate>
+#include "engine/SupportBundle.hpp"
 #include "engine/CompilationEngine.hpp"
 #include "util/Platform.hpp"
 #include "util/Text.hpp"
@@ -43,11 +47,15 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     folder->setAccessibleName("Open Log Folder");
     auto* save = makeButton("Save Report…", nullptr, "export");
     auto* check = makeButton("Check Installation", nullptr, "check");
+    auto* bundle = makeButton("Support Bundle…", nullptr, "export");
+    bundle->setToolTip("One zip with what it takes to look into a problem: the latest build's reports and records, "
+                       "this app's logs, your load order, the newest crash log with its reading, the newest recorder "
+                       "log and the settings. No mod files; your home folder and user name are taken out.");
     auto* crash = makeButton("Read Crash Log", nullptr, "warning");
     crash->setToolTip("Read the newest Buffout 4 crash log (Documents\\My Games\\Fallout4\\F4SE\\Crash-*.log) and "
                       "name the original mod behind every output plugin FormID it mentions");
     l->addWidget(makePageHeader("Diagnostics", "What happened while you played, and what it likely means.",
-                                {newest, openBtn, folder, check, save, crash}, "diagnostics",
+                                {newest, openBtn, folder, check, save, crash, bundle}, "diagnostics",
                                 "To record: turn on \"Prepare the Diagnostic Recorder\" in Settings, export, and "
                                 "install Multiplexer Output\\Diagnostic Recorder\\Multiplexer Diagnostic Recorder.zip "
                                 "as a mod. Start the game through F4SE; each session writes a log. Findings are likely "
@@ -95,6 +103,7 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
             open(f);
     });
     connect(crash, &QPushButton::clicked, this, [this] { readCrashLog({}); });
+    connect(bundle, &QPushButton::clicked, this, [this] { makeSupportBundle(); });
     connect(check, &QPushButton::clicked, this, [this] {
         showInstallStatus();
         const auto st = dg::checkRecorderInstall(app_->config().install.gamePath);
@@ -142,11 +151,19 @@ void DiagnosticsPage::readCrashLog(QString file)
         if (file.isEmpty())
             return;
     }
-    QFile in(file);
-    if (!in.open(QIODevice::ReadOnly)) {
+    QString text;
+    if (!crashReading(file, &text)) {
         QMessageBox::warning(this, "Crash log", "Cannot read " + file);
         return;
     }
+    showCrashReading(file, text);
+}
+
+bool DiagnosticsPage::crashReading(const QString& file, QString* text) const
+{
+    QFile in(file);
+    if (!in.open(QIODevice::ReadOnly))
+        return false;
     const QByteArray bytes = in.readAll();
     // The latest build's FormID map and redirected copies (its Data folder, or the folder itself).
     std::vector<fo4mx::FormMapping> map;
@@ -168,9 +185,13 @@ void DiagnosticsPage::readCrashLog(QString file)
             break;
         }
     const auto report = dg::translateCrashLog(std::string_view(bytes.constData(), size_t(bytes.size())), map, {}, redirected);
-    const QString text = toQString(std::filesystem::path(ss(file)).filename()) + "\n" + qs(buildNote) + "\n\n" +
-                         qs(dg::formatCrashReport(report));
+    *text = toQString(std::filesystem::path(ss(file)).filename()) + "\n" + qs(buildNote) + "\n\n" +
+            qs(dg::formatCrashReport(report));
+    return true;
+}
 
+void DiagnosticsPage::showCrashReading(const QString& file, const QString& text)
+{
     QDialog dlg(this);
     dlg.setWindowTitle("Crash log");
     dlg.resize(820, 620);
@@ -206,6 +227,54 @@ void DiagnosticsPage::readCrashLog(QString file)
     dlg.exec();
     if (!next.isEmpty())
         readCrashLog(next);
+}
+
+void DiagnosticsPage::makeSupportBundle()
+{
+    const QString name = "Multiplexer Support " + QDate::currentDate().toString("ddMMyy") + ".zip";
+    const QString where = QFileDialog::getSaveFileName(
+        this, "Save the support bundle", QStandardPaths::writableLocation(QStandardPaths::DesktopLocation) + "/" + name,
+        "Zip (*.zip)");
+    if (where.isEmpty())
+        return;
+    fo4mx::SupportBundleInputs in;
+    in.packageRoot = packageRoot();
+    in.reportDirectory = app_->config().reportDirectory;
+    std::error_code ec;
+    const auto logs = fo4mx::platform::applicationDataDir() / "logs";
+    for (auto it = std::filesystem::directory_iterator(logs, ec); !ec && it != std::filesystem::directory_iterator();
+         it.increment(ec))
+        if (it->is_regular_file(ec))
+            in.logs.push_back(it->path());
+    if (auto* p = app_->pipeline(); p && p->scanned()) {
+        const auto& install = p->session().install;
+        for (const auto& f : {install.pluginsFile, install.profilePath / "loadorder.txt", install.profilePath / "modlist.txt"})
+            if (!f.empty() && std::filesystem::is_regular_file(f, ec))
+                in.loadOrder.push_back(f);
+    }
+    in.crashLog = dg::newestCrashLog();
+    if (!in.crashLog.empty()) {
+        QString text;
+        if (crashReading(toQString(in.crashLog), &text))
+            in.crashReading = ss(text);
+    }
+    in.recorderSession = dg::newestSession(dg::defaultRecorderFolder());
+    QSettings settings;
+    for (const auto& k : settings.allKeys())
+        in.settings.push_back({ss(k), ss(settings.value(k).toStringList().join(", ").isEmpty()
+                                            ? settings.value(k).toString()
+                                            : settings.value(k).toStringList().join(", "))});
+    try {
+        const auto r = fo4mx::writeSupportBundle(in, toPath(where));
+        QMessageBox::information(this, "Support bundle",
+                                 QString("Saved %1 (%2 files). Personal details are taken out; no mod files are "
+                                         "included.%3")
+                                     .arg(where)
+                                     .arg(r.included.size())
+                                     .arg(in.crashLog.empty() ? QString("\n\nNo crash log was found.") : QString()));
+    } catch (const std::exception& e) {
+        QMessageBox::warning(this, "Support bundle", QString("Could not write it: ") + e.what());
+    }
 }
 
 void DiagnosticsPage::open(const QString& file)

@@ -620,6 +620,15 @@ Logs are in `Documents\My Games\Fallout4\F4SE\MultiplexerDiagnosticRecorder` (th
 
 Once you play on compiled output, a crash log names the output plugins (`Dummy_Plugin_03.esp`) and their FormIDs, which say nothing about the mod behind them. **Diagnostics → Read Crash Log** reads the newest `Crash-*.log` from `Documents\My Games\Fallout4\F4SE` (or one you choose) against your latest build. Every FormID the log names is read with the log's own plugin list (the load order the game had). One that an output defines is translated through the build's FormID map to the original mod, object ID, Editor ID and type. A record of another plugin that the outputs change is marked, and so is a redirected copy. "Save…" keeps the reading as text, ready to send. Command line: `fo4mx crash-log [Crash-*.log] --formmap <export>\Data\Multiplexer_FormMap.tsv`.
 
+**Diagnostics → Support Bundle…** saves one zip holding what it takes to look into a problem, ready to send:
+- the latest export's notes (`Multiplexer_Instructions.txt`, `Multiplexer_Build.json`...), its reports and the build's own records (FormID map, redirected copies);
+- this app's logs and your load order (`plugins.txt`, `loadorder.txt`, `modlist.txt`);
+- the newest crash log with its reading against the build;
+- the newest Diagnostic Recorder log;
+- the settings.
+
+It never includes plugins, archives or other mod files. In every text file, your home folder and user name are replaced with `<user>`. Its `README.txt` lists what is inside. Command line: `fo4mx support-bundle <install> [--out FILE.zip]`.
+
 ## Command line
 
 Everything is also available through `fo4mx` (run `fo4mx help`), for example:
