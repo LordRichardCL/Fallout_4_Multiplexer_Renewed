@@ -252,8 +252,8 @@ void AppController::loadSettings()
     c.lightOutputsWhenPossible = s.value("compile/light", false).toBool();
     c.lightHeadroom = s.value("compile/lightHeadroom", fo4mx::CompileOptions::kDefaultLightHeadroom).toUInt();
     c.translatePrevis = s.value("compile/translatePrevis", true).toBool();
-    c.mergeCellConfig = s.value("compile/mergeCellConfig", false).toBool();
-    c.applyPatchPlan = s.value("compile/applyPatchPlan", false).toBool();
+    c.mergeCellConfig = s.value("compile/mergeCellConfig", true).toBool();
+    c.applyPatchPlan = s.value("compile/applyPatchPlan", true).toBool();
     c.brokenReferencesAsNull = s.value("compile/brokenReferencesAsNull", false).toBool();
     c.unusedMasterPlaceholders = s.value("compile/unusedMasterPlaceholders", false).toBool();
     c.redirectMasters = s.value("compile/redirectMasters", false).toBool();
@@ -261,7 +261,7 @@ void AppController::loadSettings()
     for (const auto& n : s.value("compile/noRedirect").toStringList())
         c.noRedirect.push_back(ss(n));
     c.compileNewQuestsAndNpcs = s.value("compile/newQuestsAndNpcs", true).toBool();
-    c.buildPatch = s.value("compile/patch", false).toBool();
+    c.buildPatch = s.value("compile/patch", true).toBool();
     c.patchOnly = s.value("compile/patchOnly", false).toBool();
     c.autoMerge = s.value("compile/autoMerge", false).toBool();
     c.allowReturn.clear();

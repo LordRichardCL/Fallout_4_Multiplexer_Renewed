@@ -222,7 +222,7 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 - **Safest**: combine compatible changes only.
 - **Custom**: shown when the switches match neither.
 
-Neither preset turns on light outputs, placeholders or Master Redirection: choose those yourself once a first build works.
+Neither preset turns on light outputs, placeholders or Master Redirection: choose those yourself once a first build works. A first run starts on **Recommended**; settings you saved are kept.
 
 The options come in cards, top to bottom, each answering one question:
 - **Plugins to compile:** which plugins (all eligible, or only the ones you choose).

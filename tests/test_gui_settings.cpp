@@ -242,6 +242,22 @@ private slots:
         app_->loadSettings(); // back to the saved state
     }
 
+    // A first run (nothing saved) starts on the Recommended preset.
+    void first_run_starts_recommended()
+    {
+        const QString db = QSettings().value("advanced/database").toString();
+        QSettings().clear();
+        QSettings().setValue("advanced/database", db);
+        start();
+        auto* recommended = childWithText<QPushButton>(compilation(), "Recommended");
+        QVERIFY(recommended);
+        QVERIFY(recommended->isChecked());
+        const auto& c = app_->config().compile;
+        QVERIFY(c.mergeCompatible && c.applyPatchPlan && c.mergeCellConfig && c.translatePrevis && c.buildPatch &&
+                c.compileNewQuestsAndNpcs);
+        QVERIFY(!c.lightOutputsWhenPossible && !c.unusedMasterPlaceholders && !c.redirectMasters);
+    }
+
     // Showing a page does not mark anything unsaved.
     void showing_pages_changes_nothing()
     {
