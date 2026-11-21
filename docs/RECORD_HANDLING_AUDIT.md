@@ -1390,3 +1390,21 @@ The whole test suite also runs clean under AddressSanitizer and UndefinedBehavio
 - **Record references are no longer read for base game records no plugin changes.** They name other base game records, which say nothing about mods, and there are about a million of them. Leveled lists are still read, so a loop through one is still found. Record references counted in the Dependency Report drop accordingly.
 - **The record reader** keeps a small pool of open handles per file and takes one per read. Reads of the same file now run in parallel; before, every thread queued on one lock per file. Releasing files (before ghosting plugins on Windows) still closes them all. A record size above 256 MB is refused as damage.
 - **Scan results are kept when nothing changed.** When the mod space fingerprint, this app's version, the record definitions and the record, asset and reference counts match what the results database was written for, its record tables are kept and only the plugins are written. Otherwise they are written again, with their indexes rebuilt once after the rows rather than row by row. Test: `rescan_keeps_unchanged_scan_results_and_rewrites_changed_ones`.
+
+### Second pass, with archives, loose files and scripts in the benchmark
+
+`FO4MX_BENCH_ASSETS=1` adds base game archives of 150,000 files and, per mod, an archive of 40 files, a script naming the mod (relinked by the Auto-Merger) and 10 loose files. The F4SE archive loader is on, because 1,400 archives do not fit the INI list.
+
+| Stage (1,400 plugins, 1.17 M records, assets) | Before | After |
+|---|---|---|
+| Scan (first) | 8.8 s | 7.0–7.9 s |
+| Analyse | 2.6 s | 1.5–1.8 s |
+| Compile | 5.0 s | 3.4–3.6 s |
+| Export | 5.4 s | 1.8–2.3 s |
+| Rescan and analyse, nothing changed | 3.3 s | 2.9–3.1 s |
+
+**Changes:**
+- **Export: relinked copies** looked up each file in the output folder by listing the folder, and a fresh export lists it in full for every file, which takes quadratic time (4.1 s for 1,400 scripts). The folder is now indexed once (0.7 s). `PathLookup` (util/Text) does the same for Apply's checks of relinked copies and Mod Organizer 2's visibility check, which compared every file against every enabled mod.
+- **Build cache:** each lookup and store prepared a new SQL statement (about 82,000 of each per compile). Statements are now prepared once. Entries (conflicts, merges, references, plugin indexes) are encoded and compressed on every thread, then stored in one transaction.
+- **Scan: record order.** About a million 64-byte records were sorted directly. Now small (key, position) entries are sorted and each record is moved once.
+- **Results database:** the bulk write uses a 128 MB page cache, back to the default afterwards. The two Editor ID indexes are dropped: the app searches Editor IDs by substring, which no index serves, and the Forms lookup scans either way. They cost about a second per million rows. Quick search over a million records takes 100–150 ms per query either way.

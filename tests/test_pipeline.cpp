@@ -7766,10 +7766,35 @@ TEST(benchmark_large_load_order)
         list += "*" + name + "\n";
     }
     writeFile(root / "plugins.txt", list);
+    // With FO4MX_BENCH_ASSETS=1: archives, loose files and scripts as a real install has them (base game
+    // archives of 150,000 files; per mod an archive of 40 files, a script naming the mod, 10 loose files).
+    if (const char* assets = std::getenv("FO4MX_BENCH_ASSETS"); assets && std::string(assets) == "1") {
+        std::vector<std::pair<std::string, std::vector<uint8_t>>> base;
+        for (int i = 0; i < 150000; ++i)
+            base.push_back({"meshes\\base\\dir" + std::to_string(i % 500) + "\\m" + std::to_string(i) + ".nif",
+                            std::vector<uint8_t>(64, uint8_t(i))});
+        writeGeneralBa2(data / "Fallout4 - Meshes.ba2", base, false);
+        for (int p = 0; p < plugins; ++p) {
+            const std::string stem = "Bench" + std::to_string(p);
+            std::vector<std::pair<std::string, std::vector<uint8_t>>> files;
+            for (int i = 0; i < 40; ++i)
+                files.push_back({"meshes\\" + stem + "\\m" + std::to_string(i) + ".nif", std::vector<uint8_t>(128, 1)});
+            files.push_back({"scripts\\" + stem + "_quest.pex", testScript(0x800, stem + ".esp", {})});
+            writeGeneralBa2(data / (stem + " - Main.ba2"), files, p % 2 == 0);
+            for (int i = 0; i < 10; ++i)
+                writeFile(data / "textures" / stem / ("t" + std::to_string(i) + ".dds"), std::string(256, 'x'));
+        }
+        std::printf("assets generated in %.1fs\n", std::chrono::duration<double>(Clock::now() - t0).count());
+    }
     auto secs = [](Clock::time_point a) { return std::chrono::duration<double>(Clock::now() - a).count(); };
     std::printf("generated %d plugins in %.1fs\n", plugins, secs(t0));
     auto cfg = configFor(root);
     cfg.compile.autoOutputs = true;
+    cfg.compile.autoMerge = true; // the generated scripts name their plugins: relinked
+    // 1,400 archives do not fit the INI's archive list: as a real setup that size, use the F4SE archive loader.
+    cfg.f4seArchiveLoader = true;
+    cfg.archiveLoaderDll = root / "MultiplexerArchiveLoader.dll";
+    writeFile(cfg.archiveLoaderDll, "dll");
     Pipeline p(cfg);
     auto t = Clock::now();
     p.scan();

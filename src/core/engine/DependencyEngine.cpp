@@ -865,11 +865,21 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
         },
         progress, options.threads);
     if (cache) {
-        cache->begin();
+        // Encoded in parallel, stored in one transaction.
+        std::vector<size_t> which;
         for (size_t i = 0; i < targets.size(); ++i)
             if (computed[i])
-                cache->put("edges", keys[i], serializeEdges(session, *refs[i]));
-        cache->commit();
+                which.push_back(i);
+        std::vector<uint64_t> putKeys(which.size());
+        std::vector<std::vector<uint8_t>> blobs(which.size());
+        parallelFor(
+            which.size(),
+            [&](size_t k) {
+                putKeys[k] = keys[which[k]];
+                blobs[k] = serializeEdges(session, *refs[which[k]]);
+            },
+            nullProgress(), options.threads);
+        cache->putMany("edges", putKeys, blobs);
     }
 
     std::vector<std::vector<RecordEdge>> edges(targets.size());

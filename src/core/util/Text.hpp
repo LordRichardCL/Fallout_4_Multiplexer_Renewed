@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <unordered_map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,6 +34,18 @@ std::filesystem::path utf8ToPath(std::string_view s);
 std::filesystem::path findChildCaseInsensitive(const std::filesystem::path& dir, std::string_view name);
 // The same for a relative path ("a\\b/c.txt"), one component at a time. Empty when it does not exist.
 std::filesystem::path findPathCaseInsensitive(const std::filesystem::path& root, std::string_view relative);
+
+// The same, for many lookups in a row: each folder is listed at most once (findPathCaseInsensitive lists a
+// folder per call when the exact spelling is not there, so a loop over many files in one folder takes
+// quadratic time). For read-only checks: files created after a folder was listed are not seen.
+class PathLookup {
+public:
+    std::filesystem::path find(const std::filesystem::path& root, std::string_view relative);
+
+private:
+    const std::unordered_map<std::string, std::filesystem::path>& listing(const std::filesystem::path& dir);
+    std::unordered_map<std::string, std::unordered_map<std::string, std::filesystem::path>> dirs_;
+};
 
 // Strip characters that are illegal in Windows file names.
 std::string sanitizeFileName(std::string_view s);

@@ -1226,3 +1226,18 @@ TEST(readers_survive_damaged_files)
     }
     std::filesystem::remove_all(dir);
 }
+
+// PathLookup finds files whatever their letter case, like findPathCaseInsensitive, listing each folder once.
+TEST(path_lookup_is_case_insensitive)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "fo4mx_pathlookup";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "Scripts" / "Sub");
+    std::ofstream(dir / "Scripts" / "Sub" / "MyQuest.pex") << "x";
+    PathLookup lookup;
+    CHECK_EQ(lookup.find(dir, "scripts\\sub\\myquest.pex"), dir / "Scripts" / "Sub" / "MyQuest.pex");
+    CHECK_EQ(lookup.find(dir, "SCRIPTS/SUB/MYQUEST.PEX"), findPathCaseInsensitive(dir, "scripts\\sub\\myquest.pex"));
+    CHECK(lookup.find(dir, "scripts\\other.pex").empty());
+    CHECK(lookup.find(dir, "scripts\\..\\x").empty());
+    std::filesystem::remove_all(dir);
+}

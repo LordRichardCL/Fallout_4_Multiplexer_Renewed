@@ -9,6 +9,7 @@
 #include <atomic>
 #include <filesystem>
 #include <mutex>
+#include <unordered_map>
 #include <optional>
 #include <span>
 #include <string>
@@ -62,6 +63,8 @@ public:
     // Generic content-addressed blobs: table is one of "conflicts", "merges", "edges".
     std::optional<std::vector<uint8_t>> get(const char* table, uint64_t key);
     void put(const char* table, uint64_t key, std::span<const uint8_t> blob);
+    // Many entries in one transaction (blobs encoded beforehand, e.g. in parallel).
+    void putMany(const char* table, const std::vector<uint64_t>& keys, const std::vector<std::vector<uint8_t>>& blobs);
 
     void begin();
     void commit();
@@ -77,6 +80,9 @@ public:
 private:
     std::mutex mutex_;
     db::Database db_;
+    // Prepared statements, by SQL text (a lookup or store per record otherwise prepares one each time).
+    std::unordered_map<std::string, db::Statement> statements_;
+    db::Statement& statement(const std::string& sql);
 };
 
 // Hash of the first and last 64 KiB plus the size: cheap content check for large files.

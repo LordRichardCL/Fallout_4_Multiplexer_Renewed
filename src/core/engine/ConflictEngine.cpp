@@ -408,11 +408,21 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
         progress, options.threads);
 
     if (cache) {
-        cache->begin();
+        // Encoded in parallel, stored in one transaction.
+        std::vector<size_t> which;
         for (size_t i = 0; i < results.size(); ++i)
             if (!reused[i] && !failed[i])
-                cache->put("conflicts", keys[i], serializeConflict(session, results[i]));
-        cache->commit();
+                which.push_back(i);
+        std::vector<uint64_t> putKeys(which.size());
+        std::vector<std::vector<uint8_t>> blobs(which.size());
+        parallelFor(
+            which.size(),
+            [&](size_t k) {
+                putKeys[k] = keys[which[k]];
+                blobs[k] = serializeConflict(session, results[which[k]]);
+            },
+            nullProgress(), options.threads);
+        cache->putMany("conflicts", putKeys, blobs);
         spdlog::info("Conflict cache: {} chains reused, {} analysed", cache->conflicts.hits.load(),
                      cache->conflicts.misses.load());
     }

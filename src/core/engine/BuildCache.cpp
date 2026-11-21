@@ -361,13 +361,16 @@ std::optional<CachedPluginIndex> BuildCache::loadPluginIndex(const std::string& 
     std::vector<uint8_t> blob;
     {
         std::lock_guard lock(mutex_);
-        auto st = db_.prepare("SELECT data FROM PluginIndex WHERE path = ? AND size = ? AND modified = ? AND sample = ?");
+        auto& st = statement("SELECT data FROM PluginIndex WHERE path = ? AND size = ? AND modified = ? AND sample = ?");
         st.bind(1, path).bind(2, size).bind(3, static_cast<int64_t>(modified)).bind(4, sample);
-        if (!st.step()) {
+        const bool found = st.step();
+        if (found)
+            blob = st.columnBlob(0);
+        st.reset();
+        if (!found) {
             plugins.misses++;
             return std::nullopt;
         }
-        blob = st.columnBlob(0);
     }
     auto raw = unpack(blob);
     if (!raw) {
@@ -423,7 +426,7 @@ void BuildCache::storePluginIndex(const std::string& path, uint64_t size, int64_
     }
     auto blob = pack(w.buffer());
     std::lock_guard lock(mutex_);
-    db_.prepare("INSERT OR REPLACE INTO PluginIndex(path, size, modified, sample, data) VALUES(?,?,?,?,?)")
+    statement("INSERT OR REPLACE INTO PluginIndex(path, size, modified, sample, data) VALUES(?,?,?,?,?)")
         .bind(1, path)
         .bind(2, size)
         .bind(3, static_cast<int64_t>(modified))
@@ -432,23 +435,42 @@ void BuildCache::storePluginIndex(const std::string& path, uint64_t size, int64_
         .run();
 }
 
+db::Statement& BuildCache::statement(const std::string& sql)
+{
+    auto it = statements_.find(sql);
+    if (it == statements_.end())
+        it = statements_.emplace(sql, db_.prepare(sql)).first;
+    return it->second;
+}
+
 std::optional<std::vector<uint8_t>> BuildCache::get(const char* table, uint64_t key)
 {
     std::lock_guard lock(mutex_);
-    auto st = db_.prepare(std::string("SELECT data FROM ") + table + " WHERE key = ?");
+    auto& st = statement(std::string("SELECT data FROM ") + table + " WHERE key = ?");
     st.bind(1, static_cast<int64_t>(key));
-    if (!st.step())
-        return std::nullopt;
-    return st.columnBlob(0);
+    std::optional<std::vector<uint8_t>> out;
+    if (st.step())
+        out = st.columnBlob(0);
+    st.reset();
+    return out;
 }
 
 void BuildCache::put(const char* table, uint64_t key, std::span<const uint8_t> blob)
 {
     std::lock_guard lock(mutex_);
-    db_.prepare(std::string("INSERT OR REPLACE INTO ") + table + "(key, data) VALUES(?, ?)")
+    statement(std::string("INSERT OR REPLACE INTO ") + table + "(key, data) VALUES(?, ?)")
         .bind(1, static_cast<int64_t>(key))
         .bindBlob(2, blob.data(), blob.size())
         .run();
+}
+
+void BuildCache::putMany(const char* table, const std::vector<uint64_t>& keys,
+                         const std::vector<std::vector<uint8_t>>& blobs)
+{
+    begin();
+    for (size_t i = 0; i < keys.size() && i < blobs.size(); ++i)
+        put(table, keys[i], blobs[i]);
+    commit();
 }
 
 void BuildCache::begin()

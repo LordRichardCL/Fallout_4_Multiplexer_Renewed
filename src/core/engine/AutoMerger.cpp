@@ -1012,6 +1012,25 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
         if (f.planned)
             planned.push_back(&f);
 
+    // The files already in the output folder, by lowercase relative path: looked up once, not by listing a
+    // folder per file (a folder of 1,400 scripts listed 1,400 times took seconds).
+    std::unordered_map<std::string, fs::path> present;
+    auto norm = [](std::string rel) {
+        std::replace(rel.begin(), rel.end(), '/', '\\');
+        return toLower(rel);
+    };
+    {
+        std::error_code ec;
+        for (auto it = fs::recursive_directory_iterator(outputDir, ec); !ec && it != fs::recursive_directory_iterator();
+             it.increment(ec))
+            if (it->is_regular_file(ec))
+                present.emplace(norm(pathToUtf8(it->path().lexically_relative(outputDir))), it->path());
+    }
+    auto existingFile = [&](const std::string& rel) -> fs::path {
+        auto it = present.find(norm(rel));
+        return it == present.end() ? fs::path() : it->second;
+    };
+
     // 1. Write every copy beside its target and read it back.
     std::vector<std::pair<fs::path, fs::path>> staged; // (temporary, target)
     auto discard = [&] {
@@ -1025,7 +1044,7 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
         tmp += kTempSuffix;
         try {
             // An earlier copy can be spelled differently (earlier versions wrote lowercase names).
-            const auto existing = findPathCaseInsensitive(outputDir, f->written_path());
+            const auto existing = existingFile(f->written_path());
             if (!existing.empty()) {
                 auto it = previous.find(toLower(f->written_path()));
                 if (it == previous.end() || (it->second != 0 && it->second != hashOf(readFile(existing))))
@@ -1059,7 +1078,7 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
     for (const auto& [tmp, target] : staged) {
         std::error_code ec;
         fs::path backup;
-        const auto existing = findPathCaseInsensitive(outputDir, pathToUtf8(target.lexically_relative(outputDir)));
+        const auto existing = existingFile(pathToUtf8(target.lexically_relative(outputDir)));
         if (!existing.empty()) {
             backup = existing;
             backup += ".fo4mx-old";
@@ -1103,7 +1122,7 @@ void AutoMerger::relink(const Session& session, const std::filesystem::path& out
         if (std::any_of(planned.begin(), planned.end(),
                         [&](const RelinkFile* f) { return toLower(f->written_path()) == path; }))
             continue;
-        const auto target = findPathCaseInsensitive(outputDir, path);
+        const auto target = existingFile(path);
         std::error_code ec;
         if (!target.empty() && fs::exists(target, ec) && (hash == 0 || hashOf(readFile(target)) == hash))
             fs::remove(target, ec);

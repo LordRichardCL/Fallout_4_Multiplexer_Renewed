@@ -406,12 +406,16 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
 
     if (cache) {
         cache->begin();
-        for (size_t pos = 0; pos < pending.size(); ++pos) {
-            const auto& pc = pending[pos];
-            const auto& p = session.plugins[session.loadOrder[pos]];
-            if (pc.store && p.scanned)
-                cache->storePluginIndex(pathToUtf8(p.path), p.fileSize, p.modified, pc.sample, pc.index);
-        }
+        // Encoded and compressed on every thread (the store itself is serialised by the cache).
+        parallelFor(
+            pending.size(),
+            [&](size_t pos) {
+                const auto& pc = pending[pos];
+                const auto& p = session.plugins[session.loadOrder[pos]];
+                if (pc.store && p.scanned)
+                    cache->storePluginIndex(pathToUtf8(p.path), p.fileSize, p.modified, pc.sample, pc.index);
+            },
+            nullProgress(), options.threads);
         cache->commit();
         spdlog::info("Plugin index cache: {} plugins reused, {} parsed", cache->plugins.hits.load(),
                      cache->plugins.misses.load());
@@ -428,11 +432,26 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
     }
 
     progress.stage("Building override chains");
-    std::sort(session.records.begin(), session.records.end(), [](const RecordInstance& a, const RecordInstance& b) {
-        if (a.key != b.key)
-            return a.key < b.key;
-        return a.loadPos < b.loadPos;
-    });
+    // By FormKey, then load order. Sorting small (key, position) entries and moving each record once is much
+    // cheaper than sorting the records themselves (a million of them on a real load order).
+    {
+        struct Entry {
+            uint64_t key;
+            int32_t loadPos;
+            uint32_t index;
+        };
+        std::vector<Entry> order(session.records.size());
+        for (uint32_t i = 0; i < order.size(); ++i)
+            order[i] = {session.records[i].key.packed(), session.records[i].loadPos, i};
+        std::sort(order.begin(), order.end(), [](const Entry& a, const Entry& b) {
+            return a.key != b.key ? a.key < b.key : a.loadPos < b.loadPos;
+        });
+        std::vector<RecordInstance> sorted;
+        sorted.reserve(order.size());
+        for (const auto& e : order)
+            sorted.push_back(std::move(session.records[e.index]));
+        session.records.swap(sorted);
+    }
 
     // The game ignores an override whose record type differs from the first definition: it keeps
     // the record it already has. Drop such overrides so every later stage sees what the game loads.

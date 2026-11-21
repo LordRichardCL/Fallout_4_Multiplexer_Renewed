@@ -699,11 +699,21 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         progress, options.threads);
 
     if (cache) {
-        cache->begin();
+        // Encoded in parallel, stored in one transaction.
+        std::vector<size_t> which;
         for (size_t ci = 0; ci < candidates.size(); ++ci)
             if (computed[ci])
-                cache->put("merges", keys[ci], serializeMerge(session, *merges[ci]));
-        cache->commit();
+                which.push_back(ci);
+        std::vector<uint64_t> putKeys(which.size());
+        std::vector<std::vector<uint8_t>> blobs(which.size());
+        parallelFor(
+            which.size(),
+            [&](size_t k) {
+                putKeys[k] = keys[which[k]];
+                blobs[k] = serializeMerge(session, *merges[which[k]]);
+            },
+            nullProgress(), options.threads);
+        cache->putMany("merges", putKeys, blobs);
     }
     for (size_t ci = 0; ci < candidates.size(); ++ci)
         (computed[ci] ? out.mergesComputed : out.mergesReused)++;

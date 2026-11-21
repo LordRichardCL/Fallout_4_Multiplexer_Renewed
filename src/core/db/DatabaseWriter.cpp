@@ -178,6 +178,8 @@ void DatabaseWriter::updatePlugins(const Session& session)
 void DatabaseWriter::writeScan(const Session& session, ProgressSink& progress)
 {
     progress.stage("Writing scan results");
+    // A larger page cache for the bulk write (about a million rows and their indexes); back to the default after.
+    db_.exec("PRAGMA cache_size=-131072");
     Transaction tx(db_);
     db_.exec("DELETE FROM Records; DELETE FROM OverrideChains; DELETE FROM Archives; DELETE FROM Assets; "
              "DELETE FROM AssetSources; DELETE FROM NameReferences; DELETE FROM Forms;");
@@ -336,11 +338,11 @@ void DatabaseWriter::writeScan(const Session& session, ProgressSink& progress)
             .bind(10, r.reason)
             .run();
 
+    // No Editor ID indexes: the app searches Editor IDs by substring (LIKE '%...%'), which no index serves, and
+    // the Forms lookup by Editor ID or FormID scans either way; building them cost a second per million rows.
     db_.exec("CREATE INDEX IF NOT EXISTS idx_records_key ON Records(origin_plugin_id, object_id); "
              "CREATE INDEX IF NOT EXISTS idx_records_plugin ON Records(plugin_id); "
-             "CREATE INDEX IF NOT EXISTS idx_records_edid ON Records(editor_id); "
-             "CREATE INDEX IF NOT EXISTS idx_chains_key ON OverrideChains(origin_plugin_id, object_id); "
-             "CREATE INDEX IF NOT EXISTS idx_forms_edid ON Forms(editor_id);");
+             "CREATE INDEX IF NOT EXISTS idx_chains_key ON OverrideChains(origin_plugin_id, object_id);");
     tx.commit();
     setMeta("game_path", pathToUtf8(session.install.gamePath));
     setMeta("install_kind", installKindName(session.install.config.kind));
@@ -353,6 +355,7 @@ void DatabaseWriter::writeScan(const Session& session, ProgressSink& progress)
     setMeta("asset_count", std::to_string(assets.entries.size()));
     setMeta("loose_file_count", std::to_string(assets.looseFileCount()));
     setMeta("asset_conflicts", std::to_string(assets.conflictCount()));
+    db_.exec("PRAGMA cache_size=-2000");
 }
 
 void DatabaseWriter::writeAnalysis(const Session& session, const ConflictReport& conflicts, const DependencyReport& deps,

@@ -178,6 +178,43 @@ std::filesystem::path findPathCaseInsensitive(const std::filesystem::path& root,
     return at;
 }
 
+const std::unordered_map<std::string, std::filesystem::path>& PathLookup::listing(const std::filesystem::path& dir)
+{
+    const std::string key = pathToUtf8(dir);
+    auto it = dirs_.find(key);
+    if (it != dirs_.end())
+        return it->second;
+    std::unordered_map<std::string, std::filesystem::path> names;
+    std::error_code ec;
+    for (auto e = std::filesystem::directory_iterator(dir, ec); !ec && e != std::filesystem::directory_iterator();
+         e.increment(ec))
+        names.emplace(toLower(pathToUtf8(e->path().filename())), e->path());
+    return dirs_.emplace(key, std::move(names)).first->second;
+}
+
+std::filesystem::path PathLookup::find(const std::filesystem::path& root, std::string_view relative)
+{
+    std::filesystem::path at = root;
+    size_t i = 0;
+    while (i <= relative.size()) {
+        size_t j = relative.find_first_of("\\/", i);
+        if (j == std::string_view::npos)
+            j = relative.size();
+        const auto part = relative.substr(i, j - i);
+        i = j + 1;
+        if (part.empty() || part == ".")
+            continue;
+        if (part == "..")
+            return {};
+        const auto& names = listing(at);
+        auto it = names.find(toLower(std::string(part)));
+        if (it == names.end())
+            return {};
+        at = it->second;
+    }
+    return at;
+}
+
 std::string sanitizeFileName(std::string_view s)
 {
     std::string out;

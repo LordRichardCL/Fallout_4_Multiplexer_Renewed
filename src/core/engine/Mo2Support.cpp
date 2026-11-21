@@ -92,13 +92,14 @@ std::vector<std::string> outputsNotVisible(const Session& session, const std::ve
 
     std::vector<std::string> missing;
     std::error_code ec;
+    PathLookup lookup; // many files against every enabled mod: each folder listed once
     for (const auto& f : outputs) {
         const std::string rel = pathToUtf8(base.empty() ? f.filename() : f.lexically_relative(base));
         bool ok = false;
         for (const auto& root : roots) {
             if (root.empty())
                 continue;
-            const auto candidate = findPathCaseInsensitive(root, rel);
+            const auto candidate = lookup.find(root, rel);
             if (!candidate.empty() && fs::is_regular_file(candidate, ec)) {
                 ok = sameFile(candidate, f); // the winner decides
                 break;

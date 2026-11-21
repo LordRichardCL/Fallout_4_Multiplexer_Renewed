@@ -260,9 +260,10 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
     // plugin that is switched off (the menu is empty or its settings do nothing).
     if (d.missingOutputs.empty() && !result.dataFolder.empty()) {
         std::vector<fs::path> copies;
+        PathLookup lookup; // every relinked copy: each folder listed once
         for (const auto& [rel, hash] : AutoMerger::readManifest(result.dataFolder)) {
             (void)hash;
-            if (auto p = findPathCaseInsensitive(result.dataFolder, rel); !p.empty())
+            if (auto p = lookup.find(result.dataFolder, rel); !p.empty())
                 copies.push_back(p);
         }
         std::sort(copies.begin(), copies.end());
@@ -272,7 +273,7 @@ DeploymentCheck PostCompilation::check(const Session& session, const CompiledOut
                  norm(result.dataFolder) != norm(session.install.dataPath))
             for (const auto& f : copies) {
                 const auto rel = pathToUtf8(f.lexically_relative(result.dataFolder));
-                const auto installed = findPathCaseInsensitive(session.install.dataPath, rel);
+                const auto installed = lookup.find(session.install.dataPath, rel);
                 if (installed.empty() || !sameFile(f, installed))
                     d.relinkedNotLoaded.push_back(rel);
             }

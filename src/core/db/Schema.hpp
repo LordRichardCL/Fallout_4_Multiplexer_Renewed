@@ -79,7 +79,6 @@ CREATE TABLE IF NOT EXISTS Records (
 );
 CREATE INDEX IF NOT EXISTS idx_records_key ON Records(origin_plugin_id, object_id);
 CREATE INDEX IF NOT EXISTS idx_records_plugin ON Records(plugin_id);
-CREATE INDEX IF NOT EXISTS idx_records_edid ON Records(editor_id);
 
 CREATE TABLE IF NOT EXISTS OverrideChains (
     origin_plugin_id INTEGER NOT NULL,
@@ -211,7 +210,6 @@ CREATE TABLE IF NOT EXISTS Forms (
     winner_plugin_id INTEGER,
     PRIMARY KEY (origin_plugin_id, object_id)
 ) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS idx_forms_edid ON Forms(editor_id);
 
 CREATE TABLE IF NOT EXISTS DependencyIssues (
     severity TEXT NOT NULL,
