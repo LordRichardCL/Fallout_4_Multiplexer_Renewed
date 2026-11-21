@@ -1374,3 +1374,19 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 - **Previs files (.uvd).** An ID table offset past the end of the file wrapped the fit check around, so the reader read outside the file: a crash on a damaged previs file. AddressSanitizer found it. The offset is now checked first.
 
 The whole test suite also runs clean under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+## Large load orders: speed (21 Nov 2026)
+
+**Benchmark:** `benchmark_large_load_order`, run only with `FO4MX_BENCH=1`. It generates 1,400 plugins with overrides, conflicts, form lists, cells and references, on a base game of up to 1.17 million records (`FO4MX_BENCH_SCALE=11`), about as large as Fallout 4 with its DLC. `FO4MX_TEST_LOG=info` shows the pipeline's own timing lines.
+
+| Stage (1,400 plugins, 1.17 M records) | Before | After |
+|---|---|---|
+| Scan | 9.2 s | 7.6 s |
+| Analyse | 27.0 s | 2.3 s |
+| Compile | 4.7 s | 3.9 s |
+| Rescan and analyse, nothing changed | 30.8 s | 3.0 s |
+
+**Changes:**
+- **Record references are no longer read for base game records no plugin changes.** They name other base game records, which say nothing about mods, and there are about a million of them. Leveled lists are still read, so a loop through one is still found. Record references counted in the Dependency Report drop accordingly.
+- **The record reader** keeps a small pool of open handles per file and takes one per read. Reads of the same file now run in parallel; before, every thread queued on one lock per file. Releasing files (before ghosting plugins on Windows) still closes them all. A record size above 256 MB is refused as damage.
+- **Scan results are kept when nothing changed.** When the mod space fingerprint, this app's version, the record definitions and the record, asset and reference counts match what the results database was written for, its record tables are kept and only the plugins are written. Otherwise they are written again, with their indexes rebuilt once after the rows rather than row by row. Test: `rescan_keeps_unchanged_scan_results_and_rewrites_changed_ones`.

@@ -1,5 +1,7 @@
 #include "engine/Pipeline.hpp"
 
+#include <chrono>
+
 #include "assets/AssetScanner.hpp"
 #include "engine/CompilationResult.hpp"
 #include "engine/Exporter.hpp"
@@ -232,9 +234,34 @@ void Pipeline::scan(ProgressSink& progress)
     openDatabase();
     if (db_) {
         db::DatabaseWriter w(*db_);
-        w.writeScan(*session_, progress);
-        // Fingerprint the mod space and compare it with the last build.
+        auto t0 = std::chrono::steady_clock::now();
+        auto since = [](std::chrono::steady_clock::time_point t) {
+            return std::chrono::duration<double>(std::chrono::steady_clock::now() - t).count();
+        };
+        // Fingerprint the mod space (it also decides whether the scan tables need writing again).
         auto snapshot = ChangeDetector::capture(*session_);
+        // The record, asset and reference tables hold exactly this scan when the mod space, this app's version
+        // and the record definitions are what they were written for: then only the plugins are written
+        // (their eligibility can differ). About a million rows on a real load order.
+        const std::string scanKey =
+            [&] {
+                auto content = snapshot.toJson();
+                content.set("created", 0); // when it was taken is not what it holds
+                const std::string text = content.dump(0);
+                return std::to_string(fnv1a64(text.data(), text.size()));
+            }() + "|" +
+            FO4MX_VERSION + "|" + std::to_string(session_->defs.fingerprint()) + "|" +
+            std::to_string(session_->records.size()) + "|" + std::to_string(session_->assets.entries.size()) + "|" +
+            std::to_string(session_->assets.archives.size()) + "|" + std::to_string(session_->nameReferences.size());
+        if (w.meta("scan_key") == scanKey) {
+            w.updatePlugins(*session_);
+            spdlog::info("Scan results unchanged since the last scan: kept ({:.1f}s)", since(t0));
+        } else {
+            w.setMeta("scan_key", ""); // cleared until the tables are written in full
+            w.writeScan(*session_, progress);
+            w.setMeta("scan_key", scanKey);
+            spdlog::info("Wrote the scan results in {:.1f}s", since(t0));
+        }
         w.saveSnapshot("scan", snapshot);
         auto build = w.loadSnapshot("build");
         auto forced = config_.compile.forcedWinners;
@@ -246,6 +273,7 @@ void Pipeline::scan(ProgressSink& progress)
                                       ChangeDetector::settingsHash(*session_, effective, config_.analysis.selectionKey()));
         w.writeChanges(changes_);
     }
+    const auto restoreStart = std::chrono::steady_clock::now();
     try {
         restoreLastBuild();
     } catch (const std::exception& e) {
@@ -253,6 +281,8 @@ void Pipeline::scan(ProgressSink& progress)
         restoreProblem_ = std::string("The last build could not be reopened: ") + e.what();
         spdlog::warn("{}", restoreProblem_);
     }
+    spdlog::info("Checked the last build in {:.1f}s",
+                 std::chrono::duration<double>(std::chrono::steady_clock::now() - restoreStart).count());
 }
 
 Pipeline::ApplySource Pipeline::applySource() const

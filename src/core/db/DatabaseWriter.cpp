@@ -181,6 +181,11 @@ void DatabaseWriter::writeScan(const Session& session, ProgressSink& progress)
     Transaction tx(db_);
     db_.exec("DELETE FROM Records; DELETE FROM OverrideChains; DELETE FROM Archives; DELETE FROM Assets; "
              "DELETE FROM AssetSources; DELETE FROM NameReferences; DELETE FROM Forms;");
+    // A real load order writes about a million rows here: the secondary indexes are built once afterwards
+    // (in the same transaction) rather than kept up to date row by row.
+    db_.exec("DROP INDEX IF EXISTS idx_records_key; DROP INDEX IF EXISTS idx_records_plugin; "
+             "DROP INDEX IF EXISTS idx_records_edid; DROP INDEX IF EXISTS idx_chains_key; "
+             "DROP INDEX IF EXISTS idx_forms_edid;");
     writePlugins(session);
 
     // Records: everything compilable plus every instance in an override chain.
@@ -331,6 +336,11 @@ void DatabaseWriter::writeScan(const Session& session, ProgressSink& progress)
             .bind(10, r.reason)
             .run();
 
+    db_.exec("CREATE INDEX IF NOT EXISTS idx_records_key ON Records(origin_plugin_id, object_id); "
+             "CREATE INDEX IF NOT EXISTS idx_records_plugin ON Records(plugin_id); "
+             "CREATE INDEX IF NOT EXISTS idx_records_edid ON Records(editor_id); "
+             "CREATE INDEX IF NOT EXISTS idx_chains_key ON OverrideChains(origin_plugin_id, object_id); "
+             "CREATE INDEX IF NOT EXISTS idx_forms_edid ON Forms(editor_id);");
     tx.commit();
     setMeta("game_path", pathToUtf8(session.install.gamePath));
     setMeta("install_kind", installKindName(session.install.config.kind));
@@ -622,6 +632,15 @@ void DatabaseWriter::saveSnapshot(const std::string& kind, const InstallSnapshot
         .bind(2, static_cast<int64_t>(snapshot.created))
         .bind(3, snapshot.toJson().dump(0))
         .run();
+}
+
+std::optional<std::string> DatabaseWriter::meta(const std::string& key)
+{
+    auto st = db_.prepare("SELECT value FROM Meta WHERE key = ?");
+    st.bind(1, key);
+    if (!st.step())
+        return std::nullopt;
+    return st.columnText(0);
 }
 
 std::optional<InstallSnapshot> DatabaseWriter::loadSnapshot(const std::string& kind)

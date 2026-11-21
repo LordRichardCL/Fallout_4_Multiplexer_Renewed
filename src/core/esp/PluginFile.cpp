@@ -237,46 +237,61 @@ PluginHeader readPluginHeader(const std::filesystem::path& path)
     return header;
 }
 
-struct RecordReader::Handle {
-    std::mutex mutex;
-    std::ifstream stream;
-};
+std::unique_ptr<std::ifstream> RecordReader::take(const std::string& key, const std::filesystem::path& path,
+                                                  uint64_t& generation)
+{
+    {
+        std::lock_guard lock(mutex_);
+        generation = generation_;
+        auto& pool = pools_[key];
+        pool.lastUse = ++tick_;
+        if (!pool.free.empty()) {
+            auto stream = std::move(pool.free.back());
+            pool.free.pop_back();
+            --open_;
+            return stream;
+        }
+    }
+    auto stream = std::make_unique<std::ifstream>(path, std::ios::binary);
+    if (!*stream)
+        throw FormatError("cannot open " + key);
+    return stream;
+}
 
-std::shared_ptr<RecordReader::Handle> RecordReader::acquire(const std::filesystem::path& path)
+void RecordReader::giveBack(const std::string& key, std::unique_ptr<std::ifstream> stream, uint64_t generation)
 {
     std::lock_guard lock(mutex_);
-    std::string key = pathToUtf8(path);
-    auto it = handles_.find(key);
-    if (it != handles_.end()) {
-        lru_.remove(path);
-        lru_.push_front(path);
-        return it->second;
+    if (generation != generation_)
+        return; // closeAll() ran meanwhile: closed here, as the stream goes out of scope
+    pools_[key].free.push_back(std::move(stream));
+    ++open_;
+    // Too many open: close the least recently used file's handles.
+    while (open_ > maxOpen_ * 2) {
+        auto oldest = pools_.end();
+        for (auto it = pools_.begin(); it != pools_.end(); ++it)
+            if (!it->second.free.empty() && (oldest == pools_.end() || it->second.lastUse < oldest->second.lastUse))
+                oldest = it;
+        if (oldest == pools_.end())
+            break;
+        open_ -= oldest->second.free.size();
+        oldest->second.free.clear();
     }
-    auto handle = std::make_shared<Handle>();
-    handle->stream.open(path, std::ios::binary);
-    if (!handle->stream)
-        throw FormatError("cannot open " + key);
-    handles_[key] = handle;
-    lru_.push_front(path);
-    while (lru_.size() > maxOpen_) {
-        handles_.erase(pathToUtf8(lru_.back()));
-        lru_.pop_back();
-    }
-    return handle;
 }
 
 void RecordReader::closeAll()
 {
     std::lock_guard lock(mutex_);
-    handles_.clear();
-    lru_.clear();
+    pools_.clear();
+    open_ = 0;
+    ++generation_;
 }
 
 std::vector<uint8_t> RecordReader::readRaw(const std::filesystem::path& path, uint64_t offset, RecordHeader& headerOut)
 {
-    auto handle = acquire(path);
-    std::lock_guard lock(handle->mutex);
-    auto& in = handle->stream;
+    const std::string key = pathToUtf8(path);
+    uint64_t generation = 0;
+    auto stream = take(key, path, generation);
+    auto& in = *stream;
     in.clear();
     in.seekg(static_cast<std::streamoff>(offset));
     uint8_t raw[RecordHeader::kSize];
@@ -284,9 +299,13 @@ std::vector<uint8_t> RecordReader::readRaw(const std::filesystem::path& path, ui
         throw FormatError("cannot read record header in " + pathToUtf8(path.filename()));
     BinaryReader r(raw, sizeof(raw));
     headerOut = RecordHeader::read(r);
+    // A damaged size must not be allocated as read (no record comes near this).
+    if (headerOut.dataSize > (256u << 20))
+        throw FormatError("record size too large in " + pathToUtf8(path.filename()));
     std::vector<uint8_t> payload(headerOut.dataSize);
     if (headerOut.dataSize && !in.read(reinterpret_cast<char*>(payload.data()), headerOut.dataSize))
         throw FormatError("cannot read record data in " + pathToUtf8(path.filename()));
+    giveBack(key, std::move(stream), generation);
     return payload;
 }
 

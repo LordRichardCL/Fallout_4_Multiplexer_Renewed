@@ -814,12 +814,19 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
             report.issues.push_back({Severity::Error, "Unreadable Plugin", p.index, {}, p.name + ": " + p.error});
     }
 
-    // Record-level references of every winning compilable record.
+    // Record-level references of every winning compilable record. A base game record no plugin changes is
+    // left out (its references are to other base game records, which say nothing about mods; a real load
+    // order has about a million of them), except leveled lists, so a loop through one is still found.
     std::vector<uint32_t> targets;
     for (uint32_t gi = 0; gi < session.groups.size(); ++gi) {
-        const auto& w = session.records[session.groups[gi].end - 1];
-        if (session.defs.isCompilable(w.signature) && !(w.flags & RecordFlags::Deleted))
-            targets.push_back(gi);
+        const auto& g = session.groups[gi];
+        const auto& w = session.records[g.end - 1];
+        if (!session.defs.isCompilable(w.signature) || (w.flags & RecordFlags::Deleted))
+            continue;
+        if (g.size() == 1 && session.plugins[w.plugin].baseGame && w.signature != Signature("LVLI") &&
+            w.signature != Signature("LVLN"))
+            continue;
+        targets.push_back(gi);
     }
 
     // References of each winning record: restored from the cache when unchanged.

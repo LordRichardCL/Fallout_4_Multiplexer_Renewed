@@ -24,6 +24,7 @@ public:
 
     void initSchema();
     void setMeta(const std::string& key, const std::string& value);
+    std::optional<std::string> meta(const std::string& key);
 
     void writeScan(const Session& session, ProgressSink& progress = nullProgress());
     void writeAnalysis(const Session& session, const ConflictReport& conflicts, const DependencyReport& deps,

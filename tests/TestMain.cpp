@@ -8,7 +8,9 @@
 
 int main(int argc, char** argv)
 {
-    spdlog::set_level(spdlog::level::warn);
+    // FO4MX_TEST_LOG=info shows the pipeline's own progress lines (with times), e.g. for the benchmark.
+    const char* level = std::getenv("FO4MX_TEST_LOG");
+    spdlog::set_level(level && (std::string(level) == "info" || std::string(level) == "debug") ? (std::string(level) == "debug" ? spdlog::level::debug : spdlog::level::info) : spdlog::level::warn);
     const char* filter = argc > 1 ? argv[1] : nullptr;
     int failed = 0, run = 0;
     for (const auto& t : fo4mx::test::registry()) {

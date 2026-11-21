@@ -29,6 +29,10 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 - Textures in BC7 and BC6H, the formats many modern textures use, now preview instead of showing details only.
 - Asset tracing follows textures named directly inside meshes, not only those named in material files.
 
+### Faster on large load orders
+- Analyse is about ten times faster on a load order the size of Fallout 4 with its DLC and 1,400 mods. Starting the app again on an unchanged load order (scan and analyse) went from about 30 seconds to 3 in the benchmark.
+- Damaged mod files (archives, meshes, previs files) are now refused with a message instead of risking a crash. A test feeds every reader thousands of damaged files.
+
 ### Easier to use
 - **Crash logs name the real mod.** Diagnostics → Read Crash Log reads a Buffout 4 crash log and names the original mod and record behind every output plugin FormID in it.
 - **Switch back** undoes the last Apply to Game in one click: your load order, mod list and INI return to exactly how they were, from Apply's backups.

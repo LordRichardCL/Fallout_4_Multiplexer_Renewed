@@ -8,6 +8,7 @@
 #include "engine/Exporter.hpp"
 #include "engine/Pipeline.hpp"
 #include "engine/SwitchBack.hpp"
+#include "db/DatabaseWriter.hpp"
 #include <chrono>
 #include <cstdlib>
 #include "engine/BuildRecord.hpp"
@@ -7670,6 +7671,38 @@ TEST(switch_back_restores_the_setup_before_apply)
     }
 }
 
+// A rescan of an unchanged mod space keeps the scan tables (they hold exactly that scan); any change to a
+// plugin writes them again.
+TEST(rescan_keeps_unchanged_scan_results_and_rewrites_changed_ones)
+{
+    auto root = buildInstall("rescan_keep");
+    auto cfg = configFor(root);
+    auto count = [&](Pipeline& p) { return *p.database()->scalar("SELECT COUNT(*) FROM Records"); };
+    int64_t first = 0;
+    {
+        Pipeline p(cfg);
+        p.scan();
+        first = count(p);
+        CHECK(first > 0);
+        CHECK(!db::DatabaseWriter(*p.database()).meta("scan_key").value_or("").empty());
+    }
+    {
+        Pipeline p(cfg);
+        p.scan();
+        CHECK_EQ(count(p), first); // kept as they were
+        p.analyse();
+        CHECK(p.compile());
+    }
+    // ModC gains a record: the tables are written again and hold it.
+    writePlugin(root / "Game" / "Data" / "ModC.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000900, {zs("EDID", "ModC_NewKeyword")})});
+    {
+        Pipeline p(cfg);
+        p.scan();
+        CHECK(*p.database()->scalar("SELECT COUNT(*) FROM Records WHERE editor_id = 'ModC_NewKeyword'") == 1);
+    }
+}
+
 // Benchmark (runs only with FO4MX_BENCH=1; FO4MX_BENCH_PLUGINS sets the count, default 1400): a generated
 // load order the size of a large real one, timed stage by stage.
 TEST(benchmark_large_load_order)
@@ -7679,6 +7712,8 @@ TEST(benchmark_large_load_order)
         return;
     const char* countEnv = std::getenv("FO4MX_BENCH_PLUGINS");
     const int plugins = countEnv ? std::atoi(countEnv) : 1400;
+    const char* scaleEnv = std::getenv("FO4MX_BENCH_SCALE"); // multiplies the base game's records
+    const uint32_t scale = scaleEnv ? static_cast<uint32_t>(std::max(1, std::atoi(scaleEnv))) : 1;
     auto root = tempDir("bench");
     auto data = root / "Game" / "Data";
     std::filesystem::create_directories(data);
@@ -7690,6 +7725,8 @@ TEST(benchmark_large_load_order)
             base.push_back(record("KYWD", 0x00001000 + i, {zs("EDID", "BaseKw" + std::to_string(i))}));
         for (uint32_t i = 0; i < 10000; ++i)
             base.push_back(record("MISC", 0x00004000 + i, {zs("EDID", "BaseMisc" + std::to_string(i)), u32("FULL", i)}));
+        for (uint32_t i = 0; i < 100000 * (scale - 1); ++i) // bulk: records nothing overrides
+            base.push_back(record("STAT", 0x00100000 + i, {zs("EDID", "BaseStat" + std::to_string(i))}));
         for (uint32_t i = 0; i < 2000; ++i)
             base.push_back(record("FLST", 0x00008000 + i,
                                   {zs("EDID", "BaseList" + std::to_string(i)), u32("LNAM", 0x00001000 + i)}));

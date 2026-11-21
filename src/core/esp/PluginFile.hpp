@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <fstream>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -91,13 +92,21 @@ public:
     void closeAll();
 
 private:
-    struct Handle;
-    std::shared_ptr<Handle> acquire(const std::filesystem::path& path);
+    // Open handles per file, taken for one read and given back: reads of the same file run in parallel, and
+    // the lock is held only to take or return a handle.
+    struct Pool {
+        std::vector<std::unique_ptr<std::ifstream>> free;
+        uint64_t lastUse = 0;
+    };
+    std::unique_ptr<std::ifstream> take(const std::string& key, const std::filesystem::path& path, uint64_t& generation);
+    void giveBack(const std::string& key, std::unique_ptr<std::ifstream> stream, uint64_t generation);
 
     size_t maxOpen_;
     std::mutex mutex_;
-    std::list<std::filesystem::path> lru_;
-    std::unordered_map<std::string, std::shared_ptr<Handle>> handles_;
+    std::unordered_map<std::string, Pool> pools_;
+    size_t open_ = 0;       // handles waiting in the pools
+    uint64_t tick_ = 0;     // for the least recently used file
+    uint64_t generation_ = 0; // closeAll() since: handles from before are not given back
 };
 
 } // namespace fo4mx
