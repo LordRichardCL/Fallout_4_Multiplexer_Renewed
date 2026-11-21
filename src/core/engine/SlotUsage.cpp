@@ -23,7 +23,7 @@ SlotUsage slotsAfter(const Session& session, const CompiledOutput& c)
         ++(p.isLight() ? u.light : u.full);
     }
     for (const auto& op : c.outputs)
-        if (!op.records.empty())
+        if (!op.records.empty() || op.newRecords || op.overrides) // a build reopened from its export keeps counts
             ++(op.light ? u.light : u.full);
     u.light += c.archiveLoaders.size(); // ESL-flagged loaders (placeholders among them)
     return u;

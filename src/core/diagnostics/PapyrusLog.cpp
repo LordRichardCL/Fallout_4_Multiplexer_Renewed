@@ -331,6 +331,26 @@ bool readBuildMap(const std::filesystem::path& root, std::vector<FormMapping>& m
     return false;
 }
 
+std::string logBuildWarning(const std::filesystem::path& log, const std::filesystem::path& root)
+{
+    std::error_code ec;
+    for (const auto& dir : {root / "Data", root}) {
+        const auto map = dir / "Multiplexer_FormMap.tsv";
+        if (root.empty() || !std::filesystem::exists(map, ec))
+            continue;
+        const auto built = std::filesystem::last_write_time(map, ec);
+        if (ec)
+            return {};
+        const auto written = std::filesystem::last_write_time(log, ec);
+        if (ec || written >= built)
+            return {};
+        return "WARNING: this log was written before this build was exported. The output plugins' FormIDs in it "
+               "may belong to an earlier build, so translations can name the wrong mods. Read it against the build "
+               "you played with, or play again with this one and read the new log.";
+    }
+    return {};
+}
+
 std::filesystem::path defaultPapyrusLog()
 {
     return platform::fallout4DocumentsDir() / "Logs" / "Script" / "Papyrus.0.log";

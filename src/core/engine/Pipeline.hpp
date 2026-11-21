@@ -130,6 +130,26 @@ public:
     const BuildComparison* comparison() const { return comparison_ ? &*comparison_ : nullptr; }
     // What a save is checked against: the load order after this compile when there is one, else now.
     diagnostics::SaveCheckInput saveCheckInput() const;
+
+    // "Ready to test?": what the testing guide asks for before Apply to Game, each Pass, Warn or Fail with why.
+    // `save`: a save to check against the build (the newest by default; none checked when empty).
+    struct ReadinessItem {
+        enum class State { Pass, Warn, Fail } state = State::Pass;
+        std::string title;
+        std::string detail;
+    };
+    struct Readiness {
+        std::vector<ReadinessItem> items;
+        bool ready() const
+        {
+            for (const auto& i : items)
+                if (i.state == ReadinessItem::State::Fail)
+                    return false;
+            return true;
+        }
+        std::string format() const;
+    };
+    Readiness readiness(const std::filesystem::path& save) const;
     db::Database* database() { return db_ ? db_.get() : nullptr; }
 
     // Re-evaluate eligibility after the user changes exclusions (no rescan needed).

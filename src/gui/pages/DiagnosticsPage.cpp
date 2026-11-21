@@ -7,6 +7,7 @@
 #include <QSettings>
 #include <QDate>
 #include "engine/SupportBundle.hpp"
+#include "engine/BuildComparison.hpp"
 #include "engine/CompilationEngine.hpp"
 #include "util/Platform.hpp"
 #include "util/Text.hpp"
@@ -248,6 +249,8 @@ bool DiagnosticsPage::crashReading(const QString& file, QString* text) const
                         redirected.insert(ss(line.section('\t', 0, 0).trimmed()));
             buildNote = "Read against the build in " + fo4mx::pathToUtf8(root) + " (" + std::to_string(map.size()) +
                         " FormID mappings).";
+            if (const auto warn = dg::logBuildWarning(toPath(file), root); !warn.empty())
+                buildNote += "\n" + warn;
             break;
         }
     const auto report = dg::translateCrashLog(std::string_view(bytes.constData(), size_t(bytes.size())), map, {}, redirected);
@@ -301,6 +304,48 @@ void DiagnosticsPage::showReading(const QString& title, const QString& file, con
         again(next);
 }
 
+bool DiagnosticsPage::papyrusReading(const QString& file, QString* text) const
+{
+    auto* p = app_->pipeline();
+    if (!p || !p->scanned())
+        return false;
+    QFile in(file);
+    if (!in.open(QIODevice::ReadOnly))
+        return false;
+    const QByteArray bytes = in.readAll();
+    std::vector<fo4mx::FormMapping> map;
+    std::set<std::string> redirected;
+    std::string buildNote = "No build found to read it against: compiled records are not translated.";
+    if (const auto root = packageRoot(); dg::readBuildMap(root, map, redirected)) {
+        buildNote = "Read against the build in " + fo4mx::pathToUtf8(root) + " (" + std::to_string(map.size()) +
+                    " FormID mappings).";
+        if (const auto warn = dg::logBuildWarning(toPath(file), root); !warn.empty())
+            buildNote += "\n" + warn;
+    }
+    const auto report = dg::translatePapyrusLog(std::string_view(bytes.constData(), size_t(bytes.size())),
+                                                dg::runtimeLoadOrder(p->session()), map, redirected,
+                                                dg::scriptOwnerOf(p->session()));
+    *text = QFileInfo(file).fileName() + "\n" + qs(buildNote) + "\n\n" + qs(dg::formatPapyrusReport(report));
+    return true;
+}
+
+QString DiagnosticsPage::saveCheckReading(const QString& file) const
+{
+    auto* p = app_->pipeline();
+    if (!p || !p->scanned())
+        return {};
+    try {
+        const auto save = dg::readSaveGame(toPath(file));
+        const auto in = p->saveCheckInput();
+        QString text = QFileInfo(file).fileName() + "\n" + qs(dg::formatSaveCheck(save, dg::checkSave(save, in), in.nextBuild));
+        if (!in.nextBuild)
+            text += "\nCompile first to check it against the next build instead.\n";
+        return text;
+    } catch (const std::exception& e) {
+        return QFileInfo(file).fileName() + "\nCannot read it: " + e.what();
+    }
+}
+
 void DiagnosticsPage::readPapyrusLog(QString file)
 {
     auto* p = app_->pipeline();
@@ -319,22 +364,11 @@ void DiagnosticsPage::readPapyrusLog(QString file)
         if (file.isEmpty())
             return;
     }
-    QFile in(file);
-    if (!in.open(QIODevice::ReadOnly)) {
+    QString text;
+    if (!papyrusReading(file, &text)) {
         QMessageBox::warning(this, "Papyrus log", "Cannot read " + file);
         return;
     }
-    const QByteArray bytes = in.readAll();
-    std::vector<fo4mx::FormMapping> map;
-    std::set<std::string> redirected;
-    std::string buildNote = "No build found to read it against: compiled records are not translated.";
-    if (const auto root = packageRoot(); dg::readBuildMap(root, map, redirected))
-        buildNote = "Read against the build in " + fo4mx::pathToUtf8(root) + " (" + std::to_string(map.size()) +
-                    " FormID mappings).";
-    const auto report = dg::translatePapyrusLog(std::string_view(bytes.constData(), size_t(bytes.size())),
-                                                dg::runtimeLoadOrder(p->session()), map, redirected,
-                                                dg::scriptOwnerOf(p->session()));
-    const QString text = QFileInfo(file).fileName() + "\n" + qs(buildNote) + "\n\n" + qs(dg::formatPapyrusReport(report));
     showReading("Papyrus log", file, text, "Papyrus logs (*.log)", [this](const QString& f) { readPapyrusLog(f); });
 }
 
@@ -353,16 +387,7 @@ void DiagnosticsPage::checkSaveGame(QString file)
         if (file.isEmpty())
             return;
     }
-    QString text;
-    try {
-        const auto save = dg::readSaveGame(toPath(file));
-        const auto in = p->saveCheckInput();
-        text = QFileInfo(file).fileName() + "\n" + qs(dg::formatSaveCheck(save, dg::checkSave(save, in), in.nextBuild));
-        if (!in.nextBuild)
-            text += "\nCompile first to check it against the next build instead.\n";
-    } catch (const std::exception& e) {
-        text = QFileInfo(file).fileName() + "\n" + QString("Cannot read it: ") + e.what();
-    }
+    const QString text = saveCheckReading(file);
     showReading("Save check", file, text, "Fallout 4 saves (*.fos)", [this](const QString& f) { checkSaveGame(f); });
 }
 
@@ -396,6 +421,29 @@ void DiagnosticsPage::makeSupportBundle()
             in.crashReading = ss(text);
     }
     in.recorderSession = dg::newestSession(dg::defaultRecorderFolder());
+    // What a test session leaves to read: the Papyrus log and its reading, a check of the newest save, this
+    // build against the previous one, and the Precombined Cell Check rows.
+    if (const auto papyrus = dg::defaultPapyrusLog(); std::filesystem::exists(papyrus)) {
+        in.extraFiles.push_back({papyrus, "papyrus/" + fo4mx::pathToUtf8(papyrus.filename())});
+        QString text;
+        if (papyrusReading(toQString(papyrus), &text))
+            in.readings.push_back({"papyrus/" + fo4mx::pathToUtf8(papyrus.filename()) + ".reading.txt", ss(text)});
+    }
+    if (auto* p = app_->pipeline(); p && p->scanned()) {
+        if (const auto save = dg::newestSave(); !save.empty())
+            in.readings.push_back({"save check.txt", ss(saveCheckReading(toQString(save)))});
+        if (const auto* cmp = p->comparison())
+            in.readings.push_back({"build comparison.txt", fo4mx::formatBuildComparison(*cmp, 2000)});
+        if (const auto* v = p->validation()) {
+            std::string rows;
+            for (const auto& is : v->issues)
+                if (is.category == "Precombined Cell Check" || is.category == "Previs Check" ||
+                    is.category == "Kept Out Automatically")
+                    rows += is.category + "\t" + is.plugin + "\t" + is.formId + "\t" + is.message + "\n";
+            if (!rows.empty())
+                in.readings.push_back({"validation highlights.tsv", "#check\tplugin\tform_id\tmessage\n" + rows});
+        }
+    }
     QSettings settings;
     for (const auto& k : settings.allKeys())
         in.settings.push_back({ss(k), ss(settings.value(k).toStringList().join(", ").isEmpty()

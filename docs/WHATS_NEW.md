@@ -4,6 +4,9 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 
 ## 21 November 2026
 
+- **Ready to Test?** beside Apply to Game checks validation, the export, plugin slots, your newest save, F4SE and a crash logger before you switch over.
+- **The support bundle holds a whole test session:** the Papyrus log and its reading, a check of your newest save, the build comparison and the Precombined Cell Check rows, besides the crash log.
+- **Readings warn about old logs:** a crash or Papyrus log written before the build was exported is flagged, since its FormIDs may belong to another build.
 - **From a Precombined Cell Check to its files:** select the row in Validation and open the cell's precombined meshes and previs file in Assets in one click.
 - **User Guide:** a new section, *Reading the Validation page*, explains each check, its severity and what to do about it.
 - **Precombined Cell Check (read only):** for each new cell that keeps its plugin out for its precombine or previs data, Validation says whether its files could be moved to the output in the next stage, or why not, with a count of the plugins that would then compile.

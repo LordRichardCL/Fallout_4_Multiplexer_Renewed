@@ -78,6 +78,7 @@ private:
     QLineEdit* outputDir_;
     QPushButton* compile_;
     QPushButton* export_;
+    QPushButton* ready_ = nullptr;
     QPushButton* apply_;
     QPushButton* switchBack_ = nullptr;
     QPushButton* openFolder_;

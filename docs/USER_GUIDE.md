@@ -217,7 +217,17 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 
 ## 6. Export and switch over
 
-**The Compilation page.** Options on the left, results on the right, and the actions at the bottom (Save Settings, Open Folder, Export, Apply to Game, Compile) with the progress of compile, export and apply. Every option has a one-line description; the **?** beside it explains it in full. **Presets** at the top right set the switches in one click; they never change the number of outputs, their name, the folder or the allocation:
+**Ready to Test?** (beside Apply to Game) checks, before you switch over, what the [testing guide](TESTING_GUIDE.md) asks for:
+- validation found no errors;
+- the build is exported (or the latest export still fits);
+- the plugin slots after switching over;
+- whether your newest save would lose anything;
+- F4SE when the archive loader or the Diagnostic Recorder needs it;
+- a crash logger (Buffout 4).
+
+Each line is OK, NOTE or FAIL. FAIL means fix that first. Command line: `fo4mx ready <install> [--save save.fos]`, which exits with code 2 when not ready.
+
+**The Compilation page.** Options on the left, results on the right, and the actions at the bottom (Save Settings, Open Folder, Export, Ready to Test?, Apply to Game, Compile) with the progress of compile, export and apply. Every option has a one-line description; the **?** beside it explains it in full. **Presets** at the top right set the switches in one click; they never change the number of outputs, their name, the folder or the allocation:
 - **Recommended**: combine compatible changes, apply your patch choices, merge cell settings, translate previs files, build Multiplexer_Patch.esp, compile new quests, dialogue and NPCs.
 - **Safest**: combine compatible changes only.
 - **Custom**: shown when the switches match neither.
@@ -666,7 +676,7 @@ Once you play on compiled output, a crash log names the output plugins (`Dummy_P
 - the scripts in errors (from call stacks, "Cannot open store for class" lines and `.psc` names), each with the mod that provides it, and which ones the game could not load;
 - every object the log names by FormID, with the original mod behind each compiled record. Records named in errors are listed first.
 
-A Papyrus log has no plugin list of its own, so FormIDs are read with your current load order. Scan first, and read the log before you change the load order. Command line: `fo4mx papyrus-log <install> [Papyrus.0.log]`.
+A crash or Papyrus log written before the build was exported was made with another build: its output FormIDs would be translated through the wrong map, so the reading starts with a warning. A Papyrus log has no plugin list of its own, so FormIDs are read with your current load order. Scan first, and read the log before you change the load order. Command line: `fo4mx papyrus-log <install> [Papyrus.0.log]`.
 
 **Diagnostics → Check a Save…** says whether a save would lose anything. It reads the plugins the save was made with and compares them with your load order. After Compile, it compares them with the load order the build would give instead. It lists:
 - plugins the save holds that will no longer load;
@@ -681,6 +691,7 @@ It compares plugin lists only and does not read what the save holds of each plug
 - this app's logs and your load order (`plugins.txt`, `loadorder.txt`, `modlist.txt`);
 - the newest crash log with its reading against the build;
 - the newest Diagnostic Recorder log;
+- `Papyrus.0.log` and its reading, a check of your newest save against the build, this build compared with the previous one, and the Precombined Cell Check, Previs Check and Kept Out Automatically rows (the app only; the command line adds the Papyrus log itself);
 - the settings.
 
 It never includes plugins, archives or other mod files. In every text file, your home folder and user name are replaced with `<user>`. Its `README.txt` lists what is inside. Command line: `fo4mx support-bundle <install> [--out FILE.zip]`.

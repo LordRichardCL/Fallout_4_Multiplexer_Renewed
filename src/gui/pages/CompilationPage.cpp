@@ -1,4 +1,5 @@
 #include "pages/CompilationPage.hpp"
+#include "diagnostics/SaveGame.hpp"
 
 #include "Format.hpp"
 #include "models/GroupedSqlModel.hpp"
@@ -512,8 +513,21 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     switchBack_->setToolTip("Undo the last Apply to Game: your load order, mod list and INI return to how they were "
                             "before it, from the backups it made. Shown only when there is something to undo.");
     switchBack_->hide();
-    for (auto* b : {saveSettings, openFolder_, export_, switchBack_, apply_, compile_})
+    ready_ = makeButton("Ready to Test?");
+    ready_->setIcon(lineIcon("validation", theme::kText, 15));
+    ready_->setToolTip("Before Apply to Game: checks what the testing guide asks for (no validation errors, "
+                       "exported, plugin slots, your newest save, F4SE and a crash logger) and says what is left.");
+    for (auto* b : {saveSettings, openFolder_, export_, switchBack_, ready_, apply_, compile_})
         bh->addWidget(b);
+    connect(ready_, &QPushButton::clicked, this, [this] {
+        auto* p = app_->pipeline();
+        if (!p)
+            return;
+        const auto r = p->readiness(fo4mx::diagnostics::newestSave());
+        QMessageBox box(r.ready() ? QMessageBox::Information : QMessageBox::Warning, "Ready to test?",
+                        QString::fromStdString(r.format()), QMessageBox::Ok, this);
+        box.exec();
+    });
     outer->addWidget(bar);
 
     connect(browse, &QPushButton::clicked, this, [this] {
@@ -1013,6 +1027,7 @@ void CompilationPage::updateButtons()
     // Apply works on this session's export, or on the last build reopened after a scan (verified).
     const bool applicable = p && p->applySource();
     apply_->setEnabled(!busy && applicable);
+    ready_->setEnabled(!busy && p && p->scanned());
     switchBack_->setVisible(app_->canSwitchBack());
     switchBack_->setEnabled(!busy);
     apply_->setToolTip(applicable ? QString()

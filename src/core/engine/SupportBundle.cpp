@@ -172,6 +172,11 @@ SupportBundleResult writeSupportBundle(const SupportBundleInputs& in, const fs::
     }
     if (!in.recorderSession.empty())
         add(in.recorderSession, "recorder/" + pathToUtf8(in.recorderSession.filename()));
+    for (const auto& [from, to] : in.extraFiles)
+        add(from, to);
+    for (const auto& [to, text] : in.readings)
+        if (!text.empty())
+            addText(text, to);
     {
         std::string s = "# Fallout 4 Multiplexer Renewed settings\n";
         for (const auto& [k, v] : in.settings)

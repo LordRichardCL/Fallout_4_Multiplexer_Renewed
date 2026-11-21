@@ -7,7 +7,8 @@ A checklist for trying a build in the game, and what to send back when something
 1. **Settings:** keep a crash logger installed (Buffout 4). Optionally turn on *Prepare the Diagnostic Recorder* (Settings → Diagnostics) and install its package.
 2. **Build:** Scan, Analyse, Compile (Recommended preset), Export.
 3. **Read Validation:** 0 errors before going on. Note the warnings.
-4. **Apply to Game.** Read the preview first. If anything goes wrong later, **Switch Back** (Compilation page) restores your setup in one click.
+4. **Ready to Test?** (Compilation page, beside Apply to Game): everything OK or NOTE, nothing FAIL.
+5. **Apply to Game.** Read the preview first. If anything goes wrong later, **Switch Back** (Compilation page) restores your setup in one click.
 
 ## 1. The game starts
 
@@ -53,7 +54,7 @@ If something is missing or broken, note the mod, the item or NPC, and where. Sen
 ## 5. When something goes wrong
 
 1. **Switch Back** first, if you want your game back at once.
-2. **Easiest:** Diagnostics → **Support Bundle…** puts everything below (crash log and its reading, reports, instructions, recorder log, load order) in one zip. Send it with a note of what happened and where.
+2. **Easiest:** Diagnostics → **Support Bundle…** puts everything below in one zip: crash log and Papyrus log with their readings, a check of your newest save, the build comparison, reports, instructions, recorder log and load order. Send it with a note of what happened and where.
 3. **Crash:** Diagnostics → Read Crash Log names the original mod behind each output FormID. Save the reading and send it with the crash log.
 4. **Not a crash, but wrong:** note what and where, then send (or the support bundle):
    - the Reports folder of the export (`Multiplexer Reports`);

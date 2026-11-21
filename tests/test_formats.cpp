@@ -1272,6 +1272,9 @@ TEST(support_bundle_collects_and_redacts)
     in.loadOrder = {dir / "plugins.txt"};
     in.settings = {{"install/gamePath", home + "\\Fallout 4"}};
     in.redact = {home};
+    std::ofstream(dir / "Papyrus.0.log") << "[time] error: x in " << home << "\\Data\n";
+    in.extraFiles = {{dir / "Papyrus.0.log", "papyrus/Papyrus.0.log"}};
+    in.readings = {{"save check.txt", "Nothing the save needs goes away"}, {"empty.txt", ""}};
     const auto r = writeSupportBundle(in, dir / "bundle.zip");
     CHECK(std::filesystem::file_size(dir / "bundle.zip") > 100);
     auto has = [&](const std::string& f) { return std::find(r.included.begin(), r.included.end(), f) != r.included.end(); };
@@ -1282,6 +1285,9 @@ TEST(support_bundle_collects_and_redacts)
     CHECK(has("load order/plugins.txt"));
     CHECK(has("settings.txt"));
     CHECK(has("README.txt"));
+    CHECK(has("papyrus/Papyrus.0.log"));
+    CHECK(has("save check.txt"));
+    CHECK(!has("empty.txt")); // an empty reading is left out
     for (const auto& f : r.included)
         CHECK(!iendsWith(f, ".esp") && !iendsWith(f, ".ba2"));
     CHECK(std::find(r.missing.begin(), r.missing.end(), "logs/missing.log") != r.missing.end());
@@ -1527,4 +1533,22 @@ TEST(save_game_plugin_lists_are_read)
     CHECK(!diagnostics::checkSave(withBuild, again).safe);
     CHECK(text.find("would lose content") != std::string::npos);
     CHECK(text.find("ModA.esp") != std::string::npos);
+}
+
+// A log written before the build was exported is flagged: its output FormIDs may be another build's.
+TEST(log_older_than_the_build_is_flagged)
+{
+    namespace fs = std::filesystem;
+    const auto dir = fs::temp_directory_path() / "fo4mx_logbuild";
+    fs::remove_all(dir);
+    fs::create_directories(dir / "Data");
+    std::ofstream(dir / "Data" / "Multiplexer_FormMap.tsv") << "#\n";
+    std::ofstream(dir / "crash.log") << "x";
+    const auto built = fs::last_write_time(dir / "Data" / "Multiplexer_FormMap.tsv");
+    fs::last_write_time(dir / "crash.log", built - std::chrono::hours(2));
+    CHECK(diagnostics::logBuildWarning(dir / "crash.log", dir).find("written before this build") != std::string::npos);
+    fs::last_write_time(dir / "crash.log", built + std::chrono::hours(2));
+    CHECK(diagnostics::logBuildWarning(dir / "crash.log", dir).empty());
+    CHECK(diagnostics::logBuildWarning(dir / "crash.log", dir / "nowhere").empty());
+    fs::remove_all(dir);
 }

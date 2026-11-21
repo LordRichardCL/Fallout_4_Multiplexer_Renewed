@@ -9983,3 +9983,31 @@ TEST(new_cells_with_precombines_are_assessed)
                    i.message.find("1 of 2 plugins would then no longer be kept out") != std::string::npos;
     CHECK(summary);
 }
+
+// "Ready to test?": not before Export, ready after; a missing crash logger is a note, not a failure.
+TEST(readiness_before_apply)
+{
+    auto root = buildInstall("ready");
+    auto cfg = configFor(root);
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        auto r = p.readiness({});
+        CHECK(!r.ready());
+        CHECK(r.format().find("FAIL  Export") != std::string::npos);
+        CHECK(r.format().find("OK    Validation: 0 errors") != std::string::npos);
+        p.exportOutputs();
+        r = p.readiness({});
+        CHECK(r.ready());
+        CHECK(r.format().find("OK    Plugin slots") != std::string::npos);
+        CHECK(r.format().find("NOTE  Crash logger") != std::string::npos);
+    }
+    writeFile(root / "Game" / "Data" / "F4SE" / "Plugins" / "Buffout4.dll", "dll");
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK(p.readiness({}).format().find("OK    Crash logger") != std::string::npos);
+}

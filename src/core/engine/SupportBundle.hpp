@@ -22,6 +22,10 @@ struct SupportBundleInputs {
     std::filesystem::path recorderSession;          // newest Diagnostic Recorder log, if any
     std::vector<std::pair<std::string, std::string>> settings; // shown as "key = value"
     std::vector<std::string> redact;                // more text to take out (besides home folder and user)
+    // More files to include (source, path in the zip), such as Papyrus.0.log; text files are redacted.
+    std::vector<std::pair<std::filesystem::path, std::string>> extraFiles;
+    // Readings written as text files (path in the zip, text): Papyrus reading, save check, build comparison...
+    std::vector<std::pair<std::string, std::string>> readings;
 };
 
 struct SupportBundleResult {

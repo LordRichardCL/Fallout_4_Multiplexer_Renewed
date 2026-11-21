@@ -1,4 +1,5 @@
 #include "engine/Pipeline.hpp"
+#include "engine/SlotUsage.hpp"
 
 #include <chrono>
 
@@ -1616,6 +1617,106 @@ diagnostics::SaveCheckInput Pipeline::saveCheckInput() const
     for (auto pi : compiled_->compiledPlugins)
         in.compiledAway.push_back(s.plugins[pi].name);
     return in;
+}
+
+} // namespace fo4mx
+
+namespace fo4mx {
+
+Pipeline::Readiness Pipeline::readiness(const std::filesystem::path& save) const
+{
+    using S = ReadinessItem::State;
+    Readiness r;
+    auto add = [&](S state, std::string title, std::string detail) {
+        r.items.push_back({state, std::move(title), std::move(detail)});
+    };
+    if (!session_->scanned) {
+        add(S::Fail, "Scan", "Nothing is scanned yet: Scan, Analyse and Compile first.");
+        return r;
+    }
+    // 1. Compiled, and validation found no errors.
+    if ((!compiled_ || !validation_) && restored_) {
+        add(S::Pass, "Validation", "The latest export (" + restored_->run +
+                                       ") was validated when it was written, and still fits this load order.");
+    } else if (!compiled_ || !validation_) {
+        add(S::Fail, "Compile", "Not compiled in this session: Compile (and Export) first.");
+    } else if (validation_->errors) {
+        add(S::Fail, "Validation", std::to_string(validation_->errors) +
+                                      " error(s): the Validation page says which and why. They block the export.");
+    } else {
+        add(S::Pass, "Validation",
+            "0 errors, " + std::to_string(validation_->warnings) + " warning(s)" +
+                (validation_->warnings ? ": worth reading before you play (Validation page)" : ""));
+    }
+    // 2. Exported: Apply switches to an export.
+    if (exported_ && !exported_->directory.empty())
+        add(S::Pass, "Export", "Exported to " + pathToUtf8(exported_->directory) + ".");
+    else if (restored_)
+        add(S::Pass, "Export", "The latest export (" + restored_->run + ") fits this load order.");
+    else
+        add(S::Fail, "Export", "Export this build before Apply to Game.");
+    // 3. Plugin slots.
+    if (const CompiledOutput* c = compiled_ ? &*compiled_ : restored_ ? &restored_->compiled : nullptr) {
+        const auto after = slotsAfter(*session_, *c);
+        const std::string counts = std::to_string(after.full) + " of 254 full plugins and " +
+                                   std::to_string(after.light) + " of 4,096 light plugins after switching over";
+        if (after.full > SlotUsage::kFullLimit || after.light > SlotUsage::kLightLimit)
+            add(S::Fail, "Plugin slots", counts + ": over the game's limit.");
+        else if (after.full > 240)
+            add(S::Warn, "Plugin slots", counts + ": close to the limit.");
+        else
+            add(S::Pass, "Plugin slots", counts + ".");
+    }
+    // 4. The save to test with.
+    if (!save.empty()) {
+        try {
+            const auto info = diagnostics::readSaveGame(save);
+            const auto in = saveCheckInput();
+            const auto check = diagnostics::checkSave(info, in);
+            if (check.safe)
+                add(S::Pass, "Your newest save", pathToUtf8(save.filename()) + " loses nothing with this build.");
+            else
+                add(S::Warn, "Your newest save",
+                    pathToUtf8(save.filename()) + " would lose content (" +
+                        std::to_string(check.missing.size() + check.compiledAway.size()) + " plugin(s)" +
+                        (check.recordsChanged ? ", " + std::to_string(check.recordsChanged) + " records" : "") +
+                        "): test with a new game, or read Diagnostics > Check a Save.");
+        } catch (const std::exception& e) {
+            add(S::Warn, "Your newest save", "Could not read " + pathToUtf8(save.filename()) + ": " + e.what());
+        }
+    }
+    // 5. What the game needs for the switches that are on, and a crash logger for the test.
+    const auto& install = session_->install;
+    std::error_code ec;
+    const bool f4se = std::filesystem::exists(install.gamePath / "f4se_loader.exe", ec);
+    if (config_.f4seArchiveLoader || config_.diagnosticRecorder)
+        add(f4se ? S::Pass : S::Fail, "F4SE",
+            f4se ? std::string("Installed: start the game through f4se_loader.exe or your mod manager's F4SE entry.")
+                 : std::string("Not found in the game folder, but the F4SE archive loader or the Diagnostic Recorder "
+                               "is on: install F4SE, or turn them off."));
+    if (config_.diagnosticRecorder && exported_)
+        add(exported_->recorderFolder.empty() ? S::Warn : S::Pass, "Diagnostic Recorder",
+            exported_->recorderFolder.empty()
+                ? "Not prepared: " + exported_->recorderProblem
+                : "Ready to install: " + pathToUtf8(exported_->recorderFolder) + ".");
+    bool buffout = false;
+    for (const char* dll : {"f4se\\plugins\\buffout4.dll", "f4se\\plugins\\crashlogger.dll"})
+        buffout |= session_->vfs.find(dll) != nullptr || session_->assets.find(dll) != nullptr;
+    add(buffout ? S::Pass : S::Warn, "Crash logger",
+        buffout ? std::string("Installed: a crash writes a log Diagnostics can read.")
+                : std::string("No Buffout 4 found: install one so a crash leaves a log to read."));
+    return r;
+}
+
+std::string Pipeline::Readiness::format() const
+{
+    std::string out = ready() ? "Ready to test.\n\n" : "Not ready yet: fix what is marked FAIL first.\n\n";
+    for (const auto& i : items) {
+        const char* mark = i.state == ReadinessItem::State::Pass ? "OK  " : i.state == ReadinessItem::State::Warn ? "NOTE" : "FAIL";
+        out += std::string(mark) + "  " + i.title + ": " + i.detail + "\n";
+    }
+    out += "\nThen: Apply to Game, start a new game, and follow the testing guide. Switch back undoes Apply.\n";
+    return out;
 }
 
 } // namespace fo4mx

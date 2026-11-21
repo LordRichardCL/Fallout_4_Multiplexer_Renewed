@@ -80,6 +80,10 @@ Usage:
                                             export's reports and records, logs, load order, the
                                             newest crash log and its reading, recorder log. No mod
                                             files; home folder and user name taken out
+  fo4mx ready    <install> [--save save.fos]
+                                            before Apply to Game: validation, export, plugin
+                                            slots, the newest save, F4SE and a crash logger
+                                            (the latest export, or compiles when it does not fit)
   fo4mx check-save <install> [save.fos] [--next]
                                             whether a save would lose anything: its plugins against
                                             the load order now, or with --next after compiling the
@@ -606,6 +610,8 @@ int cmdCrashLog(const Args& a)
     if (a.has("--formmap")) {
         const auto fm = utf8ToPath(a.get("--formmap"));
         map = CompilationEngine::readFormMap(fm);
+        if (const auto warn = diagnostics::logBuildWarning(file, fm.parent_path()); !warn.empty())
+            std::printf("%s\n", warn.c_str());
         std::ifstream r(fm.parent_path() / "Multiplexer_Redirected.tsv");
         for (std::string line; std::getline(r, line);)
             if (!line.empty() && line[0] != '#')
@@ -614,6 +620,22 @@ int cmdCrashLog(const Args& a)
     std::printf("%s\n%s", pathToUtf8(file).c_str(),
                 diagnostics::formatCrashReport(diagnostics::translateCrashLog(text, map, {}, redirected)).c_str());
     return 0;
+}
+
+// "Ready to test?" before Apply to Game: the latest export when it still fits, else a fresh compile.
+int cmdReady(const Args& a)
+{
+    auto cfg = makeConfig(a);
+    Pipeline p(cfg);
+    p.scan();
+    if (!p.restoreLastBuild()) {
+        p.analyse();
+        p.compile();
+    }
+    const auto save = a.has("--save") ? utf8ToPath(a.get("--save")) : diagnostics::newestSave();
+    const auto r = p.readiness(save);
+    std::fputs(r.format().c_str(), stdout);
+    return r.ready() ? 0 : 2;
 }
 
 // A save's plugins against the load order now, or after the next build (--next).
@@ -652,10 +674,13 @@ int cmdPapyrusLog(const Args& a)
     const auto& install = p.session().install;
     const auto loc = output::locate(cfg.exportOptions.outputDirectory, install.gamePath, install.dataPath, install.modsPath);
     const auto root = output::latestRun(loc).value_or(loc.root);
-    std::printf("%s\n%s\n\n", pathToUtf8(file).c_str(),
-                diagnostics::readBuildMap(root, map, redirected)
-                    ? ("Read against the build in " + pathToUtf8(root)).c_str()
-                    : "No build found: compiled records are not translated.");
+    std::string note = "No build found: compiled records are not translated.";
+    if (diagnostics::readBuildMap(root, map, redirected)) {
+        note = "Read against the build in " + pathToUtf8(root);
+        if (const auto warn = diagnostics::logBuildWarning(file, root); !warn.empty())
+            note += "\n" + warn;
+    }
+    std::printf("%s\n%s\n\n", pathToUtf8(file).c_str(), note.c_str());
     std::fputs(diagnostics::formatPapyrusReport(
                    diagnostics::translatePapyrusLog(text, diagnostics::runtimeLoadOrder(p.session()), map, redirected,
                                                    diagnostics::scriptOwnerOf(p.session())),
@@ -685,6 +710,8 @@ std::string crashReadingAgainst(const std::filesystem::path& crashLog, const std
                 redirected.insert(line.substr(0, line.find('\t')));
         note = "Read against the build in " + pathToUtf8(build) + " (" + std::to_string(map.size()) +
                " FormID mappings).";
+        if (const auto warn = diagnostics::logBuildWarning(crashLog, build); !warn.empty())
+            note += "\n" + warn;
         break;
     }
     return pathToUtf8(crashLog.filename()) + "\n" + note + "\n\n" +
@@ -740,6 +767,8 @@ int cmdSupportBundle(const Args& a)
     if (!in.crashLog.empty())
         in.crashReading = crashReadingAgainst(in.crashLog, in.packageRoot);
     in.recorderSession = diagnostics::newestSession(diagnostics::defaultRecorderFolder());
+    if (const auto papyrus = diagnostics::defaultPapyrusLog(); std::filesystem::exists(papyrus, ec))
+        in.extraFiles.push_back({papyrus, "papyrus/" + pathToUtf8(papyrus.filename())});
     const auto out = a.has("--out") ? utf8ToPath(a.get("--out"))
                                     : std::filesystem::current_path() /
                                           ("Multiplexer Support " + output::runStamp() + ".zip");
@@ -1031,6 +1060,8 @@ int main(int argc, char** argv)
             return cmdCompareBuilds(a);
         if (a.command == "support-bundle")
             return cmdSupportBundle(a);
+        if (a.command == "ready")
+            return cmdReady(a);
         if (a.command == "check-save")
             return cmdCheckSave(a);
         if (a.command == "papyrus-log")

@@ -30,6 +30,8 @@ private:
     void showReading(const QString& title, const QString& file, const QString& text, const QString& filter,
                      const std::function<void(const QString&)>& again);
     void readPapyrusLog(QString file);
+    bool papyrusReading(const QString& file, QString* text) const;
+    QString saveCheckReading(const QString& file) const;
     void checkSaveGame(QString file);
     // One zip with what it takes to look into a problem (Support Bundle…).
     void makeSupportBundle();

@@ -85,6 +85,11 @@ RuntimeLoadOrder runtimeLoadOrder(const Session& session);
 bool readBuildMap(const std::filesystem::path& exportRoot, std::vector<FormMapping>& map,
                   std::set<std::string>& redirected);
 
+// A warning when `log` (a crash or Papyrus log) was written before the build in `exportRoot` was exported: its
+// output plugins' FormIDs may then belong to an earlier build, and translating them through this build's map
+// can name the wrong mods. Empty when the log is newer, or either file is missing.
+std::string logBuildWarning(const std::filesystem::path& log, const std::filesystem::path& exportRoot);
+
 // Documents\My Games\Fallout4\Logs\Script\Papyrus.0.log
 std::filesystem::path defaultPapyrusLog();
 
