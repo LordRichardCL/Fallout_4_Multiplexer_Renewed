@@ -1,4 +1,5 @@
 #include "engine/ReferenceScanner.hpp"
+#include "engine/EngineFiles.hpp"
 
 #include "assets/AssetScanner.hpp"
 #include "engine/ParallelFor.hpp"
@@ -1189,8 +1190,24 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                 engine = &nf;
         // Voice files and FaceGen move with their records at export (Exporter relocations).
         const std::string pre = engine ? engine->prefix : "";
-        const bool voice = pre == "sound\\voice\\" || pre == "meshes\\actors\\character\\facegendata\\facegeom\\" ||
-                           pre == "textures\\actors\\character\\facecustomization\\";
+        bool voice = pre == "sound\\voice\\" || pre == "meshes\\actors\\character\\facegendata\\facegeom\\" ||
+                     pre == "textures\\actors\\character\\facecustomization\\";
+        // LOD billboards move too when every file directly in the folder names, by its FormID, a record the
+        // plugin defines itself (the export copies each under the output's name and the record's new FormID).
+        if (pre == "textures\\terrain\\lodgen\\") {
+            std::unordered_set<uint32_t> own;
+            for (const auto& rec : session.records)
+                if (rec.key.origin == plugin && rec.plugin == plugin)
+                    own.insert(rec.key.objectId);
+            const auto& files = folderFiles[key];
+            voice = !files.empty() && std::all_of(files.begin(), files.end(), [&](const std::string& f) {
+                const std::string name = f.substr(folder.size());
+                if (name.find('\\') != std::string::npos)
+                    return false;
+                const auto token = fileFormIdToken(name);
+                return token && own.count(token->objectId) != 0;
+            });
+        }
         // Any other folder: Safe when the plugin's records name every file in it by path (static
         // collection meshes in meshes\scol\<plugin>\, sound files): those are found by path, not by name.
         bool byPath = false;

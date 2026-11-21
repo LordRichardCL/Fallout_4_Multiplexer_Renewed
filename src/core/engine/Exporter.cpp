@@ -1,4 +1,5 @@
 #include "engine/Exporter.hpp"
+#include "engine/EngineFiles.hpp"
 #include "engine/Redirection.hpp"
 #include "engine/PluginIni.hpp"
 
@@ -494,6 +495,62 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
             }
         }
     }
+    // LOD billboards (textures\terrain\lodgen\<plugin>\), named by the base record's FormID: copied under
+    // the output's folder and the record's new FormID. The scan cleared the plugin only when every file
+    // there names one of its own records this way (ReferenceScanner).
+    {
+        constexpr const char* kPrefix = "textures\\terrain\\lodgen\\";
+        constexpr const char* kManifest = "Multiplexer_LODBillboards.tsv";
+        {
+            std::ifstream in(r.directory / kManifest);
+            auto& prev = previousCopies[kManifest];
+            for (std::string line; std::getline(in, line);)
+                if (!line.empty() && line[0] != '#')
+                    prev.insert(line.substr(0, line.find('\t')));
+            manifests[kManifest] = "# Fallout 4 Multiplexer Renewed relocated files v1\n#output_file\tsource_file\n";
+        }
+        std::map<std::pair<std::string, uint32_t>, const FormMapping*> byId; // (plugin, object id)
+        for (const auto& m : c.mappings)
+            byId[{toLower(m.sourcePlugin), m.sourceObjectId}] = &m;
+        const size_t plen = std::strlen(kPrefix);
+        const auto& idx = session.assets;
+        for (const auto& e : idx.entries) {
+            if (byId.empty())
+                break;
+            const std::string& path = idx.path(e);
+            if (!istartsWith(path, kPrefix))
+                continue;
+            const size_t pluginEnd = path.find('\\', plen);
+            if (pluginEnd == std::string::npos || path.find('\\', pluginEnd + 1) != std::string::npos)
+                continue;
+            const std::string name = path.substr(pluginEnd + 1);
+            const auto token = fileFormIdToken(name);
+            if (!token)
+                continue;
+            auto it = byId.find({toLower(path.substr(plen, pluginEnd - plen)), token->objectId});
+            if (it == byId.end())
+                continue;
+            char id[16];
+            std::snprintf(id, sizeof(id), "%08x", it->second->objectId & 0xFFFFFF);
+            const std::string dest = std::string(kPrefix) + toLower(it->second->outputPlugin) + "\\" +
+                                     name.substr(0, token->pos) + id + name.substr(token->pos + 8);
+            std::string destFs = dest;
+            std::replace(destFs.begin(), destFs.end(), '\\', '/');
+            const auto target = r.directory / utf8ToPath(destFs);
+            try {
+                auto bytes = idx.read(e, e.sources.size() - 1, session.vfs);
+                std::error_code ec;
+                fs::create_directories(target.parent_path(), ec);
+                if (!sameContent(target, bytes))
+                    writeBinary(target, bytes);
+                ++r.lodBillboardFiles;
+                currentCopies[kManifest].insert(dest);
+                manifests[kManifest] += dest + "\t" + path + "\n";
+            } catch (const std::exception& ex) {
+                spdlog::error("Could not copy {}: {}", path, ex.what());
+            }
+        }
+    }
     for (const auto& [manifest, prev] : previousCopies) {
         const auto& now = currentCopies[manifest];
         for (const auto& old : prev)
@@ -511,7 +568,8 @@ ExportResult Exporter::write(const Session& session, const CompiledOutput& c, co
     }
     if (r.voiceFiles)
         r.voiceManifest = r.directory / "Multiplexer_Voices.tsv";
-    spdlog::info("Relocated files: {} voice files, {} FaceGen files", r.voiceFiles, r.faceGenFiles);
+    spdlog::info("Relocated files: {} voice files, {} FaceGen files, {} LOD billboards", r.voiceFiles, r.faceGenFiles,
+                 r.lodBillboardFiles);
     // Archive winners: a compiled plugin's archive loads from the INI list after switching over, before
     // every plugin's own archives, so a file it serves today could be served by another archive. Each
     // such file is written loose into the output folder (a loose file wins over every archive), so the

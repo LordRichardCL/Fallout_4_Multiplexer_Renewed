@@ -9809,3 +9809,41 @@ TEST(patch_plan_carries_one_struct_member)
     CHECK_EQ(weight, 2.0f);                             // ModC's weight
     CHECK_EQ(loadLE<uint32_t>(d->data.data() + 8), 50u); // the base health
 }
+
+// LOD billboards (textures\terrain\lodgen\<plugin>\) named by a record the plugin defines move with the
+// record: copied under the output's folder and the new FormID, and the plugin compiles. A billboard that
+// names no record of the plugin keeps it out (the game would look for it by the plugin's name).
+TEST(lod_billboards_move_with_their_records)
+{
+    auto root = buildInstall("billboards");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModT.esp", {"Fallout4.esm"}, {record("STAT", 0x01000800, {zs("EDID", "ModT_Tree")})});
+    writePlugin(data / "ModU.esp", {"Fallout4.esm"}, {record("STAT", 0x01000800, {zs("EDID", "ModU_Tree")})});
+    writeFile(data / "textures" / "terrain" / "lodgen" / "ModT.esp" / "modt_tree_00000800.dds", "tree");
+    writeFile(data / "textures" / "terrain" / "lodgen" / "ModT.esp" / "modt_tree_00000800_n.dds", "normal");
+    writeFile(data / "textures" / "terrain" / "lodgen" / "ModU.esp" / "other_00000900.dds", "x");
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModT.esp\n*ModU.esp\n");
+    auto cfg = configFor(root);
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK_EQ(p.session().findPlugin("ModT.esp")->eligibility, Eligibility::Eligible);
+    CHECK(p.session().findPlugin("ModU.esp")->eligibility != Eligibility::Eligible);
+    CHECK(p.compile());
+    auto result = p.exportOutputs();
+    CHECK_EQ(p.validation()->errors, uint64_t(0));
+    const FormMapping* tree = nullptr;
+    for (const auto& m : p.compiledOutput()->mappings)
+        if (m.editorId == "ModT_Tree")
+            tree = &m;
+    CHECK(tree != nullptr);
+    if (tree) {
+        char id[16];
+        std::snprintf(id, sizeof(id), "%08x", tree->objectId & 0xFFFFFF);
+        const auto dir = result.directory / "textures" / "terrain" / "lodgen" / toLower(tree->outputPlugin);
+        CHECK(std::filesystem::exists(dir / ("modt_tree_" + std::string(id) + ".dds")));
+        CHECK(std::filesystem::exists(dir / ("modt_tree_" + std::string(id) + "_n.dds")));
+        CHECK_EQ(result.lodBillboardFiles, size_t(2));
+        CHECK(std::filesystem::exists(result.directory / "Multiplexer_LODBillboards.tsv"));
+    }
+}

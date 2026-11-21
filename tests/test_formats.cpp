@@ -2,6 +2,7 @@
 #include "diagnostics/CrashLog.hpp"
 #include "engine/SupportBundle.hpp"
 #include "engine/BuildComparison.hpp"
+#include "engine/EngineFiles.hpp"
 #include <fstream>
 #include "esp/RecordDefinitions.hpp"
 #include "diagnostics/RecorderLog.hpp"
@@ -1324,4 +1325,17 @@ TEST(build_comparison_sorts_every_record)
     CHECK(text.find("back in the load order") != std::string::npos || text.find("Back in the load order") != std::string::npos);
     CHECK(text.find("C.esp") != std::string::npos);
     CHECK(compareBuilds(before, before).same());
+}
+
+// The FormID in a file name the game finds by plugin name: one 8-digit token, load order byte 00.
+TEST(file_formid_token_is_strict)
+{
+    CHECK(fileFormIdToken("tree_0001a2b3.dds") && fileFormIdToken("tree_0001a2b3.dds")->objectId == 0x1a2b3u);
+    CHECK(fileFormIdToken("0001A2B3_n.dds") && fileFormIdToken("0001A2B3_n.dds")->pos == 0);
+    CHECK(fileFormIdToken("tree_0001a2b3_n.dds")->objectId == 0x1a2b3u);
+    CHECK(!fileFormIdToken("tree.dds"));
+    CHECK(!fileFormIdToken("01000800.dds"));            // a load order byte
+    CHECK(!fileFormIdToken("00000800_00000801.dds"));   // two: not sure which
+    CHECK(!fileFormIdToken("tree00000800.dds"));        // not its own word
+    CHECK(!fileFormIdToken("tree_000008001.dds"));      // nine digits
 }
