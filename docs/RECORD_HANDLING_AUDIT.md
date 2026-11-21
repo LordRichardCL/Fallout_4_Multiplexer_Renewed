@@ -1363,3 +1363,14 @@ A plugin that does not read counts as using all its masters. Nothing is guessed:
 - **Copies in load order.** Copies were listed after the outputs in plugin-index order. They are now listed in the order the plugins loaded before.
 - **A copy that would need another redirected plugin as a master** (through a container's version today) is refused. Both copies load after the outputs, so neither order could be relied on.
 - **Apply checks that the copy is what the game loads.** If the original plugin's mod wins over the output mod in Mod Organizer 2, the original would load after the outputs with its compiled master switched off. Apply now refuses, naming the plugin. Test: in `master_redirection_lets_masters_of_plugins_that_stay_compile`.
+
+## Damaged files: readers checked by fuzzing (21 Nov 2026)
+
+**Test:** `readers_survive_damaged_files` feeds every reader of mod files hundreds of deterministic damaged variants of a valid file: flipped bytes, huge or zero sizes and counts, truncation, repeated chunks. Readers covered: plugins (records, compressed records, subrecords, field layouts), BA2 archives (general, plain and compressed), meshes, textures, materials, scripts, previs files, string tables, crash logs and recorder logs. An error is the expected answer. Running out of memory fails the test and names the reader. It takes about 4 seconds in CI.
+
+**Found and fixed:**
+- **BA2.** The file count and each file's offset and sizes came from the archive's own table and were allocated as read. A damaged archive could make the app try to allocate gigabytes. The table must now fit in the file. A file's data must lie inside the archive, and its unpacked size must be one its compressed data can hold (zlib expands at most about 1032:1).
+- **Meshes (NIF).** The block count was allocated as read; it must now fit in the file. This allocation was added the same day, for texture sets.
+- **Previs files (.uvd).** An ID table offset past the end of the file wrapped the fit check around, so the reader read outside the file: a crash on a damaged previs file. AddressSanitizer found it. The offset is now checked first.
+
+The whole test suite also runs clean under AddressSanitizer and UndefinedBehaviorSanitizer.

@@ -22,8 +22,15 @@ void readExact(std::ifstream& in, void* dst, size_t size, const char* what)
         throw FormatError(std::string("BA2: cannot read ") + what);
 }
 
-std::vector<uint8_t> readBlock(std::ifstream& in, uint64_t offset, uint32_t packed, uint32_t unpacked)
+// Sizes come from the archive's own table: a damaged one must not make us allocate what the file cannot hold.
+// zlib expands at most about 1032:1.
+std::vector<uint8_t> readBlock(std::ifstream& in, uint64_t fileSize, uint64_t offset, uint32_t packed, uint32_t unpacked)
 {
+    const uint64_t stored = packed ? packed : unpacked;
+    if (offset > fileSize || stored > fileSize - offset)
+        throw FormatError("BA2: a file's data lies past the end of the archive");
+    if (packed && uint64_t(unpacked) > uint64_t(packed) * 1032 + 1024)
+        throw FormatError("BA2: a file's unpacked size is larger than its compressed data can hold");
     in.clear();
     in.seekg(static_cast<std::streamoff>(offset));
     if (packed == 0) {
@@ -85,6 +92,13 @@ std::unique_ptr<Ba2Archive> Ba2Archive::open(const std::filesystem::path& path)
     else
         throw FormatError(pathToUtf8(path.filename()) + ": unknown BA2 type");
 
+    // The table must fit in the file (36 bytes per general entry, at least 24 per texture entry).
+    {
+        std::error_code ec;
+        const uint64_t size = std::filesystem::file_size(path, ec);
+        if (uint64_t(count) * (type == kGeneral ? 36u : 24u) > size)
+            throw FormatError(pathToUtf8(path.filename()) + ": its file count is larger than the archive can hold");
+    }
     ar->entries_.resize(count);
     if (ar->type_ == Ba2Type::General) {
         std::vector<uint8_t> table(static_cast<size_t>(count) * 36);
@@ -216,12 +230,14 @@ std::vector<uint8_t> Ba2Archive::extract(size_t index) const
     std::ifstream in(path_, std::ios::binary);
     if (!in)
         throw FormatError("cannot open archive " + pathToUtf8(path_));
+    std::error_code ec;
+    const uint64_t fileSize = std::filesystem::file_size(path_, ec);
     if (type_ == Ba2Type::General)
-        return readBlock(in, e.offset, e.packedSize, e.unpackedSize);
+        return readBlock(in, fileSize, e.offset, e.packedSize, e.unpackedSize);
 
     std::vector<uint8_t> out = makeDdsHeader(e.width, e.height, e.mipCount, e.dxgiFormat, e.cubemap);
     for (const auto& c : e.chunks) {
-        auto data = readBlock(in, c.offset, c.packedSize, c.unpackedSize);
+        auto data = readBlock(in, fileSize, c.offset, c.packedSize, c.unpackedSize);
         out.insert(out.end(), data.begin(), data.end());
     }
     return out;
@@ -240,7 +256,9 @@ std::vector<uint8_t> Ba2Archive::extractHead(size_t index, size_t maxBytes) cons
     std::ifstream in(path_, std::ios::binary);
     if (!in)
         throw FormatError("cannot open archive " + pathToUtf8(path_));
-    return readBlock(in, e.offset, 0, static_cast<uint32_t>(std::min<uint64_t>(maxBytes, e.unpackedSize)));
+    std::error_code ec;
+    return readBlock(in, std::filesystem::file_size(path_, ec), e.offset, 0,
+                     static_cast<uint32_t>(std::min<uint64_t>(maxBytes, e.unpackedSize)));
 }
 
 std::vector<uint8_t> makeDdsHeader(uint32_t width, uint32_t height, uint32_t mipCount, uint32_t dxgiFormat, bool cubemap)

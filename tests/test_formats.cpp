@@ -1,5 +1,8 @@
 #include "util/Zip.hpp"
 #include "diagnostics/CrashLog.hpp"
+#include <fstream>
+#include "esp/RecordDefinitions.hpp"
+#include "diagnostics/RecorderLog.hpp"
 #include "engine/CompilationEngine.hpp"
 #include <cstdio>
 #include <cstring>
@@ -1045,4 +1048,181 @@ TEST(crash_log_names_the_original_mods)
     CHECK(text.find("compiled from LaserMod.esp 001234 (LaserMusketMk2) [WEAP]") != std::string::npos);
     CHECK(text.find("changed by the compiled outputs") != std::string::npos);
     CHECK(!diagnostics::translateCrashLog("just some text", map, {}, {}).recognised);
+}
+
+namespace {
+
+// Deterministic damage: flipped bytes, huge or zero 32-bit values (sizes, counts, offsets), truncation and
+// repeated chunks, a few at a time.
+struct Damage {
+    uint32_t state;
+    uint32_t next()
+    {
+        state = state * 1664525u + 1013904223u;
+        return state >> 8;
+    }
+    std::vector<uint8_t> apply(std::vector<uint8_t> b)
+    {
+        const int edits = 1 + static_cast<int>(next() % 6);
+        for (int e = 0; e < edits && !b.empty(); ++e) {
+            const size_t at = next() % b.size();
+            switch (next() % 6) {
+            case 0: b[at] ^= static_cast<uint8_t>(1u << (next() % 8)); break;
+            case 1: b[at] = static_cast<uint8_t>(next()); break;
+            case 2:
+            case 3: {
+                static const uint32_t values[] = {0xFFFFFFFFu, 0x7FFFFFFFu, 0x80000000u, 0, 0x10000, 0xFFFF};
+                const uint32_t v = values[next() % 6];
+                for (size_t k = 0; k < 4 && at + k < b.size(); ++k)
+                    b[at + k] = static_cast<uint8_t>(v >> (8 * k));
+                break;
+            }
+            case 4: b.resize(at); break;
+            default: {
+                const size_t len = std::min<size_t>(1 + next() % 32, b.size() - at);
+                std::vector<uint8_t> chunk(b.begin() + long(at), b.begin() + long(at + len));
+                b.insert(b.begin() + long(at), chunk.begin(), chunk.end());
+            }
+            }
+        }
+        return b;
+    }
+};
+
+// Runs `read` on damaged variants. An exception is a fine answer; running out of memory is not (a damaged
+// count or size must be checked against the data, not allocated): those are reported with the reader's name.
+template <class F>
+size_t survive(const char* what, const std::vector<uint8_t>& valid, uint32_t seed, size_t rounds, F&& read)
+{
+    Damage d{seed};
+    size_t rejected = 0, hugeAllocations = 0;
+    for (size_t i = 0; i < rounds; ++i) {
+        const auto bytes = d.apply(valid);
+        try {
+            read(bytes);
+        } catch (const std::bad_alloc&) {
+            if (hugeAllocations++ == 0)
+                std::printf("  %s: variant %zu asked for more memory than there is\n", what, i);
+        } catch (const std::length_error&) {
+            if (hugeAllocations++ == 0)
+                std::printf("  %s: variant %zu asked for an impossible size\n", what, i);
+        } catch (const std::exception&) {
+            ++rejected;
+        }
+    }
+    CHECK_EQ(hugeAllocations, size_t(0));
+    return rejected;
+}
+
+std::vector<uint8_t> readBytes(const std::filesystem::path& p)
+{
+    std::ifstream in(p, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), {}};
+}
+
+} // namespace
+
+// Every reader of mod files meets damaged input with an error, never a crash: plugins (records, compressed
+// records, subrecords, field layouts), BA2 archives, meshes, textures, materials, scripts, previs files,
+// string tables, crash logs and recorder logs. Hundreds of deterministic variants of a valid file each.
+TEST(readers_survive_damaged_files)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "fo4mx_fuzz";
+    std::filesystem::create_directories(dir);
+    const auto& defs = RecordDefinitions::get();
+
+    // A plugin with a compressed record, a weapon, a list and a cell with a reference.
+    std::vector<uint8_t> big(9000, 'x');
+    big.back() = 0;
+    writePlugin(dir / "Fuzz.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000800, {zs("EDID", "FuzzKeyword")}),
+                 record("FLST", 0x01000801, {zs("EDID", "FuzzList"), u32("LNAM", 0x01000800), u32("LNAM", 0x00000801)}),
+                 record("BOOK", 0x01000802, {zs("EDID", "FuzzBook"), raw("DESC", big)}),
+                 record("CELL", 0x01000803, {zs("EDID", "FuzzCell")}),
+                 record("REFR", 0x01000804, {zs("EDID", "FuzzRef"), u32("NAME", 0x01000802)})},
+                0, true);
+    const auto plugin = readBytes(dir / "Fuzz.esp");
+    CHECK(plugin.size() > 100);
+    survive("plugin", plugin, 1, 600, [&](const std::vector<uint8_t>& b) {
+        const auto file = PluginFile::fromBytes(b);
+        file.forEachRecord([&](const RecordLocation& loc) {
+            const Record rec = file.recordAt(loc.offset);
+            (void)decodeLayout(defs, rec.signature(), rec.subrecords);
+            return true;
+        });
+    });
+
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {
+        {"meshes\\fuzz\\a.nif", std::vector<uint8_t>(300, 7)}, {"scripts\\fuzz.pex", std::vector<uint8_t>(64, 1)}};
+    for (const bool compressed : {false, true}) {
+        writeGeneralBa2(dir / "Fuzz - Main.ba2", files, compressed);
+        const auto ba2 = readBytes(dir / "Fuzz - Main.ba2");
+        survive("BA2", ba2, compressed ? 3 : 2, 300, [&](const std::vector<uint8_t>& b) {
+            const auto p = dir / "Damaged - Main.ba2";
+            {
+                std::ofstream out(p, std::ios::binary | std::ios::trunc);
+                out.write(reinterpret_cast<const char*>(b.data()), std::streamsize(b.size()));
+            }
+            auto a = Ba2Archive::open(p);
+            for (size_t i = 0; a && i < a->entries().size(); ++i)
+                (void)a->extract(i);
+        });
+    }
+
+    survive("NIF", nifWithTextureSet(), 4, 600, [](const std::vector<uint8_t>& b) { (void)preview::readNifInfo(b); });
+    for (uint32_t fmt : {71u, 77u, 83u, 95u, 98u, 28u})
+        survive("DDS", ddsRow(fmt, modeBlocks(8, fmt == 98)), 5 + fmt, 200, [](const std::vector<uint8_t>& b) {
+            (void)preview::readDdsInfo(b);
+            (void)preview::decodeDds(b);
+        });
+    {
+        std::vector<uint8_t> bgsm = {'B', 'G', 'S', 'M', 2, 0, 0, 0};
+        const std::string tex = "textures\\fuzz\\a_d.dds";
+        bgsm.push_back(static_cast<uint8_t>(tex.size() + 1));
+        bgsm.insert(bgsm.end(), {0, 0, 0});
+        bgsm.insert(bgsm.end(), tex.begin(), tex.end());
+        bgsm.push_back(0);
+        survive("material", bgsm, 6, 300, [](const std::vector<uint8_t>& b) { (void)preview::readMaterialInfo(b); });
+    }
+    survive("PEX", testScript(0x800, "Fuzz.esp", {}), 7, 600, [](const std::vector<uint8_t>& b) { (void)pex::scan(b); });
+    {
+        std::vector<uint8_t> uvd(0x150 + 12, 0);
+        storeLE<uint32_t>(uvd.data(), 0xD6000012);
+        storeLE<uint32_t>(uvd.data() + 0x08, uint32_t(uvd.size()));
+        storeLE<uint32_t>(uvd.data() + 0x40, 3);
+        storeLE<uint32_t>(uvd.data() + 0x50, 0x150);
+        survive("previs", uvd, 8, 300, [](const std::vector<uint8_t>& b) { (void)readPrevisFile(b); });
+    }
+    {
+        // A .STRINGS file: count, data size, directory (id, offset), zero-terminated strings.
+        std::vector<uint8_t> st(8 + 16, 0);
+        storeLE<uint32_t>(st.data(), 2);
+        const std::string a = "Laser Musket", b2 = "Fuzz";
+        storeLE<uint32_t>(st.data() + 4, uint32_t(a.size() + b2.size() + 2));
+        storeLE<uint32_t>(st.data() + 8, 1);
+        storeLE<uint32_t>(st.data() + 12, 0);
+        storeLE<uint32_t>(st.data() + 16, 2);
+        storeLE<uint32_t>(st.data() + 20, uint32_t(a.size() + 1));
+        st.insert(st.end(), a.begin(), a.end());
+        st.push_back(0);
+        st.insert(st.end(), b2.begin(), b2.end());
+        st.push_back(0);
+        survive("strings", st, 9, 300, [](const std::vector<uint8_t>& b) {
+            StringTables t;
+            t.load(StringFileKind::Strings, b);
+        });
+    }
+    {
+        const std::string crash = "Unhandled exception \"X\" at 0x1\nREGISTERS:\n\tRAX 0x1 (TESForm*)\n\t\tFormID: "
+                                  "0x0A000805\n\t\tName: \"A\"\nPLUGINS:\n\t[00] Fallout4.esm\n\t[FE:001] B.esl\n";
+        survive("crash log", std::vector<uint8_t>(crash.begin(), crash.end()), 10, 400, [](const std::vector<uint8_t>& b) {
+            (void)diagnostics::translateCrashLog(std::string_view(reinterpret_cast<const char*>(b.data()), b.size()), {},
+                                                 {}, {});
+        });
+        const std::string rec = "{\"type\":\"session\",\"game\":\"1.10.163\"}\n{\"type\":\"plugin\",\"name\":\"A.esp\"}\n";
+        survive("recorder log", std::vector<uint8_t>(rec.begin(), rec.end()), 11, 400, [](const std::vector<uint8_t>& b) {
+            (void)diagnostics::parseRecorderLog(std::string_view(reinterpret_cast<const char*>(b.data()), b.size()));
+        });
+    }
+    std::filesystem::remove_all(dir);
 }

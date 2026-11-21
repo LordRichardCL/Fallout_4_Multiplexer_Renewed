@@ -28,7 +28,9 @@ PrevisFile readPrevisFile(std::span<const uint8_t> b)
         f.recognised = true;
         return f;
     }
-    if (f.idOffset < kHeaderSize || f.idOffset % 4 != 0 || f.idCount > (b.size() - f.idOffset) / 4) {
+    // (An offset past the end is checked first: the subtraction below would wrap around.)
+    if (f.idOffset < kHeaderSize || f.idOffset % 4 != 0 || f.idOffset > b.size() ||
+        f.idCount > (b.size() - f.idOffset) / 4) {
         f.problem = "its ID table (" + std::to_string(f.idCount) + " IDs at offset " + std::to_string(f.idOffset) +
                     ") does not fit in the file";
         return f;

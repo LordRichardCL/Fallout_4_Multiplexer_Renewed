@@ -8,6 +8,8 @@
 #include "engine/Exporter.hpp"
 #include "engine/Pipeline.hpp"
 #include "engine/SwitchBack.hpp"
+#include <chrono>
+#include <cstdlib>
 #include "engine/BuildRecord.hpp"
 #include "engine/PostCompilation.hpp"
 #include "engine/VortexSupport.hpp"
@@ -7666,6 +7668,92 @@ TEST(switch_back_restores_the_setup_before_apply)
         CHECK(plan.nothing.find("already switched back") != std::string::npos);
         CHECK(tx.empty());
     }
+}
+
+// Benchmark (runs only with FO4MX_BENCH=1; FO4MX_BENCH_PLUGINS sets the count, default 1400): a generated
+// load order the size of a large real one, timed stage by stage.
+TEST(benchmark_large_load_order)
+{
+    const char* on = std::getenv("FO4MX_BENCH");
+    if (!on || std::string(on) != "1")
+        return;
+    const char* countEnv = std::getenv("FO4MX_BENCH_PLUGINS");
+    const int plugins = countEnv ? std::atoi(countEnv) : 1400;
+    auto root = tempDir("bench");
+    auto data = root / "Game" / "Data";
+    std::filesystem::create_directories(data);
+    using Clock = std::chrono::steady_clock;
+    auto t0 = Clock::now();
+    {
+        std::vector<Record> base;
+        for (uint32_t i = 0; i < 10000; ++i)
+            base.push_back(record("KYWD", 0x00001000 + i, {zs("EDID", "BaseKw" + std::to_string(i))}));
+        for (uint32_t i = 0; i < 10000; ++i)
+            base.push_back(record("MISC", 0x00004000 + i, {zs("EDID", "BaseMisc" + std::to_string(i)), u32("FULL", i)}));
+        for (uint32_t i = 0; i < 2000; ++i)
+            base.push_back(record("FLST", 0x00008000 + i,
+                                  {zs("EDID", "BaseList" + std::to_string(i)), u32("LNAM", 0x00001000 + i)}));
+        for (uint32_t c = 0; c < 200; ++c) {
+            base.push_back(record("CELL", 0x00009000 + c * 32, {zs("EDID", "BaseCell" + std::to_string(c))}));
+            for (uint32_t r = 1; r <= 20; ++r)
+                base.push_back(record("REFR", 0x00009000 + c * 32 + r, {u32("NAME", 0x00004000 + r)}));
+        }
+        writePlugin(data / "Fallout4.esm", {}, base, RecordFlags::Master);
+    }
+    std::string list;
+    for (int p = 0; p < plugins; ++p) {
+        const std::string name = "Bench" + std::to_string(p) + ".esp";
+        std::vector<std::string> masters = {"Fallout4.esm"};
+        const bool chained = p % 10 == 9;
+        if (chained)
+            masters.push_back("Bench" + std::to_string(p - 1) + ".esp");
+        const uint32_t self = static_cast<uint32_t>(masters.size()) << 24;
+        std::vector<Record> recs;
+        for (uint32_t i = 0; i < 40; ++i)
+            recs.push_back(record(i % 2 ? "KYWD" : "MISC", self | (0x800 + i),
+                                  {zs("EDID", "B" + std::to_string(p) + "_" + std::to_string(i))}));
+        for (uint32_t i = 0; i < 20; ++i) {
+            const uint32_t target = 0x00004000 + (uint32_t(p) * 7 + i * 13) % 10000;
+            recs.push_back(record("MISC", target, {zs("EDID", "BaseMisc" + std::to_string(target - 0x4000)), u32("FULL", uint32_t(p))}));
+        }
+        for (uint32_t i = 0; i < 10; ++i) {
+            const uint32_t list = 0x00008000 + (uint32_t(p) * 3 + i) % 2000;
+            recs.push_back(record("FLST", list, {zs("EDID", "BaseList" + std::to_string(list - 0x8000)),
+                                                 u32("LNAM", 0x00001000 + (list - 0x8000)), u32("LNAM", self | 0x801)}));
+        }
+        const uint32_t cell = 0x00009000 + (uint32_t(p) % 200) * 32;
+        recs.push_back(record("CELL", cell, {zs("EDID", "BaseCell" + std::to_string((cell - 0x9000) / 32))}));
+        for (uint32_t r = 0; r < 10; ++r)
+            recs.push_back(record("REFR", self | (0x900 + r), {u32("NAME", self | 0x800)}));
+        writePlugin(data / name, masters, recs);
+        list += "*" + name + "\n";
+    }
+    writeFile(root / "plugins.txt", list);
+    auto secs = [](Clock::time_point a) { return std::chrono::duration<double>(Clock::now() - a).count(); };
+    std::printf("generated %d plugins in %.1fs\n", plugins, secs(t0));
+    auto cfg = configFor(root);
+    cfg.compile.autoOutputs = true;
+    Pipeline p(cfg);
+    auto t = Clock::now();
+    p.scan();
+    std::printf("scan     %.1fs\n", secs(t));
+    t = Clock::now();
+    p.analyse();
+    std::printf("analyse  %.1fs\n", secs(t));
+    t = Clock::now();
+    const bool ok = p.compile();
+    std::printf("compile  %.1fs (%s, %zu records)\n", secs(t), ok ? "ok" : "failed",
+                p.compiledOutput() ? p.compiledOutput()->records.size() : size_t(0));
+    t = Clock::now();
+    if (ok)
+        p.exportOutputs();
+    std::printf("export   %.1fs\n", secs(t));
+    t = Clock::now();
+    Pipeline again(cfg);
+    again.scan();
+    again.analyse();
+    std::printf("rescan + analyse (cache) %.1fs\n", secs(t));
+    CHECK(ok);
 }
 
 TEST(mo2_apply_enables_the_output_mod_and_switches_once_mo2_is_closed)

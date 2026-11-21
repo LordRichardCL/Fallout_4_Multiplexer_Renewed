@@ -359,6 +359,9 @@ std::optional<MeshInfo> readNifInfo(const std::vector<uint8_t>& nif)
                 throw FormatError("bad block type name");
             t = r.readFixedString(len);
         }
+        // Each block takes at least 6 bytes of the header (type index and size): a larger count is damage.
+        if (m.blockCount > nif.size() / 6)
+            throw FormatError("block count larger than the file");
         std::vector<uint16_t> blockType(m.blockCount);
         for (uint32_t i = 0; i < m.blockCount; ++i) {
             uint16_t ti = r.read<uint16_t>() & 0x7FFF;
