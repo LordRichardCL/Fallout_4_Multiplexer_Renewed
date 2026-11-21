@@ -15,6 +15,10 @@ class StackedBar;
 
 class ValidationPage : public Page {
     Q_OBJECT
+signals:
+    // Open the Assets page searching for `search` (a cell's precombined meshes and previs file).
+    void showAssets(const QString& search);
+
 public:
     explicit ValidationPage(AppController* app, QWidget* parent = nullptr);
     void refresh() override;

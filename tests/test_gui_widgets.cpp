@@ -10,6 +10,8 @@
 #include "models/SqlModel.hpp"
 #include "pages/CompilationPage.hpp"
 #include "pages/PluginsPage.hpp"
+#include "pages/AssetsPage.hpp"
+#include "pages/ValidationPage.hpp"
 #include "widgets/Glossary.hpp"
 #include "widgets/PluginSelection.hpp"
 #include "widgets/QuickSearch.hpp"
@@ -404,6 +406,43 @@ private slots:
         {
             fo4mx::db::Database db(gui::toPath(dbPath()));
             db.exec("DELETE FROM Snapshots");
+        }
+    }
+
+    // A Precombined Cell Check row links to the cell's files in Assets: <plugin>\<00 + object ID>.
+    void precombined_cell_check_opens_its_files_in_assets()
+    {
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("INSERT INTO ValidationResults (stage, severity, category, message, plugin, form_id) VALUES "
+                    "('pre-export', 'Info', 'Precombined Cell Check', 'New cell ModNCell: interior.', 'ModN.esp', "
+                    "'05000801')");
+        }
+        window_->showPage("Validation");
+        auto* page = qobject_cast<gui::ValidationPage*>(currentPage());
+        QVERIFY(page);
+        page->refresh();
+        auto* table = page->findChild<QTableView*>();
+        QVERIFY(table);
+        int row = -1;
+        for (int r = 0; r < table->model()->rowCount(); ++r)
+            if (table->model()->index(r, 1).data().toString() == "Precombined Cell Check")
+                row = r;
+        QVERIFY(row >= 0);
+        table->setCurrentIndex(table->model()->index(row, 0));
+        auto* details = page->findChild<QTextBrowser*>();
+        QVERIFY(details);
+        QVERIFY(details->toHtml().contains("Show the cell's precombined meshes and previs file in Assets"));
+        emit details->anchorClicked(QUrl("assets:" + QString::fromUtf8(QUrl::toPercentEncoding("ModN.esp\\00000801"))));
+        auto* assets = qobject_cast<gui::AssetsPage*>(currentPage());
+        QVERIFY(assets);
+        bool searched = false;
+        for (auto* e : assets->findChildren<QLineEdit*>())
+            searched |= e->text() == "ModN.esp\\00000801";
+        QVERIFY(searched);
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("DELETE FROM ValidationResults");
         }
     }
 };

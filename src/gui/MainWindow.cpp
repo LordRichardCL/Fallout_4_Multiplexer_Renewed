@@ -303,8 +303,15 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
         log_->appendPlainText(QDateTime::currentDateTime().toString("HH:mm:ss  ") + prefix + text);
     });
 
-    for (auto* p : pages_)
+    for (auto* p : pages_) {
         connect(p, &Page::navigate, this, &MainWindow::showPage);
+        if (auto* v = qobject_cast<ValidationPage*>(p))
+            connect(v, &ValidationPage::showAssets, this, [this](const QString& search) {
+                showPage("Assets");
+                if (auto* a = findChild<AssetsPage*>())
+                    a->searchFor(search);
+            });
+    }
 
     nav_->setCurrentRow(0);
     refreshBadges();

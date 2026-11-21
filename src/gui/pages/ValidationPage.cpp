@@ -1,4 +1,5 @@
 #include "pages/ValidationPage.hpp"
+#include <QUrl>
 
 #include "Format.hpp"
 #include "Theme.hpp"
@@ -99,12 +100,31 @@ ValidationPage::ValidationPage(AppController* app, QWidget* parent) : Page(app, 
         if (i.row() < 0)
             return;
         auto v = [&](int c) { return model_->value(i.row(), c).toString().toHtmlEscaped(); };
-        details_->setHtml(QString("<p><b>%1 · %2</b>%3</p><p>%4</p><p><b>Likely cause:</b> %5</p>")
-                              .arg(v(0), v(1),
-                                   v(4).isEmpty() ? QString() : " · " + v(4) + (v(5).isEmpty() ? QString() : " " + v(5)),
-                                   v(2), v(3).isEmpty() ? "—" : v(3)));
+        QString html = QString("<p><b>%1 · %2</b>%3</p><p>%4</p><p><b>Likely cause:</b> %5</p>")
+                           .arg(v(0), v(1),
+                                v(4).isEmpty() ? QString() : " · " + v(4) + (v(5).isEmpty() ? QString() : " " + v(5)),
+                                v(2), v(3).isEmpty() ? "—" : v(3));
+        // A cell's precombined meshes and previs file: vis\<plugin>\<00 + object ID>.uvd and
+        // meshes\precombined\<plugin>\<00 + object ID>_<mesh>_OC.nif (no plugin folder for Fallout4.esm).
+        const QString check = model_->value(i.row(), 1).toString();
+        const QString plugin = model_->value(i.row(), 4).toString();
+        const QString formId = model_->value(i.row(), 5).toString().trimmed();
+        if ((check == "Previs Check" || check == "Precombined Cell Check") && !plugin.isEmpty() &&
+            formId.size() == 8) {
+            const QString id = formId.startsWith("FE", Qt::CaseInsensitive) ? "00000" + formId.right(3)
+                                                                             : "00" + formId.right(6);
+            const QString search = plugin.compare("Fallout4.esm", Qt::CaseInsensitive) == 0 ? id : plugin + "\\" + id;
+            html += "<p><a href=\"assets:" + QString::fromUtf8(QUrl::toPercentEncoding(search)) +
+                    "\">Show the cell's precombined meshes and previs file in Assets</a></p>";
+        }
+        details_->setHtml(html);
     });
 
+    details_->setOpenLinks(false);
+    connect(details_, &QTextBrowser::anchorClicked, this, [this](const QUrl& url) {
+        if (url.scheme() == "assets")
+            emit showAssets(QUrl::fromPercentEncoding(url.path().toUtf8()));
+    });
     connect(chips_, &FilterChips::changed, this, [this] { reload(); });
     connect(search_, &QLineEdit::textChanged, this, [this] { reload(); });
 }

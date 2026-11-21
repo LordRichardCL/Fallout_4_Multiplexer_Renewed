@@ -3,6 +3,8 @@
 #include "AppController.hpp"
 #include "Format.hpp"
 #include "MainWindow.hpp"
+#include <spdlog/spdlog.h>
+#include <QDialog>
 #include "widgets/PluginSelection.hpp"
 #include "SetupDialog.hpp"
 #include "pages/PluginsPage.hpp"
@@ -63,6 +65,16 @@ int runScreenshots(gui::AppController& controller, gui::MainWindow& window, cons
         setup.grab().save(outDir.filePath("00-setup.png"));
     }
     auto runAndWait = [&](void (gui::AppController::*fn)()) {
+        // A failed task opens a warning dialog that waits for a click; nobody clicks in this mode, so it is
+        // closed (and the run goes on to the next task and the screenshots) instead of hanging.
+        QTimer closer;
+        QObject::connect(&closer, &QTimer::timeout, [] {
+            if (auto* d = qobject_cast<QDialog*>(QApplication::activeModalWidget())) {
+                spdlog::warn("Screenshot mode: closing \"{}\"", d->windowTitle().toStdString());
+                d->reject();
+            }
+        });
+        closer.start(500);
         QEventLoop loop;
         auto c = QObject::connect(&controller, &gui::AppController::taskFinished, &loop, [&] { loop.quit(); });
         (controller.*fn)();

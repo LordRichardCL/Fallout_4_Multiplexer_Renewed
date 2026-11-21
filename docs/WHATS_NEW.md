@@ -4,6 +4,8 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 
 ## 21 November 2026
 
+- **From a Precombined Cell Check to its files:** select the row in Validation and open the cell's precombined meshes and previs file in Assets in one click.
+- **User Guide:** a new section, *Reading the Validation page*, explains each check, its severity and what to do about it.
 - **Precombined Cell Check (read only):** for each new cell that keeps its plugin out for its precombine or previs data, Validation says whether its files could be moved to the output in the next stage, or why not, with a count of the plugins that would then compile.
 - **The status updates while the app is open:** editing your load order, mod list, or adding and removing mods is noticed within seconds, without a restart.
 - **Papyrus readings name the script's mod:** scripts in errors are listed with the mod that provides each one, and those the game could not load at all.

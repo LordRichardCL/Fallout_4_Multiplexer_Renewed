@@ -25,6 +25,8 @@ public:
     explicit AssetsPage(AppController* app, QWidget* parent = nullptr);
     ~AssetsPage() override;
     void refresh() override;
+    // Shows the assets whose path contains `text` (the search box set to it).
+    void searchFor(const QString& text);
 
 private:
     void reload();

@@ -259,4 +259,12 @@ void AssetsPage::preview(const QString& path, const QString& kind, const QString
     info_->setHtml(html);
 }
 
+void AssetsPage::searchFor(const QString& text)
+{
+    if (search_->text() == text)
+        reload();
+    else
+        search_->setText(text); // reloads (textChanged)
+}
+
 } // namespace gui

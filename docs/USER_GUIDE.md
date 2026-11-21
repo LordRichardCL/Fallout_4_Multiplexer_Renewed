@@ -213,7 +213,7 @@ Open **Compilation**:
   - A patch can have at most 254 masters. Larger load orders get `Multiplexer_Patch_2.esp`, `_3`, and so on. Every one is ESL-flagged, so they take no full slots.
   - **Patch only** writes just the patch and compiles nothing, so no FormIDs change and no plugins are disabled.
 
-Press **Compile**. Everything happens in memory and is then validated. The **Validation** page lists every finding. Errors block export.
+Press **Compile**. Everything happens in memory and is then validated. The **Validation** page lists every finding. Errors block export. [Reading the Validation page](#reading-the-validation-page) explains its checks.
 
 ## 6. Export and switch over
 
@@ -514,6 +514,34 @@ Compile into the same output folder each time.
 Compilation never copies, extracts or repacks assets. Compiled records keep their original mesh, texture and material paths, and the game loads those files from the mods that provide them. The only thing to do is merge `Multiplexer_Archives.ini`, so archives that belonged to compiled plugins keep loading from where they are.
 
 On the Compilation page, select a record under **Generated Records** to see its generated plugin, source plugin, winning override, and every mesh, material and texture it uses with the mod, archive and path each one is served from. **Assets Used** lists all of them. Missing assets are reported in the Validation Centre.
+
+## Reading the Validation page
+
+Every compile checks the outputs before anything is written. The **Validation** page lists what it found:
+- **Error** blocks the export. When the app can keep the plugin behind an error in the load order, it does so and compiles again; it then reports a **Kept Out Automatically** warning instead.
+- **Warning** is worth reading before you play.
+- **Info** only explains something.
+
+The chips filter by severity; the search box matches the check, plugin, FormID and message. Select a row to read all of it, with its likely cause, in the panel underneath. **Copy** and **Save…** take the rows shown.
+
+The checks you are most likely to see:
+
+| Check | Severity | What it means | What to do |
+|---|---|---|---|
+| **Kept Out Automatically** | Warning | A plugin stays in the load order because one of its records could not be written safely. The message names the record and why. | Usually nothing: the game shows that plugin as before. |
+| **FormID Stability** | Error or Warning | Records of the build you play with would get other FormIDs, so saves made with it would lose them. | Compile anyway only for a new game (the Compilation page asks), or undo the change that moves them. |
+| **Returning Plugins** | Error | A plugin the last build compiled would come back into the load order unasked. | Allow it back, exclude it, or remove what keeps it out. |
+| **Build Comparison** | Info | One line comparing this build with the previous one. The **Compilation Report** has the full section *Changes since the previous build*. | Read it before you rebuild during a playthrough. |
+| **Load Order** | Error or Warning | More than 254 full plugins after switching over (Error), or more than 240 (Warning). | Compile more plugins, or use light outputs. |
+| **Light Outputs** | Info | Why an output that would fit stays a full plugin (room to grow). | Nothing, or more outputs. |
+| **Missing Assets** | Info | A compiled record names a file no installed mod provides. It was missing for the original plugin too. | Install what the mod needs, if anything looks wrong in game. |
+| **Archive Loaders**, **Assets** | Info | How compiled plugins' archives keep loading. | Nothing. |
+| **Precombined Reference** | Info | A new reference in a cell's precombine data compiles; its mesh is unchanged. | Nothing. |
+| **Previs Numbering** | Error or Info | A cell's previs file was translated into the output's numbering (Info), or could not be, so its plugins stay (Error). | Nothing: the app keeps those plugins out. |
+| **Previs Check** | Info | Read-only evidence for a cell kept out for its precombine or previs data: what its previs file and meshes hold. | Nothing; useful when reporting a problem. |
+| **Precombined Cell Check** | Info | For a new cell kept out for that data: whether a later version could move its files to the output, or why not, with a summary count. Select a row and use *Show the cell's precombined meshes and previs file in Assets* to look at the files. | Nothing yet; send the summary row with a problem report. |
+| **Definitions**, **Group Layout** | Warning | A record type that did not decode as expected. | Run **Check Record Definitions** (Validation page) and send the report. |
+| **Missing References (summary)** | Warning | References from one plugin to a record that is not there. See *Likely causes* below. | Install matching versions of the mods. |
 
 ## Likely causes
 
