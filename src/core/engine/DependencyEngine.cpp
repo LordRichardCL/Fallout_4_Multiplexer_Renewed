@@ -1,5 +1,7 @@
 #include "engine/DependencyEngine.hpp"
 
+#include <chrono>
+
 #include "esp/FieldDecoder.hpp"
 #include "esp/PluginFile.hpp"
 
@@ -864,7 +866,17 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
                 progress.progress(n, targets.size(), "record references");
         },
         progress, options.threads);
+    // What follows the counted loop can take minutes on a large load order: each part is its own stage, so
+    // the status bar says what is running, and the log says how long each took.
+    auto timed = [](const char* what, auto&& fn) {
+        const auto t0 = std::chrono::steady_clock::now();
+        fn();
+        spdlog::info("{}: {:.1f} s", what,
+                     std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+    };
     if (cache) {
+        progress.stage("Saving record references to the build cache");
+        timed("Saving record references to the build cache", [&] {
         // Encoded in parallel, stored in one transaction.
         std::vector<size_t> which;
         for (size_t i = 0; i < targets.size(); ++i)
@@ -880,7 +892,9 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
             },
             nullProgress(), options.threads);
         cache->putMany("edges", putKeys, blobs);
+        });
     }
+    progress.stage("Checking references to missing records");
 
     std::vector<std::vector<RecordEdge>> edges(targets.size());
     std::vector<std::vector<DependencyIssue>> issues(targets.size());
@@ -962,7 +976,8 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
             is.cause = diagnosis::forCategory(is.category, is.message);
     report.recordEdges = session.recordEdges.size();
 
-    evaluateEligibility(session, options, &report);
+    progress.stage("Working out which plugins can compile");
+    timed("Working out which plugins can compile", [&] { evaluateEligibility(session, options, &report); });
     session.analysed = true;
     spdlog::info("Dependencies: {} master links, {} record references, {} dangling; {} plugins eligible for compilation",
                  report.pluginEdges, report.recordEdges, report.danglingReferences, report.eligiblePlugins);

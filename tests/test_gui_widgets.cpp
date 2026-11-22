@@ -463,6 +463,25 @@ private slots:
         window_->showPage("Dashboard");
         QVERIFY(!childWithText<QPushButton>(currentPage(), "Validate"));
     }
+
+    // The status bar says a step is still working after its count is done, with a clock that keeps going.
+    void status_bar_shows_a_step_still_working()
+    {
+        emit app_->taskStarted("Analyse");
+        emit app_->stageStarted("Analysing dependencies");
+        emit app_->progressChanged(100, 100, "record references");
+        QLabel* status = nullptr;
+        for (auto* l : window_->findChildren<QLabel*>())
+            if (l->text().startsWith("Step 1"))
+                status = l;
+        QVERIFY(status);
+        QVERIFY(status->text().contains("100 / 100"));
+        QVERIFY(status->text().contains("finishing this step"));
+        QVERIFY(status->text().contains("s in this step"));
+        QTest::qWait(1200); // the clock ticks without new progress
+        QVERIFY(status->text().contains("in this step"));
+        emit app_->taskFinished("Analyse", false, "Cancelled");
+    }
 };
 
 QTEST_MAIN(GuiWidgetsTest)

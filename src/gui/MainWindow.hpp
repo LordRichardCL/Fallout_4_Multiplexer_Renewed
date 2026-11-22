@@ -64,6 +64,10 @@ private:
     QStringList steps_;
     QList<qint64> stepMs_;
     QString stageName_;
+    // The latest progress, shown again every second (a clock that keeps going while a step reports nothing).
+    qint64 lastDone_ = 0, lastTotal_ = 0;
+    QString lastDetail_;
+    class QTimer* tick_ = nullptr;
     QString progressText(qint64 done, qint64 total, const QString& detail) const;
     QPlainTextEdit* log_;
     QDockWidget* logDock_;

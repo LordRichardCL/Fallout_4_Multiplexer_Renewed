@@ -258,7 +258,14 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
             progress_->setRange(0, 0);
         }
     });
+    tick_ = new QTimer(this);
+    tick_->setInterval(1000);
+    connect(tick_, &QTimer::timeout, this, [this] {
+        if (step_ > 0)
+            stageLabel_->setText(progressText(lastDone_, lastTotal_, lastDetail_));
+    });
     connect(app_, &AppController::taskStarted, this, [this](const QString& task) {
+        tick_->start();
         task_ = task;
         step_ = 0;
         steps_.clear();
@@ -275,18 +282,26 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
         ++step_;
         steps_ << s;
         stageName_ = s;
+        lastDone_ = lastTotal_ = 0;
+        lastDetail_.clear();
         progress_->setRange(0, 0);
         stageClock_.start();
         stageLabel_->setText(progressText(0, 0, {}));
     });
     connect(app_, &AppController::progressChanged, this, [this](qint64 done, qint64 total, const QString& detail) {
-        if (total > 0) {
+        lastDone_ = done;
+        lastTotal_ = total;
+        lastDetail_ = detail;
+        if (total > 0 && done >= total) {
+            progress_->setRange(0, 0); // the count is done, the step is not: keep the bar moving
+        } else if (total > 0) {
             progress_->setRange(0, 1000);
             progress_->setValue(int(done * 1000 / total));
         }
         stageLabel_->setText(progressText(done, total, detail));
     });
     connect(app_, &AppController::taskFinished, this, [this](const QString& task, bool ok, const QString&) {
+        tick_->stop();
         // Remember this run's steps and their times, for "step n of N" and the time left next time.
         if (!ok || task != task_ || steps_.isEmpty())
             return;
@@ -598,6 +613,8 @@ QString MainWindow::progressText(qint64 done, qint64 total, const QString& detai
     text += stageName_ + "…";
     if (total > 0)
         text += QString("  %1 / %2").arg(formatCount(done), formatCount(total));
+    if (total > 0 && done >= total)
+        text += "  · finishing this step";
     // Time left: this step's, from its own pace once enough has run, plus the later steps' times last run.
     const qint64 ms = stageClock_.isValid() ? stageClock_.elapsed() : 0;
     qint64 restMs = -1;
@@ -619,6 +636,10 @@ QString MainWindow::progressText(qint64 done, qint64 total, const QString& detai
     }
     if (!detail.isEmpty())
         text += "  " + detail;
+    // Always a running clock, so a long step without reports still shows the app is working.
+    const qint64 s = ms / 1000;
+    text += s < 60 ? QString("  · %1 s in this step").arg(s)
+                   : QString("  · %1 min %2 s in this step").arg(s / 60).arg(s % 60, 2, 10, QChar('0'));
     return text;
 }
 
