@@ -10,6 +10,7 @@ struct ScanOptions {
     // Also read inactive plugins, apart from the load order, to say what each would bring if enabled
     // (InactivePreview). Never changes what is scanned for the build.
     bool previewInactive = false;
+    bool operator==(const ScanOptions&) const = default;
 };
 
 // Stage 1: discovers plugins in the virtual Data folder, determines the load

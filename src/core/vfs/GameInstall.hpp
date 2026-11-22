@@ -26,6 +26,7 @@ struct InstallConfig {
     // Vortex: its downloads folder for this game ("...\downloads\fallout4"), where Apply to Game
     // can copy the package for Vortex to install. Empty: not set.
     std::filesystem::path vortexDownloads;
+    bool operator==(const InstallConfig&) const = default;
 };
 
 struct ModInfo {

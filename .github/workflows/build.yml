@@ -11,8 +11,16 @@ jobs:
   linux:
     name: Linux (build + tests)
     runs-on: ubuntu-24.04
+    env:
+      # Compiler cache: an object is reused only when the preprocessed source, the compiler and its flags
+      # are identical (sccache's key), so a changed header recompiles everything that includes it. Stored in
+      # the GitHub Actions cache; a cache error is a miss (it compiles), never a failure.
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
       - uses: actions/checkout@v4
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -30,15 +38,28 @@ jobs:
     timeout-minutes: 75
     permissions:
       contents: write # the release step on version tags
+    env:
+      # Compiler cache (see the Linux job). Release builds use no /Zi, which sccache cannot cache.
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      # aqtinstall wants Python 3.14 or newer; left to choose, install-qt-action takes the newest (3.15), for
+      # which py7zr's compression modules have no Windows wheels, so they were built from source on every run
+      # (about 40 s) before the cached Qt was even restored. 3.14 has the wheels.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.7.3'
           arch: win64_msvc2019_64
           cache: true
+          setup-python: false
       - name: Locate vcpkg
         shell: pwsh
         run: |

@@ -12,6 +12,7 @@ struct AssetScanOptions {
     bool scanScriptsForPluginNames = true;
     bool scanConfigsForPluginNames = true;
     unsigned threads = 0;
+    bool operator==(const AssetScanOptions&) const = default;
 };
 
 // Asset Intelligence Engine: builds the complete asset view (loose files and

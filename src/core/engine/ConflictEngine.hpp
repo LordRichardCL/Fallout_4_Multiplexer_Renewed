@@ -126,6 +126,7 @@ struct ConflictOptions {
     bool analyseAllRecordTypes = true; // field differences for types that are not merged too (display only)
     bool keepFieldDetails = true;
     unsigned threads = 0;
+    bool operator==(const ConflictOptions&) const = default;
 };
 
 // Stage 2: walks every override chain, determines the winning record, why it

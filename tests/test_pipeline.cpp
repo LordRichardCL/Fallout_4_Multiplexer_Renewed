@@ -1886,6 +1886,66 @@ TEST(rebuilds_keep_the_formids_of_the_build_in_use)
                        is.severity == (accept ? Severity::Warning : Severity::Error) &&
                        is.message.find("previous build placed would get other FormIDs") != std::string::npos;
         CHECK(stopped);
+        CHECK(!p.reusedCompile());
+    }
+
+    // Accepting after the compilation stopped keeps that compilation: the same result and findings as
+    // compiling again with the acceptance, without compiling again.
+    {
+        auto third = second;
+        third.compile.outputCount = 1;
+        third.compile.acceptFormIdChanges = true;
+        Pipeline fresh(third);
+        fresh.scan();
+        fresh.analyse();
+        CHECK(fresh.compile());
+
+        third.compile.acceptFormIdChanges = false;
+        Pipeline p(third);
+        p.scan();
+        p.analyse();
+        CHECK(!p.compile());
+        const auto* before = &*p.compiledOutput();
+        p.config().compile.acceptFormIdChanges = true;
+        CHECK(p.compile());
+        CHECK(p.reusedCompile());
+        CHECK(&*p.compiledOutput() == before);
+        const auto* a = p.validation();
+        const auto* b = fresh.validation();
+        CHECK_EQ(a->errors, b->errors);
+        CHECK_EQ(a->warnings, b->warnings);
+        CHECK_EQ(a->checks, b->checks);
+        CHECK_EQ(a->passed, b->passed);
+        auto findings = [](const ValidationReport* v) {
+            std::vector<std::string> out;
+            for (const auto& is : v->issues)
+                out.push_back(std::to_string(int(is.severity)) + "|" + is.category + "|" + is.message);
+            std::sort(out.begin(), out.end());
+            return out;
+        };
+        CHECK(findings(a) == findings(b));
+        CHECK_EQ(p.compiledOutput()->records.size(), fresh.compiledOutput()->records.size());
+        CHECK_EQ(p.compiledOutput()->mappings.size(), fresh.compiledOutput()->mappings.size());
+        // Anything else that shapes a compilation changed since: compiled again.
+        Pipeline q(third);
+        q.scan();
+        q.analyse();
+        CHECK(!q.compile());
+        q.config().compile.acceptFormIdChanges = true;
+        q.config().compile.lightOutputsWhenPossible = !q.config().compile.lightOutputsWhenPossible;
+        q.compile();
+        CHECK(!q.reusedCompile());
+        // A patch plan choice too (the plan shapes what is compiled).
+        Pipeline r(third);
+        r.scan();
+        r.analyse();
+        CHECK(!r.compile());
+        r.acceptAutomatic();
+        r.config().compile.acceptFormIdChanges = true;
+        r.compile();
+        CHECK(!r.reusedCompile());
+        // The kept compilation exports like any other (last: this install exports into its Data folder).
+        CHECK(!p.exportOutputs().pluginFiles.empty());
     }
 }
 

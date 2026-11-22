@@ -23,6 +23,9 @@ Diagnostics
 - Support bundle: one zip with the reports, logs, readings and load order, personal details removed.
 - Build comparison: what a rebuild changes against the previous build.
 
+Faster
+- Compile anyway (FormID changes accepted) keeps the compilation that just stopped instead of compiling again, when nothing else changed since; any other change compiles again.
+
 Scanning
 - Scan asks what to read, with the counts: what the game loads (always what the build uses) or also a preview of inactive plugins (would it compile, what would it conflict with). Settings → Scan; `--scan-scope`.
 - Inactive plugins are hidden on the Plugins page until *Show inactive plugins* is on.

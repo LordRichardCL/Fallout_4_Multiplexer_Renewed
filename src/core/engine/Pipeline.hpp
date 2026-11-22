@@ -27,6 +27,15 @@
 
 namespace fo4mx {
 
+// A callback held in the configuration. Configurations are compared (to decide whether a compilation can be
+// reused), so it compares by whether one is set; the ones used here run at export time only.
+template <class Signature>
+struct ConfigHook : std::function<Signature> {
+    using std::function<Signature>::function;
+    using std::function<Signature>::operator=;
+    bool operator==(const ConfigHook& other) const { return bool(*this) == bool(other); }
+};
+
 struct PipelineConfig {
     InstallConfig install;
     ScanOptions scan;
@@ -70,9 +79,10 @@ struct PipelineConfig {
     // Definition Check compares this app's reading of those plugins with it. Optional.
     std::filesystem::path formIdReference;
     // Tests: runs after the export's new folder is created, before the export writes anything.
-    std::function<void(const std::filesystem::path& outputDirectory)> beforeExportWrite;
+    ConfigHook<void(const std::filesystem::path& outputDirectory)> beforeExportWrite;
     // Record definitions to use instead of the runtime profile's (tests, trial catalogues). Not owned.
     const RecordDefinitions* definitions = nullptr;
+    bool operator==(const PipelineConfig&) const = default;
 };
 
 // Runs the compiler stages in order and keeps every intermediate result:
@@ -90,6 +100,8 @@ public:
     void analyse(ProgressSink& progress = nullProgress());
     // Resolve, merge, rewrite, compile and validate in memory. Returns false on critical validation failures.
     bool compile(ProgressSink& progress = nullProgress());
+    // The last compile() kept the compilation before it (FormID changes accepted, nothing else changed).
+    bool reusedCompile() const { return reusedCompile_; }
     // Writes plugins and side files, re-validates them and writes reports.
     ExportResult exportOutputs(ProgressSink& progress = nullProgress());
     // Written in the package folder when an export fails (removed by the next successful one).
@@ -230,6 +242,15 @@ private:
     std::unique_ptr<BuildCache> cache_;
     AssetTrace assetTrace_;
     ChangeReport changes_;
+    // The configuration of the last compilation (acceptance of FormID changes left out), cleared by
+    // anything else that shapes a compilation; and the FormID Stability error that stopped it, if one did.
+    std::optional<PipelineConfig> lastCompileInputs_;
+    std::optional<size_t> formIdGate_;
+    bool reusedCompile_ = false;
+    std::string formIdGateText_;
+    void prepareCompileConfig();
+    PipelineConfig compileInputs() const;
+    bool finishCompile();
     std::vector<InactivePreviewRow> inactivePreview_;
 };
 

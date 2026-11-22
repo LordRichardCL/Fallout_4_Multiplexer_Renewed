@@ -34,6 +34,7 @@ struct AnalysisOptions {
     bool redirectMasters = false;
     std::string redirectOff;
     std::vector<std::string> noRedirect;
+    bool operator==(const AnalysisOptions&) const = default;
 };
 
 // Why `plugin` cannot be copied with its masters redirected, from its own content (every record decodes

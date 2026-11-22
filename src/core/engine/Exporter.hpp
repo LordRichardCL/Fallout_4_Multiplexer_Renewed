@@ -20,6 +20,7 @@ struct ExportOptions {
     bool archiveWinnerCopies = true;
     // Also write "Multiplexer Output.zip" next to Data: one archive any mod manager installs.
     bool writeZip = true;
+    bool operator==(const ExportOptions&) const = default;
 };
 
 struct ExportResult {

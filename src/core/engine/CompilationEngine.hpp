@@ -27,6 +27,7 @@ const char* allocationStrategyName(AllocationStrategy s);
 struct AllocationRule {
     std::string pattern;
     int output = 1;
+    bool operator==(const AllocationRule&) const = default;
 };
 
 struct CompileOptions {
@@ -113,6 +114,7 @@ struct CompileOptions {
     // output has 254 minus this many masters left for the plugins it needs.
     static constexpr int kMinOutputs = 1;
     static constexpr int kMaxOutputs = 64;
+    bool operator==(const CompileOptions&) const = default;
 };
 
 struct EmittedRecord {

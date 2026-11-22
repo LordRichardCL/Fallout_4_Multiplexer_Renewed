@@ -4,6 +4,8 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 
 ## 22 November 2026
 
+- **Compile anyway is instant:** accepting FormID changes after a compilation stopped on them keeps that compilation (it only changes how that one finding is graded) instead of compiling it again, which took about 8 minutes on a large load order. If anything else changed since (a setting, a patch plan choice, a rescan), it compiles again as before.
+
 - **Scan asks what to read:** before scanning, a short question shows how many active and inactive plugins and archives there are, and lets you also preview inactive plugins (never part of the build). Turn the question off there or in Settings → Scan.
 - **Preview inactive plugins:** the Plugins page says, for each plugin you have not enabled, whether it would likely compile and which active mods it would conflict with if you did. `--scan-scope preview-inactive` on the command line.
 - **Inactive plugins are hidden by default** on the Plugins page; *Show inactive plugins* lists them.

@@ -113,6 +113,7 @@ ChangeReport Pipeline::checkForChanges(ProgressSink& progress)
 
 void Pipeline::scan(ProgressSink& progress)
 {
+    lastCompileInputs_.reset();
     session_ = std::make_unique<Session>(definitions(config_));
     openCache();
     session_->cache = cache_.get();
@@ -524,6 +525,7 @@ const ValidationReport* Pipeline::reportValidation() const
 
 void Pipeline::analyse(ProgressSink& progress)
 {
+    lastCompileInputs_.reset();
     if (!session_->scanned)
         scan(progress);
     progress.stage("Analyse");
@@ -573,6 +575,7 @@ std::filesystem::path Pipeline::planDecisionsPath() const
 
 void Pipeline::setPlanDecision(FormKey record, const std::string& changeId, std::optional<PlanAction> action)
 {
+    lastCompileInputs_.reset(); // the plan shapes what is compiled
     planDecisions_.set(PlanDecisions::recordId(*session_, record), changeId, action);
     if (const auto path = planDecisionsPath(); !path.empty())
         planDecisions_.save(path);
@@ -583,6 +586,7 @@ void Pipeline::setPlanDecision(FormKey record, const std::string& changeId, std:
 
 size_t Pipeline::acceptAutomatic(std::optional<FormKey> record)
 {
+    lastCompileInputs_.reset(); // the plan shapes what is compiled
     if (!plan_)
         return 0;
     size_t decided = 0;
@@ -753,10 +757,8 @@ void reportEarlierBuilds(const Session& session, ValidationReport& v)
 
 } // namespace
 
-bool Pipeline::compile(ProgressSink& progress)
+void Pipeline::prepareCompileConfig()
 {
-    if (!conflicts_)
-        analyse(progress);
     if (db_) {
         auto resolutions = db::DatabaseWriter(*db_).loadResolutions(*session_);
         for (const auto& [k, v] : resolutions)
@@ -768,6 +770,52 @@ bool Pipeline::compile(ProgressSink& progress)
         if (std::filesystem::exists(previous))
             config_.compile.previousFormMap = previous;
     }
+}
+
+PipelineConfig Pipeline::compileInputs() const
+{
+    PipelineConfig c = config_;
+    c.compile.acceptFormIdChanges = false; // what is being decided, not an input of the result
+    return c;
+}
+
+bool Pipeline::finishCompile()
+{
+    exported_.reset();
+    if (db_) {
+        db::DatabaseWriter w(*db_);
+        w.writeCompilation(*session_, *compiled_);
+        w.writeAssetTrace(*compiled_, assetTrace_);
+        w.writeValidation("pre-export", *validation_, true);
+    }
+    return !validation_->critical();
+}
+
+bool Pipeline::compile(ProgressSink& progress)
+{
+    if (!conflicts_)
+        analyse(progress);
+    prepareCompileConfig();
+    // Accepting FormID changes for the compilation that just stopped on them: that compilation's records,
+    // outputs and every other check do not depend on the acceptance (it only grades one finding), so when
+    // nothing that shapes a compilation changed since (the whole configuration compared, and scanning,
+    // analysing or a patch plan choice discard the stamp), the result is kept and only that finding is
+    // graded again, exactly as compiling again would grade it.
+    if (config_.compile.acceptFormIdChanges && compiled_ && validation_ && formIdGate_ && lastCompileInputs_ &&
+        *lastCompileInputs_ == compileInputs()) {
+        auto& issue = validation_->issues.at(*formIdGate_);
+        issue.severity = Severity::Warning;
+        issue.message = formIdGateText_ + " Accepted for this build.";
+        --validation_->errors;
+        ++validation_->warnings;
+        formIdGate_.reset();
+        reusedCompile_ = true;
+        spdlog::info("FormID changes accepted: the compilation just made is kept instead of compiling again");
+        return finishCompile();
+    }
+    reusedCompile_ = false;
+    lastCompileInputs_.reset();
+    formIdGate_.reset();
     // Compile, and while validation finds records that cannot be written safely, set their source
     // plugins (or patch records) aside and compile again. Each round only ever removes work.
     session_->autoRetained.clear();
@@ -1248,22 +1296,19 @@ bool Pipeline::compile(ProgressSink& progress)
                                      "other FormIDs (e.g. " + example +
                                      "; the FormID Stability warnings say why). Saves made with the previous build "
                                      "would lose them.";
-            if (config_.compile.acceptFormIdChanges)
+            if (config_.compile.acceptFormIdChanges) {
                 validation_->fail(Severity::Warning, "FormID Stability", what + " Accepted for this build.");
-            else
+            } else {
                 validation_->fail(Severity::Error, "FormID Stability",
                                   what + " Compile anyway only if you start a new game or accept that loss (the "
                                          "Compilation page asks; --accept-formid-changes on the command line).");
+                formIdGate_ = validation_->issues.size() - 1;
+                formIdGateText_ = what;
+            }
         }
     }
-    exported_.reset();
-    if (db_) {
-        db::DatabaseWriter w(*db_);
-        w.writeCompilation(*session_, *compiled_);
-        w.writeAssetTrace(*compiled_, assetTrace_);
-        w.writeValidation("pre-export", *validation_, true);
-    }
-    return !validation_->critical();
+    lastCompileInputs_ = compileInputs();
+    return finishCompile();
 }
 
 // A failed export leaves nothing that looks like a result: the plugins it wrote and the package
