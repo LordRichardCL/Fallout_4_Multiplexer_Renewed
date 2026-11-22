@@ -78,6 +78,9 @@ struct ChangeReport {
     size_t newMods = 0, removedMods = 0, updatedMods = 0;
     size_t addedPlugins = 0, removedPlugins = 0, updatedPlugins = 0;
     size_t archiveChanges = 0, loadOrderChanges = 0;
+    // Changes that are this build's own switch-over (its outputs installed and enabled, its compiled plugins
+    // disabled, this app's packages added to the mod manager): expected, so they are not changes.
+    size_t switchedOver = 0;
     std::vector<std::string> affectedRecordTypes;   // record types in changed plugins
     std::vector<std::string> unaffectedRecordTypes; // compiled types no changed plugin touches
     std::vector<std::string> reasons;               // why a rebuild is required

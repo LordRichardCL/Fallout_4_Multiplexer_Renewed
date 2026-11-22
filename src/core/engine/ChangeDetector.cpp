@@ -352,6 +352,11 @@ ChangeReport ChangeDetector::compare(const InstallSnapshot* reference, const Ins
         compiled.insert(toLower(p));
     for (const auto& p : reference->participants)
         participants.insert(toLower(p));
+    std::set<std::string> outputs; // this build's generated plugins
+    for (const auto& o : reference->outputs)
+        outputs.insert(toLower(o.name));
+    // This app's own packages in the mod manager: "Multiplexer Output ...", "Multiplexer Diagnostic Recorder".
+    auto ownPackage = [](const std::string& mod) { return istartsWith(mod, "Multiplexer "); };
     std::set<std::string> affectedTypes;
     auto addTypes = [&](const std::string& types) {
         for (const auto& t : split(types, ' '))
@@ -372,6 +377,11 @@ ChangeReport ChangeDetector::compare(const InstallSnapshot* reference, const Ins
         newMods[m.name] = &m;
     for (const auto& [name, m] : newMods) {
         auto it = oldMods.find(name);
+        if (ownPackage(name)) {
+            if (it == oldMods.end() || it->second->enabled != m->enabled || it->second->hash != m->hash)
+                ++r.switchedOver;
+            continue;
+        }
         if (it == oldMods.end()) {
             ++r.newMods;
             add({"Mod", "Added", name, formatCount(m->files) + " files, " + formatBytes(m->bytes), false});
@@ -386,7 +396,7 @@ ChangeReport ChangeDetector::compare(const InstallSnapshot* reference, const Ins
         }
     }
     for (const auto& [name, m] : oldMods)
-        if (!newMods.count(name)) {
+        if (!newMods.count(name) && !ownPackage(name)) {
             ++r.removedMods;
             add({"Mod", "Removed", name, formatCount(m->files) + " files", false});
         }
@@ -399,6 +409,11 @@ ChangeReport ChangeDetector::compare(const InstallSnapshot* reference, const Ins
         newPlugins[toLower(p.name)] = &p;
     for (const auto& [key, p] : newPlugins) {
         auto it = oldPlugins.find(key);
+        // This build's outputs, installed and enabled by switching over to it.
+        if (outputs.count(key) && (it == oldPlugins.end() || it->second->active != p->active)) {
+            ++r.switchedOver;
+            continue;
+        }
         if (it == oldPlugins.end()) {
             ++r.addedPlugins;
             add({"Plugin", "Added", p->name, p->active ? "enabled in the load order" : "installed, not enabled",
@@ -407,6 +422,10 @@ ChangeReport ChangeDetector::compare(const InstallSnapshot* reference, const Ins
         }
         const auto* o = it->second;
         bool role = compiled.count(key) || participants.count(key);
+        if (o->active && !p->active && compiled.count(key)) { // disabled by switching over to this build
+            ++r.switchedOver;
+            continue;
+        }
         if (o->active != p->active) {
             p->active ? ++r.addedPlugins : ++r.removedPlugins;
             add({"Plugin", p->active ? "Enabled" : "Disabled", p->name, role ? "part of the current build" : "", true});
@@ -447,8 +466,13 @@ ChangeReport ChangeDetector::compare(const InstallSnapshot* reference, const Ins
                 continue;
             ++r.loadOrderChanges;
             const auto* np = newPlugins[after[i]];
+            // A plugin whose records did not shape the build (it changes nothing the build holds) can move
+            // without changing what the build should be: mod managers re-sort plugins on deployment.
+            const bool shapes = participants.empty() || participants.count(after[i]) || compiled.count(after[i]);
             add({"Load Order", "Moved", np ? np->name : after[i],
-                 "position " + std::to_string(oldPos[after[i]]) + " → " + std::to_string(i), true});
+                 "position " + std::to_string(oldPos[after[i]]) + " → " + std::to_string(i) +
+                     (shapes ? "" : " (its records are not in the build)"),
+                 shapes});
         }
     }
 

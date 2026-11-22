@@ -10012,3 +10012,80 @@ TEST(readiness_before_apply)
     CHECK(p.compile());
     CHECK(p.readiness({}).format().find("OK    Crash logger") != std::string::npos);
 }
+
+// Switching over to a build (its outputs installed and enabled, its compiled plugins disabled) is not a change
+// that needs a rebuild; a real change after it still is.
+TEST(switching_over_is_not_a_change)
+{
+    auto root = buildInstall("switchover");
+    auto data = root / "Game" / "Data";
+    auto cfg = configFor(root);
+    cfg.exportOptions.outputDirectory = data; // installed: the outputs are in the game's Data folder
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        auto result = p.exportOutputs();
+        std::filesystem::copy_file(result.pluginsTxt, root / "plugins.txt",
+                                   std::filesystem::copy_options::overwrite_existing); // as Apply to Game does
+    }
+    Pipeline p(cfg);
+    auto r = p.checkForChanges();
+    for (const auto& i : r.items)
+        if (i.affectsBuild)
+            std::printf("affects: %s %s %s\n", i.category.c_str(), i.kind.c_str(), i.name.c_str());
+    CHECK(r.status != BuildStatus::RequiresRebuild);
+    writePlugin(data / "NewWeapons.esp", {"Fallout4.esm"}, {record("WEAP", 0x01000800, {zs("EDID", "NewGun")})});
+    std::ofstream(root / "plugins.txt", std::ios::app) << "*NewWeapons.esp\n";
+    Pipeline p2(cfg);
+    CHECK(p2.checkForChanges().status == BuildStatus::RequiresRebuild);
+}
+
+// The same with a mod manager (Vortex): the output package arrives as a mod, the outputs are enabled, the compiled
+// plugins disabled, and the mod manager re-sorts plugins that play no part in the build. None needs a rebuild.
+TEST(switch_over_through_a_mod_manager_is_not_a_change)
+{
+    InstallSnapshot ref;
+    ref.isBuild = true;
+    ref.created = 1;
+    ref.compiledPlugins = {"A.esp"};
+    ref.participants = {"A.esp", "K.esp"};
+    auto plugin = [](const char* n, bool active) {
+        FileFingerprint f;
+        f.name = n;
+        f.active = active;
+        f.hash = 7;
+        f.size = 10;
+        return f;
+    };
+    ref.plugins = {plugin("A.esp", true), plugin("K.esp", true), plugin("Other1.esp", true), plugin("Other2.esp", true)};
+    ref.loadOrder = {"A.esp", "K.esp", "Other1.esp", "Other2.esp"};
+    FileFingerprint out = plugin("Dummy_Plugin_01.esp", true);
+    ref.outputs = {out};
+    ModFingerprint mod;
+    mod.name = "Weapons";
+    mod.enabled = true;
+    mod.hash = 1;
+    ref.mods = {mod};
+    InstallSnapshot now = ref;
+    now.isBuild = false;
+    now.created = 2;
+    now.plugins = {plugin("A.esp", false), plugin("K.esp", true), plugin("Other1.esp", true), plugin("Other2.esp", true),
+                   plugin("Dummy_Plugin_01.esp", true)};
+    now.loadOrder = {"K.esp", "Other2.esp", "Other1.esp", "Dummy_Plugin_01.esp"}; // re-sorted by the mod manager
+    ModFingerprint pkg;
+    pkg.name = "Multiplexer Output 221126 204221";
+    pkg.enabled = true;
+    pkg.hash = 2;
+    now.mods = {mod, pkg};
+    auto r = ChangeDetector::compare(&ref, now);
+    for (const auto& i : r.items)
+        std::printf("  %s %s %s %d\n", i.category.c_str(), i.kind.c_str(), i.name.c_str(), int(i.affectsBuild));
+    CHECK(r.status != BuildStatus::RequiresRebuild);
+    CHECK_EQ(r.switchedOver, size_t(3)); // the package, the output enabled, the compiled plugin disabled
+    // A plugin of the build that moves still needs a rebuild.
+    now.plugins.push_back(plugin("K2.esp", true));
+    ref.participants.push_back("Other1.esp");
+    CHECK(ChangeDetector::compare(&ref, now).status == BuildStatus::RequiresRebuild);
+}
