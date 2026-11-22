@@ -532,6 +532,23 @@ bool AppController::setPlanDecision(const QString& originPlugin, quint32 objectI
     return true;
 }
 
+int AppController::acceptAutomatic(const QString& originPlugin, quint32 objectId)
+{
+    if (busy_ || !pipeline_ || !pipeline_->patchPlan())
+        return -1;
+    std::optional<fo4mx::FormKey> key;
+    if (!originPlugin.isEmpty()) {
+        const auto* o = pipeline_->session().findPlugin(ss(originPlugin));
+        if (!o)
+            return -1;
+        key = fo4mx::FormKey{o->index, objectId};
+    }
+    const size_t n = pipeline_->acceptAutomatic(key);
+    reopenDatabase();
+    emit dataChanged();
+    return int(n);
+}
+
 void AppController::clearResolution(const QString& originPlugin, quint32 objectId)
 {
     db::Database db(activeDatabase_);

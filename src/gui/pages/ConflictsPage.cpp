@@ -11,6 +11,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMap>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QSplitter>
 #include <QSqlQuery>
 #include <QTableView>
@@ -39,6 +41,7 @@ enum Column {
     ColConflict,
     ColHandling,
     ColSeverity,
+    ColReview,
     ColWinner,
     ColResolvedIn,
     ColOrigin,
@@ -54,6 +57,11 @@ enum Column {
 // Most serious first: hard conflicts, conflicts that are not merged, merges, overrides (conflictPriority).
 const QString kPriority = "CASE c.conflict_type WHEN 3 THEN 0 WHEN 4 THEN 1 WHEN 2 THEN 2 ELSE 3 END";
 
+// Where the user stands with a record: a winner they chose, or plan choices they made, or changes that
+// still wait for them (ConflictReview, written by Analyse and each decision).
+const QString kReview = "CASE WHEN ur.object_id IS NOT NULL OR r.state = 'user' THEN 'Your choice' "
+                        "WHEN r.state = 'waiting' THEN 'Waiting for you' ELSE '' END";
+
 // ORDER BY expression for each sortable column.
 QString sortExpression(int column)
 {
@@ -64,6 +72,7 @@ QString sortExpression(int column)
     case ColConflict: return kPriority;
     case ColHandling: return "c.preserved";
     case ColSeverity: return "CASE c.severity WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END";
+    case ColReview: return kReview;
     case ColWinner: return "p.name COLLATE NOCASE";
     case ColOrigin: return "o.name COLLATE NOCASE";
     case ColPlugins: return "c.chain_length";
@@ -94,7 +103,8 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
                                 "compiling; simple overrides change nothing another plugin changed. Select a record to "
                                 "see its override chain, the values field by field, and where each change came from. "
                                 "\"Winner when compiling\" lets you choose a different winner for one record."));
-    chips_ = new FilterChips({"All", "Hard Conflicts", "Compatible Merges", "Simple Overrides", "Not Merged", "Critical"});
+    chips_ = new FilterChips({"All", "Waiting for you", "Your choices", "Hard Conflicts", "Compatible Merges",
+                              "Simple Overrides", "Not Merged", "Critical"});
     plugin_ = new QComboBox;
     plugin_->setMinimumWidth(240);
     plugin_->setToolTip("Only show conflicts involving this plugin");
@@ -105,6 +115,9 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     role_->setToolTip("Involved: the plugin edits the record. Wins: it is the last plugin to edit it. "
                       "Loses: it edits the record but another plugin wins.");
     auto* clear = makeButton("Clear Filters", nullptr, "refresh");
+    acceptAll_ = makeButton("Accept Automatic for All Waiting", nullptr, "check");
+    acceptAll_->setToolTip("Every change still waiting for your choice keeps the winning plugin's value, as compiling "
+                           "does anyway, and stops waiting. Choices you already made are kept.");
     count_ = new QLabel;
     count_->setObjectName("PageSubtitle");
     auto* filters = new QHBoxLayout;
@@ -115,6 +128,13 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     filters->addWidget(role_);
     filters->addWidget(clear);
     l->addLayout(filters);
+    review_ = new QLabel;
+    review_->setObjectName("PageSubtitle");
+    review_->setWordWrap(true);
+    auto* reviewRow = new QHBoxLayout;
+    reviewRow->addWidget(review_, 1);
+    reviewRow->addWidget(acceptAll_);
+    l->addLayout(reviewRow);
 
     auto* split = new QSplitter(Qt::Vertical);
     table_ = new QTableView;
@@ -125,7 +145,15 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     table_->horizontalHeader()->setSectionsClickable(true);
     table_->horizontalHeader()->setSortIndicatorShown(true);
     table_->horizontalHeader()->setSortIndicator(-1, Qt::AscendingOrder);
-    table_->setToolTip("Click a column header to sort. Double-click a row to filter by its winning plugin.");
+    table_->setToolTip("Click a column header to sort, right-click it to show or hide columns. Double-click a row "
+                       "to filter by its winning plugin.");
+    table_->verticalHeader()->setDefaultSectionSize(30);
+    enableColumnChooser(table_, {}, {ColId, ColOriginId, ColObjectId, ColPreserved}, [this](int c, bool hidden) {
+        if (hidden)
+            hiddenColumns_.insert(c);
+        else
+            hiddenColumns_.remove(c);
+    });
     auto* listPane = new QWidget;
     auto* lp = new QVBoxLayout(listPane);
     lp->setContentsMargins(0, 0, 0, 0);
@@ -190,13 +218,19 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     resolution_ = new QComboBox;
     resolution_->setMinimumWidth(240);
     bottom->addWidget(resolution_);
+    accept_ = makeButton("Accept Automatic", nullptr, "check");
+    accept_->setToolTip("Keep the automatic result for this record: the changes waiting for your choice keep the "
+                        "winning plugin's value and stop waiting. You can still change any of them later.");
+    bottom->addWidget(accept_);
     dl->addLayout(bottom);
     resolutionNote_ = new QLabel;
     resolutionNote_->setObjectName("PageSubtitle");
     dl->addWidget(resolutionNote_);
     split->addWidget(detail);
-    split->setStretchFactor(0, 2);
-    split->setStretchFactor(1, 3);
+    // The list gets the larger share: it is where records are found; the detail scrolls within its tabs.
+    split->setStretchFactor(0, 3);
+    split->setStretchFactor(1, 2);
+    split->setChildrenCollapsible(false);
     l->addWidget(split, 1);
 
     connect(chips_, &FilterChips::changed, this, [this] { reload(); });
@@ -220,6 +254,37 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     connect(table_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
             [this](const QModelIndex& i) { showConflict(i.row()); });
     connect(resolution_, &QComboBox::activated, this, [this] { applyResolution(); });
+    connect(accept_, &QPushButton::clicked, this, [this] {
+        const int n = app_->acceptAutomatic(originPlugin_, objectId_);
+        if (n < 0) {
+            resolutionNote_->setText("Not saved: a task is running, or Analyse has not run. Try again when it is "
+                                     "finished.");
+            return;
+        }
+        reloadKeepingSelection();
+        resolutionNote_->setText(n ? QString("Accepted: the automatic result is kept for %1 change(s) of this "
+                                             "record. Saved for the next compilation.").arg(n)
+                                   : "Nothing was waiting on this record.");
+    });
+    connect(acceptAll_, &QPushButton::clicked, this, [this] {
+        auto* p = app_->pipeline();
+        const auto* plan = p ? p->patchPlan() : nullptr;
+        const size_t waiting = plan ? plan->pending : 0;
+        if (!waiting)
+            return;
+        if (QMessageBox::question(this, "Accept automatic for all",
+                                  QString("%1 change(s) wait for your choice. Accepting keeps the winning plugin's "
+                                          "value for each of them, which is what compiling does anyway, and clears "
+                                          "them from the list. Choices you already made are not changed.\n\n"
+                                          "Accept automatic for all of them?")
+                                      .arg(waiting)) != QMessageBox::Yes)
+            return;
+        const int n = app_->acceptAutomatic();
+        if (n < 0)
+            review_->setText("Not saved: a task is running, or Analyse has not run. Try again when it is finished.");
+        else
+            reloadKeepingSelection();
+    });
 }
 
 void ConflictsPage::focusRecord(const QString& text)
@@ -292,7 +357,11 @@ void ConflictsPage::reload()
     QString where = "1=1";
     QVariantList binds;
     QString chip = chips_->current();
-    if (chip == "Hard Conflicts")
+    if (chip == "Waiting for you")
+        where += " AND r.state = 'waiting'";
+    else if (chip == "Your choices")
+        where += " AND (ur.object_id IS NOT NULL OR r.state = 'user')";
+    else if (chip == "Hard Conflicts")
         where += " AND conflict_type = 3";
     else if (chip == "Compatible Merges")
         where += " AND conflict_type = 2";
@@ -332,9 +401,12 @@ void ConflictsPage::reload()
     if (sortColumn_ >= 0)
         order = sortExpression(sortColumn_) + (sortOrder_ == Qt::DescendingOrder ? " DESC" : " ASC") + ", c.form_id";
     const QString from = " FROM Conflicts c LEFT JOIN Plugins p ON p.id = c.winner_plugin_id "
-                         "LEFT JOIN Plugins o ON o.id = c.origin_plugin_id WHERE " + where;
+                         "LEFT JOIN Plugins o ON o.id = c.origin_plugin_id "
+                         "LEFT JOIN ConflictReview r ON r.origin_plugin_id = c.origin_plugin_id AND r.object_id = c.object_id "
+                         "LEFT JOIN UserResolutions ur ON ur.origin_plugin = o.name COLLATE NOCASE AND ur.object_id = c.object_id "
+                         "WHERE " + where;
     QString sql = "SELECT c.form_id AS FormID, c.signature AS Type, c.editor_id AS 'Editor ID', c.type_name AS Conflict, "
-                  "CASE c.preserved WHEN 1 THEN 'Not merged' WHEN 2 THEN 'Winner only' ELSE 'Merged' END AS Handling, c.severity AS Severity, p.name AS 'Winning Plugin', (SELECT g.output_plugin FROM "
+                  "CASE c.preserved WHEN 1 THEN 'Not merged' WHEN 2 THEN 'Winner only' ELSE 'Merged' END AS Handling, c.severity AS Severity, " + kReview + " AS Review, p.name AS 'Winning Plugin', (SELECT g.output_plugin FROM "
                   "GeneratedRecords g WHERE g.origin_plugin_id = c.origin_plugin_id AND g.object_id = c.object_id "
                   "LIMIT 1) AS resolved_in, o.name AS 'Origin', c.chain_length AS Plugins, c.chain AS 'Override Chain', "
                   "c.summary AS Summary, c.id, c.origin_plugin_id, c.object_id, c.preserved" +
@@ -346,7 +418,31 @@ void ConflictsPage::reload()
     model_->setHeaderData(ColResolvedIn, Qt::Horizontal, "Written To");
     for (int c : {ColId, ColOriginId, ColObjectId, ColPreserved})
         table_->hideColumn(c);
-    fitColumns(table_);
+    for (int c = 0; c < ColId; ++c)
+        table_->setColumnHidden(c, hiddenColumns_.contains(c));
+    fitColumns(table_, 260);
+    table_->horizontalHeader()->resizeSection(ColChain, 420);
+
+    {
+        QSqlDatabase db = app_->readDb();
+        QSqlQuery q(db);
+        qint64 waiting = 0, chosen = 0;
+        if (q.exec("SELECT SUM(state = 'waiting'), SUM(state = 'user') FROM ConflictReview") && q.next()) {
+            waiting = q.value(0).toLongLong();
+            chosen = q.value(1).toLongLong();
+        }
+        if (q.exec("SELECT COUNT(*) FROM UserResolutions") && q.next())
+            chosen += q.value(0).toLongLong();
+        review_->setText(
+            waiting ? QString("<b>%1 record(s) wait for your choice</b> (yellow changes in the compatibility patch "
+                              "plan). Open one and choose per change, or Accept Automatic to keep the winner's "
+                              "values. %2 record(s) have your choices saved.")
+                          .arg(formatCount(waiting), formatCount(chosen))
+                    : QString("Nothing waits for your choice. %1 record(s) have your choices saved; they apply in "
+                              "the next compilation.")
+                          .arg(formatCount(chosen)));
+        acceptAll_->setEnabled(waiting > 0);
+    }
 
     qint64 shown = 0, total = 0;
     {
@@ -374,11 +470,31 @@ void ConflictsPage::reload()
     resolutionNote_->clear();
 }
 
+void ConflictsPage::reloadKeepingSelection()
+{
+    const qint64 id = conflictId_;
+    reload();
+    if (id < 0)
+        return;
+    for (int row = 0;; ++row) {
+        while (row >= model_->rowCount() && model_->canFetchMore())
+            model_->fetchMore();
+        if (row >= model_->rowCount())
+            return;
+        if (model_->value(row, ColId).toLongLong() == id) {
+            table_->selectRow(row);
+            table_->scrollTo(model_->index(row, 0));
+            return;
+        }
+    }
+}
+
 void ConflictsPage::showConflict(int row)
 {
     if (row < 0)
         return;
     conflictId_ = model_->value(row, ColId).toLongLong();
+    accept_->setEnabled(false);
     QSqlDatabase db = app_->readDb();
 
     QMap<qint64, QString> pluginNames;
@@ -531,6 +647,10 @@ void ConflictsPage::showPlan()
         planNote_->setText("No change made by another plugin is missing from the winning version of this record.");
         return;
     }
+    bool waiting = false;
+    for (const auto& pe : rec->entries)
+        waiting = waiting || pe.decision == fo4mx::PlanDecision::Pending;
+    accept_->setEnabled(waiting);
     QString note = QString("Status: <b>%1</b>. Green changes are carried by default, Yellow ones wait for your "
                            "choice, Red and Unknown ones are never carried. With \"Apply the compatibility patch "
                            "plan\" on (Compilation), the next compilation writes the record with the changes "
@@ -591,7 +711,11 @@ void ConflictsPage::showPlan()
                     planNote_->setText("The choice could not be saved now (a task is running, or Analyse has "
                                        "not run). Try again when it is finished.");
                 else
-                    QMetaObject::invokeMethod(this, [this] { showPlan(); }, Qt::QueuedConnection);
+                    QMetaObject::invokeMethod(this, [this] {
+                        reloadKeepingSelection();
+                        planNote_->setText(planNote_->text() + "<br><span style='color:#3ddc84'>Your choice is saved "
+                                                               "for the next compilation.</span>");
+                    }, Qt::QueuedConnection);
             });
         }
         plan_->setCellWidget(row, 6, choice);
@@ -611,11 +735,13 @@ void ConflictsPage::applyResolution()
         return;
     if (resolution_->currentIndex() <= 0) {
         app_->clearResolution(originPlugin_, objectId_);
-        resolutionNote_->setText("Resolution cleared. Recompile to apply.");
+        reloadKeepingSelection();
+        resolutionNote_->setText("Back to automatic: saved. The next compilation decides the winner itself.");
     } else {
-        app_->saveResolution(originPlugin_, objectId_, resolution_->currentData().toString());
-        resolutionNote_->setText("Saved: " + resolution_->currentData().toString() +
-                                 " wins this record in the next compilation.");
+        const QString winner = resolution_->currentData().toString();
+        app_->saveResolution(originPlugin_, objectId_, winner);
+        reloadKeepingSelection();
+        resolutionNote_->setText("Your choice is saved: " + winner + " wins this record in the next compilation.");
     }
 }
 

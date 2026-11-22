@@ -2,9 +2,12 @@
 
 #include "pages/Page.hpp"
 
+#include <QSet>
+
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QPushButton;
 class QTableView;
 class QTableWidget;
 
@@ -29,6 +32,8 @@ private:
     void applyResolution();
     void clearFilters();
     void showPlan();
+    // Reloads the list (review states change) and selects the record that was selected.
+    void reloadKeepingSelection();
 
     FilterChips* chips_;
     QComboBox* signature_;
@@ -46,6 +51,10 @@ private:
     QLabel* planNote_;
     QComboBox* resolution_;
     QLabel* resolutionNote_;
+    QLabel* review_;
+    QPushButton* accept_;
+    QPushButton* acceptAll_;
+    QSet<int> hiddenColumns_;
 
     int sortColumn_ = -1; // -1: by conflict type and severity
     Qt::SortOrder sortOrder_ = Qt::AscendingOrder;

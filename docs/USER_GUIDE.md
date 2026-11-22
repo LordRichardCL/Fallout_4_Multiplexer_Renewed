@@ -155,6 +155,14 @@ Select a record to see the override chain and a grid of every field per plugin:
 
 **Winner when compiling** lets you force one plugin's version of the record. The choice is stored in the database and survives rescans.
 
+Reviewing what waits for you:
+
+- The line above the list says how many records **wait for your choice** (Yellow changes in their compatibility patch plan) and how many have **your choices saved**. The **Review** column says the same per record: *Waiting for you*, *Your choice*, or nothing. The chips **Waiting for you** and **Your choices** list only those records.
+- **Accept Automatic** (beside *Winner when compiling*) keeps the automatic result for the selected record: each change that waits keeps the winning plugin's value, which is what compiling does anyway, and the record stops waiting. The Conflicts badge and the Dashboard count go down at once.
+- **Accept Automatic for All Waiting** does the same for every waiting record, after asking. Choices you already made are not changed.
+- A choice you make by hand (a winner, or a change in the plan) is saved at once, the note under the panel says so, and the record shows *Your choice*. You can change it again at any time; choosing *Automatic* or *Default* again undoes it.
+- Right-click a column header to show or hide columns (Origin and Summary are hidden at first; the override chain is in the panel below). Drag the bar between the list and the panel to give either more room.
+
 ### Assets
 
 **Conflicting** lists every path provided by more than one source. Select an asset to see the winning mod, the reason (loose beats archive; later archives beat earlier ones; higher mod priority wins) and every alternative. Select an alternative to preview it. Textures show resolution, format, mip levels and an image (BC1–BC5 and uncompressed formats). Meshes show their block structure and referenced materials. Materials show their texture slots.

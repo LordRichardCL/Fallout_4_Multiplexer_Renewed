@@ -5,6 +5,7 @@
 #include "AppController.hpp"
 #include "Format.hpp"
 #include "MainWindow.hpp"
+#include "pages/ConflictsPage.hpp"
 #include "db/Database.hpp"
 #include "db/Schema.hpp"
 #include "models/SqlModel.hpp"
@@ -354,6 +355,63 @@ private slots:
         // A failed task shows no card.
         emit app_->taskFinished("Scan", false, "Cancelled");
         QVERIFY(toast->isHidden());
+    }
+
+    // The Conflict Centre says which records wait for the user's choice and which have one saved (a plan
+    // choice or a chosen winner), and its chips list them.
+    void conflict_centre_shows_what_waits_for_the_user()
+    {
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("INSERT INTO Conflicts (id, origin_plugin_id, object_id, form_id, signature, editor_id, conflict_type, "
+                    "type_name, severity, winner_plugin_id, chain_length, chain, summary, preserved) VALUES "
+                    "(1, 1, 16, '00000010', 'WEAP', 'Pistol', 3, 'Hard Conflict', 'High', 3, 3, 'a, b, c', '', 0),"
+                    "(2, 1, 17, '00000011', 'WEAP', 'Rifle', 2, 'Compatible Merge', 'Low', 2, 2, 'a, b', '', 0),"
+                    "(3, 1, 18, '00000012', 'WEAP', 'Knife', 1, 'Simple Override', 'Low', 2, 2, 'a, b', '', 0)");
+            db.exec("INSERT INTO ConflictReview VALUES (1, 16, 'waiting')");
+            db.exec("INSERT INTO UserResolutions VALUES ('fallout4.esm', 17, 'Weapons.esp')");
+        }
+        start();
+        auto* page = window_->findChild<gui::ConflictsPage*>();
+        QVERIFY(page);
+        page->refresh();
+        QAbstractItemModel* model = page->findChild<gui::SqlModel*>();
+        QVERIFY(model);
+        int review = -1;
+        for (int c = 0; c < model->columnCount(); ++c)
+            if (model->headerData(c, Qt::Horizontal).toString() == "Review")
+                review = c;
+        QVERIFY(review >= 0);
+        QMap<QString, QString> states;
+        for (int r = 0; r < model->rowCount(); ++r)
+            states[model->index(r, 2).data().toString()] = model->index(r, review).data().toString();
+        QCOMPARE(states.value("Pistol"), QString("Waiting for you"));
+        QCOMPARE(states.value("Rifle"), QString("Your choice")); // the winner chosen, plugin name in any case
+        QCOMPARE(states.value("Knife"), QString());
+        bool told = false;
+        for (auto* l : page->findChildren<QLabel*>())
+            told = told || l->text().contains("1 record(s) wait for your choice");
+        QVERIFY(told);
+        QVERIFY(childWithText<QPushButton>(page, "Accept Automatic for All Waiting")->isEnabled());
+
+        auto* chips = page->findChild<gui::FilterChips*>();
+        chips->setCurrent("Waiting for you");
+        page->refresh();
+        QCOMPARE(model->rowCount(), 1);
+        QCOMPARE(model->index(0, 2).data().toString(), QString("Pistol"));
+        chips->setCurrent("Your choices");
+        page->refresh();
+        QCOMPARE(model->rowCount(), 1);
+        QCOMPARE(model->index(0, 2).data().toString(), QString("Rifle"));
+
+        // Nothing waits: the bulk button is off. No pipeline: accepting cannot run and says so.
+        QCOMPARE(app_->acceptAutomatic(), -1);
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("DELETE FROM Conflicts; DELETE FROM ConflictReview; DELETE FROM UserResolutions");
+        }
+        page->refresh();
+        QVERIFY(!childWithText<QPushButton>(page, "Accept Automatic for All Waiting")->isEnabled());
     }
 
     // The changes check that runs when a watched file changes is quiet: no summary card, no dialog, a line in

@@ -23,6 +23,10 @@ Diagnostics
 - Support bundle: one zip with the reports, logs, readings and load order, personal details removed.
 - Build comparison: what a rebuild changes against the previous build.
 
+Conflict Centre
+- Accept Automatic for one record or for every waiting one; a Review column and filters for records waiting for you and records with your choices; manual choices confirmed as saved; a roomier list.
+- Applying a build to the game is no longer reported as a change that needs a rebuild.
+
 Compiling
 - More plugins compile: plugin INIs, unused masters (placeholders), LOD billboards, constants and cross-script calls in scripts, Master Redirection (experimental).
 - Precombined Cell Check (read only) for new cells with precombine or previs data.

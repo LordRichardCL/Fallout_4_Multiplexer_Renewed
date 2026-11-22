@@ -9568,6 +9568,9 @@ TEST(patch_plan_defaults_decisions_and_validation)
         }
         CHECK_EQ(carried, size_t(1)); // ModB's keyword
         CHECK_EQ(pending, size_t(2)); // ModD's and ModE's data
+        // The list shows it as waiting for the user.
+        CHECK(p.database() &&
+              p.database()->scalar("SELECT COUNT(*) FROM ConflictReview WHERE state = 'waiting'").value_or(0) == 1);
         const auto* d = changeBy(p, *r, "ModD.esp");
         const auto* e = changeBy(p, *r, "ModE.esp");
         CHECK(d && e);
@@ -9607,6 +9610,22 @@ TEST(patch_plan_defaults_decisions_and_validation)
             CHECK_EQ(changeBy(p, *r, "ModD.esp")->changeId, dataD);
             CHECK_EQ(p.patchPlan()->carried, size_t(2));
         }
+    }
+    {
+        // Accept automatic: the waiting changes keep the winner's values (as compiling does undecided), the record
+        // no longer waits, and nothing more is carried.
+        std::filesystem::remove(root / "decisions.json");
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK_EQ(p.patchPlan()->pending, size_t(2));
+        const size_t carriedBefore = p.patchPlan()->carried;
+        CHECK_EQ(p.acceptAutomatic(hat), size_t(2));
+        CHECK_EQ(p.patchPlan()->pending, size_t(0));
+        CHECK_EQ(p.patchPlan()->carried, carriedBefore);
+        CHECK(p.database()->scalar("SELECT COUNT(*) FROM ConflictReview WHERE state = 'user'").value_or(0) == 1);
+        CHECK_EQ(p.acceptAutomatic(), size_t(0)); // nothing left waiting
+        CHECK(std::filesystem::exists(root / "decisions.json"));
     }
 }
 

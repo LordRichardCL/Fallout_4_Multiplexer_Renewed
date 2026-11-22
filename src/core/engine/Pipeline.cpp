@@ -553,6 +553,7 @@ void Pipeline::analyse(ProgressSink& progress)
     validation_.reset();
     if (db_)
         db::DatabaseWriter(*db_).writeAnalysis(*session_, *conflicts_, *dependencies_, progress);
+    writeReviewState();
     if (db_)
         db::DatabaseWriter(*db_).writeAutoMerge(*session_, autoMerge(), nullptr);
 }
@@ -573,6 +574,52 @@ void Pipeline::setPlanDecision(FormKey record, const std::string& changeId, std:
         planDecisions_.save(path);
     if (conflicts_)
         plan_ = buildPatchPlan(*session_, *conflicts_, planDecisions_);
+    writeReviewState();
+}
+
+size_t Pipeline::acceptAutomatic(std::optional<FormKey> record)
+{
+    if (!plan_)
+        return 0;
+    size_t decided = 0;
+    for (const auto& pr : plan_->records) {
+        if (record && pr.conflict->key != *record)
+            continue;
+        const std::string id = PlanDecisions::recordId(*session_, pr.conflict->key);
+        for (const auto& e : pr.entries)
+            if (e.decision == PlanDecision::Pending) {
+                planDecisions_.set(id, pr.conflict->changes[e.change].changeId, PlanAction::KeepWinner);
+                ++decided;
+            }
+    }
+    if (decided) {
+        if (const auto path = planDecisionsPath(); !path.empty())
+            planDecisions_.save(path);
+        plan_ = buildPatchPlan(*session_, *conflicts_, planDecisions_);
+    }
+    writeReviewState();
+    return decided;
+}
+
+void Pipeline::writeReviewState()
+{
+    if (!db_ || !plan_)
+        return;
+    db::Transaction tx(*db_);
+    db_->exec("DELETE FROM ConflictReview");
+    auto ins = db_->prepare("INSERT OR REPLACE INTO ConflictReview(origin_plugin_id, object_id, state) VALUES(?,?,?)");
+    for (const auto& pr : plan_->records) {
+        bool waiting = false, user = false;
+        for (const auto& e : pr.entries) {
+            waiting |= e.decision == PlanDecision::Pending;
+            user |= e.decision == PlanDecision::User;
+        }
+        if (!waiting && !user)
+            continue;
+        ins.bind(1, pr.conflict->key.origin).bind(2, pr.conflict->key.objectId).bind(3, waiting ? "waiting" : "user");
+        ins.run();
+    }
+    tx.commit();
 }
 
 std::string Pipeline::loaderMod(std::string* off) const

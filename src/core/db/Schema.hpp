@@ -309,6 +309,15 @@ CREATE TABLE IF NOT EXISTS RecordAssets (
 CREATE INDEX IF NOT EXISTS idx_record_assets ON RecordAssets(output_plugin, form_id);
 CREATE INDEX IF NOT EXISTS idx_record_assets_path ON RecordAssets(asset_path);
 
+-- Where each conflict stands with the user, from the compatibility patch plan: 'waiting' (a change waits for a
+-- choice) or 'user' (the user decided, including accepting the automatic choice). Rewritten with the plan.
+CREATE TABLE IF NOT EXISTS ConflictReview (
+    origin_plugin_id INTEGER NOT NULL,
+    object_id INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    PRIMARY KEY (origin_plugin_id, object_id)
+);
+
 CREATE TABLE IF NOT EXISTS UserResolutions (
     origin_plugin TEXT NOT NULL,
     object_id INTEGER NOT NULL,

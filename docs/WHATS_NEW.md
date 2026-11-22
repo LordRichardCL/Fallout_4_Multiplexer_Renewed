@@ -2,6 +2,11 @@
 
 Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has the details of each.
 
+## 22 November 2026
+
+- **Applying a build no longer asks for a rebuild:** the changes check ignores what switching over does by design (the outputs installed and enabled, the compiled plugins disabled, the Multiplexer package in your mod manager) and a load-order move of a plugin that is not in the build.
+- **Conflict Centre review:** a *Review* column and *Waiting for you* / *Your choices* filters; **Accept Automatic** for one record, or for every waiting record at once, clears them from the waiting count; manual choices say they are saved and are marked *Your choice*. The list has more room and fewer columns at first (right-click a header for the rest).
+
 ## 21 November 2026
 
 - **Calmer Dashboard:** the steps are the actions (click Scan, Analyse, Review...), so the row of buttons above them is gone; the status line also says when patch choices are waiting; the plugin slots tile has its own icon.

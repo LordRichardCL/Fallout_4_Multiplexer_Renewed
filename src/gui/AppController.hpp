@@ -74,6 +74,10 @@ public:
     // 0: carry forward, 1: keep the winner's value). Saved next to the database. False while a task runs or
     // before Analyse.
     bool setPlanDecision(const QString& originPlugin, quint32 objectId, const QString& changeId, int action);
+    // Accepts the automatic choice for the changes that wait (one record, or every record with
+    // originPlugin empty): they keep the winner's values, as compiling does, and stop waiting. Returns how many
+    // changes were decided, or -1 when it cannot run now (a task is running, or Analyse has not run).
+    int acceptAutomatic(const QString& originPlugin = {}, quint32 objectId = 0);
 
     // Apply to Game, in two steps: what it will do (nothing changes yet), then doing it.
     struct ApplyPreview {

@@ -117,6 +117,10 @@ public:
     // Records the user's choice for one change (nullopt: back to the default), saves it and rebuilds the plan
     // (pointers into the previous plan are invalidated).
     void setPlanDecision(FormKey record, const std::string& changeId, std::optional<PlanAction> action);
+    // Accepts the automatic choice for the changes that wait for one (of `record`, or of every record): each is
+    // recorded as "keep the winner's value", which is what compiling does with an undecided change, so the build
+    // stays the same and the records no longer wait. Saved once; returns how many changes were decided.
+    size_t acceptAutomatic(std::optional<FormKey> record = std::nullopt);
     const DependencyReport* dependencies() const { return dependencies_ ? &*dependencies_ : nullptr; }
     const CompiledOutput* compiledOutput() const { return compiled_ ? &*compiled_ : nullptr; }
     const ValidationReport* validation() const { return validation_ ? &*validation_ : nullptr; }
@@ -206,6 +210,7 @@ private:
     std::optional<ConflictReport> conflicts_;
     std::optional<PatchPlan> plan_;
     PlanDecisions planDecisions_;
+    void writeReviewState(); // ConflictReview, from the plan
     std::optional<DependencyReport> dependencies_;
     std::optional<CompiledOutput> compiled_;
     std::optional<ValidationReport> validation_;
