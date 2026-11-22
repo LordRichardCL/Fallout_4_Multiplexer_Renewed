@@ -9,7 +9,7 @@ Release policy (alpha):
 
 ## 0.2.0-alpha (unreleased)
 
-**Tested:** build verified on 22 Nov 2026 (Vortex, Fallout 4 1.10.163, 2,270 plugins: 1,401 compiled into 7 outputs and a patch, 310,224 new FormIDs, 0 validation errors, written plugins verified, Apply to Game switched the load order over). In game: results pending.
+**Tested:** build verified on 22 Nov 2026 (Vortex, Fallout 4 1.10.163, 2,270 plugins: 1,401 compiled into 7 outputs and a patch, 310,224 new FormIDs, 0 validation errors, written plugins verified, Apply to Game switched the load order over). In game: first session (about 9 minutes from a save, normal quit, all 421 archives loaded, no Papyrus failures tied to compiling); longer play and a baseline comparison to follow.
 
 Safety and testing
 - Presets from least to most change: **Safest** (the first-run default), **Recommended**, **Advanced**; an alpha notice on the Compilation page.

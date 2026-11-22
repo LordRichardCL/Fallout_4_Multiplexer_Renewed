@@ -20,14 +20,14 @@ What has been confirmed, and how. **Fallout 4 Multiplexer Renewed is alpha softw
 | Apply to Game (Vortex) | Build verified | Same build: compiled plugins disabled, outputs enabled last, archive list written to Fallout4Custom.ini, every file backed up |
 | Apply to Game (Mod Organizer 2) | Tested | Earlier real load orders (builds 63 to 83, see RECORD_HANDLING_AUDIT.md) |
 | Switch Back | Tested | Automated tests; not yet used on a real install |
-| Playing on compiled output | **Pending** | First in-game results from 22 Nov 2026 not yet reported |
+| Playing on compiled output | **First session** | 22 Nov 2026, same build: the game loaded the 869-plugin load order, reached the main menu, loaded a save and ran about 9 minutes, then quit normally (exit save, no crash). All 421 archives loaded (the F4SE archive loader supplied what the game's 1,023-character INI read cut off). Papyrus: scripts ran on 3,454 occasions on records in the outputs; no script failed to find a plugin by name; the 19 errors on output records (in 1,474 error lines) are script bindings the source mods also get wrong. A baseline log without the build is still to compare. |
 | Safest preset | Build verified | |
 | Recommended preset (patch choices, cell settings, previs translation, patch plugin) | Build verified | Previs numbering confirmed in game on one cell (USAFSatellite01, see RECORD_HANDLING_AUDIT.md) |
 | Auto-Merger (scripts and configs relinked) | Build verified | 22 Nov 2026: 393 files relinked, 0 errors |
 | Light outputs | Experimental | |
 | Placeholders for unused masters | Experimental | |
 | Master Redirection | Experimental | Mod Organizer 2 only |
-| F4SE archive loader | Experimental | |
+| F4SE archive loader | Build verified | 22 Nov 2026: 421 of 421 archives loaded in game (Diagnostic Recorder) |
 | LOD billboards moved with their records | Experimental | |
 | New cells with precombine or previs data | Not supported | Kept in the load order; Precombined Cell Check (read only) reports what a later version could move |
 | "Clean" precombines (`- Geometry.csg`, `.cdx`) | Not supported | Kept in the load order |
