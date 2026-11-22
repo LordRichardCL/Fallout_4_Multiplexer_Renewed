@@ -50,7 +50,15 @@ Optional overrides: a different `plugins.txt`, a different INI folder, and the s
 
 ## 3. Scan
 
-**Dashboard → Scan** builds the virtual Data folder and reads every plugin, archive and loose file.
+**Dashboard → Scan** builds the virtual Data folder and reads the plugins the game loads, their archives and the loose files.
+
+**What a scan reads.** Before scanning, the app asks (until you untick *Ask me before each scan*) and shows the counts from your plugin list:
+
+- **What the game loads (recommended):** the active plugins (enabled in plugins.txt or your mod manager's profile), their archives, and loose files as the game sees them. This is all a build ever uses. Inactive plugins in Data are listed (behind *Show inactive plugins* on the Plugins page) but not read, and never compiled.
+- **Also preview inactive plugins:** reads the inactive plugins too, apart from the load order, and says for each what it would bring if you enabled it: whether it would likely compile, which active mods it would conflict with (by today's winner), and masters that are not active. It is an estimate from masters and record types; enable the plugin and scan for the full check. The build is exactly the same either way.
+- **An active plugin you want left alone** still has to be read, because the game loads it and the outputs load after it: skipping it would let the build overwrite its edits without telling you. Use **Choose Plugins to Compile…** (also in the question) or *Never compile these plugins* to keep it out of the outputs instead.
+
+The same choices are in **Settings → Scan**. The command line uses `--scan-scope game|preview-inactive`.
 
 **The Dashboard** shows, from the top:
 - the build's status in one line, with the one button that matters now (Scan my mods, Compile or Rebuild; Check again and Review Changes once there is a build);
@@ -66,6 +74,8 @@ The navigation groups the pages: **Your mods** (Changes, Plugins, Conflicts, Ass
 **Analyse** walks every override chain and classifies conflicts, builds the record reference graph and evaluates compilation eligibility.
 
 ### Plugins
+
+The list shows the plugins your game loads. Switch on **Show inactive plugins** (top right) to list the others too; the **Disabled** chip, and opening a plugin by name, show them whatever the switch says. With the preview on (above), an inactive plugin's **Why** says *If enabled: likely compiles* or *likely stays*, with the records it would conflict on, and its details have an **If you enabled it (preview)** section.
 
 Filter by ESM/ESP/ESL, conflicting, disabled, eligible, ineligible, or **Generated** (the compiled outputs).
 
@@ -713,7 +723,7 @@ Everything is also available through `fo4mx` (run `fo4mx help`), for example:
 fo4mx compile --mo2 "C:\Modding\MO2" --profile "Test" --outputs 16 --strategy type --dry-run
 ```
 
-`--dry-run` stops after validation. `fo4mx status …` prints the build status and every change since the last build (exit code 3 when a rebuild is required, handy for scripts). `--no-cache` forces a full rebuild.
+`--dry-run` stops after validation. `fo4mx status …` prints the build status and every change since the last build (exit code 3 when a rebuild is required, handy for scripts). `--no-cache` forces a full rebuild. `fo4mx scan … --scan-scope preview-inactive` also lists what each inactive plugin would bring if enabled.
 
 ## Troubleshooting
 

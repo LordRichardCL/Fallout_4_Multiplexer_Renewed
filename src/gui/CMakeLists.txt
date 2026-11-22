@@ -14,6 +14,7 @@ add_library(fo4mx_gui STATIC
     widgets/PluginSelection.cpp
     widgets/Glossary.cpp
     widgets/QuickSearch.cpp
+    widgets/ScanDialog.cpp
     models/SqlModel.cpp
     models/GroupedSqlModel.cpp
     pages/Page.hpp

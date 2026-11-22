@@ -40,6 +40,8 @@ private:
     QPlainTextEdit* excluded_;
     QCheckBox* creationClub_;
     QCheckBox* allTypes_;
+    QCheckBox* previewInactive_;
+    QCheckBox* askScan_;
     QCheckBox* recorder_;
     QCheckBox* archiveLoader_;
     QSpinBox* threads_;

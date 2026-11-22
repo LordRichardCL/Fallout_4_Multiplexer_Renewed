@@ -16,9 +16,12 @@
 #include "widgets/Glossary.hpp"
 #include "widgets/PluginSelection.hpp"
 #include "widgets/QuickSearch.hpp"
+#include "widgets/ScanDialog.hpp"
 #include "widgets/Widgets.hpp"
 
 #include <QApplication>
+#include <QCheckBox>
+#include <QRadioButton>
 #include <QCoreApplication>
 #include <QDialog>
 #include <QDir>
@@ -258,6 +261,98 @@ private slots:
             found = model->value(row, 1).toString() == "Armour.esp";
         }
         QVERIFY(found);
+    }
+
+    // The Plugins page lists what the game loads; inactive plugins only with the switch on (or asked for by
+    // name), with what the preview says each would bring.
+    void inactive_plugins_are_hidden_until_asked_for()
+    {
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("INSERT INTO InactivePreview VALUES ('Off.esp', 5, 4, 1, 1, 'Weapons.esp (1)', '', 1, "
+                    "'Likely to compile: its masters are active.')");
+        }
+        start();
+        auto* page = window_->findChild<gui::PluginsPage*>();
+        window_->showPage("Plugins");
+        page->refresh();
+        gui::SqlModel* model = nullptr;
+        for (auto* view : page->findChildren<QTableView*>())
+            if (auto* m = qobject_cast<gui::SqlModel*>(view->model()))
+                model = m;
+        QVERIFY(model);
+        auto names = [&] {
+            QStringList out;
+            for (int r = 0; r < model->rowCount(); ++r)
+                out << model->value(r, 1).toString();
+            return out;
+        };
+        QVERIFY(!names().contains("Off.esp"));
+        QVERIFY(names().contains("Weapons.esp"));
+        auto* toggle = childWithText<QCheckBox>(page, "Show inactive plugins");
+        QVERIFY(toggle);
+        toggle->setChecked(true);
+        QVERIFY(names().contains("Off.esp"));
+        const int off = static_cast<int>(names().indexOf("Off.esp"));
+        QCOMPARE(model->value(off, 3).toString(), QString("If enabled: likely compiles, conflicts on 1 record(s)"));
+        QVERIFY(QSettings().value("plugins/showInactive").toBool());
+        toggle->setChecked(false);
+        QVERIFY(!names().contains("Off.esp"));
+
+        // Asked for by name: shown, with the preview in its details.
+        page->focusPlugin("Off.esp");
+        QVERIFY(names().contains("Off.esp"));
+        auto* details = page->findChild<QTextBrowser*>();
+        QVERIFY(details->toPlainText().contains("If you enabled it (preview)"));
+        QVERIFY(details->toPlainText().contains("Weapons.esp (1)"));
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("DELETE FROM InactivePreview");
+        }
+        page->focusPlugin("Off.esp");
+        QVERIFY(details->toPlainText().contains("Also preview inactive plugins"));
+    }
+
+    // Scan asks what to read, with counts; the choice is saved, and "don't ask" skips the question.
+    void scan_asks_what_to_read()
+    {
+        QVERIFY(app_->askBeforeScan());
+        QVERIFY(!app_->previewInactive());
+        {
+            gui::ScanDialog d(app_.get());
+            auto* game = childWithText<QRadioButton>(&d, "What the game loads (recommended)");
+            QVERIFY(game && game->isChecked());
+            QVERIFY(childWithText<QRadioButton>(&d, "Also preview inactive plugins"));
+            QVERIFY(childWithText<QCheckBox>(&d, "Ask me before each scan")->isChecked());
+        }
+        bool asked = false, chose = false;
+        QTimer::singleShot(0, [&] {
+            auto* d = qobject_cast<gui::ScanDialog*>(QApplication::activeModalWidget());
+            asked = d != nullptr;
+            if (!d)
+                return;
+            childWithText<QRadioButton>(d, "Also preview inactive plugins")->setChecked(true);
+            childWithText<QCheckBox>(d, "Ask me before each scan")->setChecked(false);
+            QTest::mouseClick(childWithText<QPushButton>(d, "Scan"), Qt::LeftButton);
+        });
+        QVERIFY(gui::confirmScan(app_.get(), window_.get(), [&] { chose = true; }));
+        QVERIFY(asked);
+        QVERIFY(!chose);
+        QVERIFY(app_->previewInactive());
+        QVERIFY(QSettings().value("scan/previewInactive").toBool());
+        QVERIFY(!app_->askBeforeScan());
+        // Not asked again.
+        QVERIFY(gui::confirmScan(app_.get(), window_.get()));
+
+        // "Choose Plugins to Compile…" does not scan; it hands over to the caller.
+        app_->setAskBeforeScan(true);
+        QTimer::singleShot(0, [&] {
+            if (auto* d = qobject_cast<gui::ScanDialog*>(QApplication::activeModalWidget()))
+                QTest::mouseClick(childWithText<QPushButton>(d, "Choose Plugins to Compile…"), Qt::LeftButton);
+        });
+        QVERIFY(!gui::confirmScan(app_.get(), window_.get(), [&] { chose = true; }));
+        QVERIFY(chose);
+        app_->setPreviewInactive(false);
     }
 
     // The glossary's filter narrows the terms, and says so when none matches.

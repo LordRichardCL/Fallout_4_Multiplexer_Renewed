@@ -28,6 +28,8 @@ public:
 private:
     void fillHero(bool have);
     void fillAttention(bool have);
+    // Scan, after asking what to read (ScanDialog) unless the user said not to ask.
+    void requestScan();
 
     QLabel* subtitle_;
     // Status card

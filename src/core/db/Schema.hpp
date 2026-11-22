@@ -311,6 +311,18 @@ CREATE INDEX IF NOT EXISTS idx_record_assets_path ON RecordAssets(asset_path);
 
 -- Where each conflict stands with the user, from the compatibility patch plan: 'waiting' (a change waits for a
 -- choice) or 'user' (the user decided, including accepting the automatic choice). Rewritten with the plan.
+CREATE TABLE IF NOT EXISTS InactivePreview (
+    plugin TEXT PRIMARY KEY,
+    records INTEGER,
+    new_records INTEGER,
+    overrides INTEGER,
+    conflicts INTEGER,
+    conflicts_with TEXT,
+    missing_masters TEXT,
+    likely_compiles INTEGER,
+    reason TEXT
+);
+
 CREATE TABLE IF NOT EXISTS ConflictReview (
     origin_plugin_id INTEGER NOT NULL,
     object_id INTEGER NOT NULL,

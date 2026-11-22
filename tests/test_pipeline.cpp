@@ -330,6 +330,76 @@ TEST(pipeline_end_to_end)
         CHECK(first[m.editorId] == std::make_pair(m.outputPlugin, m.objectId));
 }
 
+// Previewing inactive plugins reads them apart from the load order: the build sees exactly the same records,
+// and each inactive plugin gets what it would bring if enabled (conflicts, missing masters, an estimate).
+TEST(scan_previews_inactive_plugins_without_touching_the_build)
+{
+    auto root = buildInstall("inactive_preview");
+    auto data = root / "Game" / "Data";
+    // Not in plugins.txt: inactive.
+    writePlugin(data / "Spare.esp", {"Fallout4.esm"},
+                {record("WEAP", 0x00001000, {zs("EDID", "Pistol10mm"), zs("FULL", "Spare Pistol")}),
+                 record("KYWD", 0x01000800, {zs("EDID", "SpareKeyword")})});
+    writePlugin(data / "Needs.esp", {"Fallout4.esm", "Missing.esm"},
+                {record("KYWD", 0x02000800, {zs("EDID", "NeedsKeyword")})});
+    writePlugin(data / "Keeps.esp", {"Fallout4.esm"}, {record("NOCM", 0x01000800, {zs("EDID", "KeepsObstacles")})});
+
+    auto cfg = configFor(root);
+    Pipeline plain(cfg);
+    plain.scan();
+    CHECK(plain.inactivePreview().empty());
+    const size_t records = plain.session().records.size();
+    const size_t active = plain.session().loadOrder.size();
+
+    cfg.scan.previewInactive = true;
+    Pipeline p(cfg);
+    p.scan();
+    CHECK_EQ(p.session().records.size(), records);
+    CHECK_EQ(p.session().loadOrder.size(), active);
+    CHECK(!p.session().findPlugin("Spare.esp")->active);
+
+    std::map<std::string, InactivePreviewRow> rows;
+    for (const auto& r : p.inactivePreview())
+        rows[r.name] = r;
+    CHECK(rows.count("Spare.esp") && rows.count("Needs.esp") && rows.count("Keeps.esp"));
+    const auto& spare = rows["Spare.esp"];
+    CHECK_EQ(spare.records, size_t(2));
+    CHECK_EQ(spare.newRecords, size_t(1));
+    CHECK_EQ(spare.overrides, size_t(1));
+    CHECK_EQ(spare.conflicts, size_t(1)); // the pistol ModA, ModB and ModC change too
+    CHECK(!spare.conflictsWith.empty() && spare.conflictsWith[0].first == "ModC.esp"); // today's winner
+    CHECK(spare.missingMasters.empty());
+    CHECK(spare.likelyCompiles);
+
+    const auto& needs = rows["Needs.esp"];
+    CHECK(!needs.likelyCompiles);
+    CHECK(needs.missingMasters.size() == 1 && needs.missingMasters[0] == "Missing.esm");
+    CHECK(needs.reason.find("Missing.esm") != std::string::npos);
+
+    const auto& keeps = rows["Keeps.esp"];
+    CHECK(!p.session().defs.isCompilable(Signature::fromString("NOCM")));
+    CHECK(!keeps.likelyCompiles);
+    CHECK(keeps.reason.find("NOCM") != std::string::npos);
+
+    // Written to the database; a scan without the preview empties the table.
+    {
+        db::Database db(cfg.databasePath);
+        auto st = db.prepare("SELECT likely_compiles, conflicts_with FROM InactivePreview WHERE plugin = 'Spare.esp'");
+        CHECK(st.step());
+        CHECK_EQ(st.columnInt(0), int64_t(1));
+        CHECK(st.columnText(1).find("ModC.esp (1)") != std::string::npos);
+    }
+    cfg.scan.previewInactive = false;
+    Pipeline again(cfg);
+    again.scan();
+    {
+        db::Database db(cfg.databasePath);
+        auto st = db.prepare("SELECT COUNT(*) FROM InactivePreview");
+        CHECK(st.step());
+        CHECK_EQ(st.columnInt(0), int64_t(0));
+    }
+}
+
 TEST(pipeline_allocation_strategies_respect_dependencies)
 {
     auto root = buildInstall("strategies");

@@ -202,6 +202,22 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
                                 "differences.",
                                 {allTypes_}));
 
+    QVBoxLayout* sl = nullptr;
+    l->addWidget(makeSectionCard("scan", "Scan", &sl));
+    previewInactive_ = new ToggleSwitch("Also preview inactive plugins");
+    askScan_ = new ToggleSwitch("Ask before each scan");
+    sl->addWidget(makeOptionRow("Also preview inactive plugins",
+                                "Display only: the build reads what the game loads either way.",
+                                "Scans also read the plugins in Data that are not enabled, apart from the load order. "
+                                "The Plugins page (Show inactive plugins) then says for each whether it would likely "
+                                "compile and which active mods it would conflict with if you enabled it.",
+                                {previewInactive_}));
+    sl->addWidget(makeOptionRow("Ask before each scan", "Shows what the scan will read, with the counts, first.",
+                                "Scan asks what to read and shows how many active and inactive plugins and archives "
+                                "there are. Turn it off to scan straight away with the choice above.",
+                                {askScan_}));
+    connect(askScan_, &QCheckBox::toggled, this, [this](bool on) { app_->setAskBeforeScan(on); });
+
     QVBoxLayout* dl = nullptr;
     l->addWidget(makeSectionCard("diagnostics", "Diagnostics", &dl));
     recorder_ = new ToggleSwitch("Prepare the Diagnostic Recorder (optional F4SE plugin) with each export");
@@ -270,7 +286,7 @@ SettingsPage::SettingsPage(AppController* app, QWidget* parent) : Page(app, pare
     connect(language_, &QComboBox::currentTextChanged, this, [this] { store(); });
     connect(runtime_, &QComboBox::currentIndexChanged, this, [this] { store(); });
     connect(excluded_, &QPlainTextEdit::textChanged, this, [this] { store(); });
-    for (auto* c : {creationClub_, allTypes_, recorder_, archiveLoader_})
+    for (auto* c : {creationClub_, allTypes_, recorder_, archiveLoader_, previewInactive_})
         connect(c, &QCheckBox::toggled, this, [this] { store(); });
     connect(threads_, &QSpinBox::valueChanged, this, [this] { store(); });
     connect(setupBtn, &QPushButton::clicked, this, [this] {
@@ -412,6 +428,11 @@ void SettingsPage::load()
     recorder_->setChecked(c.diagnosticRecorder);
     archiveLoader_->setChecked(c.f4seArchiveLoader);
     allTypes_->setChecked(c.conflicts.analyseAllRecordTypes);
+    previewInactive_->setChecked(c.scan.previewInactive);
+    {
+        QSignalBlocker b(askScan_);
+        askScan_->setChecked(app_->askBeforeScan());
+    }
     threads_->setValue(static_cast<int>(c.scan.threads));
     showPath(database_, c.databasePath);
     showPath(reports_, c.reportDirectory);
@@ -440,6 +461,7 @@ void SettingsPage::store()
     c.diagnosticRecorder = recorder_->isChecked();
     c.f4seArchiveLoader = archiveLoader_->isChecked();
     c.conflicts.analyseAllRecordTypes = allTypes_->isChecked();
+    c.scan.previewInactive = previewInactive_->isChecked();
     c.scan.threads = static_cast<unsigned>(threads_->value());
     // The results database in use changes when saved (AppController::saveSettings).
     if (!database_->text().trimmed().isEmpty())

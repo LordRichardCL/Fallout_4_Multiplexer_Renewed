@@ -171,6 +171,9 @@ Compile options:
                        the package, in "Multiplexer Output\Diagnostic Recorder"
   --dry-run            compile and validate without writing files
   --no-cache           ignore the build cache (full rescan, analysis and merge)
+  --scan-scope game|preview-inactive   game (default): read the plugins the game loads; preview-inactive:
+                       also read inactive plugins apart from the load order and say what each would
+                       bring if enabled (never part of the build)
 
   -v, --verbose        debug logging
 )";
@@ -326,6 +329,12 @@ PipelineConfig makeConfig(const Args& a)
     cfg.archiveLoaderDll = g_exeDir / Exporter::kArchiveLoaderDll;
     cfg.formIdReference = g_exeDir / FormIdReference::kFileName;
     cfg.useCache = !a.has("--no-cache");
+    {
+        const std::string scope = a.get("--scan-scope", "game");
+        if (scope != "game" && scope != "preview-inactive")
+            throw std::runtime_error("--scan-scope must be game or preview-inactive");
+        cfg.scan.previewInactive = scope == "preview-inactive";
+    }
     return cfg;
 }
 
@@ -889,6 +898,13 @@ int cmdPipeline(const Args& a)
     if (a.command == "scan") {
         printDashboard(p);
         printChanges(p.changes());
+        if (cfg.scan.previewInactive) {
+            std::printf("\nInactive plugins (preview, not part of the build): %zu\n", p.inactivePreview().size());
+            for (const auto& r : p.inactivePreview())
+                std::printf("  %-40s %s  %zu records, conflicts with active mods on %zu. %s\n", r.name.c_str(),
+                            r.likelyCompiles ? "likely compiles " : "likely stays out", r.records, r.conflicts,
+                            r.reason.c_str());
+        }
         std::printf("Database: %s\n", pathToUtf8(cfg.databasePath).c_str());
         return 0;
     }

@@ -23,6 +23,10 @@ Diagnostics
 - Support bundle: one zip with the reports, logs, readings and load order, personal details removed.
 - Build comparison: what a rebuild changes against the previous build.
 
+Scanning
+- Scan asks what to read, with the counts: what the game loads (always what the build uses) or also a preview of inactive plugins (would it compile, what would it conflict with). Settings → Scan; `--scan-scope`.
+- Inactive plugins are hidden on the Plugins page until *Show inactive plugins* is on.
+
 Conflict Centre
 - Accept Automatic for one record or for every waiting one; a Review column and filters for records waiting for you and records with your choices; manual choices confirmed as saved; a roomier list.
 - Applying a build to the game is no longer reported as a change that needs a rebuild.

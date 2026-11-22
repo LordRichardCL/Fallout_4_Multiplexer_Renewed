@@ -2,6 +2,7 @@
 
 #include "Format.hpp"
 #include "Theme.hpp"
+#include "widgets/ScanDialog.hpp"
 #include "widgets/Widgets.hpp"
 
 #include <QDateTime>
@@ -92,7 +93,7 @@ DashboardPage::DashboardPage(AppController* app, QWidget* parent) : Page(app, pa
     connect(review_, &QPushButton::clicked, this, [this] { emit navigate("Changes"); });
     connect(checkNow_, &QPushButton::clicked, app_, &AppController::runCheck);
     connect(rebuild_, &QPushButton::clicked, app_, &AppController::runRebuild);
-    connect(scanBig_, &QPushButton::clicked, app_, &AppController::runScan);
+    connect(scanBig_, &QPushButton::clicked, this, [this] { requestScan(); });
     for (auto* b : {checkNow_, rebuild_, scanBig_})
         connect(app_, &AppController::busyChanged, b, [b](bool busy) { b->setEnabled(!busy); });
     l->addWidget(hero);
@@ -109,7 +110,7 @@ DashboardPage::DashboardPage(AppController* app, QWidget* parent) : Page(app, pa
             return;
         const QString key = stepKeys_[i];
         if (key == "scan")
-            app_->runScan();
+            requestScan();
         else if (key == "analyse")
             app_->runAnalyse();
         else if (key == "review")
@@ -341,6 +342,14 @@ void DashboardPage::fillAttention(bool have)
                                            "A crash, script errors or a save to check before loading: Diagnostics finds the mod behind it.", d));
     attentionCount_->setText(QString::number(count));
     attentionCount_->setVisible(count > 0);
+}
+
+void DashboardPage::requestScan()
+{
+    if (app_->busy())
+        return;
+    if (confirmScan(app_, this, [this] { emit navigate("Compilation"); }))
+        app_->runScan();
 }
 
 void DashboardPage::refresh()

@@ -7,6 +7,7 @@
 #include "engine/CompilationEngine.hpp"
 #include "engine/ConflictEngine.hpp"
 #include "engine/DependencyEngine.hpp"
+#include "engine/InactivePreview.hpp"
 #include "engine/Session.hpp"
 #include "engine/ValidationEngine.hpp"
 #include "util/Progress.hpp"
@@ -42,6 +43,8 @@ public:
     void saveSnapshot(const std::string& kind, const InstallSnapshot& snapshot);
     std::optional<InstallSnapshot> loadSnapshot(const std::string& kind);
     void writeChanges(const ChangeReport& report);
+    // Replaces the inactive-plugin preview (empty: the scan did not preview).
+    void writeInactivePreview(const std::vector<InactivePreviewRow>& rows);
     std::vector<std::string> resolutionStrings();
 
     // User decisions survive rescans because they are keyed by plugin name.

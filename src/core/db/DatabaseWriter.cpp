@@ -671,6 +671,30 @@ std::optional<InstallSnapshot> DatabaseWriter::loadSnapshot(const std::string& k
     }
 }
 
+void DatabaseWriter::writeInactivePreview(const std::vector<InactivePreviewRow>& rows)
+{
+    Transaction tx(db_);
+    db_.exec("DELETE FROM InactivePreview;");
+    auto st = db_.prepare("INSERT OR REPLACE INTO InactivePreview(plugin, records, new_records, overrides, conflicts, "
+                          "conflicts_with, missing_masters, likely_compiles, reason) VALUES(?,?,?,?,?,?,?,?,?)");
+    for (const auto& r : rows) {
+        std::vector<std::string> with;
+        for (const auto& [name, n] : r.conflictsWith)
+            with.push_back(name + " (" + std::to_string(n) + ")");
+        st.bind(1, r.name)
+            .bind(2, static_cast<int64_t>(r.records))
+            .bind(3, static_cast<int64_t>(r.newRecords))
+            .bind(4, static_cast<int64_t>(r.overrides))
+            .bind(5, static_cast<int64_t>(r.conflicts))
+            .bind(6, join(with, ", "))
+            .bind(7, join(r.missingMasters, ", "))
+            .bind(8, r.likelyCompiles ? 1 : 0)
+            .bind(9, r.reason)
+            .run();
+    }
+    tx.commit();
+}
+
 void DatabaseWriter::writeChanges(const ChangeReport& r)
 {
     {

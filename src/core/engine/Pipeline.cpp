@@ -231,6 +231,9 @@ void Pipeline::scan(ProgressSink& progress)
     }
     AssetScanner::scan(*session_, config_.assets, progress);
     DependencyEngine::evaluateEligibility(*session_, analysisOptions());
+    inactivePreview_.clear();
+    if (config_.scan.previewInactive)
+        inactivePreview_ = InactivePreview::run(*session_, progress, config_.scan.threads);
 
     openDatabase();
     if (db_) {
@@ -263,6 +266,7 @@ void Pipeline::scan(ProgressSink& progress)
             w.setMeta("scan_key", scanKey);
             spdlog::info("Wrote the scan results in {:.1f}s", since(t0));
         }
+        w.writeInactivePreview(inactivePreview_);
         w.saveSnapshot("scan", snapshot);
         auto build = w.loadSnapshot("build");
         auto forced = config_.compile.forcedWinners;

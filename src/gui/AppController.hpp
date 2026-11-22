@@ -43,6 +43,24 @@ public:
 
     fo4mx::Pipeline* pipeline() { return pipeline_.get(); }
     bool busy() const { return busy_; }
+
+    // What a scan would read, from the plugin and archive lists only (no plugin is opened): for the
+    // question asked before scanning.
+    struct ScanSummary {
+        bool ok = false;
+        QString error;
+        QString manager; // "Vortex", "Mod Organizer 2 (profile Default)", ...
+        int activePlugins = 0;
+        int inactivePlugins = 0;
+        int archives = 0;
+    };
+    ScanSummary scanSummary() const;
+    // Whether Scan asks what to read first (saved at once).
+    bool askBeforeScan() const;
+    void setAskBeforeScan(bool ask);
+    // Also preview inactive plugins when scanning (saved at once).
+    bool previewInactive() const { return config_.scan.previewInactive; }
+    void setPreviewInactive(bool preview);
     bool hasSession() const { return pipeline_ && pipeline_->scanned(); }
     QString databasePath() const;
     QSqlDatabase readDb();

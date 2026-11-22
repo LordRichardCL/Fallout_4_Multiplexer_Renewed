@@ -12,6 +12,8 @@
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QSettings>
+#include <QCheckBox>
 #include <QLabel>
 #include <QFileDialog>
 #include <QHeaderView>
@@ -64,7 +66,22 @@ PluginsPage::PluginsPage(AppController* app, QWidget* parent) : Page(app, parent
                        "most first (those others would compile if they did). Blocking Types: record types the "
                        "compiler does not support yet, and how many plugins supporting each one would make "
                        "compilable");
-    l->addWidget(chips_);
+    // The game loads the active plugins; the others are listed only when asked for.
+    showInactive_ = new ToggleSwitch("Show inactive plugins");
+    showInactive_->setToolTip("Plugins in Data that are not enabled. They are never compiled. Scan with \"Also "
+                              "preview inactive plugins\" (Settings → Scan) to see what each would bring if enabled.");
+    showInactive_->setChecked(QSettings().value("plugins/showInactive", false).toBool());
+    auto* chipRow = new QHBoxLayout;
+    chipRow->addWidget(chips_, 1);
+    auto* inactiveLabel = new QLabel("Show inactive plugins");
+    inactiveLabel->setToolTip(showInactive_->toolTip());
+    chipRow->addWidget(inactiveLabel);
+    chipRow->addWidget(showInactive_);
+    l->addLayout(chipRow);
+    connect(showInactive_, &QCheckBox::toggled, this, [this](bool on) {
+        QSettings().setValue("plugins/showInactive", on);
+        reload();
+    });
     chips_->setToolTip(chips_->toolTip() + "\nStays: every plugin that will not be compiled (it cannot be, you kept it, "
                                            "base game, not enabled or unreadable), so Will compile + Stays = all plugins");
 
@@ -185,6 +202,16 @@ void PluginsPage::focusPlugin(const QString& name)
     search_->blockSignals(true);
     search_->setText(name);
     search_->blockSignals(false);
+    {
+        // An inactive plugin asked for by name is shown, whatever the switch says.
+        QSqlQuery q(app_->readDb());
+        q.prepare("SELECT active FROM Plugins WHERE name = ? COLLATE NOCASE");
+        q.addBindValue(name);
+        if (q.exec() && q.next() && !q.value(0).toBool() && !showInactive_->isChecked()) {
+            QSignalBlocker b(showInactive_);
+            showInactive_->setChecked(true);
+        }
+    }
     reload();
     for (int r = 0; r < model_->rowCount(); ++r)
         if (model_->value(r, 1).toString().compare(name, Qt::CaseInsensitive) == 0) {
@@ -378,13 +405,19 @@ void PluginsPage::reload()
         const bool holding = chip == "Holding Back";
         if (holding)
             where += " AND holds_back > 0";
+        // "Disabled" lists them whatever the switch says: that is what it is for.
+        if (!showInactive_->isChecked() && chip != "Disabled")
+            where += " AND active = 1";
         // Whether it compiles comes first, in plain words, with the first reason beside it.
         sql = "SELECT load_order_hex AS '#', name AS 'Plugin', " + plainStatusSql() +
-              " AS 'Compiles?', CASE WHEN eligibility = 'Eligible' THEN '' WHEN instr(eligibility_reason, '; ') > 0 "
+              " AS 'Compiles?', CASE WHEN eligibility = 'Eligible' THEN '' WHEN active = 0 AND ip.plugin IS NOT NULL "
+              "THEN 'If enabled: ' || CASE ip.likely_compiles WHEN 1 THEN 'likely compiles' ELSE 'likely stays' END || "
+              "CASE WHEN ip.conflicts > 0 THEN ', conflicts on ' || ip.conflicts || ' record(s)' ELSE '' END "
+              "WHEN instr(eligibility_reason, '; ') > 0 "
               "THEN substr(eligibility_reason, 1, instr(eligibility_reason, '; ') - 1) ELSE eligibility_reason END AS "
               "Why, type AS Type, record_count AS Records, conflict_count AS Conflicts, master_count AS Masters, " +
               QString(holding ? "redirect_note AS 'Master Redirection'" : "source_mod AS Mod") + ", " +
-              QString(holding ? "holds_back AS 'Would Also Compile'" : "support AS Support") + ", id FROM Plugins WHERE " +
+              QString(holding ? "holds_back AS 'Would Also Compile'" : "support AS Support") + ", id FROM Plugins LEFT JOIN InactivePreview ip ON ip.plugin = Plugins.name WHERE " +
               where +
               (holding ? " ORDER BY holds_back DESC, name"
                        : " ORDER BY active DESC, CASE WHEN load_order < 0 THEN 99999 ELSE load_order END, name");
@@ -595,6 +628,31 @@ void PluginsPage::showDetails(int row)
     if (!q.value(25).toString().isEmpty())
         html += "<p><b>Kept by:</b> " + linked(v(25)) +
                 ", which stays in the load order and lists it as a master: compiling it would need that one first.</p>";
+    if (!q.value(19).toInt() && !q.value(22).toInt()) {
+        QSqlQuery pv(db);
+        pv.prepare("SELECT records, new_records, overrides, conflicts, conflicts_with, missing_masters, "
+                   "likely_compiles, reason FROM InactivePreview WHERE plugin = ?");
+        pv.addBindValue(q.value(0).toString());
+        if (pv.exec() && pv.next()) {
+            auto t = [&](int i) { return pv.value(i).toString().toHtmlEscaped(); };
+            html += QString("<h3 style='color:#5cb8ff'>If you enabled it (preview)</h3>"
+                            "<p><b>%1</b><br>%2</p><p><b>Records:</b> %3 (new %4, overrides %5)<br>"
+                            "<b>Would conflict with active mods on:</b> %6 record(s)%7%8</p>"
+                            "<p style='color:#8aa196'>An estimate from its masters and record types. Not part of the "
+                            "build: enable it and scan for the full check.</p>")
+                        .arg(pv.value(6).toInt() ? "Likely to compile" : "Likely to stay in the load order", t(7),
+                             formatCount(pv.value(0).toLongLong()), formatCount(pv.value(1).toLongLong()),
+                             formatCount(pv.value(2).toLongLong()), formatCount(pv.value(3).toLongLong()),
+                             pv.value(4).toString().isEmpty() ? QString() : "<br>With (today's winners): " + linked(t(4)),
+                             pv.value(5).toString().isEmpty()
+                                 ? QString()
+                                 : "<br><span style='color:#ff5c5c'>Masters not active: " + t(5) + "</span>");
+        } else {
+            html += "<p style='color:#8aa196'>Not enabled: its records are not read. Turn on <b>Also preview "
+                    "inactive plugins</b> (Settings → Scan, or when Scan asks) and scan to see whether it would "
+                    "compile and which active mods it would conflict with.</p>";
+        }
+    }
     if (!q.value(17).toString().isEmpty())
         html += "<p><b>Record types:</b><br><span style='font-family:monospace'>" + v(17) + "</span></p>";
     if (!q.value(16).toString().isEmpty())

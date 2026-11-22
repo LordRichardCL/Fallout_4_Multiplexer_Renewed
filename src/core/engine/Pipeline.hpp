@@ -7,6 +7,7 @@
 #include "db/Database.hpp"
 #include "engine/AssetTracer.hpp"
 #include "engine/AutoMerger.hpp"
+#include "engine/InactivePreview.hpp"
 #include "engine/BuildRecord.hpp"
 #include "engine/BuildCache.hpp"
 #include "engine/ChangeDetector.hpp"
@@ -100,6 +101,8 @@ public:
     // Compares the mod space with the last exported build without a full scan.
     ChangeReport checkForChanges(ProgressSink& progress = nullProgress());
     const ChangeReport& changes() const { return changes_; }
+    // What each inactive plugin would bring if enabled (empty unless ScanOptions::previewInactive).
+    const std::vector<InactivePreviewRow>& inactivePreview() const { return inactivePreview_; }
     const AssetTrace& assetTrace() const { return assetTrace_; }
     const std::vector<ArchivePriorityChange>& archivePriorityChanges() const { return archiveChanges_; }
     BuildCache* cache() { return cache_.get(); }
@@ -227,6 +230,7 @@ private:
     std::unique_ptr<BuildCache> cache_;
     AssetTrace assetTrace_;
     ChangeReport changes_;
+    std::vector<InactivePreviewRow> inactivePreview_;
 };
 
 } // namespace fo4mx

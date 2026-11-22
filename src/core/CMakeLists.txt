@@ -64,6 +64,7 @@ add_library(fo4mx_core STATIC
     engine/EarlierBuilds.cpp
     engine/Pipeline.cpp
     engine/PluginScanner.cpp
+    engine/InactivePreview.cpp
     engine/PluginSummary.cpp
     engine/Provenance.cpp
     engine/Compatibility.cpp

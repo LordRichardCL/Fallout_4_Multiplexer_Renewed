@@ -4,12 +4,14 @@
 
 #include <QSet>
 
+class QCheckBox;
 class QLineEdit;
 class QTableView;
 class QTextBrowser;
 class QPushButton;
 
 class QFrame;
+class QCheckBox;
 class QLabel;
 
 namespace gui {
@@ -60,6 +62,7 @@ private:
     QPushButton* redirect_ = nullptr;
     QString selectedPlugin_;
     bool generatedMode_ = false;
+    QCheckBox* showInactive_;
     bool blockersMode_ = false;
 };
 

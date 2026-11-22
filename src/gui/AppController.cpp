@@ -296,6 +296,7 @@ void AppController::loadSettings()
     config_.formIdReference = toPath(QCoreApplication::applicationDirPath()) / fo4mx::FormIdReference::kFileName;
     config_.conflicts.analyseAllRecordTypes = s.value("analysis/allTypes", true).toBool();
     config_.scan.threads = s.value("advanced/threads", 0).toUInt();
+    config_.scan.previewInactive = s.value("scan/previewInactive", false).toBool();
     config_.conflicts.threads = config_.analysis.threads = config_.compile.threads = config_.scan.threads;
 
     QString db = s.value("advanced/database").toString();
@@ -377,6 +378,7 @@ void AppController::saveSettings()
     s.setValue("archives/f4seLoader", config_.f4seArchiveLoader);
     s.setValue("analysis/allTypes", config_.conflicts.analyseAllRecordTypes);
     s.setValue("advanced/threads", config_.scan.threads);
+    s.setValue("scan/previewInactive", config_.scan.previewInactive);
     s.setValue("advanced/database", toQString(config_.databasePath));
     s.setValue("advanced/reportDirectory", toQString(config_.reportDirectory));
     s.sync();
@@ -624,6 +626,40 @@ void AppController::runTask(const QString& name, std::function<QString(ProgressS
         }
     });
     worker_->start();
+}
+
+AppController::ScanSummary AppController::scanSummary() const
+{
+    ScanSummary out;
+    try {
+        const auto snap = fo4mx::ChangeDetector::captureQuick(config_.install, nullptr);
+        for (const auto& p : snap.plugins)
+            ++(p.active ? out.activePlugins : out.inactivePlugins);
+        out.archives = static_cast<int>(snap.archives.size());
+        out.manager = QString::fromStdString(fo4mx::installKindName(config_.install.kind));
+        if (!snap.profile.empty())
+            out.manager += QString(" (profile %1)").arg(QString::fromStdString(snap.profile));
+        out.ok = true;
+    } catch (const std::exception& e) {
+        out.error = QString::fromStdString(e.what());
+    }
+    return out;
+}
+
+bool AppController::askBeforeScan() const
+{
+    return QSettings().value("scan/askScope", true).toBool();
+}
+
+void AppController::setAskBeforeScan(bool ask)
+{
+    QSettings().setValue("scan/askScope", ask);
+}
+
+void AppController::setPreviewInactive(bool preview)
+{
+    config_.scan.previewInactive = preview;
+    QSettings().setValue("scan/previewInactive", preview);
 }
 
 void AppController::runScan()
