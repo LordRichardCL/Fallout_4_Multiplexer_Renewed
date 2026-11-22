@@ -64,16 +64,20 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
     auto* saveSettings = makeSaveSettingsButton();
 
     // Header: title, one line, and the presets.
-    presets_ = new SegmentedControl({"Recommended", "Safest", "Custom"});
-    presets_->button("Recommended")
-        ->setToolTip("Combine compatible changes, apply your patch choices, merge cell settings, translate previs files "
-                     "and build Multiplexer_Patch.esp. Light outputs, writing broken references as null, placeholders and Master "
-                     "Redirection stay off.");
+    // From the least to the most change: Safest is the start for everyone, Advanced holds the risky switches.
+    presets_ = new SegmentedControl({"Safest", "Recommended", "Advanced"});
     presets_->button("Safest")
-        ->setToolTip("Combine compatible changes only: no patch choices, no cell merge, no previs translation, no "
-                     "patch, no light outputs, broken references never written as null, and plugins that add new quests, "
-                     "dialogue or NPCs kept in the load order; no placeholders, no Master Redirection.");
-    presets_->button("Custom")->setToolTip("Your own choice of switches below.");
+        ->setToolTip("Start here. Combine compatible changes only: no patch choices, no cell merge, no previs "
+                     "translation, no patch, no light outputs, broken references never written as null, and plugins "
+                     "that add new quests, dialogue or NPCs kept in the load order; no placeholders, no Master "
+                     "Redirection.");
+    presets_->button("Recommended")
+        ->setToolTip("Once a Safest build works in game: also apply your patch choices, merge cell settings, translate "
+                     "previs files, compile new quests, dialogue and NPCs, and build Multiplexer_Patch.esp. Light "
+                     "outputs, writing broken references as null, placeholders and Master Redirection stay off.");
+    presets_->button("Advanced")
+        ->setToolTip("Your own choice of switches below, including the risky ones (light outputs, placeholders, Master "
+                     "Redirection, broken references as null). Test each on a new game.");
     l->addWidget(makePageHeader("Compilation", "Turns your mods into a few output plugins, with the same game data.",
                                 {presets_}));
 
@@ -859,7 +863,7 @@ void CompilationPage::updatePresetState()
                p.brokenNull == now.brokenNull && p.newQuests == now.newQuests &&
                p.placeholders == now.placeholders && p.redirect == now.redirect;
     };
-    presets_->setCurrent(same(kRecommended) ? "Recommended" : same(kSafest) ? "Safest" : "Custom");
+    presets_->setCurrent(same(kRecommended) ? "Recommended" : same(kSafest) ? "Safest" : "Advanced");
 }
 
 void CompilationPage::updateSummaries()

@@ -79,20 +79,20 @@ private slots:
     {
         auto* box = previsBox();
         QVERIFY(box);
-        QVERIFY(box->isChecked());
-        box->setChecked(false);
-        QVERIFY(!app_->config().compile.translatePrevis); // in the shared state at once
+        QVERIFY(!box->isChecked()); // off on the Safest preset (first run)
+        box->setChecked(true);
+        QVERIFY(app_->config().compile.translatePrevis); // in the shared state at once
         QVERIFY(app_->hasUnsavedSettings());
         window_->showPage("Settings");
         app_->setExcluded("Other.esp", true); // another page saves its own setting
         window_->showPage("Advanced Users Auto-Merger");
         window_->showPage("Compilation");
-        QVERIFY(!previsBox()->isChecked());
-        QVERIFY(!app_->config().compile.translatePrevis);
+        QVERIFY(previsBox()->isChecked());
+        QVERIFY(app_->config().compile.translatePrevis);
         QVERIFY(app_->hasUnsavedSettings());
         // The exclusion was saved on its own; the unsaved option was not.
         QCOMPARE(QSettings().value("analysis/excluded").toStringList(), QStringList{"Other.esp"});
-        QVERIFY(QSettings().value("compile/translatePrevis", true).toBool());
+        QVERIFY(!QSettings().value("compile/translatePrevis", false).toBool());
         app_->setExcluded("Other.esp", false);
     }
 
@@ -219,13 +219,13 @@ private slots:
         QVERIFY(childWithText<QPushButton>(settings(), "Save Settings"));
     }
 
-    // Presets set only the switches; the selector follows the switches (Custom when they match neither).
+    // Presets set only the switches; the selector follows the switches (Advanced when they match neither).
     void compilation_presets_set_switches()
     {
         auto* page = compilation();
         auto* safest = childWithText<QPushButton>(page, "Safest");
         auto* recommended = childWithText<QPushButton>(page, "Recommended");
-        auto* custom = childWithText<QPushButton>(page, "Custom");
+        auto* custom = childWithText<QPushButton>(page, "Advanced");
         QVERIFY(safest && recommended && custom);
         const int outputs = app_->config().compile.outputCount;
         QTest::mouseClick(recommended, Qt::LeftButton);
@@ -242,19 +242,20 @@ private slots:
         app_->loadSettings(); // back to the saved state
     }
 
-    // A first run (nothing saved) starts on the Recommended preset.
-    void first_run_starts_recommended()
+    // A first run (nothing saved) starts on the Safest preset.
+    void first_run_starts_safest()
     {
         const QString db = QSettings().value("advanced/database").toString();
         QSettings().clear();
         QSettings().setValue("advanced/database", db);
         start();
-        auto* recommended = childWithText<QPushButton>(compilation(), "Recommended");
-        QVERIFY(recommended);
-        QVERIFY(recommended->isChecked());
+        auto* safest = childWithText<QPushButton>(compilation(), "Safest");
+        QVERIFY(safest);
+        QVERIFY(safest->isChecked());
         const auto& c = app_->config().compile;
-        QVERIFY(c.mergeCompatible && c.applyPatchPlan && c.mergeCellConfig && c.translatePrevis && c.buildPatch &&
-                c.compileNewQuestsAndNpcs);
+        QVERIFY(c.mergeCompatible);
+        QVERIFY(!c.applyPatchPlan && !c.mergeCellConfig && !c.translatePrevis && !c.buildPatch &&
+                !c.compileNewQuestsAndNpcs);
         QVERIFY(!c.lightOutputsWhenPossible && !c.unusedMasterPlaceholders && !c.redirectMasters);
     }
 

@@ -1,4 +1,5 @@
 #include "MainWindow.hpp"
+#include <QSettings>
 
 #include "AppController.hpp"
 #include "Format.hpp"
@@ -257,31 +258,46 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
             progress_->setRange(0, 0);
         }
     });
+    connect(app_, &AppController::taskStarted, this, [this](const QString& task) {
+        task_ = task;
+        step_ = 0;
+        steps_.clear();
+        stepMs_.clear();
+        QSettings s;
+        lastSteps_ = s.value("progress/" + task + "/steps").toStringList();
+        lastMs_.clear();
+        for (const auto& v : s.value("progress/" + task + "/ms").toList())
+            lastMs_ << v.toLongLong();
+    });
     connect(app_, &AppController::stageStarted, this, [this](const QString& s) {
-        stageLabel_->setText(s + "…");
+        if (stageClock_.isValid() && step_ > 0)
+            stepMs_ << stageClock_.elapsed();
+        ++step_;
+        steps_ << s;
+        stageName_ = s;
         progress_->setRange(0, 0);
         stageClock_.start();
+        stageLabel_->setText(progressText(0, 0, {}));
     });
     connect(app_, &AppController::progressChanged, this, [this](qint64 done, qint64 total, const QString& detail) {
-        QString left;
         if (total > 0) {
             progress_->setRange(0, 1000);
             progress_->setValue(int(done * 1000 / total));
-            // Time left in this stage, once enough of it has run to tell.
-            const double f = double(done) / double(total);
-            const qint64 ms = stageClock_.isValid() ? stageClock_.elapsed() : 0;
-            if (f > 0.05 && f < 1.0 && ms > 3000) {
-                const qint64 rest = qint64(ms * (1.0 - f) / f / 1000.0);
-                left = rest < 60 ? QString("about %1 s left").arg(std::max<qint64>(rest, 1))
-                                 : QString("about %1 min left").arg((rest + 30) / 60);
-            }
         }
-        QString text = stageLabel_->text().section("…", 0, 0) + "…";
-        if (!left.isEmpty())
-            text += "  (" + left + ")";
-        if (!detail.isEmpty())
-            text += "  " + detail;
-        stageLabel_->setText(text);
+        stageLabel_->setText(progressText(done, total, detail));
+    });
+    connect(app_, &AppController::taskFinished, this, [this](const QString& task, bool ok, const QString&) {
+        // Remember this run's steps and their times, for "step n of N" and the time left next time.
+        if (!ok || task != task_ || steps_.isEmpty())
+            return;
+        if (stageClock_.isValid())
+            stepMs_ << stageClock_.elapsed();
+        QVariantList ms;
+        for (auto v : stepMs_)
+            ms << v;
+        QSettings s;
+        s.setValue("progress/" + task + "/steps", steps_);
+        s.setValue("progress/" + task + "/ms", ms);
     });
     connect(app_, &AppController::taskFinished, this, [this](const QString& task, bool ok, const QString& msg) {
         if (task == AppController::kAutoCheck) { // quiet: the Dashboard and status line say it
@@ -566,6 +582,44 @@ void MainWindow::closeEvent(QCloseEvent* e)
             app_->saveSettings();
     }
     e->accept();
+}
+
+} // namespace gui
+
+namespace gui {
+
+// "Step 3 of 9 · Analysing conflicts… 1,234 / 22,000 · about 2 min left"
+QString MainWindow::progressText(qint64 done, qint64 total, const QString& detail) const
+{
+    // The steps the same task took last time give the count, as long as this run follows them so far.
+    const bool sameSoFar = step_ <= lastSteps_.size() && steps_ == lastSteps_.mid(0, steps_.size());
+    QString text = sameSoFar && !lastSteps_.isEmpty() ? QString("Step %1 of %2 · ").arg(step_).arg(lastSteps_.size())
+                                                     : QString("Step %1 · ").arg(step_);
+    text += stageName_ + "…";
+    if (total > 0)
+        text += QString("  %1 / %2").arg(formatCount(done), formatCount(total));
+    // Time left: this step's, from its own pace once enough has run, plus the later steps' times last run.
+    const qint64 ms = stageClock_.isValid() ? stageClock_.elapsed() : 0;
+    qint64 restMs = -1;
+    if (total > 0) {
+        const double f = double(done) / double(total);
+        if (f > 0.05 && f < 1.0 && ms > 3000)
+            restMs = qint64(ms * (1.0 - f) / f);
+    }
+    if (sameSoFar && step_ >= 1 && step_ <= lastMs_.size()) {
+        if (restMs < 0) // no pace yet: last run's time for this step
+            restMs = std::max<qint64>(0, lastMs_[step_ - 1] - ms);
+        for (int i = step_; i < lastMs_.size(); ++i)
+            restMs += lastMs_[i];
+    }
+    if (restMs >= 0 && (restMs > 1500 || total > 0)) {
+        const qint64 rest = restMs / 1000;
+        text += rest < 60 ? QString("  · about %1 s left").arg(std::max<qint64>(rest, 1))
+                          : QString("  · about %1 min left").arg((rest + 30) / 60);
+    }
+    if (!detail.isEmpty())
+        text += "  " + detail;
+    return text;
 }
 
 } // namespace gui

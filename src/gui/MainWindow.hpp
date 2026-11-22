@@ -55,6 +55,16 @@ private:
     QLabel* stageLabel_;
     QPushButton* cancel_;
     QElapsedTimer stageClock_; // since the current stage started, for the time left
+    // Where a task is: step n of the steps the same task took last time (remembered in the settings), and
+    // the time each took then, for the time left in the whole task.
+    QString task_;
+    int step_ = 0;
+    QStringList lastSteps_;
+    QList<qint64> lastMs_;
+    QStringList steps_;
+    QList<qint64> stepMs_;
+    QString stageName_;
+    QString progressText(qint64 done, qint64 total, const QString& detail) const;
     QPlainTextEdit* log_;
     QDockWidget* logDock_;
 };
