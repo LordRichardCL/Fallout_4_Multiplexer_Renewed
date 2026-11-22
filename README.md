@@ -4,6 +4,10 @@
 
 Author: Romewolf · Target runtime: **Fallout 4 1.10.163 (Old Gen)** · Windows 10/11 x64
 
+[![Build](https://github.com/LordRichardCL/Fallout_4_Multiplexer_Renewed/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/LordRichardCL/Fallout_4_Multiplexer_Renewed/actions/workflows/build.yml) · **Version 0.2.0 alpha** · [Changelog](CHANGELOG.md) · [What has been confirmed](docs/COMPATIBILITY.md)
+
+> **Alpha.** The build pipeline is verified on a real 2,270-plugin load order; play testing on compiled output has only just started. Use the **Safest** preset on a **new game**, keep your saves backed up, and use **Switch Back** to undo. [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) lists what is confirmed, tested or experimental.
+
 ![Dashboard](docs/images/01-dashboard.png)
 
 Fallout 4 Multiplexer Renewed is a compiler for large modded installations. It reads every plugin, BA2 archive and loose file the game would load, works out the final winning state of every record and asset, merges compatible edits, and compiles the result into a small set of generated output plugins (`Dummy_Plugin_01.esp` …). The outputs contain real Bethesda records with real FormIDs and open in xEdit, FO4Edit and the Creation Kit like any other plugin.
@@ -168,6 +172,8 @@ docs/          specification, architecture, user guide, screenshots
 - [Architecture](docs/ARCHITECTURE.md): how the compiler works and why
 - [Dependency and Compilation Scenarios](docs/DEPENDENCY_SCENARIOS.md): what happens when compiled and retained plugins depend on each other
 - [User Guide](docs/USER_GUIDE.md)
+- [Compatibility](docs/COMPATIBILITY.md): what is confirmed in game, build verified, tested or experimental
+- [Changelog](CHANGELOG.md): versions and what each was tested on
 - [What's New](docs/WHATS_NEW.md): recent changes in plain words
 - [In-Game Testing Guide](docs/TESTING_GUIDE.md): what to check in game after switching over, and what to send back
 - [Master Redirection](docs/MASTER_REDIRECTION_DESIGN.md): letting frameworks compile when a plugin that stays uses them (advanced)

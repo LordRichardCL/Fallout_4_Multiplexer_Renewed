@@ -30,7 +30,7 @@ Untick **Show this screen at start-up** to go straight to the Dashboard next tim
 - **Ctrl+1 … Ctrl+9**: the pages in order.
 - Click a column header to sort a table by it. On the Plugins page, right-click the header to show or hide columns.
 - In a plugin's details, every plugin named (reasons, masters, required by) is a link that opens it.
-- While a task runs, the status bar shows the time left in the current step and a **Stop** button. When it finishes, a card in the corner says what it did in plain words, with buttons to what needs you (closes by itself after 30 seconds).
+- While a task runs, the status bar shows which step it is on (*Step 3 of 9*, counted from the last time the same task ran), the counts within the step (*1,234 / 22,000*), the time left for the whole task, and a **Stop** button. When it finishes, a card in the corner says what it did in plain words, with buttons to what needs you (closes by itself after 30 seconds).
 
 **Plugin status words.** **Will compile**: goes into the outputs. **Stays in load order**: cannot be compiled, with the reason beside it (it holds something the compiler cannot reproduce, or a plugin that stays needs it as a master). **Kept by you**: excluded, or not among the plugins you chose. **Base game**, **Not enabled**, **Error**. (Reports and exported files keep the technical names: Eligible, Ineligible, Retained, Inactive.)
 
@@ -228,11 +228,11 @@ Press **Compile**. Everything happens in memory and is then validated. The **Val
 Each line is OK, NOTE or FAIL. FAIL means fix that first. Command line: `fo4mx ready <install> [--save save.fos]`, which exits with code 2 when not ready.
 
 **The Compilation page.** Options on the left, results on the right, and the actions at the bottom (Save Settings, Open Folder, Export, Ready to Test?, Apply to Game, Compile) with the progress of compile, export and apply. Every option has a one-line description; the **?** beside it explains it in full. **Presets** at the top right set the switches in one click; they never change the number of outputs, their name, the folder or the allocation:
-- **Recommended**: combine compatible changes, apply your patch choices, merge cell settings, translate previs files, build Multiplexer_Patch.esp, compile new quests, dialogue and NPCs.
-- **Safest**: combine compatible changes only.
-- **Custom**: shown when the switches match neither.
+- **Safest** (start here): combine compatible changes only; plugins that add new quests, dialogue or NPCs stay in the load order.
+- **Recommended** (once a Safest build works in game): also apply your patch choices, merge cell settings, translate previs files, build Multiplexer_Patch.esp, and compile new quests, dialogue and NPCs.
+- **Advanced**: your own switches, including the risky ones (light outputs, placeholders, Master Redirection, broken references as null); shown when the switches match neither preset.
 
-Neither preset turns on light outputs, placeholders or Master Redirection: choose those yourself once a first build works. A first run starts on **Recommended**; settings you saved are kept.
+Neither preset turns on light outputs, placeholders or Master Redirection: choose those yourself once a first build works. A first run starts on **Safest**; settings you saved are kept. Until you dismiss it, a notice at the top of the page says the app is alpha software and how to try it safely.
 
 The options come in cards, top to bottom, each answering one question:
 - **Plugins to compile:** which plugins (all eligible, or only the ones you choose).

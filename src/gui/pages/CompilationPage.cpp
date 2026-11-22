@@ -1,4 +1,5 @@
 #include "pages/CompilationPage.hpp"
+#include <QSettings>
 #include "diagnostics/SaveGame.hpp"
 
 #include "Format.hpp"
@@ -80,6 +81,32 @@ CompilationPage::CompilationPage(AppController* app, QWidget* parent) : Page(app
                      "Redirection, broken references as null). Test each on a new game.");
     l->addWidget(makePageHeader("Compilation", "Turns your mods into a few output plugins, with the same game data.",
                                 {presets_}));
+
+    // Until it is dismissed: the app is still being tested, so say where it is safe to try it.
+    if (!QSettings().value("notice/alphaSeen", false).toBool()) {
+        auto* notice = new QFrame;
+        notice->setObjectName("Card");
+        notice->setStyleSheet("QFrame#Card { border: 1px solid #6b5a1f; background: #1f1c10; }");
+        auto* nh = new QHBoxLayout(notice);
+        nh->setContentsMargins(14, 10, 14, 10);
+        auto* icon = new QLabel;
+        icon->setPixmap(linePixmap("warning", theme::kYellow, 18));
+        nh->addWidget(icon, 0, Qt::AlignTop);
+        auto* text = new QLabel(
+            "<b>Alpha:</b> Multiplexer is still being tested on real load orders. Start with the <b>Safest</b> "
+            "preset and a <b>new game</b>, keep your saves backed up, and use <b>Ready to Test?</b> before Apply to "
+            "Game. <b>Switch Back</b> undoes Apply. <i>Recommended</i> and <i>Advanced</i> change more; try them once "
+            "a Safest build works in game.");
+        text->setWordWrap(true);
+        nh->addWidget(text, 1);
+        auto* ok = makeButton("Got it");
+        nh->addWidget(ok, 0, Qt::AlignVCenter);
+        connect(ok, &QPushButton::clicked, notice, [notice] {
+            QSettings().setValue("notice/alphaSeen", true);
+            notice->hide();
+        });
+        l->addWidget(notice);
+    }
 
     auto* cols = new QHBoxLayout;
     cols->setSpacing(16);

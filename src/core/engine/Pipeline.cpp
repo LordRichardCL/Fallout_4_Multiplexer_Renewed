@@ -943,23 +943,33 @@ bool Pipeline::compile(ProgressSink& progress)
     if (!session_->newCellChecks.empty()) {
         std::map<PluginIndex, std::pair<size_t, size_t>> perPlugin; // movable, cells
         for (const auto& [cell, a] : session_->newCellChecks) {
-            validation_->fail(Severity::Info, "Precombined Cell Check", a.text, session_->pluginName(cell.origin),
-                              session_->loadOrderFormId(cell));
             auto& [movable, cells] = perPlugin[cell.origin];
             movable += a.movable;
             ++cells;
         }
         size_t cells = 0, movableCells = 0, plugins = 0;
+        std::vector<std::pair<size_t, std::string>> byPlugin; // cells, "Plugin: n cells, m movable"
         for (const auto& [p, counts] : perPlugin) {
             movableCells += counts.first;
             cells += counts.second;
             plugins += counts.first == counts.second;
+            byPlugin.push_back({counts.second, session_->plugins[p].name + " " + std::to_string(counts.second) +
+                                                   " (" + std::to_string(counts.first) + " movable)"});
         }
+        std::sort(byPlugin.begin(), byPlugin.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+        std::string top;
+        for (size_t i = 0; i < byPlugin.size() && i < 10; ++i)
+            top += (i ? ", " : "") + byPlugin[i].second;
+        // The summary first: reports keep a limited number of rows per check.
         validation_->fail(Severity::Info, "Precombined Cell Check",
-                          std::to_string(movableCells) + " of " + std::to_string(cells) +
+                          "Summary: " + std::to_string(movableCells) + " of " + std::to_string(cells) +
                               " new cells kept out for their precombine or previs data could have their files moved "
                               "(stage PC2); " + std::to_string(plugins) + " of " + std::to_string(perPlugin.size()) +
-                              " plugins would then no longer be kept out by their cells. Nothing is moved yet.");
+                              " plugins would then no longer be kept out by their cells. Nothing is moved yet. By "
+                              "plugin: " + top + (byPlugin.size() > 10 ? ", ..." : "") + ".");
+        for (const auto& [cell, a] : session_->newCellChecks)
+            validation_->fail(Severity::Info, "Precombined Cell Check", a.text, session_->pluginName(cell.origin),
+                              session_->loadOrderFormId(cell));
     }
     for (const auto& [label, reason] : isolatedPatchRecords)
         validation_->fail(Severity::Warning, "Kept Out Automatically",

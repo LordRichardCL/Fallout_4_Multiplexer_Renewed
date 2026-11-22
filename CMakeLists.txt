@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Fallout4MultiplexerRenewed
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "Fallout 4 mod compilation, conflict resolution and load order intelligence platform"
     LANGUAGES CXX)
 
