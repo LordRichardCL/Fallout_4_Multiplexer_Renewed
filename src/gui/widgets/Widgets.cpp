@@ -178,6 +178,14 @@ FilterChips::FilterChips(const QStringList& labels, QWidget* parent) : QWidget(p
     connect(group_, &QButtonGroup::idClicked, this, [this](int id) { emit changed(labels_[id]); });
 }
 
+void FilterChips::setCount(const QString& label, qint64 count)
+{
+    int idx = static_cast<int>(labels_.indexOf(label));
+    if (idx < 0)
+        return;
+    group_->button(idx)->setText(count < 0 ? label : QString("%1  %2").arg(label, QLocale().toString(count)));
+}
+
 QString FilterChips::current() const
 {
     int id = group_->checkedId();

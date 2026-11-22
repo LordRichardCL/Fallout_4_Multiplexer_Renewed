@@ -117,7 +117,7 @@ Notes on a row:
 
 A record is **Ready**, **Needs decision**, **Blocked** (for example, you chose to carry two different values for the same field) or has **Nothing to carry**. The plan also lists the extra masters a patch would need.
 
-To decide in the app: select a record in the **Conflict Centre** and open its **Compatibility patch plan** tab (beside **Fields**). It lists each change the winner lacks:
+To decide in the app: select a record in the **Conflict Centre** and open its **Your choices** tab (beside **Fields**; it opens by itself when a change waits for you). It lists each change the winner lacks:
 - what the change was, which mod made it, and what became of it;
 - its class and the rule that decided it;
 - an **In the patch** choice: *Default*, *Carry forward* or *Keep the winner's value*. Red and Unknown rows show *Never carried*.
@@ -157,11 +157,12 @@ Select a record to see the override chain and a grid of every field per plugin:
 
 Reviewing what waits for you:
 
-- The line above the list says how many records **wait for your choice** (Yellow changes in their compatibility patch plan) and how many have **your choices saved**. The **Review** column says the same per record: *Waiting for you*, *Your choice*, or nothing. The chips **Waiting for you** and **Your choices** list only those records.
-- **Accept Automatic** (beside *Winner when compiling*) keeps the automatic result for the selected record: each change that waits keeps the winning plugin's value, which is what compiling does anyway, and the record stops waiting. The Conflicts badge and the Dashboard count go down at once.
-- **Accept Automatic for All Waiting** does the same for every waiting record, after asking. Choices you already made are not changed.
-- A choice you make by hand (a winner, or a change in the plan) is saved at once, the note under the panel says so, and the record shows *Your choice*. You can change it again at any time; choosing *Automatic* or *Default* again undoes it.
-- Right-click a column header to show or hide columns (Origin and Summary are hidden at first; the override chain is in the panel below). Drag the bar between the list and the panel to give either more room.
+- **The card at the top** says how many records wait for your choice (changes by other mods that the app will not carry on its own) and how many have your choices saved. **Review Them** lists only the waiting records and opens the first; **Accept Automatic for All** accepts every one of them after asking.
+- **The chips** (All, Waiting for you, Your choices, Hard Conflicts, ...) show how many records each holds. The **Review** column says *Waiting for you*, *Your choice*, or nothing.
+- **Select a record** and the card under its name says in plain words what happens to it: who wins, whether edits are merged, and whether anything needs you.
+- **Accept Automatic** keeps the automatic result for that record: each change that waits keeps the winning plugin's value, which is what the game uses today, and the record stops waiting. The next waiting record is selected, so a list can be worked through one button at a time. **Next Waiting** skips to it without deciding.
+- A choice you make by hand (a winner, or a change under *Your choices*) is saved at once, the panel says so, and the record shows *Your choice*. Choosing *Automatic* or *Not decided* again undoes it. Accepting never changes choices you already made.
+- Right-click a column header to show or hide columns (Origin and Summary are hidden at first). Drag the bar between the list and the panel to give either more room.
 
 ### Assets
 

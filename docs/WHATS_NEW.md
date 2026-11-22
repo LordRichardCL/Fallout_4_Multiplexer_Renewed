@@ -6,6 +6,7 @@ Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has
 
 - **Applying a build no longer asks for a rebuild:** the changes check ignores what switching over does by design (the outputs installed and enabled, the compiled plugins disabled, the Multiplexer package in your mod manager) and a load-order move of a plugin that is not in the build.
 - **Conflict Centre review:** a *Review* column and *Waiting for you* / *Your choices* filters; **Accept Automatic** for one record, or for every waiting record at once, clears them from the waiting count; manual choices say they are saved and are marked *Your choice*. The list has more room and fewer columns at first (right-click a header for the rest).
+- **Conflict Centre is easier to work through:** a card at the top with **Review Them**, counts on every filter chip, a plain-words verdict for each record (who wins, whether anything needs you), **Accept Automatic** that moves on to the next waiting record, **Next Waiting**, and the choices tab opening by itself when something waits.
 
 ## 21 November 2026
 

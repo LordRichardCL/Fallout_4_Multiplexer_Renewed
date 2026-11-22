@@ -9,6 +9,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QTableView;
+class QTabWidget;
 class QTableWidget;
 
 namespace gui {
@@ -34,6 +35,10 @@ private:
     void showPlan();
     // Reloads the list (review states change) and selects the record that was selected.
     void reloadKeepingSelection();
+    // Plain words on what happens to the selected record and whether it needs the user.
+    void showVerdict(int row);
+    void selectNextWaiting();
+    bool currentIsWaiting() const;
 
     FilterChips* chips_;
     QComboBox* signature_;
@@ -54,6 +59,12 @@ private:
     QLabel* review_;
     QPushButton* accept_;
     QPushButton* acceptAll_;
+    QPushButton* reviewThem_;
+    QPushButton* next_;
+    QLabel* reviewIcon_;
+    QLabel* verdict_;
+    QTabWidget* tabs_;
+    int waitingChanges_ = 0;
     QSet<int> hiddenColumns_;
 
     int sortColumn_ = -1; // -1: by conflict type and severity

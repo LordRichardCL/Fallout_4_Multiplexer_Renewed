@@ -6,6 +6,7 @@
 #include "widgets/Widgets.hpp"
 
 #include <QComboBox>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -115,26 +116,38 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     role_->setToolTip("Involved: the plugin edits the record. Wins: it is the last plugin to edit it. "
                       "Loses: it edits the record but another plugin wins.");
     auto* clear = makeButton("Clear Filters", nullptr, "refresh");
-    acceptAll_ = makeButton("Accept Automatic for All Waiting", nullptr, "check");
+    acceptAll_ = makeButton("Accept Automatic for All", nullptr, "check");
     acceptAll_->setToolTip("Every change still waiting for your choice keeps the winning plugin's value, as compiling "
                            "does anyway, and stops waiting. Choices you already made are kept.");
     count_ = new QLabel;
     count_->setObjectName("PageSubtitle");
+    // What needs the user first: a card that says how many records wait, with the two ways out.
+    auto* banner = new QFrame;
+    banner->setObjectName("Card");
+    auto* bl = new QHBoxLayout(banner);
+    bl->setContentsMargins(14, 10, 14, 10);
+    reviewIcon_ = new QLabel;
+    review_ = new QLabel;
+    review_->setWordWrap(true);
+    review_->setTextFormat(Qt::RichText);
+    reviewThem_ = makeButton("Review Them", "Primary", "review");
+    reviewThem_->setToolTip("List only the records waiting for your choice and open the first one.");
+    bl->addWidget(reviewIcon_);
+    bl->addWidget(review_, 1);
+    bl->addWidget(reviewThem_);
+    bl->addWidget(acceptAll_);
+    l->addWidget(banner);
+
+    // Filters: the chips get a row of their own so their labels are never cut; the plugin filter below.
+    l->addWidget(chips_);
     auto* filters = new QHBoxLayout;
-    filters->addWidget(chips_);
-    filters->addStretch();
     filters->addWidget(new QLabel("Plugin"));
+    plugin_->setMinimumWidth(320);
     filters->addWidget(plugin_);
     filters->addWidget(role_);
+    filters->addStretch();
     filters->addWidget(clear);
     l->addLayout(filters);
-    review_ = new QLabel;
-    review_->setObjectName("PageSubtitle");
-    review_->setWordWrap(true);
-    auto* reviewRow = new QHBoxLayout;
-    reviewRow->addWidget(review_, 1);
-    reviewRow->addWidget(acceptAll_);
-    l->addLayout(reviewRow);
 
     auto* split = new QSplitter(Qt::Vertical);
     table_ = new QTableView;
@@ -173,9 +186,25 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     summary_ = new QLabel;
     summary_->setObjectName("PageSubtitle");
     summary_->setWordWrap(true);
+    verdict_ = new QLabel;
+    verdict_->setWordWrap(true);
+    verdict_->setTextFormat(Qt::RichText);
+    accept_ = makeButton("Accept Automatic", "Primary", "check");
+    accept_->setToolTip("Keep the automatic result for this record: the changes waiting for your choice keep the "
+                        "winning plugin's value and stop waiting. You can still change any of them later.");
+    next_ = makeButton("Next Waiting", nullptr, "review");
+    next_->setToolTip("Select the next record in the list that waits for your choice.");
+    auto* decide = new QFrame;
+    decide->setObjectName("Card");
+    auto* dcl = new QHBoxLayout(decide);
+    dcl->setContentsMargins(14, 10, 14, 10);
+    dcl->addWidget(verdict_, 1);
+    dcl->addWidget(accept_);
+    dcl->addWidget(next_);
     dl->addWidget(title_);
     dl->addWidget(chain_);
     dl->addWidget(summary_);
+    dl->addWidget(decide);
 
     fields_ = new QTableWidget;
     fields_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -203,33 +232,37 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     pl->addWidget(planNote_);
     pl->addWidget(plan_, 1);
 
-    auto* tabs = new QTabWidget;
-    tabs->addTab(fields_, "Fields");
-    tabs->addTab(planPane, "Compatibility patch plan");
-    dl->addWidget(tabs, 1);
-
-    auto* bottom = new QHBoxLayout;
+    auto* fieldsPane = new QWidget;
+    auto* fl = new QVBoxLayout(fieldsPane);
+    fl->setContentsMargins(0, 4, 0, 0);
+    fl->addWidget(fields_, 1);
     auto* legend = new QLabel("<span style='color:#3ddc84'>■</span> Winning value &nbsp; "
                               "<span style='color:#ff5c5c'>■</span> Replaced value &nbsp; "
                               "<span style='color:#f5c542'>■</span> Merged value &nbsp; "
                               "<span style='color:#5cb8ff'>■</span> Compiled result");
-    bottom->addWidget(legend, 1);
-    bottom->addWidget(new QLabel("Winner when compiling:"));
+    fl->addWidget(legend);
+    tabs_ = new QTabWidget;
+    tabs_->addTab(fieldsPane, "Fields");
+    tabs_->addTab(planPane, "Your choices (patch plan)");
+    dl->addWidget(tabs_, 1);
+
+    auto* bottom = new QHBoxLayout;
+    auto* winnerLabel = new QLabel("Winner when compiling:");
+    winnerLabel->setToolTip("Optional. Make one plugin's version of the whole record win, whatever the load order.");
+    bottom->addWidget(winnerLabel);
     resolution_ = new QComboBox;
-    resolution_->setMinimumWidth(240);
+    resolution_->setMinimumWidth(320);
+    resolution_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     bottom->addWidget(resolution_);
-    accept_ = makeButton("Accept Automatic", nullptr, "check");
-    accept_->setToolTip("Keep the automatic result for this record: the changes waiting for your choice keep the "
-                        "winning plugin's value and stop waiting. You can still change any of them later.");
-    bottom->addWidget(accept_);
+    bottom->addStretch();
     dl->addLayout(bottom);
     resolutionNote_ = new QLabel;
     resolutionNote_->setObjectName("PageSubtitle");
     dl->addWidget(resolutionNote_);
     split->addWidget(detail);
     // The list gets the larger share: it is where records are found; the detail scrolls within its tabs.
-    split->setStretchFactor(0, 3);
-    split->setStretchFactor(1, 2);
+    split->setStretchFactor(0, 1);
+    split->setStretchFactor(1, 1);
     split->setChildrenCollapsible(false);
     l->addWidget(split, 1);
 
@@ -254,6 +287,13 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     connect(table_->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
             [this](const QModelIndex& i) { showConflict(i.row()); });
     connect(resolution_, &QComboBox::activated, this, [this] { applyResolution(); });
+    connect(reviewThem_, &QPushButton::clicked, this, [this] {
+        chips_->setCurrent("Waiting for you");
+        reload();
+        if (model_->rowCount() > 0)
+            table_->selectRow(0);
+    });
+    connect(next_, &QPushButton::clicked, this, [this] { selectNextWaiting(); });
     connect(accept_, &QPushButton::clicked, this, [this] {
         const int n = app_->acceptAutomatic(originPlugin_, objectId_);
         if (n < 0) {
@@ -261,10 +301,14 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
                                      "finished.");
             return;
         }
+        const QString done = n ? QString("Accepted: the automatic result is kept for %1 change(s) of the record "
+                                         "you were on, saved for the next compilation.").arg(n)
+                               : "Nothing was waiting on this record.";
         reloadKeepingSelection();
-        resolutionNote_->setText(n ? QString("Accepted: the automatic result is kept for %1 change(s) of this "
-                                             "record. Saved for the next compilation.").arg(n)
-                                   : "Nothing was waiting on this record.");
+        // Straight on to the next record that waits, so a list can be worked through with one button.
+        if (n > 0 && !currentIsWaiting())
+            selectNextWaiting();
+        resolutionNote_->setText(done);
     });
     connect(acceptAll_, &QPushButton::clicked, this, [this] {
         auto* p = app_->pipeline();
@@ -433,15 +477,37 @@ void ConflictsPage::reload()
         }
         if (q.exec("SELECT COUNT(*) FROM UserResolutions") && q.next())
             chosen += q.value(0).toLongLong();
+        const auto plural = [](qint64 n, const char* one, const char* many) {
+            return QString("%1 %2").arg(formatCount(n), n == 1 ? one : many);
+        };
+        const QString saved = chosen ? " " + plural(chosen, "record has", "records have") + " your choices saved."
+                                     : QString();
         review_->setText(
-            waiting ? QString("<b>%1 record(s) wait for your choice</b> (yellow changes in the compatibility patch "
-                              "plan). Open one and choose per change, or Accept Automatic to keep the winner's "
-                              "values. %2 record(s) have your choices saved.")
-                          .arg(formatCount(waiting), formatCount(chosen))
-                    : QString("Nothing waits for your choice. %1 record(s) have your choices saved; they apply in "
-                              "the next compilation.")
-                          .arg(formatCount(chosen)));
+            waiting ? QString("<b>%1 for your choice.</b> Mods changed them in ways the app will not combine on its "
+                              "own. Look at each one, or accept the automatic result: the winning plugin's values, "
+                              "which is what the game uses today.%2")
+                          .arg(plural(waiting, "record waits", "records wait"), saved)
+                    : QString("<b>Nothing waits for your choice.</b> Compiling resolves every conflict below on its "
+                              "own; browse them if you want to see what wins.%1")
+                          .arg(saved));
+        reviewIcon_->setPixmap(linePixmap(waiting ? "warning" : "check", waiting ? theme::kYellow : theme::kGreen, 20));
         acceptAll_->setEnabled(waiting > 0);
+        acceptAll_->setVisible(waiting > 0);
+        reviewThem_->setVisible(waiting > 0 && chips_->current() != "Waiting for you");
+
+        // Counts on the chips, for the whole list (not narrowed by the other filters).
+        const QString cs =
+            "SELECT COUNT(*), SUM(r.state = 'waiting'), SUM(ur.object_id IS NOT NULL OR r.state = 'user'), "
+            "SUM(c.conflict_type = 3), SUM(c.conflict_type = 2), SUM(c.conflict_type = 1), SUM(c.preserved <> 0), "
+            "SUM(c.severity = 'Critical') FROM Conflicts c LEFT JOIN Plugins o ON o.id = c.origin_plugin_id "
+            "LEFT JOIN ConflictReview r ON r.origin_plugin_id = c.origin_plugin_id AND r.object_id = c.object_id "
+            "LEFT JOIN UserResolutions ur ON ur.origin_plugin = o.name COLLATE NOCASE AND ur.object_id = c.object_id";
+        if (q.exec(cs) && q.next()) {
+            const QStringList chips = {"All", "Waiting for you", "Your choices", "Hard Conflicts", "Compatible Merges",
+                                       "Simple Overrides", "Not Merged", "Critical"};
+            for (int i = 0; i < chips.size(); ++i)
+                chips_->setCount(chips[i], q.value(i).toLongLong());
+        }
     }
 
     qint64 shown = 0, total = 0;
@@ -460,6 +526,12 @@ void ConflictsPage::reload()
                                    : QString("Showing %1 of %2 conflicts").arg(formatCount(shown), formatCount(total)));
     conflictId_ = -1;
     title_->setText(model_->rowCount() ? "Select a conflict" : "No conflicts to show");
+    verdict_->setText(total == 0 ? "Run Analyse (Dashboard) to find the records more than one mod changes."
+                      : model_->rowCount() ? "Select a record above to see who wins it and whether anything needs "
+                                             "you."
+                                           : "No record matches these filters. Clear Filters shows them all.");
+    accept_->hide();
+    tabs_->setTabText(1, "Your choices (patch plan)");
     chain_->clear();
     summary_->clear();
     fields_->clear();
@@ -473,20 +545,55 @@ void ConflictsPage::reload()
 void ConflictsPage::reloadKeepingSelection()
 {
     const qint64 id = conflictId_;
+    const int oldRow = table_->currentIndex().row();
     reload();
     if (id < 0)
         return;
     for (int row = 0;; ++row) {
         while (row >= model_->rowCount() && model_->canFetchMore())
             model_->fetchMore();
-        if (row >= model_->rowCount())
+        if (row >= model_->rowCount()) {
+            // The record left the list (a filter no longer matches it): the one now in its place.
+            if (oldRow >= 0 && model_->rowCount() > 0) {
+                const int r = std::min(oldRow, model_->rowCount() - 1);
+                table_->selectRow(r);
+                table_->scrollTo(model_->index(r, 0));
+            }
             return;
+        }
         if (model_->value(row, ColId).toLongLong() == id) {
             table_->selectRow(row);
             table_->scrollTo(model_->index(row, 0));
             return;
         }
     }
+}
+
+bool ConflictsPage::currentIsWaiting() const
+{
+    const int row = table_->currentIndex().row();
+    return row >= 0 && model_->value(row, ColReview).toString() == "Waiting for you";
+}
+
+void ConflictsPage::selectNextWaiting()
+{
+    const int start = table_->currentIndex().row();
+    for (int pass = 0; pass < 2; ++pass)
+        for (int row = pass == 0 ? start + 1 : 0;; ++row) {
+            while (row >= model_->rowCount() && model_->canFetchMore())
+                model_->fetchMore();
+            if (row >= model_->rowCount() || (pass == 1 && row > start))
+                break;
+            if (model_->value(row, ColReview).toString() == "Waiting for you") {
+                table_->selectRow(row);
+                table_->scrollTo(model_->index(row, 0));
+                return;
+            }
+        }
+    resolutionNote_->setText(chips_->current() == "All" || chips_->current() == "Waiting for you"
+                                 ? "No other record waits for your choice."
+                                 : "No other record in this list waits for your choice. Choose All or Waiting for "
+                                   "you to see the rest.");
 }
 
 void ConflictsPage::showConflict(int row)
@@ -597,9 +704,10 @@ void ConflictsPage::showConflict(int row)
         fields_->horizontalHeader()->resizeSection(c, 220);
 
     showPlan();
+    showVerdict(row);
 
     resolution_->clear();
-    resolution_->addItem("Automatic (merge compatible edits)");
+    resolution_->addItem("Automatic (recommended)");
     for (const auto& n : chainNames)
         resolution_->addItem("Force: " + n, n);
     QSqlQuery res(db);
@@ -628,8 +736,49 @@ void ConflictsPage::showConflict(int row)
     }
 }
 
+void ConflictsPage::showVerdict(int row)
+{
+    const QString winner = model_->value(row, ColWinner).toString().toHtmlEscaped();
+    const QString review = model_->value(row, ColReview).toString();
+    const int handling = model_->value(row, ColPreserved).toInt();
+    const QString type = model_->value(row, ColConflict).toString();
+    QString text;
+    if (review == "Waiting for you") {
+        text = QString("<b style='color:#f5c542'>Waiting for your choice.</b> %1 change(s) by other mods are not in "
+                       "%2's version and the app will not carry them on its own. Choose per change under <i>Your "
+                       "choices</i>, or Accept Automatic to keep %2's values (what the game uses today).")
+                   .arg(waitingChanges_)
+                   .arg(winner);
+    } else if (review == "Your choice") {
+        text = "<b style='color:#3ddc84'>Your choice is saved.</b> The next compilation uses it. Change it below "
+               "at any time.";
+    } else if (handling == 1 || handling == 2) {
+        text = QString("<b>%1 wins.</b> Records of this type are compiled as the winning version, without merging "
+                       "fields. Nothing to decide here; change the load order for another winner.")
+                   .arg(winner);
+    } else if (type.startsWith("Hard")) {
+        text = QString("<b>%1 wins the contested fields.</b> Mods set the same value differently; the last one in "
+                       "the load order wins, as in the game. Edits to other fields are merged in. Nothing to decide "
+                       "unless you want another winner.")
+                   .arg(winner);
+    } else if (type.startsWith("Compatible")) {
+        text = "<b>Merged.</b> The mods changed different fields; compiling combines them, so no edit is lost. "
+               "Nothing to decide.";
+    } else {
+        text = QString("<b>%1 wins.</b> Only one mod's change is in play; nothing is lost. Nothing to decide.")
+                   .arg(winner);
+    }
+    verdict_->setText(text);
+    accept_->setVisible(review == "Waiting for you");
+    tabs_->setTabText(1, waitingChanges_ ? QString("Your choices (%1 waiting)").arg(waitingChanges_)
+                                         : QString("Your choices (patch plan)"));
+    // Open where the decision is made when one waits; otherwise the field comparison.
+    tabs_->setCurrentIndex(waitingChanges_ ? 1 : 0);
+}
+
 void ConflictsPage::showPlan()
 {
+    waitingChanges_ = 0;
     plan_->setRowCount(0);
     auto* p = app_->pipeline();
     const fo4mx::PatchPlan* plan = p ? p->patchPlan() : nullptr;
@@ -649,13 +798,16 @@ void ConflictsPage::showPlan()
     }
     bool waiting = false;
     for (const auto& pe : rec->entries)
-        waiting = waiting || pe.decision == fo4mx::PlanDecision::Pending;
+        if (pe.decision == fo4mx::PlanDecision::Pending) {
+            waiting = true;
+            ++waitingChanges_;
+        }
     accept_->setEnabled(waiting);
-    QString note = QString("Status: <b>%1</b>. Green changes are carried by default, Yellow ones wait for your "
-                           "choice, Red and Unknown ones are never carried. With \"Apply the compatibility patch "
-                           "plan\" on (Compilation), the next compilation writes the record with the changes "
-                           "carried.")
+    QString note = QString("Status: <b>%1</b>. Choose per change in the last column; each choice is saved at once.")
                        .arg(QString::fromStdString(fo4mx::planStatusName(rec->status)));
+    planNote_->setToolTip("Green changes are carried by default, Yellow ones wait for your choice, Red and Unknown "
+                          "ones are never carried. With \"Apply the compatibility patch plan\" on (Compilation), "
+                          "the next compilation writes the record with the changes carried.");
     for (const auto& problem : rec->problems)
         note += "<br><span style='color:#ff5c5c'>" + QString::fromStdString(problem).toHtmlEscaped() + "</span>";
     if (!rec->masters.empty()) {
@@ -700,7 +852,7 @@ void ConflictsPage::showPlan()
             choice->setEnabled(false);
         } else {
             const bool greenDefault = t.cls == fo4mx::CompatClass::Green;
-            choice->addItem(greenDefault ? "Default: carry forward" : "Default: keep the winner's (decide)", -1);
+            choice->addItem(greenDefault ? "Default: carry forward" : "Not decided (winner's value)", -1);
             choice->addItem("Carry forward", 0);
             choice->addItem("Keep the winner's value", 1);
             if (pe.decision == fo4mx::PlanDecision::User)
@@ -726,7 +878,9 @@ void ConflictsPage::showPlan()
     plan_->horizontalHeader()->resizeSection(2, 160);
     plan_->horizontalHeader()->resizeSection(3, 170);
     plan_->horizontalHeader()->resizeSection(4, 70);
-    plan_->horizontalHeader()->resizeSection(5, 260);
+    plan_->horizontalHeader()->resizeSection(5, 220);
+    plan_->horizontalHeader()->setMinimumSectionSize(60);
+    plan_->setColumnWidth(6, 230);
 }
 
 void ConflictsPage::applyResolution()

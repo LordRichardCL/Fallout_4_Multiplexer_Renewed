@@ -390,9 +390,19 @@ private slots:
         QCOMPARE(states.value("Knife"), QString());
         bool told = false;
         for (auto* l : page->findChildren<QLabel*>())
-            told = told || l->text().contains("1 record(s) wait for your choice");
+            told = told || l->text().contains("1 record waits for your choice");
         QVERIFY(told);
-        QVERIFY(childWithText<QPushButton>(page, "Accept Automatic for All Waiting")->isEnabled());
+        QVERIFY(childWithText<QPushButton>(page, "Accept Automatic for All")->isEnabled());
+
+        // The chips carry their counts; Review Them lists the waiting records and opens the first.
+        QVERIFY(childWithText<QPushButton>(page, "Waiting for you  1"));
+        QVERIFY(childWithText<QPushButton>(page, "Hard Conflicts  1"));
+        QTest::mouseClick(childWithText<QPushButton>(page, "Review Them"), Qt::LeftButton);
+        QCOMPARE(model->rowCount(), 1);
+        bool verdict = false;
+        for (auto* l : page->findChildren<QLabel*>())
+            verdict = verdict || l->text().contains("Waiting for your choice.");
+        QVERIFY(verdict);
 
         auto* chips = page->findChild<gui::FilterChips*>();
         chips->setCurrent("Waiting for you");
@@ -411,7 +421,7 @@ private slots:
             db.exec("DELETE FROM Conflicts; DELETE FROM ConflictReview; DELETE FROM UserResolutions");
         }
         page->refresh();
-        QVERIFY(!childWithText<QPushButton>(page, "Accept Automatic for All Waiting")->isEnabled());
+        QVERIFY(!childWithText<QPushButton>(page, "Accept Automatic for All")->isEnabled());
     }
 
     // The changes check that runs when a watched file changes is quiet: no summary card, no dialog, a line in

@@ -60,6 +60,8 @@ public:
     explicit FilterChips(const QStringList& labels, QWidget* parent = nullptr);
     QString current() const;
     void setCurrent(const QString& label);
+    // Shows a count after a chip's label ("Critical  12"); -1 shows the label alone. current() is unchanged.
+    void setCount(const QString& label, qint64 count);
 
 signals:
     void changed(const QString& label);
