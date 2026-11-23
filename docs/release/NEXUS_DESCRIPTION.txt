@@ -1,0 +1,155 @@
+NEXUS MODS PAGE TEXT FOR 0.2.0-alpha
+====================================
+
+Paste each part into the matching field on the Nexus "Add mod" page.
+The description uses Nexus BBCode. Check the preview before publishing.
+
+
+--- Mod name -------------------------------------------------------------
+
+Fallout 4 Multiplexer Renewed
+
+
+--- Brief overview (Nexus limit: 255 characters) ---------------------------
+
+Compiles large Fallout 4 load orders into a few generated plugins: merges compatible edits, keeps every asset where it is, frees plugin slots and tells you exactly why. A tool, not a mod. Alpha: new games and backups.
+
+
+--- Category ---------------------------------------------------------------
+
+Utilities
+
+
+--- Requirements (Nexus "Requirements" tab) --------------------------------
+
+- F4SE (Fallout 4 Script Extender): needed for the optional archive loader and Diagnostic Recorder
+- An archive limit raiser such as BSA Limit Expander: needed when the build registers more than 255 archives
+- Recommended: Buffout 4, so crash logs can be read back to the original mods
+
+
+--- Description (BBCode) ---------------------------------------------------
+
+[center][size=6][b]Fallout 4 Multiplexer Renewed[/b][/size]
+[size=3]Compile a huge load order into a few plugins. Keep every asset where it is. Know why every record wins.[/size]
+[size=2]Version 0.2.0 alpha · Fallout 4 1.10.163 (Old Gen) · Windows 10/11 x64[/size][/center]
+
+[line]
+
+[size=4][b][color=#e6b800]Alpha software: read this first[/color][/b][/size]
+[list]
+[*]Start with the [b]Safest[/b] preset and a [b]new game[/b]. Records from compiled plugins get new FormIDs, so saves made before compiling lose them.
+[*][b]Back up your saves.[/b] Every file the app changes is backed up beside it, and [b]Switch Back[/b] undoes Apply to Game in one click.
+[*]Tested on a real 2,270-plugin Vortex load order: 1,668 plugins compiled into 5 outputs and a patch, 0 validation errors, and a new game played through Vault 111 into the Commonwealth with no crash.
+[*]Not yet confirmed: long playthroughs, Sim Settlements 2 city building over many hours, and the current version under Mod Organizer 2 (earlier builds were tested there). Vortex is the tested route.
+[/list]
+
+[line]
+
+[size=4][b]What it is[/b][/size]
+Multiplexer is a compiler for big modded installations. It reads every plugin, BA2 archive and loose file the game would load, works out the final winning version of every record and asset, merges compatible edits, and compiles the result into a small set of generated plugins ([i]Dummy_Plugin_01.esp[/i] and so on).
+
+The outputs hold real records with real FormIDs. They open in xEdit and the Creation Kit like any other plugin.
+
+[b]It does not touch your assets.[/b] No mesh, texture, material, script or sound is copied, extracted or repacked. Compiled records keep their original paths, and the game keeps loading every asset from the mod, archive or loose file that provides it today.
+
+[b]It is a tool, not a mod.[/b] You unpack it to a folder and run it. The only thing you install with your mod manager is the output it creates.
+
+It is [b]not[/b] a mod manager, a load order sorter or a runtime virtual file system.
+
+[line]
+
+[size=4][b]Why you might want it[/b][/size]
+[list]
+[*][b]Plugin slots.[/b] Hundreds of plugins become a handful of outputs, far below the 254-plugin limit.
+[*][b]Conflicts you can see.[/b] The Conflict Centre shows the override chain of every record, which plugin wins and why, a field-by-field comparison, and the compiled result. You can choose a different winner for any record.
+[*][b]Compatible edits merged.[/b] Leveled lists, form lists, keywords and separate field edits from different mods are combined instead of the last plugin winning everything.
+[*][b]Optional conflict patch.[/b] [i]Multiplexer_Patch.esp[/i], similar to a Bashed Patch, for plugins that stay in your load order. It is light (ESL-flagged) and changes no FormIDs.
+[*][b]Safe rebuilds.[/b] It notices when you add, remove or update mods, shows what changed, and rebuilds only that. A rebuild keeps the FormIDs your saves depend on, and stops and asks before any would change.
+[*][b]Honest about what it can't do.[/b] A plugin is compiled only when the output can reproduce it exactly. Everything else stays in your load order untouched, with the reason shown.
+[/list]
+
+[line]
+
+[size=4][b]How it works[/b][/size]
+[list=1]
+[*]Install your mods as usual (Vortex, Mod Organizer 2 or manually).
+[*]Run [b]Fallout4MultiplexerRenewed.exe[/b]. The Setup screen asks how your mods are installed and where the game is, then previews your load order.
+[*][b]Scan[/b] and [b]Analyse[/b]: plugins, records, archives, conflicts, dependencies and what can be compiled.
+[*]Review the Plugins and Conflicts pages if you want to. The defaults are safe.
+[*][b]Compile[/b] and [b]Export[/b]. This validates everything and writes the outputs plus [i]Multiplexer Output.zip[/i].
+[*]Install [i]Multiplexer Output.zip[/i] in your mod manager. It must win every file conflict, so install it last.
+[*][b]Apply to Game[/b]. It shows what it will change and changes nothing until you confirm. Then it backs up your files, switches the compiled plugins off, enables the outputs at the end of the load order, and keeps the compiled mods' archives loading.
+[*]Start a new game.
+[/list]
+
+Keep the original mods installed. Only their plugins are switched off; their meshes, textures, sounds and scripts are still used.
+
+[line]
+
+[size=4][b]Requirements[/b][/size]
+[list]
+[*]Fallout 4 [b]1.10.163 (Old Gen)[/b]. This is the version it is built and tested against.
+[*]Windows 10 or 11, 64-bit. Everything else it needs is included; nothing to install.
+[*][b]F4SE[/b] for the optional [b]archive loader[/b]. The game reads at most 1,023 characters of its archive list from the INI; the loader lifts that limit for large builds.
+[*]With more than 255 archives registered: an archive limit raiser. [b]BSA Limit Expander[/b] works. Daytripper 4's ExtendedArchiveLimit froze the game at the main menu with such a list, and Apply to Game warns about it. Use only one limit raiser.
+[*]Recommended: [b]Buffout 4[/b]. The app reads its crash logs and names the original mod behind every compiled record.
+[/list]
+
+[line]
+
+[size=4][b]Installation[/b][/size]
+[list=1]
+[*]Download the zip and unpack it to any folder [b]outside[/b] the game folder, for example [i]C:\Tools\Multiplexer[/i].
+[*]Run [b]Fallout4MultiplexerRenewed.exe[/b].
+[*]Do [b]not[/b] install this download with your mod manager. Only the output it creates is installed.
+[/list]
+
+[b]Updating:[/b] unpack the new version over the old one. Your settings, your choices in the Conflict Centre and the build cache are kept.
+
+[b]Uninstalling:[/b] use [b]Switch Back[/b] on the Compilation page (or re-enable the plugins listed in [i]Multiplexer_DisablePlugins.txt[/i]), remove the output mod, then delete the folder.
+
+[line]
+
+[size=4][b]Included extras (optional)[/b][/size]
+[list]
+[*][b]MultiplexerArchiveLoader.dll[/b] (F4SE plugin): supplies the full archive list to the game. It ships inside the output only when you turn it on in Settings → Archives.
+[*][b]Diagnostic Recorder[/b] (F4SE plugin): records what the game loads (archives, plugins, saves, normal or abnormal exit) for the Diagnostics page. It changes nothing in the game. While it is installed, Faster Loose Files logs a warning that file opens "now go to MultiplexerDiagnosticRecorder.dll first". That is expected and harmless.
+[*][b]fo4mx.exe[/b]: the same engine from the command line, for scripting and automation.
+[/list]
+
+[line]
+
+[size=4][b]When something goes wrong[/b][/size]
+[list]
+[*][b]Diagnostics → Read Crash Log / Read Papyrus Log[/b] translates the output plugins' FormIDs back to the original mods.
+[*][b]Diagnostics → Support Bundle[/b] makes one zip with the reports, logs and load order, with personal details removed. Please attach it to bug reports.
+[*][b]Multiplexer Reports\Multiplexer Report.html[/b] in every export: validation, compilation, conflicts, dependencies and assets in one page.
+[*][b]Switch Back[/b] restores your previous load order and INI in one click.
+[/list]
+
+[line]
+
+[size=4][b]Compatibility notes[/b][/size]
+[list]
+[*][b]Mid-playthrough:[/b] not recommended. Saves made [i]with[/i] a build are protected on later rebuilds; saves made [i]before[/i] the first build are not.
+[*][b]LOOT / Sort Now:[/b] sorting can move the outputs. They must load last; Apply to Game puts them back, and the app warns if they moved.
+[*][b]Not compiled, kept in the load order:[/b] the base game, DLC and Creation Club content; plugins named by F4SE DLLs; Transfer Settlements blueprints; LooksMenu overlays; new cells with precombined or previs data; and anything the app cannot reproduce exactly.
+[*][b]Next Gen (1.10.980 and later):[/b] experimental (Settings → Runtime) and not tested on a real load order. Old Gen 1.10.163 is the tested version.
+[/list]
+
+[line]
+
+[size=4][b]Documentation and source[/b][/size]
+The full User Guide, the in-game testing guide and the list of what has been confirmed are in the [i]docs[/i] folder of the download, and online:
+[url=https://github.com/LordRichardCL/Fallout_4_Multiplexer_Renewed]github.com/LordRichardCL/Fallout_4_Multiplexer_Renewed[/url]
+
+[line]
+
+[size=4][b]Credits[/b][/size]
+[list]
+[*]The xEdit team: record definitions and conflict rules were checked against xEdit's documentation and source.
+[*]The F4SE team.
+[*]Built with Qt, SQLite, zlib, spdlog and fmt.
+[/list]
+
+[center][size=2]Author: Romewolf[/size][/center]
