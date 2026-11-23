@@ -24,6 +24,7 @@ Diagnostics
 - Build comparison: what a rebuild changes against the previous build.
 
 Faster
+- An app update keeps the build cache's parts whose code did not change (plugin index, references, conflicts, merges, each versioned by the code that produces it), instead of deleting the whole cache; the results database keeps the last build's record. Damaged entries are recomputed; an unreadable cache file is set aside and recreated.
 - Compile anyway (FormID changes accepted) keeps the compilation that just stopped instead of compiling again, when nothing else changed since; any other change compiles again.
 
 Scanning

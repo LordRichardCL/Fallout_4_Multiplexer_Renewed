@@ -4,6 +4,7 @@
 #include "ba2/Ba2Archive.hpp"
 #include "db/Database.hpp"
 #include "engine/BuildCache.hpp"
+#include "engine/CacheVersions.hpp"
 #include "engine/CompilationResult.hpp"
 #include "engine/Exporter.hpp"
 #include "engine/Pipeline.hpp"
@@ -547,6 +548,305 @@ void writeModB(const std::filesystem::path& data, bool extraLoot)
 }
 
 } // namespace
+
+// ---- Build cache across app updates ------------------------------------------------------------------------
+
+// Everything a build produces that the cache could affect: scan, conflicts, validation, FormID mappings and the
+// exported plugins' bytes.
+struct BuildDigest {
+    size_t records = 0, groups = 0;
+    std::vector<std::string> conflicts, validation, mappings;
+    std::map<std::string, std::vector<uint8_t>> plugins;
+    bool operator==(const BuildDigest&) const = default;
+};
+
+BuildDigest runAndDigest(Pipeline& p)
+{
+    BuildDigest d;
+    p.scan();
+    p.analyse();
+    const bool ok = p.compile();
+    CHECK(ok);
+    const auto& s = p.session();
+    d.records = s.records.size();
+    d.groups = s.groups.size();
+    for (const auto& e : p.conflicts()->entries) {
+        std::string line = s.pluginName(e.key.origin) + ":" + std::to_string(e.key.objectId) + "|" +
+                           std::to_string(int(e.type)) + "|" + s.pluginName(e.winner) + "|" + e.summary + "|" +
+                           std::to_string(e.fields.size());
+        for (const auto& c : e.changes)
+            line += "|" + c.changeId + ":" + std::to_string(int(c.cls)) + ":" + std::to_string(int(c.status));
+        d.conflicts.push_back(line);
+    }
+    for (const auto& is : p.validation()->issues)
+        d.validation.push_back(std::to_string(int(is.severity)) + "|" + is.category + "|" + is.message + "|" +
+                               is.plugin + "|" + is.formId);
+    for (const auto& m : p.compiledOutput()->mappings)
+        d.mappings.push_back(m.sourcePlugin + ":" + std::to_string(m.sourceObjectId) + "->" + m.outputPlugin + ":" +
+                             std::to_string(m.objectId) + " " + m.editorId);
+    for (auto* v : {&d.conflicts, &d.validation, &d.mappings})
+        std::sort(v->begin(), v->end());
+    for (const auto& f : p.exportOutputs().pluginFiles) {
+        std::ifstream in(f, std::ios::binary);
+        d.plugins[pathToUtf8(f.filename())] = std::vector<uint8_t>(std::istreambuf_iterator<char>(in), {});
+    }
+    CHECK(!d.plugins.empty());
+    return d;
+}
+
+// A configuration with its own results database, cache and output folder (runs do not see each other's builds).
+PipelineConfig cacheRun(const std::filesystem::path& root, const std::string& name, bool useCache = true)
+{
+    auto cfg = configFor(root);
+    cfg.databasePath = root / (name + ".sqlite");
+    cfg.cachePath = root / "shared.cache.sqlite";
+    cfg.exportOptions.outputDirectory = root / ("Output_" + name);
+    cfg.reportDirectory = root / ("Reports_" + name);
+    cfg.useCache = useCache;
+    return cfg;
+}
+
+const BuildCache::ComponentState* component(const Pipeline& p, const std::string& table)
+{
+    for (const auto& c : p.cache()->components())
+        if (c.table == table)
+            return &c;
+    return nullptr;
+}
+
+// An app update that leaves a component's code alone keeps that component; one that changes it empties only
+// that component; results are the same as with no cache at all.
+TEST(build_cache_components_survive_unrelated_updates)
+{
+    auto root = buildInstall("cache_versions");
+    Pipeline cold(cacheRun(root, "nocache", false));
+    const BuildDigest expected = runAndDigest(cold);
+
+    {
+        Pipeline first(cacheRun(root, "first"));
+        CHECK(runAndDigest(first) == expected); // cold cache: everything computed and stored
+        for (const auto& c : first.cache()->components())
+            CHECK(c.reset); // a new cache file: nothing stored yet
+    }
+    {
+        // Same component versions (any app update that changes none of their code): everything reused.
+        Pipeline warm(cacheRun(root, "warm"));
+        CHECK(runAndDigest(warm) == expected);
+        for (const auto& c : warm.cache()->components()) {
+            CHECK(!c.reset);
+            CHECK(c.entries > 0);
+        }
+        for (auto pi : warm.session().loadOrder)
+            CHECK(warm.session().plugins[pi].fromCache);
+        CHECK_EQ(warm.conflicts()->reusedGroups, warm.conflicts()->analysedGroups);
+        CHECK_EQ(warm.compiledOutput()->mergesComputed, size_t(0));
+        CHECK(warm.cache()->edges.hits > 0);
+        CHECK_EQ(warm.cache()->edges.misses.load(), uint64_t(0));
+    }
+    {
+        // The merge code changed: merges are emptied and computed again; the plugin index, references and
+        // conflict analyses are kept.
+        auto cfg = cacheRun(root, "mergechange");
+        cfg.cacheVersions.merges += "-changed";
+        Pipeline p(cfg);
+        CHECK(runAndDigest(p) == expected);
+        CHECK(component(p, "merges")->reset);
+        for (const char* kept : {"PluginIndex", "edges", "conflicts"})
+            CHECK(!component(p, kept)->reset);
+        for (auto pi : p.session().loadOrder)
+            CHECK(p.session().plugins[pi].fromCache);
+        CHECK_EQ(p.conflicts()->reusedGroups, p.conflicts()->analysedGroups);
+        CHECK_EQ(p.compiledOutput()->mergesReused, size_t(0));
+        CHECK(p.compiledOutput()->mergesComputed > 0);
+        CHECK_EQ(p.cache()->edges.misses.load(), uint64_t(0));
+    }
+    {
+        // The plugin reading code changed: plugins are parsed again; what is keyed by their content is kept.
+        auto cfg = cacheRun(root, "indexchange");
+        cfg.cacheVersions = CacheVersions::current();
+        cfg.cacheVersions.merges += "-changed"; // as stored by the previous run
+        cfg.cacheVersions.pluginIndex += "-changed";
+        Pipeline p(cfg);
+        CHECK(runAndDigest(p) == expected);
+        CHECK(component(p, "PluginIndex")->reset);
+        CHECK(!component(p, "conflicts")->reset && !component(p, "merges")->reset);
+        for (auto pi : p.session().loadOrder)
+            CHECK(!p.session().plugins[pi].fromCache);
+        CHECK_EQ(p.conflicts()->reusedGroups, p.conflicts()->analysedGroups);
+        CHECK_EQ(p.compiledOutput()->mergesComputed, size_t(0));
+    }
+    {
+        // A cache written before components had versions is emptied once, whole.
+        auto cfg = cacheRun(root, "legacy");
+        {
+            db::Database db(cfg.cachePath);
+            db.exec("INSERT OR REPLACE INTO Info(key, value) VALUES('version', '15')");
+        }
+        Pipeline p(cfg);
+        CHECK(runAndDigest(p) == expected);
+        for (const auto& c : p.cache()->components())
+            CHECK(c.reset);
+        db::Database db(cfg.cachePath);
+        CHECK_EQ(db.scalar("SELECT COUNT(*) FROM Info WHERE key = 'version'").value_or(-1), int64_t(0));
+    }
+}
+
+// What a result depends on decides what is computed again: options, load order and record definitions each
+// invalidate exactly the results keyed by them.
+TEST(build_cache_invalidates_exactly_what_changed)
+{
+    auto root = buildInstall("cache_inputs");
+    {
+        Pipeline p(cacheRun(root, "seed"));
+        runAndDigest(p);
+    }
+    {
+        // A conflict option: every conflict analysed again, merges and the plugin index kept.
+        auto cfg = cacheRun(root, "conflictoption");
+        cfg.conflicts.analyseAllRecordTypes = !cfg.conflicts.analyseAllRecordTypes;
+        Pipeline p(cfg);
+        runAndDigest(p);
+        CHECK_EQ(p.conflicts()->reusedGroups, size_t(0));
+        CHECK_EQ(p.compiledOutput()->mergesComputed, size_t(0));
+        for (auto pi : p.session().loadOrder)
+            CHECK(p.session().plugins[pi].fromCache);
+    }
+    {
+        // A merge option: merges computed again, conflicts kept.
+        auto cfg = cacheRun(root, "mergeoption");
+        cfg.compile.mergeCompatible = false;
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        p.compile();
+        CHECK_EQ(p.conflicts()->reusedGroups, p.conflicts()->analysedGroups);
+        CHECK_EQ(p.compiledOutput()->mergesReused, size_t(0));
+    }
+    {
+        // Load order: chains where ModB and ModC trade places are analysed again; the others are kept, and no
+        // plugin is parsed again.
+        writeFile(root / "plugins.txt", "# test\n*ModA.esp\n*ModC.esp\n*ModB.esp\n");
+        Pipeline p(cacheRun(root, "order"));
+        p.scan();
+        p.analyse();
+        for (auto pi : p.session().loadOrder)
+            CHECK(p.session().plugins[pi].fromCache);
+        CHECK(p.conflicts()->reusedGroups > 0);
+        CHECK(p.conflicts()->reusedGroups < p.conflicts()->analysedGroups);
+        size_t both = 0;
+        for (const auto& e : p.conflicts()->entries) {
+            const auto has = [&](const char* n) {
+                return std::find(e.chain.begin(), e.chain.end(), p.session().findPlugin(n)->index) != e.chain.end();
+            };
+            both += has("ModB.esp") && has("ModC.esp");
+        }
+        CHECK_EQ(p.conflicts()->analysedGroups - p.conflicts()->reusedGroups, both);
+        writeFile(root / "plugins.txt", "# test\n*ModA.esp\n*ModB.esp\n*ModC.esp\n");
+    }
+    {
+        // Record definitions (another runtime's): every analysis computed again; the plugin index (raw record
+        // headers, independent of the definitions) kept.
+        auto cfg = cacheRun(root, "definitions");
+        cfg.install.runtime = RuntimeProfile::NextGen;
+        CHECK(RecordDefinitions::get(RuntimeProfile::NextGen).fingerprint() !=
+              RecordDefinitions::get(RuntimeProfile::OldGen_1_10_163).fingerprint());
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        for (auto pi : p.session().loadOrder)
+            CHECK(p.session().plugins[pi].fromCache);
+        CHECK_EQ(p.conflicts()->reusedGroups, size_t(0));
+    }
+    {
+        // A plugin's content: its index is read again, and every chain holding a record whose bytes changed (here
+        // only its leveled list: chains are keyed by each record's bytes, not the whole file) is computed again.
+        writeModB(root / "Game" / "Data", true);
+        Pipeline p(cacheRun(root, "content"));
+        p.scan();
+        p.analyse();
+        p.compile();
+        CHECK(!p.session().findPlugin("ModB.esp")->fromCache);
+        CHECK(p.session().findPlugin("ModA.esp")->fromCache);
+        CHECK_EQ(p.conflicts()->analysedGroups - p.conflicts()->reusedGroups, size_t(1));
+        bool listAnalysed = false;
+        for (const auto& e : p.conflicts()->entries)
+            listAnalysed |= e.editorId == "LootPistols";
+        CHECK(listAnalysed);
+        CHECK(p.compiledOutput()->mergesComputed > 0);
+        CHECK(p.compiledOutput()->mergesReused > 0);
+    }
+    {
+        // And what the partly reused build produces is what a build without the cache produces.
+        Pipeline cold(cacheRun(root, "contentcold", false));
+        Pipeline warm(cacheRun(root, "contentwarm"));
+        CHECK(runAndDigest(warm) == runAndDigest(cold));
+    }
+}
+
+// Damaged entries are computed again (never reused, never fatal); a damaged cache file is set aside; a write
+// that never committed leaves nothing behind.
+TEST(build_cache_survives_damage_and_interrupted_writes)
+{
+    auto root = buildInstall("cache_damage");
+    Pipeline cold(cacheRun(root, "nocache", false));
+    const BuildDigest expected = runAndDigest(cold);
+    const auto cfg = cacheRun(root, "seed");
+    {
+        Pipeline p(cfg);
+        runAndDigest(p);
+    }
+    {
+        db::Database db(cfg.cachePath);
+        db.exec("UPDATE PluginIndex SET data = substr(data, 1, 12)");
+        db.exec("UPDATE conflicts SET data = substr(data, 1, length(data) / 2)");
+        db.exec("UPDATE merges SET data = randomblob(24)");
+        db.exec("UPDATE edges SET data = X'00'");
+    }
+    {
+        Pipeline p(cacheRun(root, "damaged"));
+        CHECK(runAndDigest(p) == expected);
+        for (auto pi : p.session().loadOrder)
+            CHECK(!p.session().plugins[pi].fromCache);
+        CHECK_EQ(p.conflicts()->reusedGroups, size_t(0));
+        CHECK_EQ(p.compiledOutput()->mergesReused, size_t(0));
+        CHECK(p.cache()->plugins.unreadable > 0);
+        CHECK(p.cache()->conflicts.unreadable > 0);
+        CHECK(p.cache()->edges.unreadable > 0);
+    }
+    {
+        // The damaged entries were replaced: the next run reuses everything.
+        Pipeline p(cacheRun(root, "repaired"));
+        CHECK(runAndDigest(p) == expected);
+        CHECK_EQ(p.conflicts()->reusedGroups, p.conflicts()->analysedGroups);
+    }
+    {
+        // Not a database at all: set aside, started anew, the build is unaffected.
+        { std::ofstream(cfg.cachePath, std::ios::binary | std::ios::trunc) << std::string(4096, 'x'); }
+        for (const char* suffix : {"-wal", "-shm"})
+            std::filesystem::remove(cfg.cachePath.string() + suffix);
+        Pipeline p(cacheRun(root, "garbage"));
+        CHECK(runAndDigest(p) == expected);
+        CHECK(p.cache() != nullptr);
+        CHECK(std::filesystem::exists(cfg.cachePath.string() + ".unreadable"));
+    }
+    {
+        // A write that was never committed (the app closed or crashed mid-store) leaves no entry.
+        const auto path = root / "interrupted.cache.sqlite";
+        const std::vector<uint8_t> blob = {1, 2, 3, 4};
+        {
+            BuildCache c(path);
+            c.begin();
+            c.put("merges", 42, blob);
+            c.put("conflicts", 43, blob);
+        }
+        BuildCache c(path);
+        CHECK(!c.get("merges", 42).has_value());
+        CHECK(!c.get("conflicts", 43).has_value());
+        c.put("merges", 44, blob); // a committed one is there
+        BuildCache again(path);
+        CHECK(again.get("merges", 44).has_value());
+    }
+}
 
 TEST(incremental_rebuild_reuses_unchanged_work)
 {

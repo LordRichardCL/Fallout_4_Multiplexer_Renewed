@@ -22,6 +22,7 @@
 
 #include <QMetaObject>
 #include <QCoreApplication>
+#include <QSet>
 #include <QSettings>
 #include <QSqlError>
 #include <QThread>
@@ -141,10 +142,46 @@ bool AppController::clearResultsAfterUpgrade(const QString& buildId)
     s.setValue("app/build", buildId);
     if (previous.isEmpty() || previous == buildId)
         return false;
-    spdlog::info("New build ({} -> {}): clearing results and cache from the previous build", previous.toStdString(),
-                 buildId.toStdString());
-    resetToFreshState(true);
+    spdlog::info("New build ({} -> {}): clearing the previous build's results; the build cache checks each of its "
+                 "parts against the new code when it opens",
+                 previous.toStdString(), buildId.toStdString());
+    clearDerivedResults();
     return true;
+}
+
+void AppController::clearDerivedResults()
+{
+    if (busy_)
+        return;
+    pipeline_.reset();
+    if (QSqlDatabase::contains(connectionName_)) {
+        QSqlDatabase::database(connectionName_, false).close();
+        QSqlDatabase::removeDatabase(connectionName_);
+    }
+    // Results the new code computes again on the next scan and analysis are emptied. Kept: the conflict
+    // resolutions the user chose, and the snapshots (the last build's manifest: what it compiled, its outputs and
+    // settings), which change detection and save-safe rebuilds read. The build cache file is not touched: each
+    // of its components is kept or emptied by the cache itself, by the version of the code that wrote it. The
+    // exports (with their FormID maps) and the patch plan decisions are files of their own, never touched here.
+    static const QSet<QString> kept = {"UserResolutions", "Snapshots"};
+    std::error_code ec;
+    if (activeDatabase_.empty() || !std::filesystem::exists(activeDatabase_, ec))
+        return;
+    try {
+        db::Database d(activeDatabase_);
+        std::vector<std::string> tables;
+        auto q = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'");
+        while (q.step())
+            tables.push_back(q.columnText(0));
+        d.begin();
+        for (const auto& t : tables)
+            if (!kept.contains(QString::fromStdString(t)))
+                d.exec("DELETE FROM \"" + t + "\";");
+        d.commit();
+    } catch (const std::exception& e) {
+        spdlog::warn("Could not clear the previous build's results in {}: {}", pathToUtf8(activeDatabase_), e.what());
+    }
+    emit dataChanged();
 }
 
 QStringList AppController::resetToFreshState(bool keepSettings)

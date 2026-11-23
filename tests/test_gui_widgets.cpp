@@ -26,6 +26,7 @@
 #include <QDialog>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
@@ -517,6 +518,42 @@ private slots:
         }
         page->refresh();
         QVERIFY(!childWithText<QPushButton>(page, "Accept Automatic for All")->isEnabled());
+    }
+
+    // The first start of a new build clears what Scan and Analyse compute, and nothing else: the build cache
+    // (it checks its own parts against the new code), the last build's manifest, the user's conflict resolutions
+    // and the patch plan decisions stay.
+    void app_update_keeps_the_cache_and_the_build_record()
+    {
+        const QString dir = QFileInfo(dbPath()).absolutePath();
+        const QString cache = dir + "/results.cache.sqlite";
+        const QString decisions = dir + "/patch_plan_decisions.json";
+        for (const auto& f : {cache, decisions}) {
+            QFile file(f);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("kept");
+        }
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("INSERT OR REPLACE INTO Snapshots VALUES ('build', 1, '{}')");
+            db.exec("INSERT OR REPLACE INTO UserResolutions VALUES ('Fallout4.esm', 16, 'Weapons.esp')");
+            db.exec("INSERT INTO ValidationResults (stage, severity, category, message) VALUES ('x', 'Error', 'c', 'm')");
+        }
+        QSettings().setValue("app/build", "0.1.0 earlier");
+        QVERIFY(app_->clearResultsAfterUpgrade("0.2.0 now"));
+        QVERIFY(!app_->clearResultsAfterUpgrade("0.2.0 now")); // once per build
+        QVERIFY(QFile::exists(cache));
+        QVERIFY(QFile::exists(decisions));
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            QCOMPARE(db.scalar("SELECT COUNT(*) FROM Snapshots").value_or(-1), qint64(1));
+            QCOMPARE(db.scalar("SELECT COUNT(*) FROM UserResolutions").value_or(-1), qint64(1));
+            QCOMPARE(db.scalar("SELECT COUNT(*) FROM ValidationResults").value_or(-1), qint64(0));
+            QCOMPARE(db.scalar("SELECT COUNT(*) FROM Plugins").value_or(-1), qint64(0));
+        }
+        QFile::remove(cache);
+        QFile::remove(decisions);
+        writeResults(); // as the other tests expect
     }
 
     // The changes check that runs when a watched file changes is quiet: no summary card, no dialog, a line in

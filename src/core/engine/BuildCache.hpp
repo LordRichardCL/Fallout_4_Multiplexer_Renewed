@@ -1,6 +1,7 @@
 #pragma once
 
 #include "db/Database.hpp"
+#include "engine/CacheVersions.hpp"
 #include "engine/ConflictEngine.hpp"
 #include "engine/FieldModel.hpp"
 #include "engine/Session.hpp"
@@ -49,10 +50,12 @@ struct CachedMerge {
 
 // Persistent cache that makes rescans and recompiles incremental. Entries are
 // keyed by content signatures, so a changed plugin only invalidates the work
-// that involves it. Thread-safe.
+// that involves it. Each component (plugin index, references, conflicts, merges) also carries the version of
+// the code that wrote it (CacheVersions): opening the cache empties a component whose version differs, and
+// keeps the others. Thread-safe.
 class BuildCache {
 public:
-    explicit BuildCache(const std::filesystem::path& file);
+    explicit BuildCache(const std::filesystem::path& file, const CacheVersions& versions = CacheVersions::current());
     static std::filesystem::path defaultPathFor(const std::filesystem::path& databasePath);
 
     std::optional<CachedPluginIndex> loadPluginIndex(const std::string& path, uint64_t size, int64_t modified,
@@ -73,17 +76,35 @@ public:
     struct Counters {
         std::atomic<uint64_t> hits{0};
         std::atomic<uint64_t> misses{0};
+        std::atomic<uint64_t> unreadable{0}; // found but could not be decoded: recomputed (counted as misses too)
     };
     Counters plugins, conflicts, merges, edges;
     void resetCounters();
 
+    // What opening the cache did to each component: kept (with how many entries) or emptied, and why.
+    struct ComponentState {
+        std::string name;  // "plugin index", "references", "conflicts", "merges"
+        std::string table;
+        bool reset = false;
+        std::string reason; // why it was emptied
+        uint64_t entries = 0; // kept entries
+    };
+    const std::vector<ComponentState>& components() const { return components_; }
+
 private:
+    std::vector<ComponentState> components_;
     std::mutex mutex_;
     db::Database db_;
     // Prepared statements, by SQL text (a lookup or store per record otherwise prepares one each time).
     std::unordered_map<std::string, db::Statement> statements_;
     db::Statement& statement(const std::string& sql);
 };
+
+// Logs one component's use of the cache in a stage: reused, computed, unreadable, and an estimate of the time
+// reuse saved (computing the reused entries at the average speed of those computed, over `threads` workers,
+// less the time restoring them took). No estimate without computed entries to measure.
+void logCacheUse(const char* what, const char* unit, const BuildCache::Counters& c, uint64_t computeNanos,
+                 double restoreSeconds, unsigned threads);
 
 // Hash of the first and last 64 KiB plus the size: cheap content check for large files.
 uint64_t sampleFileHash(const std::filesystem::path& path, uint64_t size);

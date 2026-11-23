@@ -9,6 +9,8 @@
 #include "util/Text.hpp"
 
 #include <algorithm>
+#include <thread>
+#include <chrono>
 #include <cstdio>
 #include <unordered_set>
 
@@ -308,12 +310,18 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
     std::vector<PendingCache> pending(session.loadOrder.size());
     BuildCache* cache = session.cache;
     std::atomic<size_t> done{0};
+    std::atomic<uint64_t> parseNanos{0}, restoreNanos{0};
 
     parallelFor(
         session.loadOrder.size(),
         [&](size_t pos) {
             auto& p = session.plugins[session.loadOrder[pos]];
             auto& out = perPlugin[pos];
+            const auto t0 = std::chrono::steady_clock::now();
+            auto elapsed = [&] {
+                return static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count());
+            };
             try {
                 // Unchanged plugin: restore its record index instead of parsing it.
                 uint64_t sample = 0;
@@ -348,6 +356,7 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
                         p.fileHash = cached->fileHash;
                         p.fromCache = true;
                         p.scanned = true;
+                        restoreNanos += elapsed();
                         size_t n = ++done;
                         progress.progress(n, session.loadOrder.size(), p.name);
                         return;
@@ -395,6 +404,7 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
                     return true;
                 });
                 p.scanned = true;
+                parseNanos += elapsed();
             } catch (const std::exception& e) {
                 p.error = e.what();
                 spdlog::error("Failed to scan {}: {}", p.name, e.what());
@@ -417,8 +427,9 @@ void PluginScanner::indexRecords(Session& session, const ScanOptions& options, P
             },
             nullProgress(), options.threads);
         cache->commit();
-        spdlog::info("Plugin index cache: {} plugins reused, {} parsed", cache->plugins.hits.load(),
-                     cache->plugins.misses.load());
+        const unsigned workers = options.threads ? options.threads : std::max(1u, std::thread::hardware_concurrency());
+        logCacheUse("Plugin index cache", "plugins", cache->plugins, parseNanos.load(),
+                    restoreNanos.load() / 1e9 / workers, options.threads);
     }
 
     size_t total = 0;

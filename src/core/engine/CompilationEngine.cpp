@@ -27,6 +27,8 @@
 #include <tuple>
 #include <unordered_map>
 
+#include <chrono>
+
 #include <spdlog/spdlog.h>
 
 namespace fo4mx {
@@ -538,6 +540,8 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
     std::vector<std::optional<CachedMerge>> merges(candidates.size());
     std::vector<uint64_t> keys(candidates.size(), 0);
     BuildCache* cache = session.cache;
+    const auto restoreStart = std::chrono::steady_clock::now();
+    const uint64_t hitsBefore = cache ? cache->merges.hits.load() : 0;
     if (cache) {
         for (size_t ci = 0; ci < candidates.size(); ++ci) {
             const auto& c = candidates[ci];
@@ -545,11 +549,17 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                 continue; // built from the compiled plugins' versions every time
             uint64_t opts = (options.mergeCompatible ? 1ull : 0ull) | (static_cast<uint64_t>(c.forced + 1) << 8);
             keys[ci] = chainSignature(session, session.groups[c.group]) ^ ((opts + 1) * 0xC2B2AE3D27D4EB4FULL);
-            if (auto blob = cache->get("merges", keys[ci]))
+            if (auto blob = cache->get("merges", keys[ci])) {
                 merges[ci] = deserializeMerge(session, *blob);
+                if (!merges[ci])
+                    cache->merges.unreadable++;
+            }
             (merges[ci] ? cache->merges.hits : cache->merges.misses)++;
         }
     }
+    const double restoreSeconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - restoreStart).count();
+    std::atomic<uint64_t> computeNanos{0};
     std::vector<uint8_t> computed(candidates.size(), 0);
 
     std::atomic<size_t> done{0};
@@ -567,6 +577,7 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     return;
                 }
                 if (!merges[ci]) {
+                    const auto t0 = std::chrono::steady_clock::now();
                     Normalizer norm(session);
                     std::vector<FieldSet> chain;
                     CachedMerge m;
@@ -588,6 +599,9 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     m.fields = std::move(mr.fields);
                     merges[ci] = std::move(m);
                     computed[ci] = 1;
+                    computeNanos += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                              std::chrono::steady_clock::now() - t0)
+                                                              .count());
                 }
                 const CachedMerge& m = *merges[ci];
 
@@ -714,6 +728,11 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
             },
             nullProgress(), options.threads);
         cache->putMany("merges", putKeys, blobs);
+        // This compilation's share of the counters (a build compiles several rounds).
+        BuildCache::Counters round;
+        round.hits = cache->merges.hits.load() - hitsBefore;
+        round.misses = which.size();
+        logCacheUse("Merge cache", "chains", round, computeNanos.load(), restoreSeconds, options.threads);
     }
     for (size_t ci = 0; ci < candidates.size(); ++ci)
         (computed[ci] ? out.mergesComputed : out.mergesReused)++;

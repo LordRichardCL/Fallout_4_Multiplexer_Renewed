@@ -7,6 +7,8 @@
 #include <atomic>
 #include <cstdio>
 
+#include <chrono>
+
 #include <spdlog/spdlog.h>
 
 namespace fo4mx {
@@ -354,6 +356,7 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
 
     // Reuse analyses of override chains whose content has not changed.
     BuildCache* cache = session.cache;
+    const auto restoreStart = std::chrono::steady_clock::now();
     if (cache) {
         const uint64_t optionBits = (options.analyseAllRecordTypes ? 1 : 0) | (options.keepFieldDetails ? 2 : 0);
         for (size_t i = 0; i < overridden.size(); ++i) {
@@ -362,6 +365,8 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
             auto entry = blob ? deserializeConflict(session, *blob) : std::nullopt;
             if (!entry) {
                 cache->conflicts.misses++;
+                if (blob)
+                    cache->conflicts.unreadable++;
                 continue;
             }
             cache->conflicts.hits++;
@@ -384,12 +389,16 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
         }
     }
 
+    const double restoreSeconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - restoreStart).count();
     std::atomic<size_t> done{0};
+    std::atomic<uint64_t> computeNanos{0};
     parallelFor(
         overridden.size(),
         [&](size_t i) {
             if (reused[i])
                 return;
+            const auto t0 = std::chrono::steady_clock::now();
             uint32_t gi = overridden[i];
             Signature s = session.records[session.groups[gi].begin].signature;
             bool fieldLevel = options.analyseAllRecordTypes || session.defs.isCompilable(s);
@@ -401,6 +410,8 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
                 results[i].summary = std::string("Analysis failed: ") + ex.what();
                 spdlog::debug("Conflict analysis failed for {}: {}", session.formLabel(results[i].key), ex.what());
             }
+            computeNanos += static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count());
             size_t n = ++done;
             if ((n & 0x3FF) == 0 || n == overridden.size())
                 progress.progress(n, overridden.size(), "override chains");
@@ -423,8 +434,7 @@ ConflictReport ConflictEngine::analyse(Session& session, const ConflictOptions& 
             },
             nullProgress(), options.threads);
         cache->putMany("conflicts", putKeys, blobs);
-        spdlog::info("Conflict cache: {} chains reused, {} analysed", cache->conflicts.hits.load(),
-                     cache->conflicts.misses.load());
+        logCacheUse("Conflict cache", "chains", cache->conflicts, computeNanos.load(), restoreSeconds, options.threads);
     }
     for (auto& e : results) {
         for (auto& f : e.fields) {

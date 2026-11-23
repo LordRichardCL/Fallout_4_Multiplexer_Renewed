@@ -363,6 +363,68 @@ The report lists every change, the record types the changed plugins contain (aff
 
 Cached values store FormKeys by plugin **name**, so they survive load order changes and new plugin numbering. Conflict cell text stores form references as tokens, rendered against the current load order (so labels show current FormIDs). Allocation, FormID translation and validation always run in full: they are fast, and they guarantee a consistent output. The exporter compares each output image with the file on disk and leaves identical files untouched. It removes generated plugins that the new build no longer produces.
 
+### Component versions: what survives an app update
+
+The keys above cover the inputs (files, records, masters, load order, options, record definitions). They do
+not cover the code that computed the result, so each component also has a **version**, stored in the cache's
+`Info` table (`component:<table>`) and checked when the cache opens (`engine/CacheVersions`):
+
+| Component (table) | Its version changes when |
+|---|---|
+| Plugin index (`PluginIndex`) | `engine/PluginScanner`, or anything all components share, changes |
+| References (`edges`) | `engine/DependencyEngine`, `Normalizer` or `FieldModel` changes, or anything shared |
+| Conflicts (`conflicts`) | `engine/ConflictEngine`, `Normalizer`, `FieldModel`, `MergeEngine`, `Compatibility` or `Provenance` changes, or anything shared |
+| Merges (`merges`) | `engine/CompilationEngine` (all of it), `Normalizer`, `FieldModel` or `MergeEngine` changes, or anything shared |
+
+Shared by all: `esp/` (reading plugins, record definitions), `util/`, `engine/Session`, `engine/BuildCache`,
+`engine/CacheVersions`, `engine/ParallelFor`, `db/Database` and `resources/record_catalogue.csv`; and the
+compiler (name, version, build type), zlib and SQLite versions.
+
+A version is `f<format>-<code fingerprint>-z<zlib>-s<sqlite>`:
+- **format**: a number per component in `CacheVersions.cpp`, raised when a stored layout or its meaning changes
+  in a way the fingerprint would not show;
+- **code fingerprint**: the SHA-256 of the component's files, computed at build time by
+  `cmake/CacheFingerprint.cmake` from the lists in `cmake/CacheComponents.cmake`. Any edit to one of those files
+  (a comment included) gives the component a new version. The script also **stops the build** when a listed file
+  includes a project file that is neither listed nor a named boundary (headers whose code cannot change the
+  result, each with its reason), so a new dependency cannot be missed silently.
+
+Opening the cache compares each stored version with the build's: a component that differs is emptied and
+stamped with the new version in **one transaction**, the others are kept. The app version plays no part: an
+update that changes none of a component's files keeps it, and a rebuild that changes them invalidates it even
+under the same version number. A cache written before components had versions (one `version` number) is
+emptied once, whole.
+
+**Safety.**
+- A stored entry that cannot be decoded (truncated, damaged, foreign) is counted as unreadable and computed
+  again; it is never reused.
+- A cache file SQLite cannot open is renamed `<name>.unreadable` and created anew; the build goes on.
+- Stores run in transactions (each stage's entries in one), so an interrupted run leaves either all of a
+  stage's new entries or none.
+- The log reports, per component: kept or emptied (and why) when the cache opens; then for each stage the
+  entries reused, computed and unreadable, the time restoring took and an estimate of the time saved.
+
+**Never cache data.** These are part of save compatibility and are kept apart from the cache:
+- the FormID maps (`Multiplexer_FormMap.tsv` in each export) and the export folders themselves;
+- the build manifests (`Multiplexer_Build.json`, the compiled-plugins lists, the `build` snapshot in the
+  results database);
+- the user's conflict resolutions (`UserResolutions`) and patch plan decisions (`patch_plan_decisions.json`).
+
+**Always recomputed.** Allocation to outputs, FormID assignment and translation, reference rewriting,
+validation and export are never cached: they depend on the whole build, and are checked in full every time.
+
+**Scan tables.** The results database's scan rows (records, assets, references...) are written again when the
+mod space, the record definitions or the **core's** code fingerprint changes (`scanTablesVersion()`: all of
+`src/core`, since many parts write those rows); an update that changes only the GUI, the CLI or the docs keeps
+them.
+
+**The GUI on the first start of a new build** empties the results database's derived tables (they are shown
+until the next Scan, and come from the old code) but keeps `UserResolutions` and `Snapshots`, and leaves the
+build cache to the checks above. **Settings → Reset to Fresh State** still removes everything, the cache included.
+
+**Measuring.** `tools/cache-bench.sh` times a scan, analysis and compilation (no export) with a given `fo4mx`
+and prints what each component reused.
+
 ## Record access
 
 `docs/RECORD_ACCESS.md` compares what the backend sees with xEdit. In short: `PluginFile::tree()` gives the

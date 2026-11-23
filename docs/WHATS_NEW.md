@@ -2,6 +2,10 @@
 
 Recent changes in plain words, newest first. The [User Guide](USER_GUIDE.md) has the details of each.
 
+## 23 November 2026
+
+- **Updates keep the build cache:** after updating the app, a rescan and recompile reuse every part of the cache the update did not change (each part is checked against the code that produced it) instead of starting from nothing. The log says what was kept, what was recomputed and why.
+
 ## 22 November 2026
 
 - **Compile anyway is instant:** accepting FormID changes after a compilation stopped on them keeps that compilation (it only changes how that one finding is graded) instead of compiling it again, which took about 8 minutes on a large load order. If anything else changed since (a setting, a patch plan choice, a rescan), it compiles again as before.

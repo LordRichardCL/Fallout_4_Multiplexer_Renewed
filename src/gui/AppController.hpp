@@ -69,9 +69,12 @@ public:
     // and remembered conflict resolutions. Generated plugins in the output folder are not touched.
     // Returns what was removed.
     QStringList resetToFreshState(bool keepSettings = false);
-    // On the first start of a different build: clears results and the cache from the previous one
-    // (settings are kept). Returns true when it did.
+    // On the first start of a different build: clears the previous build's derived results (settings,
+    // conflict resolutions and build snapshots are kept; the build cache checks itself). Returns true when it did.
     bool clearResultsAfterUpgrade(const QString& buildId);
+    // Empties the results database's derived tables (what Scan and Analyse compute), keeping the user's
+    // conflict resolutions and the build snapshots. The build cache is left to check itself.
+    void clearDerivedResults();
 
     QStringList excludedPlugins() const;
     void setExcluded(const QString& plugin, bool excluded);

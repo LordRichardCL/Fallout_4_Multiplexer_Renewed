@@ -1,4 +1,5 @@
 #include "engine/Pipeline.hpp"
+#include "engine/CacheVersions.hpp"
 #include "engine/SlotUsage.hpp"
 
 #include <chrono>
@@ -65,7 +66,24 @@ void Pipeline::openCache()
         path = BuildCache::defaultPathFor(config_.databasePath);
     }
     try {
-        cache_ = std::make_unique<BuildCache>(path);
+        cache_ = std::make_unique<BuildCache>(path, config_.cacheVersions);
+        return;
+    } catch (const std::exception& e) {
+        spdlog::warn("Build cache unreadable ({}): set aside and started anew", e.what());
+    }
+    // A damaged cache file is only lost work: moved aside (kept for a support request) and created again.
+    std::error_code ec;
+    auto aside = path;
+    aside += ".unreadable";
+    std::filesystem::remove(aside, ec);
+    std::filesystem::rename(path, aside, ec);
+    for (const char* suffix : {"-wal", "-shm", "-journal"}) {
+        auto side = path;
+        side += suffix;
+        std::filesystem::remove(side, ec);
+    }
+    try {
+        cache_ = std::make_unique<BuildCache>(path, config_.cacheVersions);
     } catch (const std::exception& e) {
         spdlog::warn("Build cache unavailable ({}); continuing without incremental reuse", e.what());
     }
@@ -245,9 +263,10 @@ void Pipeline::scan(ProgressSink& progress)
         };
         // Fingerprint the mod space (it also decides whether the scan tables need writing again).
         auto snapshot = ChangeDetector::capture(*session_);
-        // The record, asset and reference tables hold exactly this scan when the mod space, this app's version
-        // and the record definitions are what they were written for: then only the plugins are written
-        // (their eligibility can differ). About a million rows on a real load order.
+        // The record, asset and reference tables hold exactly this scan when the mod space, the code that writes
+        // them (the core's fingerprint, not the app version: a build that changes nothing there keeps them) and
+        // the record definitions are what they were written for: then only the plugins are written (their
+        // eligibility can differ). About a million rows on a real load order.
         const std::string scanKey =
             [&] {
                 auto content = snapshot.toJson();
@@ -255,7 +274,7 @@ void Pipeline::scan(ProgressSink& progress)
                 const std::string text = content.dump(0);
                 return std::to_string(fnv1a64(text.data(), text.size()));
             }() + "|" +
-            FO4MX_VERSION + "|" + std::to_string(session_->defs.fingerprint()) + "|" +
+            scanTablesVersion() + "|" + std::to_string(session_->defs.fingerprint()) + "|" +
             std::to_string(session_->records.size()) + "|" + std::to_string(session_->assets.entries.size()) + "|" +
             std::to_string(session_->assets.archives.size()) + "|" + std::to_string(session_->nameReferences.size());
         if (w.meta("scan_key") == scanKey) {

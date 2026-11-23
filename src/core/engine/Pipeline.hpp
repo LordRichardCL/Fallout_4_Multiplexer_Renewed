@@ -7,6 +7,7 @@
 #include "db/Database.hpp"
 #include "engine/AssetTracer.hpp"
 #include "engine/AutoMerger.hpp"
+#include "engine/CacheVersions.hpp"
 #include "engine/InactivePreview.hpp"
 #include "engine/BuildRecord.hpp"
 #include "engine/BuildCache.hpp"
@@ -48,6 +49,8 @@ struct PipelineConfig {
     std::filesystem::path reportDirectory;
     bool useCache = true;               // incremental scans / analysis / compilation
     std::filesystem::path cachePath;    // default: next to the database
+    // The build cache components' versions (tests simulate a component's code changing with another value).
+    CacheVersions cacheVersions = CacheVersions::current();
     // The user's choices in the compatibility patch plan (JSON); default: next to the database.
     std::filesystem::path patchPlanDecisions;
     bool traceAssets = true;            // resolve the assets compiled records use
@@ -113,6 +116,8 @@ public:
     // Compares the mod space with the last exported build without a full scan.
     ChangeReport checkForChanges(ProgressSink& progress = nullProgress());
     const ChangeReport& changes() const { return changes_; }
+    // The build cache in use (null without one): its components' state and this run's counters.
+    const BuildCache* cache() const { return cache_.get(); }
     // What each inactive plugin would bring if enabled (empty unless ScanOptions::previewInactive).
     const std::vector<InactivePreviewRow>& inactivePreview() const { return inactivePreview_; }
     const AssetTrace& assetTrace() const { return assetTrace_; }

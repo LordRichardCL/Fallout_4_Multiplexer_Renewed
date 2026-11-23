@@ -6,6 +6,8 @@
 
 #include <cstdio>
 #include <fstream>
+#include <algorithm>
+#include <thread>
 #include <unordered_map>
 
 #include <spdlog/spdlog.h>
@@ -330,15 +332,75 @@ uint64_t chainSignature(const Session& session, const FormGroup& group)
     return h;
 }
 
-BuildCache::BuildCache(const std::filesystem::path& file)
+BuildCache::BuildCache(const std::filesystem::path& file, const CacheVersions& versions)
 {
     db_.open(file);
     db_.exec(kCacheSchema);
-    auto version = db_.scalar("SELECT CAST(value AS INTEGER) FROM Info WHERE key = 'version'");
-    if (!version || *version != kFormatVersion) {
-        db_.exec("DELETE FROM PluginIndex; DELETE FROM conflicts; DELETE FROM merges; DELETE FROM edges;");
-        db_.prepare("INSERT OR REPLACE INTO Info(key, value) VALUES('version', ?)").bind(1, kFormatVersion).run();
+    // One transaction: a component is emptied and stamped with its new version together, so an interrupted
+    // run never leaves old entries under a new version (or new entries under the old one).
+    db_.begin();
+    // Caches written before components had versions: one number for everything, kept since by clearing the
+    // whole cache on every app update. Nothing in them is known to match today's code.
+    const bool legacy = db_.scalar("SELECT COUNT(*) FROM Info WHERE key = 'version'").value_or(0) > 0;
+    const std::pair<const char*, const std::string*> parts[] = {{"PluginIndex", &versions.pluginIndex},
+                                                               {"edges", &versions.edges},
+                                                               {"conflicts", &versions.conflicts},
+                                                               {"merges", &versions.merges}};
+    const char* names[] = {"plugin index", "references", "conflicts", "merges"};
+    for (size_t i = 0; i < std::size(parts); ++i) {
+        const auto& [table, version] = parts[i];
+        ComponentState st;
+        st.name = names[i];
+        st.table = table;
+        std::string stored;
+        {
+            auto q = db_.prepare("SELECT value FROM Info WHERE key = ?");
+            q.bind(1, std::string("component:") + table);
+            if (q.step())
+                stored = q.columnText(0);
+        }
+        if (legacy || stored != *version) {
+            st.reset = true;
+            st.reason = legacy           ? "cache written before components had versions"
+                        : stored.empty() ? "no version stored"
+                                         : "the code or format that writes it changed (" + stored + " -> " + *version + ")";
+            db_.exec(std::string("DELETE FROM ") + table + ";");
+            db_.prepare("INSERT OR REPLACE INTO Info(key, value) VALUES(?, ?)")
+                .bind(1, std::string("component:") + table)
+                .bind(2, *version)
+                .run();
+        } else {
+            st.entries = static_cast<uint64_t>(db_.scalar(std::string("SELECT COUNT(*) FROM ") + table).value_or(0));
+        }
+        components_.push_back(std::move(st));
     }
+    if (legacy)
+        db_.exec("DELETE FROM Info WHERE key = 'version';");
+    db_.commit();
+    for (const auto& c : components_)
+        if (c.reset)
+            spdlog::info("Build cache: {} emptied: {}", c.name, c.reason);
+        else
+            spdlog::info("Build cache: {} kept ({} entries)", c.name, c.entries);
+}
+
+void logCacheUse(const char* what, const char* unit, const BuildCache::Counters& c, uint64_t computeNanos,
+                 double restoreSeconds, unsigned threads)
+{
+    const uint64_t hits = c.hits.load(), misses = c.misses.load(), unreadable = c.unreadable.load();
+    const unsigned workers = threads ? threads : std::max(1u, std::thread::hardware_concurrency());
+    std::string saved;
+    if (hits && misses) {
+        const double perEntry = computeNanos / 1e9 / static_cast<double>(misses) / workers;
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), "; about %.1f s saved (estimate)", std::max(0.0, hits * perEntry - restoreSeconds));
+        saved = buf;
+    } else if (hits) {
+        saved = "; all reused (compare with a run without the cache for the time saved)";
+    }
+    spdlog::info("{}: {} {} reused, {} computed{}{}; restoring took {:.1f} s", what, hits, unit, misses,
+                 unreadable ? ", " + std::to_string(unreadable) + " unreadable entries recomputed" : std::string(),
+                 saved, restoreSeconds);
 }
 
 std::filesystem::path BuildCache::defaultPathFor(const std::filesystem::path& databasePath)
@@ -352,6 +414,7 @@ void BuildCache::resetCounters()
     for (auto* c : {&plugins, &conflicts, &merges, &edges}) {
         c->hits = 0;
         c->misses = 0;
+        c->unreadable = 0;
     }
 }
 
@@ -375,6 +438,7 @@ std::optional<CachedPluginIndex> BuildCache::loadPluginIndex(const std::string& 
     auto raw = unpack(blob);
     if (!raw) {
         plugins.misses++;
+        plugins.unreadable++;
         return std::nullopt;
     }
     try {
@@ -396,10 +460,13 @@ std::optional<CachedPluginIndex> BuildCache::loadPluginIndex(const std::string& 
             c.versionControl1 = r.read<uint32_t>();
             c.versionControl2 = r.read<uint16_t>();
         }
+        if (!r.atEnd())
+            throw FormatError("trailing data in a cached plugin index");
         plugins.hits++;
         return out;
     } catch (const std::exception&) {
         plugins.misses++;
+        plugins.unreadable++;
         return std::nullopt;
     }
 }

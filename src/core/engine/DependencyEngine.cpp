@@ -836,15 +836,22 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
     std::vector<uint64_t> keys(targets.size(), 0);
     std::vector<std::string> unreadable(targets.size());
     BuildCache* cache = session.cache;
+    const auto restoreStart = std::chrono::steady_clock::now();
     if (cache) {
         for (size_t i = 0; i < targets.size(); ++i) {
             const auto& g = session.groups[targets[i]];
             keys[i] = chainSignature(session, FormGroup{g.end - 1, g.end}) ^ 0xED6E5ULL;
-            if (auto blob = cache->get("edges", keys[i]))
+            if (auto blob = cache->get("edges", keys[i])) {
                 refs[i] = deserializeEdges(session, *blob);
+                if (!refs[i])
+                    cache->edges.unreadable++;
+            }
             (refs[i] ? cache->edges.hits : cache->edges.misses)++;
         }
     }
+    const double restoreSeconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - restoreStart).count();
+    std::atomic<uint64_t> computeNanos{0};
     std::vector<uint8_t> computed(targets.size(), 0);
     std::atomic<size_t> done{0};
     parallelFor(
@@ -853,6 +860,7 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
             if (refs[i])
                 return;
             const auto& g = session.groups[targets[i]];
+            const auto t0 = std::chrono::steady_clock::now();
             try {
                 Normalizer norm(session);
                 FieldSet fs = splitFields(norm.normalize(session.records[g.end - 1]), session.defs);
@@ -861,6 +869,8 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
             } catch (const std::exception& e) {
                 unreadable[i] = e.what();
             }
+            computeNanos += static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count());
             size_t n = ++done;
             if ((n & 0x3FF) == 0 || n == targets.size())
                 progress.progress(n, targets.size(), "record references");
@@ -893,6 +903,7 @@ DependencyReport DependencyEngine::analyse(Session& session, const AnalysisOptio
             nullProgress(), options.threads);
         cache->putMany("edges", putKeys, blobs);
         });
+        logCacheUse("Reference cache", "records", cache->edges, computeNanos.load(), restoreSeconds, options.threads);
     }
     progress.stage("Checking references to missing records");
 

@@ -433,8 +433,9 @@ Folder** work on it. **Export** still needs a compilation (the records are not i
 export does not fit, the page says why (with the first change found) and you compile again. Exports made by
 earlier versions of the app have no `Multiplexer_Build.json` and are not reopened.
 
-The app clears its results database and build cache when the app itself is updated (merged records from an
-older version must not be reused). The reopened build does not depend on them: it is checked against its own
+When the app is updated, its results database is cleared (except your conflict resolutions and the record of
+the last build), and each part of its build cache is kept only if the code that produced it is unchanged (see
+*Keeping the build up to date* below). The reopened build does not depend on them: it is checked against its own
 `Multiplexer_Build.json`.
 
 ## Checking the record definitions
@@ -516,7 +517,13 @@ Validation shows the same counts as one *Build Comparison* line. Saves made with
 
 **Settings → Reset to Fresh State…** removes everything the app has stored: settings and folders, exclusions, conflict resolutions, the results database, the build cache and the logs. The Setup screen then opens as on a first start. Your mods, your load order and the generated plugins in the output folder are not touched.
 
-When you start a **new build** of the app for the first time, it clears the previous build's results and cache automatically (your settings and conflict resolutions are kept), so nothing stale carries over.
+When you start a **new build** of the app for the first time, it clears the previous build's results (your settings, conflict resolutions and the record of your last build are kept). The **build cache** (the `.cache.sqlite` file next to the results database, which makes rescans and recompiles fast) is checked part by part instead of thrown away:
+
+- **Kept**: each part the update did not touch. The plugin index (what is in each plugin), record references, conflict analyses and merges each have their own version, from the code that produces them. An update that changes only the screens, the command line or the documents keeps all four; one that changes how records are merged recomputes the merges and keeps the rest.
+- **Recomputed**: any part whose code changed, any entry whose plugins, records, masters, load order, options or record definitions changed, and any entry that turns out damaged.
+- **Never cached**: which output each record goes to, its new FormID, reference rewriting, validation and export run in full every time. Your FormID maps and exports are never part of the cache.
+
+The log says, when the cache opens, which parts were kept and which emptied (and why), and for each step how much was reused and roughly how much time that saved. To compare times yourself, `tools/cache-bench.sh` runs the same build with a given `fo4mx` and prints what was reused.
 
 ## Keeping the build up to date
 
