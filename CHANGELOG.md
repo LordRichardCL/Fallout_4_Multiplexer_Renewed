@@ -41,6 +41,10 @@ Compiling
 - Precombined Cell Check (read only) for new cells with precombine or previs data.
 - About ten times faster analysis on large load orders; readers refuse damaged files instead of crashing.
 
+Fewer files
+- Each export writes its reports as three files in `Multiplexer Reports\` instead of eighteen: `Multiplexer Report.html` (every report, with a contents bar), `.txt` (the same as plain text) and `.json` (every row). The Reports page still exports a single report in any format.
+- A smaller download: the Windows package leaves out libraries the app never uses (OpenGL and Direct3D shader compilers, unused database drivers) and carries the Visual C++ runtime as three DLLs instead of its 25 MB installer. CI starts the packaged app on its own before publishing, so a missing DLL stops the release.
+
 Interface
 - Dashboard steps are the actions; plugin slots; the status bar shows step n of N and the time left; the build status updates while the app is open.
 - Diagnostics organised by situation; Validation explained in the User Guide.

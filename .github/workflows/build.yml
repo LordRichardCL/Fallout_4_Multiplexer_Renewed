@@ -142,8 +142,30 @@ jobs:
           # Editor IDs of the base-game masters, for the Definition Check's cross-check (optional).
           Copy-Item resources/Fallout4_reference_editorids.bin $out
           Copy-Item build/windows-msvc/vcpkg_installed/x64-windows/bin/*.dll $out
-          windeployqt --release --no-translations --sql $out/Fallout4MultiplexerRenewed.exe
+          # Only what the app uses: Qt Widgets drawn in software (no OpenGL, Direct3D or shader compilers) and
+          # SQLite. The Visual C++ runtime ships as its three DLLs beside the exe instead of the 25 MB installer.
+          windeployqt --release --no-translations --sql --no-compiler-runtime --no-opengl-sw --no-system-d3d-compiler $out/Fallout4MultiplexerRenewed.exe
+          Remove-Item -ErrorAction SilentlyContinue -Path $out/dxcompiler.dll, $out/dxil.dll, $out/d3dcompiler_47.dll, $out/opengl32sw.dll, $out/vc_redist*.exe
+          Remove-Item -ErrorAction SilentlyContinue -Path $out/sqldrivers/qsqlmimer.dll, $out/sqldrivers/qsqlodbc.dll, $out/sqldrivers/qsqlpsql.dll
+          $crt = Get-ChildItem "$env:VCToolsRedistDir/x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
+          if (-not $crt) { Write-Output "::error::Visual C++ runtime folder not found under $env:VCToolsRedistDir"; exit 1 }
+          Copy-Item "$($crt.FullName)/msvcp140.dll", "$($crt.FullName)/vcruntime140.dll", "$($crt.FullName)/vcruntime140_1.dll" $out
           Copy-Item README.md, CHANGELOG.md, docs -Destination $out -Recurse
+          $files = Get-ChildItem $out -Recurse -File
+          "Package: {0} files, {1:N1} MB" -f $files.Count, (($files | Measure-Object Length -Sum).Sum / 1MB)
+      - name: Smoke test the package
+        shell: pwsh
+        run: |
+          # The package must start on its own: every DLL it needs is in it (a missing one stops the process
+          # at once with 0xC0000135). The tests above ran from the build tree, which has more DLLs.
+          $out = (Resolve-Path "package/Fallout4MultiplexerRenewed").Path
+          & "$out/fo4mx.exe" help > $null
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error::fo4mx.exe from the package exited with $LASTEXITCODE"; exit 1 }
+          $p = Start-Process -FilePath "$out/Fallout4MultiplexerRenewed.exe" -WorkingDirectory $out -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { Write-Output ("::error::The app from the package exited at start with 0x{0:X8}" -f $p.ExitCode); exit 1 }
+          Stop-Process -Id $p.Id -Force
+          "The packaged app started and kept running."
       - uses: actions/upload-artifact@v4
         with:
           name: Fallout4MultiplexerRenewed-windows-x64

@@ -242,8 +242,25 @@ TEST(pipeline_end_to_end)
     CHECK(!result.pluginFiles.empty());
     CHECK_EQ(p.validation()->errors, uint64_t(0));
     CHECK(std::filesystem::exists(result.formMap));
-    CHECK(std::filesystem::exists(root / "Reports" / "ConflictReport.html"));
-    CHECK(std::filesystem::exists(root / "Reports" / "ValidationReport.json"));
+    // One file per format holds every report; the per-report files are gone.
+    CHECK(std::filesystem::exists(root / "Reports" / "Multiplexer Report.html"));
+    CHECK(std::filesystem::exists(root / "Reports" / "Multiplexer Report.txt"));
+    CHECK(std::filesystem::exists(root / "Reports" / "Multiplexer Report.json"));
+    CHECK(!std::filesystem::exists(root / "Reports" / "ConflictReport.html"));
+    {
+        auto slurp = [](const std::filesystem::path& f) {
+            std::ifstream in(f, std::ios::binary);
+            return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        };
+        const auto html = slurp(root / "Reports" / "Multiplexer Report.html");
+        for (const char* id : {"id=\"validation\"", "id=\"compilation\"", "id=\"conflict\"", "href=\"#dependency\""})
+            CHECK(html.find(id) != std::string::npos);
+        CHECK(html.find("<header><h1>Validation Report</h1>") != std::string::npos);
+        const auto json = slurp(root / "Reports" / "Multiplexer Report.json");
+        CHECK(json.rfind("{\"reports\": [", 0) == 0);
+        CHECK(json.find("\"report\": \"Validation\"") != std::string::npos ||
+              json.find("\"report\":\"Validation\"") != std::string::npos);
+    }
 
     OutputSet out(result.pluginFiles);
     const auto* kw = out.byEditorId("ModA_Keyword");
@@ -4490,7 +4507,7 @@ TEST(analysis_checks_candidate_types)
     p.analyse();
     CHECK(p.compile());
     p.writeReports(root / "Reports");
-    std::ifstream in(root / "Reports" / "ValidationReport.txt");
+    std::ifstream in(root / "Reports" / "Multiplexer Report.txt");
     std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     CHECK(txt.find("DIAL (Dialog Topic): candidate confirmed by your load order (1 records)") != std::string::npos);
     CHECK(txt.find("NAVM NVNM: not decoded in 1 of 1 records, scanned instead: version 15: implausible vertex count N") !=
@@ -4533,10 +4550,19 @@ TEST(text_reports)
     p.scan();
     p.analyse();
     auto files = p.writeReports(root / "Text");
-    CHECK(std::find(files.begin(), files.end(), root / "Text" / "ConflictReport.txt") != files.end());
-    std::ifstream in(root / "Text" / "ConflictReport.txt");
-    std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    CHECK(txt.rfind("Conflict Report\n===============\n", 0) == 0);
+    CHECK(std::find(files.begin(), files.end(), root / "Text" / "Multiplexer Report.txt") != files.end());
+    CHECK_EQ(files.size(), size_t(3));
+    // Writing again over a folder of per-report files (from an earlier version) removes them.
+    std::ofstream(root / "Text" / "ConflictReport.txt") << "old";
+    p.writeReports(root / "Text");
+    CHECK(!std::filesystem::exists(root / "Text" / "ConflictReport.txt"));
+    std::ifstream in(root / "Text" / "Multiplexer Report.txt");
+    std::string all((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto at = all.find("Conflict Report\n===============\n");
+    CHECK(at != std::string::npos);
+    // The Conflict Report's part: up to the separator before the next report.
+    const auto next = at == std::string::npos ? at : all.find("\n\n" + std::string(78, '#'), at);
+    const std::string txt = at == std::string::npos ? std::string() : all.substr(at, next == std::string::npos ? next : next - at);
     CHECK(txt.find("Pistol10mm [WEAP:00001000]") != std::string::npos);
     CHECK(txt.find('<') == std::string::npos); // no markup
 }
@@ -4652,7 +4678,7 @@ TEST(definition_check_checks_group_layouts)
     CHECK(summary);
     // The exported Validation Report includes the definition check.
     p.writeReports(root / "Reports");
-    std::ifstream in(root / "Reports" / "ValidationReport.txt");
+    std::ifstream in(root / "Reports" / "Multiplexer Report.txt");
     std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     CHECK(txt.find("Group Layout") != std::string::npos);
 
@@ -4662,7 +4688,7 @@ TEST(definition_check_checks_group_layouts)
     fresh.analyse();
     CHECK(fresh.compile());
     fresh.writeReports(root / "Reports2");
-    std::ifstream in2(root / "Reports2" / "ValidationReport.txt");
+    std::ifstream in2(root / "Reports2" / "Multiplexer Report.txt");
     std::string txt2((std::istreambuf_iterator<char>(in2)), std::istreambuf_iterator<char>());
     CHECK(txt2.find("Group Layout") != std::string::npos);
 }
@@ -5855,12 +5881,12 @@ TEST(references_mixed_safe_and_unsafe)
 
     // The per-plugin block in the dependency report.
     p.writeReports(root / "Text");
-    const auto txt = slurpFile(root / "Text" / "DependencyReport.txt");
+    const auto txt = slurpFile(root / "Text" / "Multiplexer Report.txt");
     const auto block = txt.find("Plugin: ModS.esp\nFilename references: 2\n");
     CHECK(block != std::string::npos);
     CHECK(txt.find("Overall classification: Unsafe\nReason: Unsafe: f4se\\plugins\\modshelper.dll", block) != std::string::npos);
     CHECK(txt.find("Recommended action: Leave it in the load order", block) != std::string::npos);
-    const auto json = slurpFile(root / "Text" / "DependencyReport.json");
+    const auto json = slurpFile(root / "Text" / "Multiplexer Report.json");
     CHECK(json.find("\"filenameReferences\"") != std::string::npos);
     CHECK(json.find("\"recommendedAction\"") != std::string::npos);
 }

@@ -273,7 +273,7 @@ The options come in cards, top to bottom, each answering one question:
     ├── Data\                            everything the game loads (see below)
     ├── Multiplexer Output.zip           the Data folder, zipped (Data\ at its root): install this
     ├── Multiplexer_DisablePlugins.txt, Multiplexer_plugins.txt, Multiplexer_Archives.ini, Multiplexer_Instructions.txt
-    └── Multiplexer Reports\
+    └── Multiplexer Reports\           Multiplexer Report.html, .txt and .json (every report in each)
 ```
 
 - **While it is written** the folder is called `Multiplexer Output DDMMYY HHMMSS.tmp`; it gets its final name only when everything is written, and only then does `Multiplexer Latest.txt` name it. An export that fails or is interrupted stays `.tmp` (with `MULTIPLEXER_BUILD_FAILED.txt` saying why when it failed): it is never taken for a finished export, and the latest export stays the latest.
@@ -325,7 +325,7 @@ An ID in a previs file that points to no record today (a record its plugin does 
 | `Multiplexer_ArchivePriority.txt` | only when loose copies are off: files whose winning archive would change |
 | `Multiplexer_ArchiveLoaders.txt` | MO2: which compiled plugins have an archive loader |
 | `Multiplexer_DisablePlugins.txt`, `Multiplexer_plugins.txt` | plugins to disable (and, under "Enable these", plugins an earlier build compiled that this one keeps), and a proposed `plugins.txt` (for Vortex and manual installs) |
-| `Multiplexer Reports/` | all reports (HTML + JSON) |
+| `Multiplexer Reports/` | every report in three files: `Multiplexer Report.html` (open this: a contents bar jumps to each report), `.txt` (the same as plain text, for sharing) and `.json` (every row, for tools; HTML and text stop at 5,000 rows per table). The Reports page still exports a single report in any format |
 
 Then:
 

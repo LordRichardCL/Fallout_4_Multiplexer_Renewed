@@ -42,7 +42,9 @@ public:
     // Plain text with aligned columns, for reading in any text editor.
     static std::string text(ReportKind kind, const ReportContext& ctx);
 
-    // Writes <dir>/<Kind>Report.html, .json and .txt for every report that has data.
+    // Writes every report that has data into three files in <dir>: Multiplexer Report.html (all reports,
+    // with a contents bar), .txt (the same as text) and .json ({"reports": [...]}, every row). Removes the
+    // per-report files (<Kind>Report.html/.json/.txt) earlier versions wrote there.
     static std::vector<std::filesystem::path> writeAll(const ReportContext& ctx, const std::filesystem::path& dir);
 };
 

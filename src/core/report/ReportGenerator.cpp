@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <algorithm>
+#include <cctype>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -162,7 +163,7 @@ public:
     {
         out_ += "</tbody></table>";
         if (shown < total)
-            note("Showing " + formatCount(shown) + " of " + formatCount(total) + " rows. The JSON report contains all rows.");
+            note("Showing " + formatCount(shown) + " of " + formatCount(total) + " rows. The JSON report (Multiplexer Report.json in the export) contains all rows.");
     }
     std::string finish()
     {
@@ -247,7 +248,7 @@ public:
         }
         rows_.clear();
         if (shown < total)
-            note("Showing " + formatCount(shown) + " of " + formatCount(total) + " rows. The JSON report contains all rows.");
+            note("Showing " + formatCount(shown) + " of " + formatCount(total) + " rows. The JSON report (Multiplexer Report.json in the export) contains all rows.");
     }
     std::string finish()
     {
@@ -1498,25 +1499,68 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
     return root.dump();
 }
 
+namespace {
+
+// The part of a Rich report page between <header> and </main>: its title, subtitle and body.
+std::string reportSection(const std::string& page)
+{
+    const auto from = page.find("<header>");
+    const auto to = page.rfind("</main>");
+    if (from == std::string::npos || to == std::string::npos || to < from)
+        return {};
+    return page.substr(from, to + 7 - from);
+}
+
+std::string anchorFor(ReportKind kind)
+{
+    std::string id = reportKindName(kind);
+    for (auto& c : id)
+        c = c == ' ' ? '-' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return id;
+}
+
+} // namespace
+
 std::vector<std::filesystem::path> ReportGenerator::writeAll(const ReportContext& ctx, const std::filesystem::path& dir)
 {
     std::filesystem::create_directories(dir);
-    std::vector<std::filesystem::path> written;
-    for (auto kind : {ReportKind::Conflict, ReportKind::Asset, ReportKind::Dependency, ReportKind::Compilation,
-                      ReportKind::Validation, ReportKind::AutoMerger}) {
-        std::string base = std::string(reportKindName(kind)) + "Report";
+    // One file per format with every report in it (in this order), instead of a file per report and format.
+    // The per-report files earlier versions wrote here are removed, so a folder never mixes the two.
+    std::string nav, sections, text, json;
+    for (auto kind : {ReportKind::Validation, ReportKind::Compilation, ReportKind::Conflict, ReportKind::Dependency,
+                      ReportKind::Asset, ReportKind::AutoMerger}) {
+        const std::string base = std::string(reportKindName(kind)) + "Report";
+        for (const char* ext : {".html", ".json", ".txt"}) {
+            std::error_code ec;
+            std::filesystem::remove(dir / (base + ext), ec);
+        }
         auto h = html(kind, ctx);
         if (h.empty())
             continue;
-        auto hp = dir / (base + ".html");
-        std::ofstream(hp, std::ios::binary) << h;
-        written.push_back(hp);
-        auto jp = dir / (base + ".json");
-        std::ofstream(jp, std::ios::binary) << json(kind, ctx);
-        written.push_back(jp);
-        auto tp = dir / (base + ".txt");
-        std::ofstream(tp, std::ios::binary) << text(kind, ctx);
-        written.push_back(tp);
+        const std::string title = std::string(reportKindName(kind)) + " Report";
+        nav += "<a href=\"#" + anchorFor(kind) + "\">" + htmlEscape(title) + "</a> ";
+        sections += "<section id=\"" + anchorFor(kind) + "\">" + reportSection(h) + "</section>";
+        text += (text.empty() ? "" : "\n\n" + std::string(78, '#') + "\n\n") + ReportGenerator::text(kind, ctx);
+        json += (json.empty() ? "\n" : ",\n") + ReportGenerator::json(kind, ctx);
+    }
+    std::vector<std::filesystem::path> written;
+    if (sections.empty())
+        return written;
+    const std::string page =
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" "
+        "content=\"width=device-width,initial-scale=1\"><title>Multiplexer Report</title><style>" +
+        std::string(kCss) +
+        "nav.toc{position:sticky;top:0;z-index:1;background:var(--bg,#0f1311);padding:10px 24px;border-bottom:1px "
+        "solid var(--line,#26302b)}nav.toc a{color:var(--accent,#3ddc84);margin-right:18px;text-decoration:none}"
+        "section{border-top:1px solid var(--line,#26302b);scroll-margin-top:44px}</style></head><body><nav class=\"toc\">" +
+        nav + "</nav>" + sections + "</body></html>";
+    const std::pair<const char*, const std::string*> files[] = {
+        {"Multiplexer Report.html", &page}, {"Multiplexer Report.txt", &text}, {"Multiplexer Report.json", nullptr}};
+    const std::string jsonDoc = "{\"reports\": [" + json + "\n]}\n";
+    for (const auto& [name, content] : files) {
+        const auto path = dir / name;
+        std::ofstream(path, std::ios::binary) << (content ? *content : jsonDoc);
+        written.push_back(path);
     }
     return written;
 }
