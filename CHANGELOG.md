@@ -23,6 +23,7 @@ Diagnostics
 - Support bundle: one zip with the reports, logs, readings and load order, personal details removed.
 - Build comparison: what a rebuild changes against the previous build.
 - Check Startup (Diagnostics): which start-up quests of the build ran or could not attach, the message boxes they hold, popups that found no message, and the MCM menus whose required plugin was relinked, from the Papyrus log, MCM.log and f4se.log's load order. `fo4mx startup-check`.
+- Check a Mod (Diagnostics): for a mod that doesn't seem to work, the later plugins that overwrite its changes (and its patches' changes), with the records, the patch that held them until then, and what to do. `fo4mx overwritten`.
 - The User Guide explains the Faster Loose Files warning that appears while the Diagnostic Recorder is installed (harmless: the recorder passes every file open on).
 
 Faster

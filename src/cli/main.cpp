@@ -5,6 +5,7 @@
 #include "engine/Exporter.hpp"
 #include "ba2/Ba2Archive.hpp"
 #include "engine/Pipeline.hpp"
+#include "engine/OverwrittenChanges.hpp"
 #include "engine/SwitchBack.hpp"
 #include "engine/SupportBundle.hpp"
 #include "engine/BuildComparison.hpp"
@@ -92,6 +93,10 @@ Usage:
   fo4mx papyrus-log <install> [Papyrus.0.log] [--limit N]
                                             the Papyrus log read with the current load order: the
                                             original mod behind every compiled record it names
+  fo4mx overwritten <install> <plugin> [--examples N]
+                                            a mod that does not seem to work: the later plugins
+                                            whose versions of its records leave out its changes
+                                            (and its patches'), from the conflict analysis
   fo4mx startup-check <install> [Papyrus.0.log] [--mcm-log MCM.log] [--build <export>] [--f4se-log f4se.log]
                                             startup popups and MCM menus: which start-game quests of
                                             the latest build started or could not, popups that found
@@ -706,6 +711,23 @@ int cmdPapyrusLog(const Args& a)
     return 0;
 }
 
+// "A mod doesn't seem to work": the later plugins that overwrite a plugin's changes, from the conflict analysis.
+int cmdOverwritten(const Args& a)
+{
+    if (a.positional.size() < 2)
+        throw std::runtime_error("overwritten: <plugin> required (with the install options)");
+    auto cfg = makeConfig(a);
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    const auto r = findOverwrittenChanges(p.session(), p.conflicts(), a.positional[1]);
+    std::fputs(formatOverwrittenChanges(p.session(), r, a.positional[1],
+                                        a.has("--examples") ? std::stoul(a.get("--examples")) : 3)
+                   .c_str(),
+               stdout);
+    return !r.found ? 1 : r.lost ? 2 : 0;
+}
+
 // Startup popups and MCM menus of a build, against the Papyrus log and MCM.log of a session.
 int cmdStartupCheck(const Args& a)
 {
@@ -1122,6 +1144,8 @@ int main(int argc, char** argv)
             return cmdCheckSave(a);
         if (a.command == "papyrus-log")
             return cmdPapyrusLog(a);
+        if (a.command == "overwritten")
+            return cmdOverwritten(a);
         if (a.command == "startup-check")
             return cmdStartupCheck(a);
         if (a.command == "crash-log")

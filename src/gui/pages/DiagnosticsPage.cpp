@@ -8,6 +8,8 @@
 #include <QSettings>
 #include <QDate>
 #include "engine/SupportBundle.hpp"
+#include "engine/OverwrittenChanges.hpp"
+#include <QInputDialog>
 #include "engine/BuildComparison.hpp"
 #include "engine/CompilationEngine.hpp"
 #include "util/Platform.hpp"
@@ -68,6 +70,10 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     startup->setToolTip("Reads Papyrus.0.log and MCM.log against the latest build: which start-up quests it compiled "
                         "started or could not, popups that found no message, and the MCM menus whose required plugin "
                         "now names an output.");
+    auto* overwritten = makeButton("Check a Mod…", nullptr, "conflicts");
+    overwritten->setToolTip("Pick a plugin: lists the later plugins whose versions of its records leave out its "
+                            "changes (and its patches' changes), with what to do about it. Uses the conflict "
+                            "analysis of the last scan.");
     auto* crash = makeButton("Read Crash Log", nullptr, "warning");
     crash->setToolTip("Read the newest Buffout 4 crash log (Documents\\My Games\\Fallout4\\F4SE\\Crash-*.log) and "
                       "name the original mod behind every output plugin FormID it mentions");
@@ -78,7 +84,7 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     // The tools, each with the situation it is for.
     auto* tools = new QGridLayout;
     tools->setSpacing(12);
-    auto tool = [&](int col, const QString& icon, const QColor& accent, const QString& title, const QString& when,
+    auto tool = [&](int row, int col, const QString& icon, const QColor& accent, const QString& title, const QString& when,
                     QPushButton* button) {
         auto* f = new QFrame;
         f->setObjectName("Card");
@@ -98,20 +104,23 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
         d->setAlignment(Qt::AlignLeft | Qt::AlignTop);
         v->addWidget(d, 1);
         v->addWidget(button, 0, Qt::AlignLeft);
-        tools->addWidget(f, 0, col);
+        tools->addWidget(f, row, col);
         tools->setColumnStretch(col, 1);
     };
-    tool(0, "warning", theme::kRed, "The game crashed",
+    tool(0, 0, "warning", theme::kRed, "The game crashed",
          "Reads the newest Buffout 4 crash log and names the original mod behind every compiled record in it.", crash);
-    tool(1, "warning", theme::kYellow, "Scripts misbehave",
+    tool(0, 1, "warning", theme::kYellow, "Scripts misbehave",
          "Lists the most frequent Papyrus script errors and the mods behind the records they name.", papyrus);
-    tool(2, "validation", theme::kGreen, "Before loading a save",
+    tool(0, 2, "validation", theme::kGreen, "Before loading a save",
          "Says whether a save would lose anything with your load order, or with the build you just compiled.",
          saveCheck);
-    tool(3, "check", theme::kGreen, "Popups and menus",
+    tool(1, 0, "check", theme::kGreen, "Popups and menus",
          "Did the compiled mods' start-up quests run, and which MCM menus should appear? Checks the last session.",
          startup);
-    tool(4, "export", theme::kBlue, "Asking for help",
+    tool(1, 1, "conflicts", theme::kYellow, "A mod doesn't seem to work",
+         "Names the later plugins that overwrite its changes, so the game uses their version of its records.",
+         overwritten);
+    tool(1, 2, "export", theme::kBlue, "Asking for help",
          "One zip with the reports, logs and readings to send. No mod files; your user name is taken out.", bundle);
     l->addLayout(tools);
 
@@ -191,6 +200,7 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     connect(bundle, &QPushButton::clicked, this, [this] { makeSupportBundle(); });
     connect(papyrus, &QPushButton::clicked, this, [this] { readPapyrusLog({}); });
     connect(startup, &QPushButton::clicked, this, [this] { checkStartup({}); });
+    connect(overwritten, &QPushButton::clicked, this, [this] { checkOverwritten({}); });
     connect(saveCheck, &QPushButton::clicked, this, [this] { checkSaveGame({}); });
     connect(check, &QPushButton::clicked, this, [this] {
         showInstallStatus();
@@ -286,7 +296,8 @@ void DiagnosticsPage::showCrashReading(const QString& file, const QString& text)
 }
 
 void DiagnosticsPage::showReading(const QString& title, const QString& file, const QString& text,
-                                  const QString& filter, const std::function<void(const QString&)>& again)
+                                  const QString& filter, const std::function<void(const QString&)>& again,
+                                  const std::function<QString(QWidget*)>& pickAnother)
 {
     QDialog dlg(this);
     dlg.setWindowTitle(title);
@@ -297,7 +308,7 @@ void DiagnosticsPage::showReading(const QString& title, const QString& file, con
     view->setLineWrapMode(QPlainTextEdit::WidgetWidth);
     v->addWidget(view, 1);
     auto* buttons = new QHBoxLayout;
-    auto* other = makeButton("Open Another…", nullptr, "folder");
+    auto* other = makeButton(pickAnother ? "Check Another…" : "Open Another…", nullptr, "folder");
     auto* saveText = makeButton("Save…", nullptr, "export");
     auto* close = makeButton("Close");
     buttons->addWidget(other);
@@ -315,8 +326,9 @@ void DiagnosticsPage::showReading(const QString& title, const QString& file, con
     });
     QString next;
     connect(other, &QPushButton::clicked, &dlg, [&] {
-        next = QFileDialog::getOpenFileName(&dlg, "Open another " + title.toLower(),
-                                            QFileInfo(file).absolutePath(), filter);
+        next = pickAnother ? pickAnother(&dlg)
+                           : QFileDialog::getOpenFileName(&dlg, "Open another " + title.toLower(),
+                                                          QFileInfo(file).absolutePath(), filter);
         if (!next.isEmpty())
             dlg.accept();
     });
@@ -378,6 +390,51 @@ QString DiagnosticsPage::startupReading(const QString& papyrusFile) const
     if (const auto warn = dg::logBuildWarning(toPath(papyrusFile), in.exportRoot); !warn.empty())
         head += qs(warn) + "\n";
     return head + "\n" + qs(dg::formatStartupCheck(dg::checkStartup(in)));
+}
+
+QString DiagnosticsPage::pickPlugin(QWidget* parent) const
+{
+    auto* p = app_->pipeline();
+    QStringList names;
+    for (auto pi : p->session().loadOrder)
+        names << toQString(p->session().plugins[pi].name);
+    const int current = std::max<qsizetype>(0, names.indexOf(lastChecked_));
+    bool ok = false;
+    const QString name = QInputDialog::getItem(parent, "Check a mod",
+                                               "The plugin of the mod that doesn't seem to work (type to search):",
+                                               names, current, true, &ok);
+    return ok ? name.trimmed() : QString();
+}
+
+QString DiagnosticsPage::overwrittenReading(const QString& plugin) const
+{
+    auto* p = app_->pipeline();
+    if (!p || !p->scanned())
+        return "Scan first: the check reads the conflict analysis of the scanned load order.";
+    const auto r = fo4mx::findOverwrittenChanges(p->session(), p->conflicts(), ss(plugin));
+    return qs(fo4mx::formatOverwrittenChanges(p->session(), r, ss(plugin)));
+}
+
+void DiagnosticsPage::checkOverwritten(QString plugin)
+{
+    auto* p = app_->pipeline();
+    if (!p || !p->scanned()) {
+        QMessageBox::information(this, "Check a mod", "Scan your load order first (Dashboard → Scan).");
+        return;
+    }
+    if (!p->conflicts()) {
+        QMessageBox::information(this, "Check a mod",
+                                 "The conflict analysis has not run yet: analyse or compile first, then check again.");
+        return;
+    }
+    if (plugin.isEmpty())
+        plugin = pickPlugin(this);
+    if (plugin.isEmpty())
+        return;
+    lastChecked_ = plugin;
+    showReading("Overwritten changes", plugin, overwrittenReading(plugin), {},
+                [this](const QString& next) { checkOverwritten(next); },
+                [this](QWidget* parent) { return pickPlugin(parent); });
 }
 
 void DiagnosticsPage::checkStartup(QString file)

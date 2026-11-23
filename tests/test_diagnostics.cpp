@@ -504,3 +504,100 @@ TEST(startup_check_reads_quests_popups_and_mcm_menus)
     CHECK(!noOrder.outputsActive);
     CHECK(formatStartupCheck(noOrder).find("not in the load order") != std::string::npos);
 }
+
+// ---- Overwritten changes: a plugin's changes the winning versions do not hold ------------------------------
+
+#include "engine/OverwrittenChanges.hpp"
+
+TEST(overwritten_changes_names_the_later_plugins)
+{
+    using namespace fo4mx;
+    Session s;
+    auto add = [&](const std::string& name, std::vector<PluginIndex> masters) {
+        PluginInfo p;
+        p.index = static_cast<PluginIndex>(s.plugins.size());
+        p.name = name;
+        p.key = name;
+        for (auto& c : p.key)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        p.active = true;
+        p.masters = std::move(masters);
+        char hex[8];
+        std::snprintf(hex, sizeof(hex), "%02X", unsigned(p.index));
+        p.loadOrderHex = hex;
+        s.loadOrder.push_back(p.index);
+        s.plugins.push_back(std::move(p));
+    };
+    add("Fallout4.esm", {});          // 0
+    add("Skills.esp", {0});           // 1: the mod that "doesn't work"
+    add("Skills Patch.esp", {0, 1});  // 2: made for it
+    add("Perk Tweaks.esp", {0});      // 3: loads later, made without it
+    add("Skills - Fix.esp", {0, 1});  // 4: made with it, changes it on purpose
+
+    ConflictReport report;
+    auto change = [](PluginIndex source, ChangeStatus status, PluginIndex lostAt, std::vector<PluginIndex> keptBy = {}) {
+        TracedChange t;
+        t.field = "Record Flags";
+        t.before = "0x00000000";
+        t.after = "0x00000004";
+        t.source = source;
+        t.status = status;
+        t.lostAt = lostAt;
+        t.keptBy = std::move(keptBy);
+        return t;
+    };
+    ConflictEntry perk;
+    perk.key = FormKey{0, 0x4A09F};
+    perk.sig = Signature("PERK");
+    perk.chain = {0, 1, 2, 3};
+    perk.winner = 3;
+    perk.changes = {change(1, ChangeStatus::OmittedLater, 3, {2}), change(2, ChangeStatus::OmittedLater, 3),
+                    change(1, ChangeStatus::Survives, kInvalidPlugin)};
+    ConflictEntry perk2 = perk;
+    perk2.key = FormKey{0, 0x4A0A9};
+    perk2.changes = {change(1, ChangeStatus::OmittedLater, kInvalidPlugin)}; // no lostAt: the winner
+    ConflictEntry book;
+    book.key = FormKey{0, 0x1234};
+    book.sig = Signature("BOOK");
+    book.chain = {0, 1, 4};
+    book.winner = 4;
+    book.changes = {change(1, ChangeStatus::Replaced, 4)};
+    ConflictEntry other; // changes by plugins unrelated to it are not counted
+    other.chain = {0, 3};
+    other.winner = 3;
+    other.changes = {change(3, ChangeStatus::Survives, kInvalidPlugin)};
+    report.entries = {perk, perk2, book, other};
+
+    auto r = findOverwrittenChanges(s, &report, "skills.ESP");
+    CHECK(r.found && r.analysed);
+    CHECK_EQ(r.madeFor.size(), size_t(2));
+    CHECK_EQ(r.records, size_t(3));
+    CHECK_EQ(r.changes, size_t(5));
+    CHECK_EQ(r.lost, size_t(4));
+    CHECK_EQ(r.lostRecords, size_t(3));
+    CHECK_EQ(r.overwriters.size(), size_t(2));
+    const auto& tweaks = r.overwriters[0];
+    CHECK_EQ(tweaks.plugin, PluginIndex(3));
+    CHECK_EQ(tweaks.records, size_t(2));
+    CHECK_EQ(tweaks.changes, size_t(2));
+    CHECK_EQ(tweaks.patchChanges, size_t(1));
+    CHECK_EQ(tweaks.deliberate, size_t(0));
+    CHECK_EQ(tweaks.keptBefore.at(2), size_t(1));
+    CHECK_EQ(tweaks.types.at("PERK"), size_t(2));
+    CHECK_EQ(r.overwriters[1].plugin, PluginIndex(4));
+    CHECK_EQ(r.overwriters[1].deliberate, size_t(1));
+
+    const auto text = formatOverwrittenChanges(s, r, "Skills.esp");
+    CHECK(text.find("Overwritten by plugins made without it") != std::string::npos);
+    CHECK(text.find("Perk Tweaks.esp [03]") != std::string::npos);
+    CHECK(text.find("Kept until it loads by: Skills Patch.esp") != std::string::npos);
+    CHECK(text.find("Changed by plugins made with it as a master") != std::string::npos);
+    CHECK(text.find("Load the plugins in the first list before Skills.esp") != std::string::npos);
+
+    // Without the patches' changes; a plugin that is not active; no analysis yet.
+    CHECK_EQ(findOverwrittenChanges(s, &report, "Skills.esp", false).lost, size_t(3));
+    CHECK(!findOverwrittenChanges(s, &report, "Missing.esp").found);
+    const auto none = findOverwrittenChanges(s, nullptr, "Skills.esp");
+    CHECK(none.found && !none.analysed);
+    CHECK(formatOverwrittenChanges(s, none, "Skills.esp").find("has not run yet") != std::string::npos);
+}

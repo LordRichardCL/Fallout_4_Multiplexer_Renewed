@@ -28,7 +28,8 @@ private:
     bool crashReading(const QString& file, QString* text) const;
     void showCrashReading(const QString& file, const QString& text);
     void showReading(const QString& title, const QString& file, const QString& text, const QString& filter,
-                     const std::function<void(const QString&)>& again);
+                     const std::function<void(const QString&)>& again,
+                     const std::function<QString(QWidget*)>& pickAnother = {});
     void readPapyrusLog(QString file);
     bool papyrusReading(const QString& file, QString* text) const;
     // Startup popups and MCM menus of the latest build, from a Papyrus log, MCM.log and the load order the game
@@ -36,6 +37,11 @@ private:
     void checkStartup(QString file);
     QString startupReading(const QString& papyrusFile) const;
     QString saveCheckReading(const QString& file) const;
+    // "A mod doesn't seem to work": the later plugins that overwrite a plugin's changes (conflict analysis).
+    void checkOverwritten(QString plugin);
+    QString overwrittenReading(const QString& plugin) const;
+    QString pickPlugin(QWidget* parent) const;
+    QString lastChecked_;
     void checkSaveGame(QString file);
     QLabel* noLog_ = nullptr; // shown until a recorder log is opened
     // One zip with what it takes to look into a problem (Support Bundle…).

@@ -679,6 +679,9 @@ private slots:
         QVERIFY(button);
         QVERIFY(button->toolTip().contains("MCM"));
         QVERIFY(childWithText<QPushButton>(currentPage(), "Read Papyrus Log"));
+        auto* mod = childWithText<QPushButton>(currentPage(), "Check a Mod…");
+        QVERIFY(mod);
+        QVERIFY(mod->toolTip().contains("later plugins"));
         window_->grab().save(QDir::temp().filePath("fo4mx_diagnostics_page.png"));
     }
 
