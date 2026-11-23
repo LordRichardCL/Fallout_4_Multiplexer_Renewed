@@ -33,8 +33,11 @@ APIs only. For the archive events (1.2.0) it replaces three entries of `Fallout4
 (Windows, or another plugin's wrapper) with the same arguments, return its result unchanged and restore
 its error code: they observe and change nothing. A plugin that replaces the same entry later and calls
 Windows directly (X-Cell's Profile patch) hides the reads from the recorder; `archive_handles` still shows
-what loaded. Every entry point catches every exception, every entry point catches every exception, so a failure is
-written to the log instead of reaching the game.
+what loaded. A plugin that replaced an entry earlier (Faster Loose Files patches `CreateFileA`/`CreateFileW`)
+keeps working, because the recorder's wrapper calls it; Faster Loose Files still logs a warning that the entry
+"now goes to MultiplexerDiagnosticRecorder.dll first", which is expected and harmless while the recorder is
+installed (its summary line shows the files it served and `errors=0`). Every entry point catches every
+exception, so a failure is written to the log instead of reaching the game.
 
 ## Compatibility
 
