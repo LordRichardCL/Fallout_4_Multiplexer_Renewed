@@ -7,9 +7,9 @@ Release policy (alpha):
 - Each entry has a **Tested** line: build verified, confirmed in game, or not yet.
 - Anything not yet confirmed in game stays off by default (Advanced preset).
 
-## 0.2.0-alpha (unreleased)
+## 0.2.0-alpha (23 Nov 2026)
 
-**Tested:** build verified on 22 Nov 2026 (Vortex, Fallout 4 1.10.163, 2,270 plugins: 1,401 compiled into 7 outputs and a patch, 310,224 new FormIDs, 0 validation errors, written plugins verified, Apply to Game switched the load order over). In game: first session (about 9 minutes from a save, normal quit, all 421 archives loaded, no Papyrus failures tied to compiling); a second build with every setting on (1,668 compiled) ran a new game for about 30 minutes without a crash, all 689 archives loaded; a baseline comparison is to follow.
+**Tested:** build verified on 22 Nov 2026 (Vortex, Fallout 4 1.10.163, 2,270 plugins: 1,401 compiled into 7 outputs and a patch, 310,224 new FormIDs, 0 validation errors, written plugins verified, Apply to Game switched the load order over). In game: first session (about 9 minutes from a save, normal quit, all 421 archives loaded, no Papyrus failures tied to compiling); a second build with every setting on (1,668 compiled) ran a new game for about 30 minutes without a crash, all 689 archives loaded. A third build the same night (1,668 compiled into 5 outputs and a patch, 791,783 new FormIDs, 0 validation errors, 153 full and 623 light plugin slots) started a new game and played through character creation and Vault 111 into the Commonwealth (about 21 minutes, six saves, normal quit): all 689 archives loaded, no script property pointed at a missing record in the outputs, and the script errors on output records are ones the source mods also have. A baseline comparison without the build is still to follow.
 
 Safety and testing
 - Presets from least to most change: **Safest** (the first-run default), **Recommended**, **Advanced**; an alpha notice on the Compilation page.
@@ -22,6 +22,7 @@ Diagnostics
 - Crash logs (Buffout 4) and Papyrus logs name the original mod behind compiled records; readings warn when a log is older than the build.
 - Support bundle: one zip with the reports, logs, readings and load order, personal details removed.
 - Build comparison: what a rebuild changes against the previous build.
+- The User Guide explains the Faster Loose Files warning that appears while the Diagnostic Recorder is installed (harmless: the recorder passes every file open on).
 
 Faster
 - An app update keeps the build cache's parts whose code did not change (plugin index, references, conflicts, merges, each versioned by the code that produces it), instead of deleting the whole cache; the results database keeps the last build's record. Damaged entries are recomputed; an unreadable cache file is set aside and recreated.
