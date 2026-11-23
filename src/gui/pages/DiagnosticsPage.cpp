@@ -3,6 +3,7 @@
 #include <functional>
 #include "diagnostics/PapyrusLog.hpp"
 #include "diagnostics/SaveGame.hpp"
+#include "diagnostics/StartupCheck.hpp"
 #include <QStandardPaths>
 #include <QSettings>
 #include <QDate>
@@ -63,6 +64,10 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     auto* papyrus = makeButton("Read Papyrus Log", nullptr, "warning");
     papyrus->setToolTip("Reads Papyrus.0.log with your current load order and names the original mod behind every "
                         "compiled record it mentions, with its most frequent errors.");
+    auto* startup = makeButton("Check Startup", nullptr, "check");
+    startup->setToolTip("Reads Papyrus.0.log and MCM.log against the latest build: which start-up quests it compiled "
+                        "started or could not, popups that found no message, and the MCM menus whose required plugin "
+                        "now names an output.");
     auto* crash = makeButton("Read Crash Log", nullptr, "warning");
     crash->setToolTip("Read the newest Buffout 4 crash log (Documents\\My Games\\Fallout4\\F4SE\\Crash-*.log) and "
                       "name the original mod behind every output plugin FormID it mentions");
@@ -70,7 +75,7 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
                                 "Something went wrong in the game? Find the mod behind it, or check a save first.",
                                 {}, "diagnostics"));
 
-    // The four tools, each with the situation it is for.
+    // The tools, each with the situation it is for.
     auto* tools = new QGridLayout;
     tools->setSpacing(12);
     auto tool = [&](int col, const QString& icon, const QColor& accent, const QString& title, const QString& when,
@@ -103,7 +108,10 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     tool(2, "validation", theme::kGreen, "Before loading a save",
          "Says whether a save would lose anything with your load order, or with the build you just compiled.",
          saveCheck);
-    tool(3, "export", theme::kBlue, "Asking for help",
+    tool(3, "check", theme::kGreen, "Popups and menus",
+         "Did the compiled mods' start-up quests run, and which MCM menus should appear? Checks the last session.",
+         startup);
+    tool(4, "export", theme::kBlue, "Asking for help",
          "One zip with the reports, logs and readings to send. No mod files; your user name is taken out.", bundle);
     l->addLayout(tools);
 
@@ -182,6 +190,7 @@ DiagnosticsPage::DiagnosticsPage(AppController* app, QWidget* parent) : Page(app
     connect(crash, &QPushButton::clicked, this, [this] { readCrashLog({}); });
     connect(bundle, &QPushButton::clicked, this, [this] { makeSupportBundle(); });
     connect(papyrus, &QPushButton::clicked, this, [this] { readPapyrusLog({}); });
+    connect(startup, &QPushButton::clicked, this, [this] { checkStartup({}); });
     connect(saveCheck, &QPushButton::clicked, this, [this] { checkSaveGame({}); });
     connect(check, &QPushButton::clicked, this, [this] {
         showInstallStatus();
@@ -341,6 +350,55 @@ bool DiagnosticsPage::papyrusReading(const QString& file, QString* text) const
     return true;
 }
 
+QString DiagnosticsPage::startupReading(const QString& papyrusFile) const
+{
+    auto slurp = [](const std::filesystem::path& f) {
+        QFile in(toQString(f));
+        return in.open(QIODevice::ReadOnly) ? ss(QString::fromUtf8(in.readAll())) : std::string();
+    };
+    dg::StartupCheckInputs in;
+    in.exportRoot = packageRoot();
+    in.papyrusLog = slurp(toPath(papyrusFile));
+    in.mcmLog = slurp(dg::defaultMcmLog());
+    // The load order the game had in that session: F4SE writes it to f4se.log with every save.
+    const auto f4seLog = dg::defaultRecorderFolder().parent_path() / "f4se.log";
+    in.loadOrder = dg::loadOrderFromF4seLog(slurp(f4seLog));
+    QString source = "the load order in " + toQString(f4seLog);
+    if (in.loadOrder.full.empty()) {
+        auto* p = app_->pipeline();
+        if (p && p->scanned()) {
+            in.loadOrder = dg::runtimeLoadOrder(p->session());
+            source = "the scanned load order";
+        } else {
+            source = "no load order (scan first, or play a session so f4se.log lists one)";
+        }
+    }
+    QString head = QFileInfo(papyrusFile).fileName() + "\nRead against the build in " + toQString(in.exportRoot) +
+                   ", with " + source + ".\n";
+    if (const auto warn = dg::logBuildWarning(toPath(papyrusFile), in.exportRoot); !warn.empty())
+        head += qs(warn) + "\n";
+    return head + "\n" + qs(dg::formatStartupCheck(dg::checkStartup(in)));
+}
+
+void DiagnosticsPage::checkStartup(QString file)
+{
+    if (packageRoot().empty()) {
+        QMessageBox::information(this, "Startup check", "No build found: export a build and play a session first.");
+        return;
+    }
+    if (file.isEmpty()) {
+        const auto def = dg::defaultPapyrusLog();
+        file = std::filesystem::exists(def)
+                   ? toQString(def)
+                   : QFileDialog::getOpenFileName(this, "Open a Papyrus log", toQString(def.parent_path()),
+                                                  "Papyrus logs (*.log)");
+        if (file.isEmpty())
+            return;
+    }
+    showReading("Startup check", file, startupReading(file), "Papyrus logs (*.log)",
+                [this](const QString& f) { checkStartup(f); });
+}
+
 QString DiagnosticsPage::saveCheckReading(const QString& file) const
 {
     auto* p = app_->pipeline();
@@ -440,6 +498,10 @@ void DiagnosticsPage::makeSupportBundle()
         QString text;
         if (papyrusReading(toQString(papyrus), &text))
             in.readings.push_back({"papyrus/" + fo4mx::pathToUtf8(papyrus.filename()) + ".reading.txt", ss(text)});
+        if (!packageRoot().empty())
+            in.readings.push_back({"startup check.txt", ss(startupReading(toQString(papyrus)))});
+        if (const auto mcm = dg::defaultMcmLog(); std::filesystem::exists(mcm))
+            in.extraFiles.push_back({mcm, "f4se/" + fo4mx::pathToUtf8(mcm.filename())});
     }
     if (auto* p = app_->pipeline(); p && p->scanned()) {
         if (const auto save = dg::newestSave(); !save.empty())

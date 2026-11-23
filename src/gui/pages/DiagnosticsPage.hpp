@@ -31,6 +31,10 @@ private:
                      const std::function<void(const QString&)>& again);
     void readPapyrusLog(QString file);
     bool papyrusReading(const QString& file, QString* text) const;
+    // Startup popups and MCM menus of the latest build, from a Papyrus log, MCM.log and the load order the game
+    // had (f4se.log's plugin list, else the scanned one).
+    void checkStartup(QString file);
+    QString startupReading(const QString& papyrusFile) const;
     QString saveCheckReading(const QString& file) const;
     void checkSaveGame(QString file);
     QLabel* noLog_ = nullptr; // shown until a recorder log is opened

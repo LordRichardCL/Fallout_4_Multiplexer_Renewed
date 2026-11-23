@@ -5,6 +5,10 @@
 #include "Test.hpp"
 
 #include "diagnostics/RecorderLog.hpp"
+#include "diagnostics/StartupCheck.hpp"
+#include "util/Binary.hpp"
+
+#include <cstdio>
 
 #include <fstream>
 
@@ -373,4 +377,130 @@ TEST(diagnostics_quit_after_exit_save_is_not_a_crash)
     auto stopped = parseRecorderLog(base + msg(5, "pre_save_game") + msg(6, "post_save_game"));
     CHECK(!quitAfterExitSave(stopped));
     CHECK(find(analyse(stopped), "The session ended without a normal exit") != nullptr);
+}
+
+// Startup popups and MCM menus: start-game quests of a build against a Papyrus log, MCM.log and the relink list.
+TEST(startup_check_reads_quests_popups_and_mcm_menus)
+{
+    using fo4mx::BinaryWriter;
+    auto root = tempDir("startup_check");
+    auto data = root / "Data";
+    auto wstr = [](BinaryWriter& w, const std::string& s) {
+        w.write(static_cast<uint16_t>(s.size()));
+        for (char ch : s)
+            w.write(static_cast<uint8_t>(ch));
+    };
+    // VMAD: one script, optionally one object property naming `object` (file FormID).
+    auto vmad = [&](const std::string& script, uint32_t object) {
+        BinaryWriter w;
+        w.write(static_cast<int16_t>(6));
+        w.write(static_cast<int16_t>(2));
+        w.write(static_cast<uint16_t>(1));
+        wstr(w, script);
+        w.write(static_cast<uint8_t>(0));
+        w.write(static_cast<uint16_t>(object ? 1 : 0));
+        if (object) {
+            wstr(w, "Popup");
+            w.write(static_cast<uint8_t>(1)); // object
+            w.write(static_cast<uint8_t>(1)); // status
+            w.write(static_cast<uint16_t>(0));
+            w.write(static_cast<int16_t>(-1));
+            w.write(object);
+        }
+        return raw("VMAD", w.take());
+    };
+    auto qdnam = [](uint16_t flags) {
+        return raw("DNAM", {static_cast<uint8_t>(flags & 0xFF), static_cast<uint8_t>(flags >> 8), 0, 0});
+    };
+    writePlugin(data / "Dummy_Plugin_01.esp", {"Fallout4.esm"},
+                {record("QUST", 0x01000800, {zs("EDID", "ModA_Start"), qdnam(1), vmad("ModA:StartScript", 0x01000801)}),
+                 record("QUST", 0x01000802, {zs("EDID", "ModA_Broken"), qdnam(1), vmad("ModA:MissingScript", 0)}),
+                 record("QUST", 0x01000803, {zs("EDID", "ModA_Running"), qdnam(0x101), vmad("ModA:RunScript", 0)}),
+                 record("QUST", 0x01000804, {zs("EDID", "ModA_Later"), qdnam(0), vmad("ModA:LaterScript", 0)}),
+                 record("MESG", 0x01000801, {zs("EDID", "ModA_Welcome"), zs("FULL", "Welcome"), u32("DNAM", 1)})});
+    std::string map = "# Fallout 4 Multiplexer Renewed FormID map v1\n";
+    for (uint32_t id = 0x800; id <= 0x804; ++id) {
+        char row[96];
+        std::snprintf(row, sizeof(row), "ModA.esp\t%06X\tDummy_Plugin_01.esp\t%06X\tQUST\t\n", id, id);
+        map += row;
+    }
+    writeFile(data / "Multiplexer_FormMap.tsv", map);
+    writeFile(data / "Multiplexer_Relinked.tsv",
+              "# header\n# header\n# file\twritten\toriginal\tplugin\tlocation\tuse\tbefore\tafter\n"
+              "MCM\\Config\\ModA\\config.json\ta\tb\tModA.esp\tpluginRequirements[0]\tMCM pluginRequirements\tModA.esp\t"
+              "Dummy_Plugin_01.esp\n"
+              "MCM\\Config\\ModA\\config.json\ta\tb\tModA.esp\tline 5\tPlugin|FormID pair\tModA.esp|800\t"
+              "Dummy_Plugin_01.esp|800\n");
+
+    StartupCheckInputs in;
+    in.exportRoot = root;
+    in.loadOrder = loadOrderFromF4seLog("save name is x\nSaving plugin list:\n\t[0]\tFallout4.esm\n\t[1]\tModB.esp\n"
+                                        "\t[FE:0]\tLight.esl\n\t[2]\tDummy_Plugin_01.esp\nSaving key input event\n");
+    CHECK_EQ(in.loadOrder.full.size(), size_t(3));
+    CHECK_EQ(in.loadOrder.light.size(), size_t(1));
+    in.papyrusLog =
+        "[11/23/2026 - 10:00:00PM] Cannot open store for class \"ModA:MissingScript\", missing file?\n"
+        "[11/23/2026 - 10:00:00PM] error: Unable to bind script ModA:MissingScript to ModA_Broken (02000802) because "
+        "their base types do not match\n"
+        "[11/23/2026 - 10:00:01PM] error: Cannot call Show() on a None object, aborting function call\n"
+        "stack:\n"
+        "\t[ModB_Quest (01000900)].ModB:Script.OnQuestInit() - \"x.psc\" Line 3\n"
+        "[11/23/2026 - 10:00:02PM] Dumping stack 1:\n"
+        "\t\t[ModA_Running (02000803)].ModA:RunScript.OnQuestInit() - \"y.psc\" Line 9\n"
+        "\t\t\t[::temp1]: \"OnMCMSettingChange|ModA\"\n";
+    in.mcmLog = "MCM v1.38\nNumber of mod setting files: 2\nRegistered 30 mod settings in 5 ms.\n"
+                "WARNING: ModSetting x has an unknown type and cannot be registered.\n";
+
+    const auto c = checkStartup(in);
+    CHECK(c.buildFound);
+    CHECK(c.outputsActive);
+    CHECK_EQ(c.startupQuests, size_t(3)); // not ModA_Later, which does not start with the game
+    CHECK_EQ(c.notStarted, size_t(1));
+    CHECK_EQ(c.seenRunning, size_t(1));
+    CHECK_EQ(c.withMessageBoxes, size_t(1));
+    const StartupQuest* start = nullptr;
+    const StartupQuest* broken = nullptr;
+    for (const auto& q : c.quests) {
+        if (q.editorId == "ModA_Start")
+            start = &q;
+        if (q.editorId == "ModA_Broken")
+            broken = &q;
+    }
+    CHECK(start && broken);
+    if (start && broken) {
+        CHECK_EQ(start->formId, uint32_t(0x02000800));
+        CHECK_EQ(start->source, std::string("ModA.esp"));
+        CHECK_EQ(start->messageBoxes.size(), size_t(1));
+        CHECK_EQ(start->messageBoxes.front().formId, uint32_t(0x02000801));
+        CHECK_EQ(start->messageBoxes.front().text, std::string("Welcome"));
+        CHECK(broken->state == StartupQuest::State::ScriptMissing);
+        CHECK_EQ(broken->failedScript, std::string("ModA:MissingScript"));
+    }
+    CHECK_EQ(c.failedPopups.size(), size_t(1));
+    if (!c.failedPopups.empty()) {
+        CHECK_EQ(c.failedPopups.front().plugin, std::string("ModB.esp"));
+        CHECK(!c.failedPopups.front().inOutput);
+    }
+    CHECK_EQ(c.mcmMenus.size(), size_t(1));
+    if (!c.mcmMenus.empty()) {
+        CHECK_EQ(c.mcmMenus.front().config, std::string("ModA"));
+        CHECK_EQ(c.mcmMenus.front().now, std::string("Dummy_Plugin_01.esp"));
+        CHECK(c.mcmMenus.front().scriptRegistered);
+    }
+    CHECK_EQ(c.mcmReferences, size_t(1));
+    CHECK_EQ(c.mcm.settingFiles, size_t(2));
+    CHECK_EQ(c.mcm.settings, size_t(30));
+    CHECK_EQ(c.mcm.warnings.size(), size_t(1));
+
+    const auto text = formatStartupCheck(c);
+    CHECK(text.find("NOT STARTED: script file missing in the mod: ModA:MissingScript") != std::string::npos);
+    CHECK(text.find("ModA_Welcome: \"Welcome\"") != std::string::npos);
+    CHECK(text.find("ModB.esp, not compiled") != std::string::npos);
+    CHECK(text.find("its script registered for setting changes") != std::string::npos);
+
+    // Without the outputs in the load order the log cannot name their records, and the check says so.
+    in.loadOrder = {};
+    const auto noOrder = checkStartup(in);
+    CHECK(!noOrder.outputsActive);
+    CHECK(formatStartupCheck(noOrder).find("not in the load order") != std::string::npos);
 }

@@ -72,6 +72,7 @@ add_library(fo4mx_core STATIC
     diagnostics/CrashLog.cpp
     diagnostics/PapyrusLog.cpp
     diagnostics/SaveGame.cpp
+    diagnostics/StartupCheck.cpp
     assets/BcDecode.cpp
     engine/FieldModel.cpp
     engine/MergeEngine.cpp

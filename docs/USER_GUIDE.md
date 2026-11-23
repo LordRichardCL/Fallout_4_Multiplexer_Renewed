@@ -706,6 +706,14 @@ Once you play on compiled output, a crash log names the output plugins (`Dummy_P
 
 A crash or Papyrus log written before the build was exported was made with another build: its output FormIDs would be translated through the wrong map, so the reading starts with a warning. A Papyrus log has no plugin list of its own, so FormIDs are read with your current load order. Scan first, and read the log before you change the load order. Command line: `fo4mx papyrus-log <install> [Papyrus.0.log]`.
 
+**Diagnostics → Check Startup** answers two questions after a session: did the start-up quests the build compiled run, and which MCM menus should appear? It reads the latest build's output plugins, the Papyrus log, `Documents\My Games\Fallout4\F4SE\MCM.log` and the load order the game had (the plugin list F4SE writes to `f4se.log`, else your scanned one). It shows:
+- the start-game quests in the outputs, how many the log shows running, and the ones whose script could not attach. Those never run, so nothing they would show ever appears. "Script file missing in the mod" means the mod names a script it does not ship: the same error appears without the build;
+- the start-up quests that hold message boxes, with each message's text, so you know what to expect in the first minutes of a new game. Most are menus or prompts shown only when you use something;
+- popups that found no message (`Show()` on a None property), with the plugin behind each. One in a plugin the build compiled is worth a look;
+- the MCM menus whose required plugin the build compiled: their requirement now names the output. MCM hides a menu whose required plugin is not active, so each listed menu should appear in game; a missing one means the original config won the file conflict over the relinked copy. MCM.log's settings count and warnings are shown too.
+
+A quest that starts without problems leaves no trace in a Papyrus log, so "no trace" is normal: the check reports what the log proves. Command line: `fo4mx startup-check <install> [Papyrus.0.log] [--mcm-log MCM.log] [--build <export>] [--f4se-log f4se.log]`; with `--build` and `--f4se-log` no scan is needed (use `none` for the install). The support bundle includes this reading and MCM.log.
+
 **Diagnostics → Check a Save…** says whether a save would lose anything. It reads the plugins the save was made with and compares them with your load order. After Compile, it compares them with the load order the build would give instead. It lists:
 - plugins the save holds that will no longer load;
 - plugins the build compiles. Their records get new FormIDs in the outputs, so a save made while they were in the load order loses what it holds of them: start a new game, or leave them out of compiling;

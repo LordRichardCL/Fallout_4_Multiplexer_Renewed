@@ -12,6 +12,7 @@
 #include "diagnostics/CrashLog.hpp"
 #include "diagnostics/PapyrusLog.hpp"
 #include "diagnostics/SaveGame.hpp"
+#include "diagnostics/StartupCheck.hpp"
 #include "util/FileTransaction.hpp"
 #include "reference/FormIdReference.hpp"
 #include "engine/ReferenceIndex.hpp"
@@ -91,6 +92,12 @@ Usage:
   fo4mx papyrus-log <install> [Papyrus.0.log] [--limit N]
                                             the Papyrus log read with the current load order: the
                                             original mod behind every compiled record it names
+  fo4mx startup-check <install> [Papyrus.0.log] [--mcm-log MCM.log] [--build <export>] [--f4se-log f4se.log]
+                                            startup popups and MCM menus: which start-game quests of
+                                            the latest build started or could not, popups that found
+                                            no message, and the MCM menus whose requirement was
+                                            relinked. With --build and --f4se-log (the load order the
+                                            game had) no scan is needed and <install> may be "none"
   fo4mx crash-log [Crash-*.log] [--formmap <export>\\Data\\Multiplexer_FormMap.tsv]
                                             name the original mods behind a Buffout 4 crash log
                  delete exports in the output folder beyond the newest N (default
@@ -699,6 +706,39 @@ int cmdPapyrusLog(const Args& a)
     return 0;
 }
 
+// Startup popups and MCM menus of a build, against the Papyrus log and MCM.log of a session.
+int cmdStartupCheck(const Args& a)
+{
+    auto slurp = [](const std::filesystem::path& f) {
+        std::ifstream in(f, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    };
+    diagnostics::StartupCheckInputs in;
+    const auto papyrus = a.positional.size() > 1 ? utf8ToPath(a.positional[1]) : diagnostics::defaultPapyrusLog();
+    in.papyrusLog = slurp(papyrus);
+    in.mcmLog = slurp(a.has("--mcm-log") ? utf8ToPath(a.get("--mcm-log")) : diagnostics::defaultMcmLog());
+    if (a.has("--build"))
+        in.exportRoot = utf8ToPath(a.get("--build"));
+    if (a.has("--f4se-log"))
+        in.loadOrder = diagnostics::loadOrderFromF4seLog(slurp(utf8ToPath(a.get("--f4se-log"))));
+    if (in.exportRoot.empty() || !a.has("--f4se-log")) {
+        auto cfg = makeConfig(a);
+        Pipeline p(cfg);
+        p.scan();
+        const auto& install = p.session().install;
+        if (in.exportRoot.empty()) {
+            const auto loc = output::locate(cfg.exportOptions.outputDirectory, install.gamePath, install.dataPath,
+                                            install.modsPath);
+            in.exportRoot = output::latestRun(loc).value_or(loc.root);
+        }
+        if (!a.has("--f4se-log"))
+            in.loadOrder = diagnostics::runtimeLoadOrder(p.session());
+    }
+    std::printf("%s\nRead against the build in %s\n\n", pathToUtf8(papyrus).c_str(), pathToUtf8(in.exportRoot).c_str());
+    std::fputs(diagnostics::formatStartupCheck(diagnostics::checkStartup(in)).c_str(), stdout);
+    return 0;
+}
+
 // The crash log read against a build (its Data folder or root holding Multiplexer_FormMap.tsv).
 std::string crashReadingAgainst(const std::filesystem::path& crashLog, const std::filesystem::path& build)
 {
@@ -1082,6 +1122,8 @@ int main(int argc, char** argv)
             return cmdCheckSave(a);
         if (a.command == "papyrus-log")
             return cmdPapyrusLog(a);
+        if (a.command == "startup-check")
+            return cmdStartupCheck(a);
         if (a.command == "crash-log")
             return cmdCrashLog(a);
         if (a.command == "switch-back")

@@ -5,6 +5,7 @@
 #include "AppController.hpp"
 #include "Format.hpp"
 #include "MainWindow.hpp"
+#include "pages/DiagnosticsPage.hpp"
 #include "pages/ConflictsPage.hpp"
 #include "db/Database.hpp"
 #include "db/Schema.hpp"
@@ -666,6 +667,19 @@ private slots:
         // No duplicate Scan/Analyse buttons in the header any more.
         window_->showPage("Dashboard");
         QVERIFY(!childWithText<QPushButton>(currentPage(), "Validate"));
+    }
+
+    // Diagnostics offers the startup check (popups and MCM menus) beside the Papyrus reader.
+    void diagnostics_offers_the_startup_check()
+    {
+        window_->resize(1400, 900);
+        window_->showPage("Diagnostics");
+        QVERIFY(qobject_cast<gui::DiagnosticsPage*>(currentPage()));
+        auto* button = childWithText<QPushButton>(currentPage(), "Check Startup");
+        QVERIFY(button);
+        QVERIFY(button->toolTip().contains("MCM"));
+        QVERIFY(childWithText<QPushButton>(currentPage(), "Read Papyrus Log"));
+        window_->grab().save(QDir::temp().filePath("fo4mx_diagnostics_page.png"));
     }
 
     // The status bar says a step is still working after its count is done, with a clock that keeps going.
