@@ -553,7 +553,11 @@ private slots:
         }
         QFile::remove(cache);
         QFile::remove(decisions);
-        writeResults(); // as the other tests expect
+        // As the other tests expect. The app holds the database open (Windows cannot replace an open file).
+        window_.reset();
+        app_.reset();
+        writeResults();
+        start();
     }
 
     // The changes check that runs when a watched file changes is quiet: no summary card, no dialog, a line in
