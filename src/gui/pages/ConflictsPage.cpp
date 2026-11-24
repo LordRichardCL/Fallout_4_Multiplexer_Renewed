@@ -6,6 +6,7 @@
 #include "widgets/Widgets.hpp"
 
 #include <QComboBox>
+#include <QCompleter>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -108,7 +109,10 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
                               "Simple Overrides", "Not Merged", "Critical"});
     plugin_ = new QComboBox;
     plugin_->setMinimumWidth(240);
-    plugin_->setToolTip("Only show conflicts involving this plugin");
+    plugin_->setToolTip("Only show conflicts involving this plugin. Type part of a plugin's name to see the plugins "
+                        "that match, then pick one; clear the text for any plugin.");
+    // Searchable: typing shows every plugin whose name contains the text, wherever it appears in the name.
+    makeNameSearch(plugin_, "Type a plugin name…");
     role_ = new QComboBox;
     role_->addItem("is involved", "involved");
     role_->addItem("wins", "wins");
@@ -270,6 +274,18 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     connect(search_, &QLineEdit::textChanged, this, [this] { reload(); });
     connect(signature_, &QComboBox::currentTextChanged, this, [this] { reload(); });
     connect(plugin_, &QComboBox::currentIndexChanged, this, [this] { reload(); });
+    // Text left as typed: an exact name picks that plugin, an empty box means any plugin, anything else goes
+    // back to the plugin chosen before.
+    connect(plugin_->lineEdit(), &QLineEdit::editingFinished, this, [this] {
+        const QString text = plugin_->lineEdit()->text().trimmed();
+        int i = text.isEmpty() ? 0 : plugin_->findText(text, Qt::MatchFixedString);
+        if (i < 0)
+            i = plugin_->findData(text, Qt::UserRole, Qt::MatchFixedString);
+        if (i >= 0 && i != plugin_->currentIndex())
+            plugin_->setCurrentIndex(i);
+        else
+            plugin_->lineEdit()->setText(plugin_->currentText());
+    });
     connect(role_, &QComboBox::currentIndexChanged, this, [this] { reload(); });
     connect(clear, &QPushButton::clicked, this, [this] { clearFilters(); });
     connect(table_->horizontalHeader(), &QHeaderView::sortIndicatorChanged, this, [this](int column, Qt::SortOrder order) {

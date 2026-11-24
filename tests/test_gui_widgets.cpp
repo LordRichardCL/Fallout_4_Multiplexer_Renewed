@@ -7,6 +7,8 @@
 #include "MainWindow.hpp"
 #include "pages/DiagnosticsPage.hpp"
 #include "pages/ConflictsPage.hpp"
+#include <QComboBox>
+#include <QCompleter>
 #include "db/Database.hpp"
 #include "db/Schema.hpp"
 #include "models/SqlModel.hpp"
@@ -683,6 +685,60 @@ private slots:
         QVERIFY(mod);
         QVERIFY(mod->toolTip().contains("later plugins"));
         window_->grab().save(QDir::temp().filePath("fo4mx_diagnostics_page.png"));
+    }
+
+    // The Conflicts page's plugin filter is a search: typing part of a name (anywhere in it, any case) suggests
+    // the plugins that match; picking one filters the list; clearing the text shows every plugin again.
+    void conflict_plugin_filter_searches_by_name()
+    {
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("INSERT INTO Conflicts (id, origin_plugin_id, object_id, form_id, signature, editor_id, conflict_type, "
+                    "type_name, severity, winner_plugin_id, chain_length, chain, summary, preserved) VALUES "
+                    "(1, 1, 16, '00000010', 'WEAP', 'Pistol', 3, 'Hard Conflict', 'High', 2, 2, 'a, b', '', 0),"
+                    "(2, 1, 17, '00000011', 'ARMO', 'Vest', 2, 'Compatible Merge', 'Low', 3, 2, 'a, b', '', 0)");
+            db.exec("INSERT INTO ConflictPlugins VALUES (1, 1), (1, 2), (2, 1), (2, 3)");
+        }
+        start();
+        window_->showPage("Conflicts");
+        auto* page = window_->findChild<gui::ConflictsPage*>();
+        QVERIFY(page);
+        page->refresh();
+        QAbstractItemModel* model = page->findChild<gui::SqlModel*>();
+        QCOMPARE(model->rowCount(), 2);
+        QComboBox* plugin = nullptr;
+        for (auto* c : page->findChildren<QComboBox*>())
+            if (c->toolTip().startsWith("Only show conflicts involving this plugin"))
+                plugin = c;
+        QVERIFY(plugin && plugin->isEditable() && plugin->completer());
+        QCOMPARE(plugin->completer()->filterMode(), Qt::MatchContains);
+
+        // "pons" is in the middle of Weapons.esp: suggested, and nothing else is.
+        plugin->completer()->setCompletionPrefix("PONS");
+        QCOMPARE(plugin->completer()->completionCount(), 1);
+        QVERIFY(plugin->completer()->currentCompletion().startsWith("Weapons.esp"));
+        emit plugin->completer()->activated(plugin->completer()->currentCompletion());
+        QCOMPARE(plugin->currentData().toString(), QString("Weapons.esp"));
+        QCOMPARE(model->rowCount(), 1);
+        QCOMPARE(model->index(0, 2).data().toString(), QString("Pistol"));
+
+        // Typing a plugin's exact name picks it; clearing the text shows every plugin; other text is undone.
+        plugin->lineEdit()->setText("armour.esp");
+        emit plugin->lineEdit()->editingFinished();
+        QCOMPARE(plugin->currentData().toString(), QString("Armour.esp"));
+        QCOMPARE(model->rowCount(), 1);
+        plugin->lineEdit()->setText("no such plugin");
+        emit plugin->lineEdit()->editingFinished();
+        QCOMPARE(plugin->currentData().toString(), QString("Armour.esp"));
+        plugin->lineEdit()->clear();
+        emit plugin->lineEdit()->editingFinished();
+        QCOMPARE(plugin->currentIndex(), 0);
+        QCOMPARE(model->rowCount(), 2);
+        window_->grab().save(QDir::temp().filePath("fo4mx_conflicts_search.png"));
+        {
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            db.exec("DELETE FROM Conflicts; DELETE FROM ConflictPlugins");
+        }
     }
 
     // The status bar says a step is still working after its count is done, with a clock that keeps going.

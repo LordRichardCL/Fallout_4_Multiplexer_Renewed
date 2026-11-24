@@ -556,6 +556,11 @@ TEST(overwritten_changes_names_the_later_plugins)
     ConflictEntry perk2 = perk;
     perk2.key = FormKey{0, 0x4A0A9};
     perk2.changes = {change(1, ChangeStatus::OmittedLater, kInvalidPlugin)}; // no lostAt: the winner
+    ConflictEntry list = perk; // a list a build merges: the change is in the merged version
+    list.key = FormKey{0, 0x9000};
+    list.sig = Signature("FLST");
+    list.changes = {change(2, ChangeStatus::OmittedLater, 3)};
+    list.changes[0].inMerged = true;
     ConflictEntry book;
     book.key = FormKey{0, 0x1234};
     book.sig = Signature("BOOK");
@@ -566,13 +571,15 @@ TEST(overwritten_changes_names_the_later_plugins)
     other.chain = {0, 3};
     other.winner = 3;
     other.changes = {change(3, ChangeStatus::Survives, kInvalidPlugin)};
-    report.entries = {perk, perk2, book, other};
+    report.entries = {perk, perk2, list, book, other};
 
     auto r = findOverwrittenChanges(s, &report, "skills.ESP");
     CHECK(r.found && r.analysed);
     CHECK_EQ(r.madeFor.size(), size_t(2));
-    CHECK_EQ(r.records, size_t(3));
-    CHECK_EQ(r.changes, size_t(5));
+    CHECK_EQ(r.records, size_t(4));
+    CHECK_EQ(r.changes, size_t(6));
+    CHECK_EQ(r.merged, size_t(1));
+    CHECK_EQ(r.mergedRecords, size_t(1));
     CHECK_EQ(r.lost, size_t(4));
     CHECK_EQ(r.lostRecords, size_t(3));
     CHECK_EQ(r.overwriters.size(), size_t(2));
@@ -593,6 +600,7 @@ TEST(overwritten_changes_names_the_later_plugins)
     CHECK(text.find("Kept until it loads by: Skills Patch.esp") != std::string::npos);
     CHECK(text.find("Changed by plugins made with it as a master") != std::string::npos);
     CHECK(text.find("Load the plugins in the first list before Skills.esp") != std::string::npos);
+    CHECK(text.find("1 more change, in 1 record (lists") != std::string::npos);
 
     // Without the patches' changes; a plugin that is not active; no analysis yet.
     CHECK_EQ(findOverwrittenChanges(s, &report, "Skills.esp", false).lost, size_t(3));

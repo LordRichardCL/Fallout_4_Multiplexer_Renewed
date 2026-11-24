@@ -259,6 +259,7 @@ ConflictEntry ConflictEngine::analyseGroup(Session& session, uint32_t groupIndex
                 if (ev.duplicateOf >= 0)
                     t.duplicateOf = inst[static_cast<size_t>(ev.duplicateOf)].plugin;
                 t.opaque = ev.opaque;
+                t.inMerged = e.fieldsMerged() && isLost(ev.status) && changeHeldBy(merged.fields, chain, ev);
                 const CompatFinding cf = classifyChange(ev, chain, session.defs, cc);
                 t.cls = cf.cls;
                 t.kind = cf.kind;

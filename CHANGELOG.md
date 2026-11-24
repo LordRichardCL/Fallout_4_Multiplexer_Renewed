@@ -25,6 +25,8 @@ Diagnostics
 - Check Startup (Diagnostics): which start-up quests of the build ran or could not attach, the message boxes they hold, popups that found no message, and the MCM menus whose required plugin was relinked, from the Papyrus log, MCM.log and f4se.log's load order. `fo4mx startup-check`.
 - Check a Mod (Diagnostics): for a mod that doesn't seem to work, the later plugins that overwrite its changes (and its patches' changes), with the records, the patch that held them until then, and what to do. `fo4mx overwritten`.
 - Auto-Merger: every rewritten `Plugin|FormID` pair (MCM configs included) is checked to name the same record as before, by type and Editor ID, against the build's map and the records the outputs hold; a mismatch keeps the plugin out. The report says how many pairs were checked.
+- Check a Mod counts apart the changes a build's merge keeps (lists and other merged fields), which are lost only without a build.
+- Conflicts: the Plugin filter is a search. Type any part of a plugin's name to see the plugins that match. The Check a Mod picker searches the same way.
 - The User Guide explains the Faster Loose Files warning that appears while the Diagnostic Recorder is installed (harmless: the recorder passes every file open on).
 
 Faster

@@ -59,7 +59,7 @@ OverwrittenChanges findOverwrittenChanges(const Session& session, const Conflict
     std::map<PluginIndex, Overwriter> by;
     std::map<PluginIndex, const ConflictEntry*> lastEntry; // counts each record once per overwriter
     for (const auto& e : conflicts->entries) {
-        bool touched = false, lostHere = false;
+        bool touched = false, lostHere = false, mergedHere = false;
         for (const auto& t : e.changes) {
             if (!counts(t.source))
                 continue;
@@ -67,6 +67,11 @@ OverwrittenChanges findOverwrittenChanges(const Session& session, const Conflict
             ++r.changes;
             if (!isLost(t.status))
                 continue;
+            if (t.inMerged) {
+                ++r.merged;
+                mergedHere = true;
+                continue;
+            }
             ++r.lost;
             lostHere = true;
             const PluginIndex at = t.lostAt != kInvalidPlugin ? t.lostAt : e.winner;
@@ -95,6 +100,7 @@ OverwrittenChanges findOverwrittenChanges(const Session& session, const Conflict
         }
         r.records += touched;
         r.lostRecords += lostHere;
+        r.mergedRecords += mergedHere;
     }
     for (auto& [p, o] : by)
         r.overwriters.push_back(std::move(o));
@@ -136,14 +142,24 @@ std::string formatOverwrittenChanges(const Session& session, const OverwrittenCh
     }
     line("It and the plugins made for it change " + formatCount(r.records) +
          " records that other plugins change too, with " + formatCount(r.changes) + " changes.");
+    const std::string mergedNote =
+        r.merged ? counted(r.merged, "more change", "more changes") + ", in " +
+                       counted(r.mergedRecords, "record", "records") + " (lists and other fields a build merges), are not in the last plugin's version but are "
+                       "in the merged version a Multiplexer build writes: with a build they are kept."
+                 : std::string();
     if (r.lost == 0) {
-        line("The winning version of every one of them holds all of those changes: no later plugin overwrites them.");
+        line("No later plugin overwrites them: the winning version holds all of those changes" +
+             std::string(r.merged ? ", or the merged version a build writes does." : "."));
+        if (r.merged)
+            line(mergedNote);
         return out;
     }
     line(formatCount(r.lost) + " of those changes, in " + formatCount(r.lostRecords) +
          " records, are not in the winning version: in game those records work as the later plugin has them.");
-    line("This describes the load order as scanned. A Multiplexer build keeps the same winning versions (adding "
-         "only the changes the Compatibility Patch option carries), so the result is the same with or without it.");
+    line("This holds with or without a Multiplexer build: a build keeps the same winning versions for these "
+         "records (adding only the changes the Compatibility Patch option carries).");
+    if (r.merged)
+        line(mergedNote);
     line("");
 
     std::vector<const Overwriter*> unaware, onPurpose;

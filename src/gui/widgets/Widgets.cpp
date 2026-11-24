@@ -6,6 +6,9 @@
 #include "Theme.hpp"
 
 #include <QButtonGroup>
+#include <QComboBox>
+#include <QCompleter>
+#include <QLineEdit>
 #include <QMouseEvent>
 #include <QStyleOption>
 #include <QHBoxLayout>
@@ -933,6 +936,26 @@ QPushButton* makeButton(const QString& text, const char* objectName, const QStri
         b->setIcon(lineIcon(icon, primary ? QColor(0xea, 0xff, 0xf2) : theme::kText, 15));
     }
     return b;
+}
+
+QCompleter* makeNameSearch(QComboBox* combo, const QString& placeholder)
+{
+    combo->setEditable(true);
+    combo->setInsertPolicy(QComboBox::NoInsert);
+    combo->lineEdit()->setPlaceholderText(placeholder);
+    combo->lineEdit()->setClearButtonEnabled(true);
+    auto* search = new QCompleter(combo->model(), combo);
+    search->setCompletionMode(QCompleter::PopupCompletion);
+    search->setCaseSensitivity(Qt::CaseInsensitive);
+    search->setFilterMode(Qt::MatchContains);
+    search->setMaxVisibleItems(15);
+    combo->setCompleter(search);
+    QObject::connect(search, qOverload<const QString&>(&QCompleter::activated), combo, [combo](const QString& text) {
+        const int i = combo->findText(text, Qt::MatchFixedString);
+        if (i >= 0)
+            combo->setCurrentIndex(i);
+    });
+    return search;
 }
 
 } // namespace gui

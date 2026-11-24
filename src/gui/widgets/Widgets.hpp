@@ -15,6 +15,9 @@ class QHBoxLayout;
 class QButtonGroup;
 class QVBoxLayout;
 
+class QComboBox;
+class QCompleter;
+
 namespace gui {
 
 // Large number + caption card used on the dashboard and summary rows.
@@ -237,6 +240,10 @@ QWidget* makePageHeader(const QString& title, const QString& subtitle, const std
 QLabel* makeSectionTitle(const QString& text);
 // A button; with `icon`, a line icon in the button's text colour (light on Primary buttons).
 QPushButton* makeButton(const QString& text, const char* objectName = nullptr, const QString& icon = {});
+
+// Makes a combo box of names searchable: typing shows every item whose text contains what was typed (any case,
+// anywhere in the name), and picking a suggestion selects that item. Returns the completer.
+QCompleter* makeNameSearch(QComboBox* combo, const QString& placeholder);
 // A section title with a "?" holding its explanation.
 QWidget* makeSectionTitle(const QString& text, const QString& help);
 

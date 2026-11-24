@@ -9,7 +9,8 @@
 #include <QDate>
 #include "engine/SupportBundle.hpp"
 #include "engine/OverwrittenChanges.hpp"
-#include <QInputDialog>
+#include <QComboBox>
+#include <QDialogButtonBox>
 #include "engine/BuildComparison.hpp"
 #include "engine/CompilationEngine.hpp"
 #include "util/Platform.hpp"
@@ -398,12 +399,27 @@ QString DiagnosticsPage::pickPlugin(QWidget* parent) const
     QStringList names;
     for (auto pi : p->session().loadOrder)
         names << toQString(p->session().plugins[pi].name);
-    const int current = std::max<qsizetype>(0, names.indexOf(lastChecked_));
-    bool ok = false;
-    const QString name = QInputDialog::getItem(parent, "Check a mod",
-                                               "The plugin of the mod that doesn't seem to work (type to search):",
-                                               names, current, true, &ok);
-    return ok ? name.trimmed() : QString();
+    QDialog dlg(parent);
+    dlg.setWindowTitle("Check a mod");
+    dlg.setMinimumWidth(460);
+    auto* v = new QVBoxLayout(&dlg);
+    v->addWidget(new QLabel("The plugin of the mod that doesn't seem to work. Type part of its name to see the "
+                            "plugins that match:"));
+    auto* combo = new QComboBox;
+    combo->addItems(names);
+    makeNameSearch(combo, "Type a plugin name…");
+    combo->setCurrentIndex(std::max<qsizetype>(0, names.indexOf(lastChecked_)));
+    v->addWidget(combo);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Ok)->setText("Check");
+    v->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted)
+        return {};
+    // The typed text when it is a plugin's name (any case), else the plugin selected.
+    const int typed = combo->findText(combo->currentText().trimmed(), Qt::MatchFixedString);
+    return typed >= 0 ? combo->itemText(typed) : combo->itemText(combo->currentIndex());
 }
 
 QString DiagnosticsPage::overwrittenReading(const QString& plugin) const

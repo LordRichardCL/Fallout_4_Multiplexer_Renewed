@@ -43,6 +43,10 @@ struct OverwrittenChanges {
     size_t changes = 0;     // the changes those plugins make in them
     size_t lost = 0;        // of those, the ones the winning version does not hold
     size_t lostRecords = 0; // records with at least one of them
+    // Not in the winning version, but in the merged version a build writes (lists and other fields it merges):
+    // lost only without a build. Not counted in `lost`.
+    size_t merged = 0;
+    size_t mergedRecords = 0;
     std::vector<Overwriter> overwriters; // most changes first
 };
 

@@ -641,6 +641,11 @@ bool holds(const FieldSet& result, const std::vector<FieldSet>& chain, const Cha
 
 } // namespace
 
+bool changeHeldBy(const FieldSet& result, const std::vector<FieldSet>& chain, const ChangeEvent& c)
+{
+    return holds(result, chain, c);
+}
+
 std::vector<size_t> applyChanges(FieldSet& result, const std::vector<FieldSet>& chain,
                                  const std::vector<const ChangeEvent*>& changes)
 {

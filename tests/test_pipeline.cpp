@@ -10008,12 +10008,15 @@ TEST(conflict_report_traces_changes_not_in_the_winner)
         const std::string text = ReportGenerator::text(ReportKind::Conflict, ctx);
         CHECK(text.find("Changes not in the winning version") != std::string::npos);
         CHECK(text.find("not in ModC.esp, which was not made with ModB.esp as a master") != std::string::npos);
-        // Diagnostics, "a mod doesn't seem to work": ModB's keyword is overwritten by ModC.
+        // The keywords merge: the merged version a build writes holds ModB's keyword (kept through the cache).
+        CHECK(lost->inMerged);
+        // Diagnostics, "a mod doesn't seem to work": not overwritten with a build, only without one.
         const auto ow = findOverwrittenChanges(s, p.conflicts(), "ModB.esp");
-        CHECK_EQ(ow.lost, size_t(1));
-        CHECK(ow.overwriters.size() == 1 && s.pluginName(ow.overwriters[0].plugin) == "ModC.esp");
+        CHECK_EQ(ow.lost, size_t(0));
+        CHECK_EQ(ow.merged, size_t(1));
+        CHECK(ow.overwriters.empty());
         const auto owText = formatOverwrittenChanges(s, ow, "ModB.esp");
-        CHECK(owText.find("LaserSlot") != std::string::npos);
+        CHECK(owText.find("merged version a Multiplexer build writes") != std::string::npos);
         CHECK_EQ(findOverwrittenChanges(s, p.conflicts(), "ModC.esp").lost, size_t(0));
     };
     check(false);

@@ -16,7 +16,7 @@ namespace fo4mx {
 
 namespace {
 
-constexpr uint32_t kFormatVersion = 15; // 15: position of elements added to ordered lists; 14: partial structs described from complete xEdit layouts; 13: struct members traced one by one; 12: change ids; 11: compatibility classes; 10: change provenance of conflicts; 9: IPDS PNAM read per subrecord; 8: raw source value of every described reference; // 7: Version Control Info of every record; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
+constexpr uint32_t kFormatVersion = 16; // 16: lost changes held by the merged version; 15: position of elements added to ordered lists; 14: partial structs described from complete xEdit layouts; 13: struct members traced one by one; 12: change ids; 11: compatibility classes; 10: change provenance of conflicts; 9: IPDS PNAM read per subrecord; 8: raw source value of every described reference; // 7: Version Control Info of every record; // 6: opaque spans and their origin plugin; // 2: merges against own masters; 3: Editor IDs of all compressed records;
                                        // 4: record-level classification of types that are not merged;
                                        // 5: record placement (cells, worldspaces, topics)
 
@@ -615,7 +615,7 @@ std::vector<uint8_t> serializeConflict(const Session& session, const ConflictEnt
         plugins(t.keptBy);
         plugins(t.competesWith);
         optional(t.duplicateOf);
-        w.write<uint8_t>(t.opaque ? 1 : 0);
+        w.write<uint8_t>((t.opaque ? 1 : 0) | (t.inMerged ? 2 : 0));
         w.write<uint8_t>(static_cast<uint8_t>(t.cls));
         w.write<uint8_t>(static_cast<uint8_t>(t.kind));
         writeString(w, t.rule);
@@ -684,7 +684,9 @@ std::optional<ConflictEntry> deserializeConflict(const Session& session, std::sp
             t.keptBy = plugins();
             t.competesWith = plugins();
             t.duplicateOf = optional();
-            t.opaque = r.read<uint8_t>() != 0;
+            const uint8_t bits = r.read<uint8_t>();
+            t.opaque = bits & 1;
+            t.inMerged = bits & 2;
             t.cls = static_cast<CompatClass>(r.read<uint8_t>());
             t.kind = static_cast<CompatKind>(r.read<uint8_t>());
             t.rule = readString(r);

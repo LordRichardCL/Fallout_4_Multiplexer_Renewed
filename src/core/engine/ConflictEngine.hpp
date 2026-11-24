@@ -67,6 +67,9 @@ struct TracedChange {
     std::vector<PluginIndex> competesWith;  // versions not made against each other that changed it differently
     PluginIndex duplicateOf = kInvalidPlugin; // an unrelated version that added the same element
     bool opaque = false;                    // undescribed bytes: the difference is not understood
+    // Not in the winning version, but in the merged version a build writes for a record whose fields it merges
+    // (lists and other mergeable fields): only the load order without a build loses it.
+    bool inMerged = false;
     // Compatibility analysis (engine/Compatibility): whether carrying it forward matches a documented rule.
     CompatClass cls = CompatClass::Unknown;
     CompatKind kind = CompatKind::Unsupported;
