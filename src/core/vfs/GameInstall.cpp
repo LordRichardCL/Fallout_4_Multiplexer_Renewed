@@ -235,6 +235,8 @@ void readVortexDeployment(ResolvedInstall& out)
         return;
     try {
         auto doc = json::Value::parse(readText(manifest));
+        if (const auto staging = doc["stagingPath"].asString(); !staging.empty())
+            out.vortexStaging = utf8ToPath(staging);
         for (const auto& f : doc["files"].asArray()) {
             auto rel = f["relPath"].asString();
             auto src = f["source"].asString();

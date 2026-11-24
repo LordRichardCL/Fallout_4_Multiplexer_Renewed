@@ -8,6 +8,7 @@
 #include "engine/CompilationResult.hpp"
 #include "engine/Exporter.hpp"
 #include "engine/Pipeline.hpp"
+#include "util/Json.hpp"
 #include "engine/OverwrittenChanges.hpp"
 #include "engine/SwitchBack.hpp"
 #include "db/DatabaseWriter.hpp"
@@ -9112,6 +9113,81 @@ TEST(relinked_configs_must_win_before_switching_over)
     d = PostCompilation::check(p.session(), *p.compiledOutput(), r);
     CHECK(d.relinkedNotLoaded.empty());
     CHECK(d.blockers.empty());
+}
+
+// Vortex deploys only the winning copy of each file. When an earlier build's rewritten MCM config wins (as it
+// should), the mod's own config is only in Vortex's staging folder: it is read from there, so the next build
+// finds the plugin's references and rewrites the config again. Without any original to read, the plugin stays
+// in the load order instead of compiling with the config unseen (owner's build of 24 Nov: 212 files lost their
+// rewritten copies this way, among them 75 MCM configs that then named switched-off plugins).
+TEST(earlier_copy_under_vortex_reads_the_original_from_staging)
+{
+    auto root = referenceInstall("relink_vortex_staging");
+    auto data = root / "Game" / "Data";
+    const std::string original =
+        "{\"modName\": \"ModS\", \"pluginRequirements\": [\"ModS.esp\"],\n"
+        " \"content\": [{\"valueOptions\": {\"sourceType\": \"GlobalValue\", \"sourceForm\": \"ModS.esp|812\"}}]}\n";
+    const auto config = data / "MCM" / "Config" / "ModS" / "config.json";
+    writeFile(config, original);
+    auto cfg = configFor(root);
+    cfg.install.kind = InstallKind::Vortex;
+    cfg.compile.autoMerge = true;
+    std::string copy;
+    {
+        Pipeline p(cfg);
+        p.scan();
+        p.analyse();
+        CHECK(p.compile());
+        p.exportOutputs();
+        copy = slurpFile(p.exportResult()->directory / "mcm" / "config" / "mods" / "config.json");
+        CHECK(!copy.empty() && copy.find("ModS.esp") == std::string::npos);
+    }
+    // Deployed: the copy wins in Data; the original and the copy are in their mods' staging folders.
+    const auto staging = root / "Vortex" / "staging";
+    writeFile(staging / "ModS Mod" / "MCM" / "Config" / "ModS" / "config.json", original);
+    writeFile(staging / "Multiplexer Output" / "MCM" / "Config" / "ModS" / "config.json", copy);
+    writeFile(config, copy);
+    auto deployment = [&] {
+        json::Value files{json::Array{}};
+        json::Value f{json::Object{}};
+        f.set("relPath", "MCM\\Config\\ModS\\config.json");
+        f.set("source", "Multiplexer Output");
+        files.push(f);
+        json::Value doc{json::Object{}};
+        doc.set("stagingPath", pathToUtf8(staging));
+        doc.set("files", files);
+        writeFile(data / "vortex.deployment.json", doc.dump(2));
+    };
+    deployment();
+    auto modsStatus = [&](bool expectCompiled) {
+        Pipeline p(cfg);
+        p.scan();
+        const auto& s = p.session();
+        bool requirement = false, pair = false, ownCopyOnly = false;
+        for (const auto* r : referencesOf(s, "ModS.esp")) {
+            requirement |= r->context == std::string("MCM pluginRequirements");
+            pair |= r->context == std::string("Plugin|FormID pair");
+            ownCopyOnly |= r->context == std::string("earlier build's copy without its original");
+        }
+        if (expectCompiled) {
+            CHECK(requirement && pair && !ownCopyOnly);
+            p.analyse();
+            CHECK(p.compile());
+            CHECK(p.compiledOutput()->isCompiled(s.findPlugin("ModS.esp")->index));
+            bool planned = false;
+            for (const auto& f : p.autoMerge()->files)
+                planned |= f.path == "mcm\\config\\mods\\config.json" && f.planned;
+            CHECK(planned);
+        } else {
+            CHECK(ownCopyOnly && !requirement);
+            CHECK(s.findPlugin("ModS.esp")->eligibility != Eligibility::Eligible);
+        }
+    };
+    modsStatus(true);
+
+    // No original anywhere (not in Data, not in staging): fail closed.
+    std::filesystem::remove_all(staging / "ModS Mod");
+    modsStatus(false);
 }
 
 // Every rewritten "Plugin|FormID" pair is checked to name the same record as before: the type and Editor

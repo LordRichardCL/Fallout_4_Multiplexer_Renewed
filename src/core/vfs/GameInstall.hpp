@@ -58,6 +58,9 @@ struct ResolvedInstall {
     IniFile ini;
     std::string gameVersion;
     std::unordered_map<std::string, std::string> vortexOwners; // normalised path -> Vortex mod
+    // Vortex's staging folder (vortex.deployment.json "stagingPath"): every installed mod's own files, also
+    // those that lose a conflict and are therefore not in the Data folder.
+    std::filesystem::path vortexStaging;
     std::vector<std::string> warnings;
 
     // Archives the engine loads from INI settings, in load order.

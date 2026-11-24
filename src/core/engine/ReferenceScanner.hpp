@@ -39,7 +39,10 @@ public:
     static PluginNames pluginNames(const Session& session);
 
     // The file's content as the load order provides it without the Auto-Merger's own copies
-    // (Session::relinkedCopies): the winning source that is not such a copy.
+    // (Session::relinkedCopies): the winning source that is not such a copy. Under Vortex, whose Data folder
+    // holds only the winning copy, the original comes from Vortex's staging folder when the winning copy is
+    // the Auto-Merger's. Throws kOnlyOwnCopy when no original can be read.
+    static constexpr const char* kOnlyOwnCopy = "only the Auto-Merger's own copy provides this file";
     static std::vector<uint8_t> readOriginal(const Session& session, const AssetEntry& entry,
                                              size_t maxBytes = 64u * 1024 * 1024);
     // The index's (lowercase) path of that same source with its file name as spelled on disk, or

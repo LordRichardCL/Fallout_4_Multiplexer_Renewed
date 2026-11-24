@@ -178,9 +178,19 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $zip = "Fallout4MultiplexerRenewed-$tag-windows-x64.zip"
-          Compress-Archive -Path package/Fallout4MultiplexerRenewed/* -DestinationPath $zip
-          # The tag's section of CHANGELOG.md is the release text.
-          $notes = (Get-Content CHANGELOG.md -Raw) -split "(?m)^## " | Where-Object { $_ -like "*$($tag.TrimStart('v'))*" } | Select-Object -First 1
+          if ($tag -match '-hotfix\d+$') {
+            # A hotfix replaces only the programs of the release it fixes: extracted over that release's folder.
+            $hot = "hotfix/Fallout4MultiplexerRenewed"
+            New-Item -ItemType Directory -Force -Path $hot | Out-Null
+            Copy-Item package/Fallout4MultiplexerRenewed/Fallout4MultiplexerRenewed.exe, package/Fallout4MultiplexerRenewed/fo4mx.exe, CHANGELOG.md $hot
+            Copy-Item docs/release/HOTFIX_README.txt "$hot/README - Hotfix.txt"
+            Compress-Archive -Path $hot -DestinationPath $zip
+          } else {
+            Compress-Archive -Path package/Fallout4MultiplexerRenewed/* -DestinationPath $zip
+          }
+          # The tag's section of CHANGELOG.md is the release text: the section whose heading starts with it.
+          $ver = $tag.TrimStart('v')
+          $notes = (Get-Content CHANGELOG.md -Raw) -split "(?m)^## " | Where-Object { $_.StartsWith("$ver ") } | Select-Object -First 1
           if (-not $notes) { $notes = "See CHANGELOG.md." }
           Set-Content -Path release-notes.md -Value ("## " + $notes)
           # A release made by hand on GitHub (which creates the tag) gets the package attached; its text is kept.

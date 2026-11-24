@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <unordered_map>
 #include <unordered_set>
@@ -149,6 +150,7 @@ enum class Fact {
     RecordScriptString,  // a script property in a plugin's record holds the file name (VMAD string)
     Ss2AddonFilename,    // a Sim Settlements 2 add-on config's sAddonFilename naming its own plugin
     PluginIni,           // Data\<plugin>.ini: read by the game only while that plugin is active
+    OwnCopyOnly,         // an earlier build's rewritten copy whose original cannot be read
     PrecombineGeometry,  // <plugin> - Geometry.csg, <plugin>.cdx: "clean" precombines' shared geometry
 };
 
@@ -182,6 +184,12 @@ Rule rule(Fact f)
                 "through a variable or another script)"};
     case Fact::PexUnused:
         return {K::Papyrus, C::Safe, "string table", "in the script's string table but not used by its code"};
+    case Fact::OwnCopyOnly:
+        return {K::Config, C::Unknown, "earlier build's copy without its original",
+                "the file the game loads is the copy an earlier build rewrote for this plugin, and the mod's own "
+                "version cannot be read (not in the Data folder, the mod manager's folders or Vortex's staging "
+                "folder), so what it does with the plugin cannot be established: the plugin stays in the load "
+                "order. Reinstall the mod that provides the file, or let it win the file conflict, and scan again"};
     case Fact::PexUnreadable:
         return {K::Papyrus, C::Unknown, "unreadable script",
                 "the script could not be read completely, so its use of the name cannot be established"};
@@ -615,6 +623,91 @@ std::pair<size_t, size_t> jsonValue(std::string_view text, size_t from, size_t t
 }
 } // namespace
 
+namespace {
+
+// The mod folders of a Vortex staging folder, each with the lowercase names of its top-level entries
+// (listed once per staging folder, on first use; reads run in parallel).
+struct StagingMod {
+    std::filesystem::path dir;
+    std::string name;
+    std::unordered_set<std::string> top;
+};
+const std::vector<StagingMod>& stagingMods(const std::filesystem::path& staging)
+{
+    static std::mutex m;
+    static std::map<std::filesystem::path, std::vector<StagingMod>> cache;
+    std::lock_guard<std::mutex> lock(m);
+    auto [it, added] = cache.try_emplace(staging);
+    if (added) {
+        std::error_code ec;
+        for (const auto& mod : std::filesystem::directory_iterator(staging, ec)) {
+            if (!mod.is_directory(ec))
+                continue;
+            StagingMod sm{mod.path(), pathToUtf8(mod.path().filename()), {}};
+            for (const auto& e : std::filesystem::directory_iterator(mod.path(), ec))
+                sm.top.insert(toLower(pathToUtf8(e.path().filename())));
+            it->second.push_back(std::move(sm));
+        }
+    }
+    return it->second;
+}
+
+// The original of a file whose only copy in the Data folder is the Auto-Merger's (Vortex deploys only the
+// winning copy of each file): the copies other installed mods keep in Vortex's staging folder. Exactly one
+// distinct content, else it cannot be told which the game would use without the build's copy (throws).
+std::optional<std::vector<uint8_t>> originalFromVortexStaging(const Session& session, const AssetEntry& entry,
+                                                              uint64_t ownHash, size_t maxBytes)
+{
+    const auto& staging = session.install.vortexStaging;
+    const auto& w = entry.winner();
+    if (staging.empty() || w.archive != kLooseFile || w.entry >= session.vfs.files().size())
+        return std::nullopt;
+    const std::string rel = session.vfs.files()[w.entry].relativePath;
+    const std::string top = toLower(rel.substr(0, rel.find('\\')));
+    const auto owner = session.install.vortexOwners.find(normalizeAssetPath(rel));
+    std::filesystem::path relPath;
+    for (size_t b = 0, e; b <= rel.size(); b = e + 1) {
+        e = rel.find('\\', b);
+        if (e == std::string::npos)
+            e = rel.size();
+        relPath /= utf8ToPath(rel.substr(b, e - b));
+    }
+    std::map<uint64_t, std::pair<std::vector<uint8_t>, std::vector<std::string>>> found; // content -> (bytes, mods)
+    for (const auto& mod : stagingMods(staging)) {
+        if (!mod.top.count(top) || (owner != session.install.vortexOwners.end() && iequals(owner->second, mod.name)))
+            continue;
+        std::error_code ec;
+        const auto file = mod.dir / relPath;
+        if (!std::filesystem::is_regular_file(file, ec))
+            continue;
+        std::ifstream in(file, std::ios::binary);
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        const uint64_t h = fnv1a64(bytes.data(), bytes.size());
+        if (ownHash != 0 && h == ownHash)
+            continue; // the same copy, installed again under another mod
+        auto& f = found[h];
+        if (f.second.empty())
+            f.first = std::move(bytes);
+        f.second.push_back(mod.name);
+    }
+    if (found.empty())
+        return std::nullopt;
+    if (found.size() > 1) {
+        std::string mods;
+        for (const auto& [h, f] : found)
+            mods += (mods.empty() ? "" : ", ") + f.second.front();
+        throw std::runtime_error("only the Auto-Merger's own copy is in the Data folder, and several mods in Vortex's "
+                                 "staging folder provide different originals (" + mods +
+                                 "): which one the game would use without it cannot be told");
+    }
+    auto bytes = std::move(found.begin()->second.first);
+    if (maxBytes && bytes.size() > maxBytes)
+        bytes.resize(maxBytes);
+    return bytes;
+}
+
+} // namespace
+
 std::vector<uint8_t> ReferenceScanner::readOriginal(const Session& session, const AssetEntry& entry, size_t maxBytes)
 {
     if (entry.sources.empty())
@@ -628,7 +721,11 @@ std::vector<uint8_t> ReferenceScanner::readOriginal(const Session& session, cons
         if (!ours)
             return bytes;
     }
-    throw std::runtime_error("only the Auto-Merger's own copy provides this file");
+    // Vortex: the Data folder holds only the winning copy, here the Auto-Merger's; the original is in the
+    // staging folder of the mod that provides it.
+    if (auto staged = originalFromVortexStaging(session, entry, copy->second, maxBytes))
+        return std::move(*staged);
+    throw std::runtime_error(std::string(kOnlyOwnCopy));
 }
 
 std::string ReferenceScanner::originalSpelling(const Session& session, const AssetEntry& entry)
@@ -1266,6 +1363,18 @@ void ReferenceScanner::scan(Session& session, const ReferenceScanOptions& option
                                    &members[i], &summaries[i]);
             } catch (const std::exception& ex) {
                 spdlog::debug("Could not read {}: {}", path, ex.what());
+                // An earlier build's copy with no original to read: what it was made for is known from that
+                // build's list. Those plugins stay out rather than compile with the file unseen (fail closed).
+                if (std::string_view(ex.what()).find("Auto-Merger's own copy") != std::string_view::npos)
+                    if (auto it = session.relinkedPlugins.find(toLower(path)); it != session.relinkedPlugins.end())
+                        for (const auto& n : it->second)
+                            if (auto p = names.find(n); p != names.end()) {
+                                auto r = make(Fact::OwnCopyOnly, p->second, toLower(path), "File",
+                                              session.plugins[p->second].name, {});
+                                r.reason += " (" + std::string(ex.what()) + ")";
+                                r.source = idx.modName(e.winner());
+                                found[i].push_back(std::move(r));
+                            }
             }
             size_t n = ++scanned;
             if ((n & 0xFF) == 0 || n == candidates.size())

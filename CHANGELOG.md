@@ -7,6 +7,16 @@ Release policy (alpha):
 - Each entry has a **Tested** line: build verified, confirmed in game, or not yet.
 - Anything not yet confirmed in game stays off by default (Advanced preset).
 
+## 0.2.0-alpha-hotfix1 (24 Nov 2026) — Hotfix 1 for 0.2.0-alpha
+
+**Install:** extract `Fallout4MultiplexerRenewed-v0.2.0-alpha-hotfix1-windows-x64.zip` over the 0.2.0-alpha folder and replace the files (only `Fallout4MultiplexerRenewed.exe` and `fo4mx.exe` change). The app shows "v0.2.0 alpha · Hotfix 1". Then scan, compile and export again, install the new output package as before, and start a new game or load a save made with the build.
+
+**Tested:** automated tests (a Vortex install whose Data folder holds only the earlier build's rewritten MCM config, its original only in Vortex's staging folder) and against the owner's build of 24 Nov 2026, whose report showed the problem; not yet a new build on the real load order.
+
+Fixed
+- **MCM menus showing "Missing plugins" after a rebuild (Vortex).** Vortex puts only the winning copy of each file in the Data folder. When the previous build's rewritten copies of scripts and configs were correctly deployed, the next scan found no original to read beside them and left those files out without a word: the plugins they name compiled without their references, the new package had no rewritten copies, and once it replaced the old one the mods' original configs named plugins that were switched off. On the owner's load order 212 files were affected (75 MCM configs, 96 F4SE configs such as RobCo Patcher and LooksMenu presets, 29 scripts and 12 INIs). The original is now read from Vortex's staging folder (`stagingPath` in vortex.deployment.json), so the rebuild rewrites them again.
+- When no original can be read at all, the plugins the earlier copy was made for stay in the load order with the reason given (fail closed), instead of compiling with the file unseen.
+
 ## 0.2.0-alpha (24 Nov 2026)
 
 **Tested:** build verified on 22 Nov 2026 (Vortex, Fallout 4 1.10.163, 2,270 plugins: 1,401 compiled into 7 outputs and a patch, 310,224 new FormIDs, 0 validation errors, written plugins verified, Apply to Game switched the load order over). In game: first session (about 9 minutes from a save, normal quit, all 421 archives loaded, no Papyrus failures tied to compiling); a second build with every setting on (1,668 compiled) ran a new game for about 30 minutes without a crash, all 689 archives loaded. A third build the same night (1,668 compiled into 5 outputs and a patch, 791,783 new FormIDs, 0 validation errors, 153 full and 623 light plugin slots) started a new game and played through character creation and Vault 111 into the Commonwealth (about 21 minutes, six saves, normal quit): all 689 archives loaded, no script property pointed at a missing record in the outputs, and the script errors on output records are ones the source mods also have. A baseline comparison without the build is still to follow. On 24 Nov 2026 Switch Back restored the original plugins on the same real install. The changes added on 24 Nov (Check a Mod, the relinked MCM form check, merged and carried changes in Check a Mod, the searchable plugin filter, Winner for Listed, and the Check Startup fixes) are covered by the automated tests and were run against that session's logs, but not yet by a new build on the real load order.

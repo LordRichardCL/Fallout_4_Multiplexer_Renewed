@@ -101,6 +101,8 @@ public:
 
     // Copies an earlier export wrote into `dir`: data-relative path -> content hash (0: not recorded).
     static std::unordered_map<std::string, uint64_t> readManifest(const std::filesystem::path& dir);
+    // The plugins each listed copy was rewritten for (lowercase path -> lowercase plugin names).
+    static std::unordered_map<std::string, std::vector<std::string>> readManifestPlugins(const std::filesystem::path& dir);
 
     // Removes every copy the manifest lists (unless changed since) and the manifest.
     static size_t rollback(const std::filesystem::path& outputDir);

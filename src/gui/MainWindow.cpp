@@ -175,7 +175,8 @@ MainWindow::MainWindow(AppController* app, QWidget* parent) : QMainWindow(parent
     nl->addWidget(glossary, 0, Qt::AlignLeft);
     auto* f1 = new QShortcut(QKeySequence(Qt::Key_F1), this);
     connect(f1, &QShortcut::activated, this, [this] { showGlossary(this); });
-    auto* version = new QLabel("v" FO4MX_VERSION " alpha · by Romewolf");
+    auto* version = new QLabel(FO4MX_HOTFIX ? QString("v" FO4MX_VERSION " alpha · Hotfix %1 · by Romewolf").arg(FO4MX_HOTFIX)
+                                            : QString("v" FO4MX_VERSION " alpha · by Romewolf"));
     version->setObjectName("NavFooter");
     nl->addWidget(version);
     h->addWidget(navPanel);

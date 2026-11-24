@@ -6,6 +6,8 @@
 - Work on a **new game** or a save you can afford to lose. Compiled records get new FormIDs.
 - Fallout 4 **1.10.163** (Old Gen) is the supported runtime.
 
+**Hotfixes.** A hotfix (for example "0.2.0-alpha Hotfix 1") is a small download that replaces only the two programs of the release it fixes. Extract it over the release's folder and replace the files; the bottom left of the app then shows the hotfix number. Each hotfix says in its README and in CHANGELOG.md whether you need to compile and export again.
+
 ## 1. Setup
 
 ![Setup](images/00-setup.png)

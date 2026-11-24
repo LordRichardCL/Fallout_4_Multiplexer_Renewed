@@ -307,6 +307,9 @@ public:
     // Copies the Auto-Merger wrote into the output folder (path -> content hash, from its manifest).
     // They are never read as originals.
     std::unordered_map<std::string, uint64_t> relinkedCopies;
+    // The plugins each of those copies was made for (lowercase path -> lowercase plugin names), from the same
+    // list: what a copy names when its original cannot be read.
+    std::unordered_map<std::string, std::vector<std::string>> relinkedPlugins;
     // Loose copies an earlier export wrote to keep archive winners (path -> content hash): not sources.
     std::unordered_map<std::string, uint64_t> archiveWinnerCopies;
     // Where the previous build's records were read from: the output folder, or the installed package.

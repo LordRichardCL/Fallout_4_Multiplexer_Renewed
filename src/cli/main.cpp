@@ -1123,6 +1123,10 @@ int main(int argc, char** argv)
         Args a = parseArgs(argc, argv);
         log::init(platform::applicationDataDir() / "logs" / "fo4mx.log", a.has("--verbose") || a.has("-v"));
         if (a.command.empty() || a.command == "help" || a.has("--help")) {
+            if (FO4MX_HOTFIX)
+                std::printf("Version %s alpha, Hotfix %d\n", FO4MX_VERSION, FO4MX_HOTFIX);
+            else
+                std::printf("Version %s alpha\n", FO4MX_VERSION);
             std::fputs(kUsage, stdout);
             return a.command.empty() ? 1 : 0;
         }

@@ -195,10 +195,12 @@ void Pipeline::scan(ProgressSink& progress)
             }
     session_->buildRecordsDirectory = outputDir;
     session_->relinkedCopies.clear();
+    session_->relinkedPlugins.clear();
     session_->archiveWinnerCopies.clear();
     session_->registeredArchives.clear();
     if (!outputDir.empty()) {
         session_->relinkedCopies = AutoMerger::readManifest(outputDir);
+        session_->relinkedPlugins = AutoMerger::readManifestPlugins(outputDir);
         session_->archiveWinnerCopies = Exporter::archiveWinnerCopies(outputDir);
         for (const auto& a : Exporter::registeredArchives(outputDir)) // written by earlier versions
             session_->registeredArchives.insert(a);

@@ -432,6 +432,28 @@ std::unordered_map<std::string, uint64_t> AutoMerger::readManifest(const std::fi
     return files;
 }
 
+std::unordered_map<std::string, std::vector<std::string>> AutoMerger::readManifestPlugins(const std::filesystem::path& dir)
+{
+    std::unordered_map<std::string, std::vector<std::string>> out;
+    if (std::ifstream in{dir / kManifest}) {
+        std::string line;
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            if (line.empty() || line[0] == '#')
+                continue;
+            auto cols = split(line, '\t', false);
+            if (cols.size() < 4 || cols[3].empty())
+                continue;
+            auto& names = out[toLower(cols[0])];
+            const std::string name = toLower(cols[3]);
+            if (std::find(names.begin(), names.end(), name) == names.end())
+                names.push_back(name);
+        }
+    }
+    return out;
+}
+
 AutoMergeReport AutoMerger::analyse(const Session& session)
 {
     AutoMergeReport report;
