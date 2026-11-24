@@ -27,6 +27,7 @@ Diagnostics
 - Auto-Merger: every rewritten `Plugin|FormID` pair (MCM configs included) is checked to name the same record as before, by type and Editor ID, against the build's map and the records the outputs hold; a mismatch keeps the plugin out. The report says how many pairs were checked.
 - Check a Mod counts apart the changes a build's merge keeps (lists and other merged fields), which are lost only without a build.
 - Conflicts: the Plugin filter is a search. Type any part of a plugin's name to see the plugins that match. The Check a Mod picker searches the same way.
+- Check Startup reads the plugin list f4se.log has after loading a save (not only after saving one). Without a load order it no longer counts every quest as holding a message box.
 - The User Guide explains the Faster Loose Files warning that appears while the Diagnostic Recorder is installed (harmless: the recorder passes every file open on).
 
 Faster

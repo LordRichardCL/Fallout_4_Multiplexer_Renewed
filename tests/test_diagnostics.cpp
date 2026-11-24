@@ -458,6 +458,29 @@ TEST(startup_check_reads_quests_popups_and_mcm_menus)
     CHECK_EQ(c.notStarted, size_t(1));
     CHECK_EQ(c.seenRunning, size_t(1));
     CHECK_EQ(c.withMessageBoxes, size_t(1));
+    {
+        // The list F4SE writes when a save is loaded reads the same: "(<in the save> -> <now>)", decimal,
+        // light plugins at 0xFE000 + their index (1040384 = FE:0).
+        auto loaded = in;
+        loaded.loadOrder = loadOrderFromF4seLog("loading co-save\nLoading plugin list:\n\t(0 -> 0)\tFallout4.esm\n"
+                                                "\t(1 -> 1)\tModB.esp\n\t(1040384 -> 1040384)\tLight.esl\n"
+                                                "\t(5 -> 2)\tDummy_Plugin_01.esp\nLoading key input event "
+                                                "registrations...\n");
+        CHECK_EQ(loaded.loadOrder.full.size(), size_t(3));
+        CHECK_EQ(loaded.loadOrder.full[2], std::string("Dummy_Plugin_01.esp"));
+        CHECK(loaded.loadOrder.light.size() == 1 && loaded.loadOrder.light[0] == "Light.esl");
+        const auto l = checkStartup(loaded);
+        CHECK(l.outputsActive);
+        CHECK_EQ(l.notStarted, size_t(1));
+        CHECK_EQ(l.seenRunning, size_t(1));
+        // Without any load order the outputs' records cannot be numbered, but the message boxes a quest
+        // holds are still told apart (they are not all FormID 0).
+        auto none = in;
+        none.loadOrder = {};
+        const auto n = checkStartup(none);
+        CHECK(!n.outputsActive);
+        CHECK_EQ(n.withMessageBoxes, size_t(1));
+    }
     const StartupQuest* start = nullptr;
     const StartupQuest* broken = nullptr;
     for (const auto& q : c.quests) {

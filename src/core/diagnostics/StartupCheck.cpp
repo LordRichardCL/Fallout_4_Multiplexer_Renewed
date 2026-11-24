@@ -217,8 +217,10 @@ StartupCheck checkStartup(const StartupCheckInputs& in)
                 outputs.push_back(m.outputPlugin);
         }
     }
-    std::unordered_map<uint32_t, StartupMessage> boxes; // message-box MESG records by runtime FormID
-    std::vector<std::pair<StartupQuest, std::vector<uint32_t>>> quests;
+    // Records by the plugin that defines them and their object ID: found without the game's load order.
+    using ObjectKey = std::pair<std::string, uint32_t>;
+    std::map<ObjectKey, StartupMessage> boxes; // message-box MESG records
+    std::vector<std::pair<StartupQuest, std::vector<ObjectKey>>> quests;
     for (const auto& name : outputs) {
         const auto file = dir / name;
         if (!std::filesystem::exists(file, ec))
@@ -236,6 +238,10 @@ StartupCheck checkStartup(const StartupCheckInputs& in)
         auto runtime = [&](uint32_t fileId) {
             const uint32_t top = fileId >> 24;
             return top < masters.size() ? numbers.id(masters[top].name, fileId) : numbers.id(name, fileId);
+        };
+        auto keyOf = [&](uint32_t fileId) -> ObjectKey {
+            const uint32_t top = fileId >> 24;
+            return {lower(top < masters.size() ? masters[top].name : name), fileId & 0xFFFFFF};
         };
         plugin.forEachRecord([&](const RecordLocation& loc) {
             const Signature sig = loc.header.signature;
@@ -257,7 +263,7 @@ StartupCheck checkStartup(const StartupCheckInputs& in)
                 }
                 if (m.text.size() > 90)
                     m.text = m.text.substr(0, 87) + "...";
-                boxes.emplace(m.formId, std::move(m));
+                boxes.emplace(keyOf(loc.header.formId), std::move(m));
                 return true;
             }
             const auto* dnam = rec.find(Signature{"DNAM"});
@@ -274,9 +280,11 @@ StartupCheck checkStartup(const StartupCheckInputs& in)
             std::vector<uint32_t> objects;
             if (const auto* vmad = rec.find(sig::VMAD))
                 readVmad(vmad->data, q.scripts, objects);
-            for (auto& o : objects)
-                o = runtime(o);
-            quests.emplace_back(std::move(q), std::move(objects));
+            std::vector<ObjectKey> keys;
+            for (uint32_t o : objects)
+                if (o)
+                    keys.push_back(keyOf(o));
+            quests.emplace_back(std::move(q), std::move(keys));
             return true;
         });
     }
@@ -337,10 +345,9 @@ StartupCheck checkStartup(const StartupCheckInputs& in)
 
     for (auto& [q, objects] : quests) {
         ++out.startupQuests;
-        for (uint32_t o : objects)
-            if (auto b = boxes.find(o); b != boxes.end() &&
-                std::none_of(q.messageBoxes.begin(), q.messageBoxes.end(),
-                             [&](const StartupMessage& m) { return m.formId == o; }))
+        std::set<ObjectKey> added;
+        for (const auto& o : objects)
+            if (auto b = boxes.find(o); b != boxes.end() && added.insert(o).second)
                 q.messageBoxes.push_back(b->second);
         if (auto f = bindFailed.find(q.formId); q.formId && f != bindFailed.end()) {
             q.failedScript = f->second;
@@ -541,7 +548,8 @@ RuntimeLoadOrder loadOrderFromF4seLog(std::string_view text)
     RuntimeLoadOrder lo;
     bool inList = false;
     for (const auto& line : splitLines(std::string(text))) {
-        if (line.find("Saving plugin list:") != std::string::npos) {
+        if (line.find("Saving plugin list:") != std::string::npos ||
+            line.find("Loading plugin list:") != std::string::npos) {
             if (!lo.full.empty() || !lo.light.empty())
                 break; // the first list is enough: every save in a session writes the same one
             inList = true;
@@ -549,6 +557,31 @@ RuntimeLoadOrder loadOrderFromF4seLog(std::string_view text)
         }
         if (!inList)
             continue;
+        // Written when a save is loaded: "(<index in the save> -> <index now>)<tab>Name", the index now in
+        // decimal; a light plugin's is 0xFE000 plus its light index.
+        if (const size_t arrow = line.find(" -> "); arrow != std::string::npos && line.find('(') < arrow) {
+            const size_t close = line.find(')', arrow);
+            if (close == std::string::npos)
+                continue;
+            const unsigned long now = std::strtoul(line.c_str() + arrow + 4, nullptr, 10);
+            std::string name = line.substr(close + 1);
+            name.erase(0, name.find_first_not_of(" \t"));
+            while (!name.empty() && (name.back() == ' ' || name.back() == '\t' || name.back() == '\r'))
+                name.pop_back();
+            if (name.empty())
+                continue;
+            if (now >= 0xFE000 && now < 0xFF000) {
+                const size_t i = now - 0xFE000;
+                if (lo.light.size() <= i)
+                    lo.light.resize(i + 1);
+                lo.light[i] = name;
+            } else if (now < 0xFE) {
+                if (lo.full.size() <= now)
+                    lo.full.resize(now + 1);
+                lo.full[now] = name;
+            }
+            continue;
+        }
         const size_t open = line.find('[');
         const size_t close = line.find(']', open == std::string::npos ? 0 : open);
         if (open == std::string::npos || close == std::string::npos || line.find_first_not_of(" \t") != open) {
