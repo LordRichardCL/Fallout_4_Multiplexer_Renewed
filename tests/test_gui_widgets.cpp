@@ -7,6 +7,7 @@
 #include "MainWindow.hpp"
 #include "pages/DiagnosticsPage.hpp"
 #include "pages/ConflictsPage.hpp"
+#include <QMessageBox>
 #include <QComboBox>
 #include <QCompleter>
 #include "db/Database.hpp"
@@ -735,6 +736,34 @@ private slots:
         QCOMPARE(plugin->currentIndex(), 0);
         QCOMPARE(model->rowCount(), 2);
         window_->grab().save(QDir::temp().filePath("fo4mx_conflicts_search.png"));
+
+        // Winner for Listed: off until a plugin is picked; then Weapons.esp wins every listed record it takes part
+        // in (only Pistol), after a confirmation, and Back to automatic undoes it.
+        auto* bulk = childWithText<QPushButton>(page, "Winner for Listed…");
+        QVERIFY(bulk && !bulk->isEnabled());
+        plugin->lineEdit()->setText("Weapons.esp");
+        emit plugin->lineEdit()->editingFinished();
+        QVERIFY(bulk->isEnabled());
+        auto yes = [](QWidget* w) {
+            if (auto* box = qobject_cast<QMessageBox*>(w))
+                box->button(QMessageBox::Yes)->click();
+        };
+        auto savedWinners = [&] {
+            QMap<quint32, QString> m;
+            fo4mx::db::Database db(gui::toPath(dbPath()));
+            auto st = db.prepare("SELECT object_id, winner_plugin FROM UserResolutions");
+            while (st.step())
+                m[quint32(st.columnInt(0))] = QString::fromStdString(st.columnText(1));
+            return m;
+        };
+        whenOpen(yes);
+        bulk->menu()->actions().at(0)->trigger();
+        auto winners = savedWinners();
+        QCOMPARE(winners.size(), 1);
+        QCOMPARE(winners.value(16), QString("Weapons.esp"));
+        whenOpen(yes);
+        bulk->menu()->actions().at(1)->trigger();
+        QVERIFY(savedWinners().isEmpty());
         {
             fo4mx::db::Database db(gui::toPath(dbPath()));
             db.exec("DELETE FROM Conflicts; DELETE FROM ConflictPlugins");

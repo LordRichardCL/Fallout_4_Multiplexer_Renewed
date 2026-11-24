@@ -3,6 +3,8 @@
 #include "engine/ConflictEngine.hpp"
 #include "engine/Session.hpp"
 
+#include <unordered_set>
+
 #include <map>
 #include <string>
 #include <vector>
@@ -47,12 +49,27 @@ struct OverwrittenChanges {
     // lost only without a build. Not counted in `lost`.
     size_t merged = 0;
     size_t mergedRecords = 0;
+    // Not in the winning version, but carried into the last build by the Compatibility Patch option. Not
+    // counted in `lost` either.
+    size_t carried = 0;
+    size_t carriedRecords = 0;
     std::vector<Overwriter> overwriters; // most changes first
 };
 
-// `includeMadeFor`: count the changes of plugins made for it (with it as a master) too.
+struct PatchPlan;
+struct CompiledOutput;
+
+// The change ids (TracedChange::changeId) the last build carried with the Compatibility Patch option: the
+// carried changes of the plan's Ready records, less the records the compiler wrote without the plan (it
+// warns when the plan no longer matches). Empty when the option is off or nothing was compiled.
+std::unordered_set<std::string> changesCarriedByBuild(const PatchPlan* plan, const CompiledOutput* compiled,
+                                                      bool applyPatchPlan);
+
+// `includeMadeFor`: count the changes of plugins made for it (with it as a master) too. `carried`: changes
+// the build carried (changesCarriedByBuild), counted apart from the lost ones.
 OverwrittenChanges findOverwrittenChanges(const Session& session, const ConflictReport* conflicts,
-                                          std::string_view pluginName, bool includeMadeFor = true);
+                                          std::string_view pluginName, bool includeMadeFor = true,
+                                          const std::unordered_set<std::string>* carried = nullptr);
 std::string formatOverwrittenChanges(const Session& session, const OverwrittenChanges& result,
                                      std::string_view pluginName, size_t examplesPerPlugin = 3);
 

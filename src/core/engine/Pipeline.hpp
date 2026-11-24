@@ -96,6 +96,7 @@ public:
     ~Pipeline();
 
     PipelineConfig& config() { return config_; }
+    const PipelineConfig& config() const { return config_; }
     Session& session() { return *session_; }
     const Session& session() const { return *session_; }
 

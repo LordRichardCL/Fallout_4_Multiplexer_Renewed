@@ -5,6 +5,7 @@
 #include <QSet>
 
 class QComboBox;
+class QMenu;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -31,6 +32,10 @@ private:
     void reloadPluginFilter();
     void showConflict(int row);
     void applyResolution();
+    // The plugin in the Plugin filter wins every listed record it takes part in (or they all go back to
+    // automatic): the "Winner when compiling" choice, for the whole list at once.
+    void chooseWinnerForListed(bool automatic);
+    QVector<QPair<QString, quint32>> listedRecordsOf(const QString& plugin) const;
     void clearFilters();
     void showPlan();
     // Reloads the list (review states change) and selects the record that was selected.
@@ -59,6 +64,9 @@ private:
     QLabel* review_;
     QPushButton* accept_;
     QPushButton* acceptAll_;
+    QPushButton* bulkWinner_ = nullptr;
+    QString listFrom_;        // the list's FROM ... WHERE, as last loaded
+    QVariantList listBinds_;
     QPushButton* reviewThem_;
     QPushButton* next_;
     QLabel* reviewIcon_;

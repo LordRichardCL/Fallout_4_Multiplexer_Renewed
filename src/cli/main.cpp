@@ -720,7 +720,11 @@ int cmdOverwritten(const Args& a)
     Pipeline p(cfg);
     p.scan();
     p.analyse();
-    const auto r = findOverwrittenChanges(p.session(), p.conflicts(), a.positional[1]);
+    // What the latest build carried with the Compatibility Patch option: its export, else a fresh compile.
+    if (cfg.compile.applyPatchPlan && !p.compiledOutput()) // scan() reopens the latest export when it fits
+        p.compile();
+    const auto carried = changesCarriedByBuild(p.patchPlan(), p.compiledOutput(), cfg.compile.applyPatchPlan);
+    const auto r = findOverwrittenChanges(p.session(), p.conflicts(), a.positional[1], true, &carried);
     std::fputs(formatOverwrittenChanges(p.session(), r, a.positional[1],
                                         a.has("--examples") ? std::stoul(a.get("--examples")) : 3)
                    .c_str(),

@@ -554,6 +554,39 @@ void AppController::saveResolution(const QString& originPlugin, quint32 objectId
     }
 }
 
+void AppController::saveResolutions(const QVector<QPair<QString, quint32>>& records, const QString& winnerPlugin)
+{
+    db::Database db(activeDatabase_);
+    db.exec("BEGIN");
+    db::DatabaseWriter w(db);
+    for (const auto& [origin, objectId] : records)
+        w.saveResolution(ss(origin), objectId, ss(winnerPlugin));
+    db.exec("COMMIT");
+    if (pipeline_) {
+        auto& s = pipeline_->session();
+        auto win = s.findPlugin(ss(winnerPlugin));
+        for (const auto& [origin, objectId] : records)
+            if (auto o = s.findPlugin(ss(origin)); o && win)
+                pipeline_->config().compile.forcedWinners[FormKey{o->index, objectId}.packed()] = win->index;
+    }
+}
+
+void AppController::clearResolutions(const QVector<QPair<QString, quint32>>& records)
+{
+    db::Database db(activeDatabase_);
+    db.exec("BEGIN");
+    db::DatabaseWriter w(db);
+    for (const auto& [origin, objectId] : records)
+        w.clearResolution(ss(origin), objectId);
+    db.exec("COMMIT");
+    if (pipeline_) {
+        auto& s = pipeline_->session();
+        for (const auto& [origin, objectId] : records)
+            if (auto o = s.findPlugin(ss(origin)))
+                pipeline_->config().compile.forcedWinners.erase(FormKey{o->index, objectId}.packed());
+    }
+}
+
 bool AppController::setPlanDecision(const QString& originPlugin, quint32 objectId, const QString& changeId, int action)
 {
     if (busy_ || !pipeline_ || !pipeline_->patchPlan())

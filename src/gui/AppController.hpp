@@ -91,6 +91,9 @@ public:
     void applySelection();
     void saveResolution(const QString& originPlugin, quint32 objectId, const QString& winnerPlugin);
     void clearResolution(const QString& originPlugin, quint32 objectId);
+    // The same for many records at once (one transaction): `records` holds (origin plugin, object ID).
+    void saveResolutions(const QVector<QPair<QString, quint32>>& records, const QString& winnerPlugin);
+    void clearResolutions(const QVector<QPair<QString, quint32>>& records);
     // The compatibility patch plan: the user's choice for one change (action -1: back to the default,
     // 0: carry forward, 1: keep the winner's value). Saved next to the database. False while a task runs or
     // before Analyse.

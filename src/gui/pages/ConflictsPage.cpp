@@ -6,6 +6,7 @@
 #include "widgets/Widgets.hpp"
 
 #include <QComboBox>
+#include <QMenu>
 #include <QCompleter>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -120,6 +121,16 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     role_->setToolTip("Involved: the plugin edits the record. Wins: it is the last plugin to edit it. "
                       "Loses: it edits the record but another plugin wins.");
     auto* clear = makeButton("Clear Filters", nullptr, "refresh");
+    bulkWinner_ = makeButton("Winner for Listed…", nullptr, "conflicts");
+    bulkWinner_->setToolTip("Pick a plugin in the Plugin filter first. Makes that plugin's version win every listed "
+                            "record it takes part in when compiling (the \"Winner when compiling\" choice, for the "
+                            "whole list), or puts them all back to automatic.");
+    auto* bulkMenu = new QMenu(bulkWinner_);
+    auto* makeWin = bulkMenu->addAction("Make the plugin win every listed record");
+    auto* backAuto = bulkMenu->addAction("Back to automatic for every listed record");
+    bulkWinner_->setMenu(bulkMenu);
+    connect(makeWin, &QAction::triggered, this, [this] { chooseWinnerForListed(false); });
+    connect(backAuto, &QAction::triggered, this, [this] { chooseWinnerForListed(true); });
     acceptAll_ = makeButton("Accept Automatic for All", nullptr, "check");
     acceptAll_->setToolTip("Every change still waiting for your choice keeps the winning plugin's value, as compiling "
                            "does anyway, and stops waiting. Choices you already made are kept.");
@@ -149,6 +160,7 @@ ConflictsPage::ConflictsPage(AppController* app, QWidget* parent) : Page(app, pa
     plugin_->setMinimumWidth(320);
     filters->addWidget(plugin_);
     filters->addWidget(role_);
+    filters->addWidget(bulkWinner_);
     filters->addStretch();
     filters->addWidget(clear);
     l->addLayout(filters);
@@ -465,6 +477,9 @@ void ConflictsPage::reload()
                          "LEFT JOIN ConflictReview r ON r.origin_plugin_id = c.origin_plugin_id AND r.object_id = c.object_id "
                          "LEFT JOIN UserResolutions ur ON ur.origin_plugin = o.name COLLATE NOCASE AND ur.object_id = c.object_id "
                          "WHERE " + where;
+    listFrom_ = from;
+    listBinds_ = binds;
+    bulkWinner_->setEnabled(!plugin_->currentData().toString().isEmpty());
     QString sql = "SELECT c.form_id AS FormID, c.signature AS Type, c.editor_id AS 'Editor ID', c.type_name AS Conflict, "
                   "CASE c.preserved WHEN 1 THEN 'Not merged' WHEN 2 THEN 'Winner only' ELSE 'Merged' END AS Handling, c.severity AS Severity, " + kReview + " AS Review, p.name AS 'Winning Plugin', (SELECT g.output_plugin FROM "
                   "GeneratedRecords g WHERE g.origin_plugin_id = c.origin_plugin_id AND g.object_id = c.object_id "
@@ -897,6 +912,55 @@ void ConflictsPage::showPlan()
     plan_->horizontalHeader()->resizeSection(5, 220);
     plan_->horizontalHeader()->setMinimumSectionSize(60);
     plan_->setColumnWidth(6, 230);
+}
+
+QVector<QPair<QString, quint32>> ConflictsPage::listedRecordsOf(const QString& plugin) const
+{
+    QVector<QPair<QString, quint32>> out;
+    QSqlDatabase db = app_->readDb();
+    if (!db.isOpen() || listFrom_.isEmpty())
+        return out;
+    // Every record of the list (not only the rows loaded so far) that the plugin takes part in.
+    QSqlQuery q(db);
+    q.prepare("SELECT o.name, c.object_id" + listFrom_ +
+              " AND EXISTS (SELECT 1 FROM ConflictPlugins cx WHERE cx.conflict_id = c.id AND cx.plugin_id = "
+              "(SELECT id FROM Plugins WHERE name = ?))");
+    for (int i = 0; i < listBinds_.size(); ++i)
+        q.bindValue(i, listBinds_[i]);
+    q.bindValue(listBinds_.size(), plugin);
+    if (q.exec())
+        while (q.next())
+            out.push_back({q.value(0).toString(), q.value(1).toUInt()});
+    return out;
+}
+
+void ConflictsPage::chooseWinnerForListed(bool automatic)
+{
+    const QString plugin = plugin_->currentData().toString();
+    if (plugin.isEmpty())
+        return;
+    const auto records = listedRecordsOf(plugin);
+    if (records.isEmpty()) {
+        QMessageBox::information(this, "Winner for listed records", plugin + " takes part in none of the listed records.");
+        return;
+    }
+    const QString n = formatCount(records.size()) + (records.size() == 1 ? " record" : " records");
+    const QString text =
+        automatic ? "Put the winner of " + n + " back to automatic? The next compilation decides each winner itself "
+                                               "(the load order, merged where it can)."
+                  : "Make " + plugin + "'s version win " + n + " when compiling, whatever the load order?\n\n"
+                    "Its whole version of each record is used: what the other plugins changed in these records is "
+                    "lost, including changes the build would have merged or carried. You can undo it here (Back to "
+                    "automatic) or record by record.";
+    if (QMessageBox::question(this, "Winner for listed records", text) != QMessageBox::Yes)
+        return;
+    if (automatic)
+        app_->clearResolutions(records);
+    else
+        app_->saveResolutions(records, plugin);
+    reloadKeepingSelection();
+    resolutionNote_->setText(automatic ? "Back to automatic for " + n + ": saved."
+                                       : plugin + " wins " + n + " in the next compilation: saved.");
 }
 
 void ConflictsPage::applyResolution()

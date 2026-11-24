@@ -427,7 +427,9 @@ QString DiagnosticsPage::overwrittenReading(const QString& plugin) const
     auto* p = app_->pipeline();
     if (!p || !p->scanned())
         return "Scan first: the check reads the conflict analysis of the scanned load order.";
-    const auto r = fo4mx::findOverwrittenChanges(p->session(), p->conflicts(), ss(plugin));
+    const auto carried = fo4mx::changesCarriedByBuild(p->patchPlan(), p->compiledOutput(),
+                                                      p->config().compile.applyPatchPlan);
+    const auto r = fo4mx::findOverwrittenChanges(p->session(), p->conflicts(), ss(plugin), true, &carried);
     return qs(fo4mx::formatOverwrittenChanges(p->session(), r, ss(plugin)));
 }
 

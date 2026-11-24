@@ -1,5 +1,7 @@
 #include "engine/OverwrittenChanges.hpp"
 
+#include "engine/CompilationEngine.hpp"
+#include "engine/PatchPlan.hpp"
 #include "util/Text.hpp"
 
 #include <algorithm>
@@ -31,8 +33,29 @@ std::string shorten(std::string s, size_t max)
 
 } // namespace
 
+std::unordered_set<std::string> changesCarriedByBuild(const PatchPlan* plan, const CompiledOutput* compiled,
+                                                      bool applyPatchPlan)
+{
+    std::unordered_set<std::string> ids;
+    if (!applyPatchPlan || !plan || !compiled)
+        return ids;
+    std::set<uint64_t> withoutPlan; // records written as they would be without the plan
+    for (const auto& i : compiled->issues)
+        if (i.category == "Compatibility Patch" && i.severity == Severity::Warning)
+            withoutPlan.insert(i.form.packed());
+    for (const auto& pr : plan->records) {
+        if (pr.status != PlanStatus::Ready || withoutPlan.count(pr.conflict->key.packed()))
+            continue;
+        for (const auto& pe : pr.entries)
+            if (pe.action == PlanAction::CarryForward)
+                ids.insert(pr.conflict->changes[pe.change].changeId);
+    }
+    return ids;
+}
+
 OverwrittenChanges findOverwrittenChanges(const Session& session, const ConflictReport* conflicts,
-                                          std::string_view pluginName, bool includeMadeFor)
+                                          std::string_view pluginName, bool includeMadeFor,
+                                          const std::unordered_set<std::string>* carried)
 {
     OverwrittenChanges r;
     const std::string key = lowerCopy(pluginName);
@@ -59,7 +82,7 @@ OverwrittenChanges findOverwrittenChanges(const Session& session, const Conflict
     std::map<PluginIndex, Overwriter> by;
     std::map<PluginIndex, const ConflictEntry*> lastEntry; // counts each record once per overwriter
     for (const auto& e : conflicts->entries) {
-        bool touched = false, lostHere = false, mergedHere = false;
+        bool touched = false, lostHere = false, mergedHere = false, carriedHere = false;
         for (const auto& t : e.changes) {
             if (!counts(t.source))
                 continue;
@@ -67,6 +90,11 @@ OverwrittenChanges findOverwrittenChanges(const Session& session, const Conflict
             ++r.changes;
             if (!isLost(t.status))
                 continue;
+            if (carried && carried->count(t.changeId)) {
+                ++r.carried;
+                carriedHere = true;
+                continue;
+            }
             if (t.inMerged) {
                 ++r.merged;
                 mergedHere = true;
@@ -101,6 +129,7 @@ OverwrittenChanges findOverwrittenChanges(const Session& session, const Conflict
         r.records += touched;
         r.lostRecords += lostHere;
         r.mergedRecords += mergedHere;
+        r.carriedRecords += carriedHere;
     }
     for (auto& [p, o] : by)
         r.overwriters.push_back(std::move(o));
@@ -147,11 +176,18 @@ std::string formatOverwrittenChanges(const Session& session, const OverwrittenCh
                        counted(r.mergedRecords, "record", "records") + " (lists and other fields a build merges), are not in the last plugin's version but are "
                        "in the merged version a Multiplexer build writes: with a build they are kept."
                  : std::string();
+    const std::string carriedNote =
+        r.carried ? counted(r.carried, "more change", "more changes") + ", in " +
+                        counted(r.carriedRecords, "record", "records") +
+                        ", are not in the winning version but the last build carried them (Compatibility Patch)."
+                  : std::string();
     if (r.lost == 0) {
         line("No later plugin overwrites them: the winning version holds all of those changes" +
-             std::string(r.merged ? ", or the merged version a build writes does." : "."));
+             std::string(r.merged || r.carried ? ", or the build keeps them." : "."));
         if (r.merged)
             line(mergedNote);
+        if (r.carried)
+            line(carriedNote);
         return out;
     }
     line(formatCount(r.lost) + " of those changes, in " + formatCount(r.lostRecords) +
@@ -160,6 +196,8 @@ std::string formatOverwrittenChanges(const Session& session, const OverwrittenCh
          "records (adding only the changes the Compatibility Patch option carries).");
     if (r.merged)
         line(mergedNote);
+    if (r.carried)
+        line(carriedNote);
     line("");
 
     std::vector<const Overwriter*> unaware, onPurpose;

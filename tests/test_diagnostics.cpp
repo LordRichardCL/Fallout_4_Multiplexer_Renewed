@@ -625,6 +625,17 @@ TEST(overwritten_changes_names_the_later_plugins)
     CHECK(text.find("Load the plugins in the first list before Skills.esp") != std::string::npos);
     CHECK(text.find("1 more change, in 1 record (lists") != std::string::npos);
 
+    // A change the build carried (Compatibility Patch) is counted apart, not as overwritten.
+    {
+        auto carriedReport = report;
+        carriedReport.entries[0].changes[0].changeId = "carried-1";
+        const std::unordered_set<std::string> carried{"carried-1"};
+        const auto c = findOverwrittenChanges(s, &carriedReport, "Skills.esp", true, &carried);
+        CHECK_EQ(c.carried, size_t(1));
+        CHECK_EQ(c.lost, size_t(3));
+        CHECK(formatOverwrittenChanges(s, c, "Skills.esp").find("the last build carried them") != std::string::npos);
+        CHECK(changesCarriedByBuild(nullptr, nullptr, true).empty());
+    }
     // Without the patches' changes; a plugin that is not active; no analysis yet.
     CHECK_EQ(findOverwrittenChanges(s, &report, "Skills.esp", false).lost, size_t(3));
     CHECK(!findOverwrittenChanges(s, &report, "Missing.esp").found);
