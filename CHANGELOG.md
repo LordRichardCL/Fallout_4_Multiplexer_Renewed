@@ -1,6 +1,6 @@
 # Changelog
 
-Versions are tagged `vMAJOR.MINOR.PATCH-alpha` while the project is in alpha. Each entry says what was **tested** (and how), not only what was added; [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) keeps the current state. Pushing a version tag makes CI publish a GitHub pre-release with the Windows package and this version's section as its notes.
+Versions are tagged `vMAJOR.MINOR.PATCH-alpha` while the project is in alpha. Each entry says what was **tested** (and how), not only what was added; [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) keeps the current state. Pushing a version tag makes CI publish a GitHub pre-release with the Windows package and this version's section as its notes; a release created by hand on GitHub (which creates the tag) gets the package attached instead.
 
 Release policy (alpha):
 - A version is tagged only after a build on a real load order has 0 validation errors and its export passes the written-content check.

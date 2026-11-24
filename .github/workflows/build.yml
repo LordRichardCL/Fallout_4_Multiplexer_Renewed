@@ -183,4 +183,10 @@ jobs:
           $notes = (Get-Content CHANGELOG.md -Raw) -split "(?m)^## " | Where-Object { $_ -like "*$($tag.TrimStart('v'))*" } | Select-Object -First 1
           if (-not $notes) { $notes = "See CHANGELOG.md." }
           Set-Content -Path release-notes.md -Value ("## " + $notes)
-          gh release create $tag $zip --prerelease --title "Fallout 4 Multiplexer Renewed $tag" --notes-file release-notes.md
+          # A release made by hand on GitHub (which creates the tag) gets the package attached; its text is kept.
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip --clobber
+          } else {
+            gh release create $tag $zip --prerelease --title "Fallout 4 Multiplexer Renewed $tag" --notes-file release-notes.md
+          }
