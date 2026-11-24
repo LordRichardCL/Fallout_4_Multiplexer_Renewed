@@ -92,6 +92,11 @@ std::vector<uint8_t> readFile(const std::filesystem::path& path)
 struct Relocation {
     std::unordered_map<uint64_t, std::pair<std::string, uint32_t>> byRecord;
     std::map<PluginIndex, std::string> primaryOutput; // output holding most of a plugin's records
+    // What the build says it wrote at each relocated record: (type, Editor ID) by the same key as byRecord.
+    std::unordered_map<uint64_t, std::pair<Signature, std::string>> mapped;
+    // The records the outputs hold, as built: (lowercase output, object ID) -> (type, Editor ID). Empty for a
+    // build reopened from its export (its records are on disk, not in memory).
+    std::map<std::pair<std::string, uint32_t>, std::pair<Signature, std::string>> written;
 
     explicit Relocation(const CompiledOutput& compiled)
     {
@@ -100,8 +105,12 @@ struct Relocation {
             if (!m.source.valid())
                 continue;
             byRecord[(uint64_t(m.source.origin) << 32) | (m.sourceObjectId & 0xFFFFFF)] = {m.outputPlugin, m.objectId};
+            mapped[(uint64_t(m.source.origin) << 32) | (m.sourceObjectId & 0xFFFFFF)] = {m.sig, m.editorId};
             perOutput[m.source.origin][m.outputPlugin]++;
         }
+        for (const auto& r : compiled.records)
+            if (r.isNew && r.output >= 0 && size_t(r.output) < compiled.outputs.size())
+                written[{toLower(compiled.outputs[size_t(r.output)].name), r.objectId}] = {r.sig, r.editorId};
         for (const auto& [plugin, outputs] : perOutput) {
             auto best = std::max_element(outputs.begin(), outputs.end(),
                                          [](const auto& a, const auto& b) { return a.second < b.second; });
@@ -118,7 +127,88 @@ struct Relocation {
         auto it = byRecord.find((uint64_t(plugin) << 32) | (formId & mask));
         return it == byRecord.end() ? nullptr : &it->second;
     }
+
+    // A rewritten "Plugin|FormID" must name the same record it named before: the record the game found
+    // at the original pair (its type and Editor ID, as the load order has them) is the one the build
+    // mapped there and the one the output holds at the new FormID. Empty when it is; else what differs.
+    // `note`: set when an MCM control reads it as a global ("sourceType": "GlobalValue") and it was not one
+    // before either (the mod's own mistake, unchanged by the build).
+    std::string verify(const Session& session, PluginIndex plugin, uint32_t formId, const std::string& output,
+                       uint32_t newId, std::string_view mcmSourceType, std::string* note) const
+    {
+        const uint32_t mask = session.plugins[plugin].isLight() ? 0xFFF : 0xFFFFFF;
+        const FormKey key{plugin, formId & mask};
+        const auto* g = session.findGroup(key);
+        if (!g)
+            return session.plugins[plugin].name + "|" + formatFormId(formId) + " is not a record of the load order";
+        const Signature sig = session.records[g->begin].signature;
+        std::set<std::string> names; // every Editor ID its versions give it
+        for (uint32_t i = g->begin; i < g->end; ++i)
+            if (session.records[i].editorId)
+                names.insert(session.strings.get(session.records[i].editorId));
+        const std::string was = session.plugins[plugin].name + "|" + formatFormId(formId) + " (" + sig.str() +
+                                (names.empty() ? std::string() : " " + *names.rbegin()) + ")";
+        auto differs = [&](const char* where, const std::pair<Signature, std::string>& rec) -> std::string {
+            if (rec.first != sig)
+                return was + " is " + where + " a " + rec.first.str() + " record";
+            if (!rec.second.empty() && !names.empty() && !names.count(rec.second))
+                return was + " is " + where + " the record " + rec.second;
+            return {};
+        };
+        auto m = mapped.find(key.packed());
+        if (m == mapped.end())
+            return was + " has no FormID mapping";
+        if (auto d = differs("mapped to", m->second); !d.empty())
+            return d;
+        if (!written.empty()) {
+            auto w = written.find({toLower(output), newId});
+            if (w == written.end())
+                return was + " is mapped to " + output + "|" + formatFormId(newId) + ", which the output does not hold";
+            if (auto d = differs(("in " + output + " at " + formatFormId(newId) + ",").c_str(), w->second); !d.empty())
+                return d;
+        }
+        if (mcmSourceType == "GlobalValue" && sig != Signature("GLOB"))
+            *note = was + " is read by an MCM control as a global but is a " + sig.str() +
+                    " record, before and after this build";
+        return {};
+    }
 };
+
+// The "sourceType" of the MCM control around position `at` of an MCM config (the innermost JSON object
+// holding it), or "" when there is none. MCM reads "sourceForm" as a global for "GlobalValue" and as a
+// scripted form for "PropertyValue..." controls.
+std::string_view mcmSourceType(std::string_view text, size_t at)
+{
+    int depth = 0;
+    size_t open = std::string_view::npos;
+    for (size_t i = at; i-- > 0;) {
+        if (text[i] == '}')
+            ++depth;
+        else if (text[i] == '{' && depth-- == 0) {
+            open = i;
+            break;
+        }
+    }
+    if (open == std::string_view::npos)
+        return {};
+    depth = 0;
+    size_t close = text.size();
+    for (size_t i = open + 1; i < text.size(); ++i) {
+        if (text[i] == '{')
+            ++depth;
+        else if (text[i] == '}' && depth-- == 0) {
+            close = i;
+            break;
+        }
+    }
+    const auto obj = text.substr(open, close - open);
+    const auto key = obj.find("\"sourceType\"");
+    if (key == std::string_view::npos)
+        return {};
+    const auto q1 = obj.find('"', obj.find(':', key) + 1);
+    const auto q2 = q1 == std::string_view::npos ? q1 : obj.find('"', q1 + 1);
+    return q2 == std::string_view::npos ? std::string_view{} : obj.substr(q1 + 1, q2 - q1 - 1);
+}
 
 // A planned change that only one plugin makes unsafe: that plugin stays out, and the file is
 // planned again without it in the next round (the others are not kept out with it).
@@ -610,7 +700,7 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
         f.validation.clear();
         f.notes.clear();
         f.originalHash = f.outputHash = 0;
-        f.changedCalls = f.changedPairs = f.renamed = 0;
+        f.changedCalls = f.changedPairs = f.renamed = f.verifiedPairs = 0;
 
         std::set<PluginIndex> compiledHere;
         std::vector<const PluginReference*> todo;
@@ -893,6 +983,16 @@ std::map<PluginIndex, std::string> AutoMerger::plan(const Session& session, cons
                             if (!base.empty())
                                 edits.push_back({r->baseBegin, r->baseEnd, base});
                         }
+                        const bool mcm = f.path.rfind("mcm\\", 0) == 0;
+                        std::string note;
+                        if (auto wrong = where.verify(session, r->plugin, r->formId, moved->first, moved->second,
+                                                      mcm ? mcmSourceType(text, r->nameBegin) : std::string_view{},
+                                                      &note);
+                            !wrong.empty())
+                            throw std::runtime_error(r->location + ": " + wrong);
+                        if (!note.empty())
+                            f.notes.push_back(r->location + ": " + note);
+                        ++f.verifiedPairs;
                         const std::string id = hexLike(moved->second, r->idEnd - r->idBegin);
                         edits.push_back({r->nameBegin, r->nameEnd, moved->first});
                         if (r->idEnd > r->idBegin) // some pairs write the FormID only in decimal

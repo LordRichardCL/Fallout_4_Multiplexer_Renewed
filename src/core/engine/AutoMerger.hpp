@@ -63,6 +63,8 @@ struct RelinkFile {
     // Export:
     bool written = false;
     size_t changedCalls = 0, changedPairs = 0, renamed = 0;
+    // Rewritten "Plugin|FormID" pairs checked to name the same record (type and Editor ID) as before.
+    size_t verifiedPairs = 0;
     std::vector<std::string> notes;
 
     std::string spelled;                // path with the original file name's case (empty: path)

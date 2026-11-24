@@ -1003,7 +1003,8 @@ std::string autoMergerReport(const ReportContext& ctx)
             result = "Nothing to change (safe)";
         else if (f.written)
             result = "Relinked: " + std::to_string(f.changedCalls) + " calls, " + std::to_string(f.changedPairs) +
-                     " pairs, " + std::to_string(f.renamed) + " names";
+                     " pairs" + (f.verifiedPairs ? " (each checked to name the same record)" : "") + ", " +
+                     std::to_string(f.renamed) + " names";
         else
             result = "Relinkable";
         for (const auto& n : f.notes)
@@ -1481,6 +1482,7 @@ std::string ReportGenerator::json(ReportKind kind, const ReportContext& ctx)
             o.set("relinked", f.written);
             o.set("changedCalls", static_cast<uint64_t>(f.changedCalls));
             o.set("changedPairs", static_cast<uint64_t>(f.changedPairs));
+            o.set("verifiedPairs", static_cast<uint64_t>(f.verifiedPairs));
             o.set("renamed", static_cast<uint64_t>(f.renamed));
             json::Value notes;
             for (const auto& n : f.notes)

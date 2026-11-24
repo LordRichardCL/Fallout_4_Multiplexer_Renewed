@@ -9114,6 +9114,62 @@ TEST(relinked_configs_must_win_before_switching_over)
     CHECK(d.blockers.empty());
 }
 
+// Every rewritten "Plugin|FormID" pair is checked to name the same record as before: the type and Editor
+// ID the load order gives the original are the ones the build mapped there and the output holds. A
+// mismatch keeps the plugin out (fail closed). An MCM control reading as a global a record that is not
+// one (the mod's own mistake) is noted, not blocked.
+TEST(relinked_mcm_forms_name_the_same_record)
+{
+    auto root = referenceInstall("relink_verify");
+    auto data = root / "Game" / "Data";
+    writeFile(data / "MCM" / "Config" / "ModS" / "config.json",
+              "{\"modName\": \"ModS\", \"pluginRequirements\": [\"ModS.esp\"],\n"
+              " \"content\": [{\"valueOptions\": {\"sourceType\": \"GlobalValue\", \"sourceForm\": \"ModS.esp|812\"}}]}\n");
+    auto cfg = configFor(root);
+    cfg.compile.autoMerge = true;
+    Pipeline p(cfg);
+    p.scan();
+    p.analyse();
+    CHECK(p.compile());
+    CHECK(p.compiledOutput()->isCompiled(p.session().findPlugin("ModS.esp")->index));
+    const RelinkFile* file = nullptr;
+    for (const auto& f : p.autoMerge()->files)
+        if (f.path == "mcm\\config\\mods\\config.json")
+            file = &f;
+    CHECK(file != nullptr);
+    if (!file)
+        return;
+    CHECK(file->planned);
+    CHECK_EQ(file->verifiedPairs, size_t(1));
+    bool noted = false;
+    for (const auto& n : file->notes)
+        noted |= n.find("read by an MCM control as a global but is a KYWD record") != std::string::npos;
+    CHECK(noted);
+
+    // The build's map says the pair's record is another one: the copy is not written, ModS stays out.
+    auto wrong = *p.compiledOutput();
+    const auto mods = p.session().findPlugin("ModS.esp")->index;
+    for (auto& m : wrong.mappings)
+        if (m.source.origin == mods && m.sourceObjectId == 0x812)
+            m.sig = Signature("GLOB");
+    auto report = *p.autoMerge();
+    auto failed = AutoMerger::plan(p.session(), wrong, root / "Output", report);
+    CHECK(failed.count(mods) == 1);
+    for (const auto& f : report.files)
+        if (f.path == "mcm\\config\\mods\\config.json") {
+            CHECK(!f.planned);
+            CHECK(f.validation.find("mapped to a GLOB record") != std::string::npos);
+        }
+
+    // The same with an Editor ID the record never had.
+    wrong = *p.compiledOutput();
+    for (auto& m : wrong.mappings)
+        if (m.source.origin == mods && m.sourceObjectId == 0x812)
+            m.editorId = "SomethingElse";
+    report = *p.autoMerge();
+    CHECK(AutoMerger::plan(p.session(), wrong, root / "Output", report).count(mods) == 1);
+}
+
 // A script property in a plugin's own record holding a plugin's file name (Sim Settlements 2 add-on
 // configs: SS2 checks GetFormFromFile(the config's FormID, that name) and rejects the add-on when it
 // does not match). Compiling would leave the name pointing at a plugin that is switched off: kept out,

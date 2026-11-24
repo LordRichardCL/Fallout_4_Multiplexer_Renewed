@@ -662,6 +662,7 @@ Nothing else in a file changes, and compiled files are never patched by blind by
 4. checked that every reference to other plugins, and every safe one, is unchanged;
 5. compared byte for byte with the original outside the changed places (scripts must also read back exactly);
 6. checked to name only outputs of this build.
+7. for every rewritten `Plugin.esp|FormID` pair (MCM configs and other configs): checked to name the same record as before. The record the original pair named (its type and Editor ID in your load order) must be the one the build mapped to the new FormID and the one the output holds there. A pair read by an MCM control as a global (`"sourceType": "GlobalValue"`) whose record was not a global to begin with is noted in the report, not blocked: the mod shipped it that way.
 
 A copy that fails any check keeps its plugins in the load order (**Kept Out Automatically**, with the reason) and the compilation runs again without them.
 
