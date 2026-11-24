@@ -1,0 +1,9 @@
+# The files a hotfix zip holds: only those that changed since the release it fixes, as paths inside the
+# release's folder (one per line). CI packages exactly these for a "v<version>-hotfix<N>" tag and stops if one
+# is missing. Update this list with every hotfix; a file a hotfix does not change is never in it.
+#
+# 0.2.0-alpha Hotfix 2: the two programs (all the fixes are in them) and the licence files the release lacked.
+Fallout4MultiplexerRenewed.exe
+fo4mx.exe
+LICENSE
+LICENSE.txt

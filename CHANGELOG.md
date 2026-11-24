@@ -2,6 +2,8 @@
 
 Versions are tagged `vMAJOR.MINOR.PATCH-alpha` while the project is in alpha. Each entry says what was **tested** (and how), not only what was added; [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) keeps the current state. Pushing a version tag makes CI publish a GitHub pre-release with the Windows package and this version's section as its notes; a release created by hand on GitHub (which creates the tag) gets the package attached instead.
 
+Hotfixes: a `v<version>-hotfix<N>` tag publishes a zip holding only the files that changed since that release (listed in docs/release/HOTFIX_FILES.txt), at the same paths as in the release. Extract it over the release's folder and replace the files.
+
 Release policy (alpha):
 - A version is tagged only after a build on a real load order has 0 validation errors and its export passes the written-content check.
 - Each entry has a **Tested** line: build verified, confirmed in game, or not yet.
@@ -9,7 +11,7 @@ Release policy (alpha):
 
 ## 0.2.0-alpha-hotfix2 (24 Nov 2026) — Hotfix 2 for 0.2.0-alpha (includes Hotfix 1)
 
-**Install:** extract `Fallout4MultiplexerRenewed-v0.2.0-alpha-hotfix2-windows-x64.zip` over the 0.2.0-alpha folder and replace the files. It includes everything in Hotfix 1, so it is the only hotfix to install. The app shows "v0.2.0 alpha · Hotfix 2". Then scan, compile and export again.
+**Install:** close the app, extract `Fallout4MultiplexerRenewed-v0.2.0-alpha-hotfix2-windows-x64.zip` over the 0.2.0-alpha folder and replace the files. It holds only what changed: `Fallout4MultiplexerRenewed.exe`, `fo4mx.exe`, `LICENSE` and `LICENSE.txt`. It includes everything in Hotfix 1, so it is the only hotfix to install. The app shows "v0.2.0 alpha · Hotfix 2". Then scan, compile and export again, install the new output package as before, and check the MCM menus in game.
 
 **Tested:** automated tests; the fixes come from the owner's build of 24 Nov 2026, where these plugins stayed in the load order. Not yet a new build on the real load order.
 
@@ -19,7 +21,8 @@ Fixed
 - When a subrecord's bytes are undescribed, the finding now gives the decoder's reason (for example why an OMOD DATA layout did not fit), so the layout can be completed from the report alone.
 
 Package
-- The download now includes `LICENSE` (the project's licence) and `LICENSE.txt` (the Mozilla Public License 2.0 notice for xEdit), in both the full package and the hotfix zip.
+- The download now includes `LICENSE` (the project's licence) and `LICENSE.txt` (the Mozilla Public License 2.0 notice for xEdit).
+- Hotfix zips hold only the files that changed, at the release's own paths (Hotfix 1's zip had them in a subfolder, so extracting it over the release folder did not replace the programs).
 
 ## 0.2.0-alpha-hotfix1 (24 Nov 2026) — Hotfix 1 for 0.2.0-alpha
 

@@ -179,12 +179,22 @@ jobs:
           $tag = "${{ github.ref_name }}"
           $zip = "Fallout4MultiplexerRenewed-$tag-windows-x64.zip"
           if ($tag -match '-hotfix\d+$') {
-            # A hotfix replaces only the programs of the release it fixes: extracted over that release's folder.
-            $hot = "hotfix/Fallout4MultiplexerRenewed"
+            # A hotfix holds only the files that changed since the release it fixes (docs/release/HOTFIX_FILES.txt),
+            # at the same paths as in the release: extracted over the release's folder, they replace exactly those.
+            $hot = "hotfix"
             New-Item -ItemType Directory -Force -Path $hot | Out-Null
-            Copy-Item package/Fallout4MultiplexerRenewed/Fallout4MultiplexerRenewed.exe, package/Fallout4MultiplexerRenewed/fo4mx.exe, CHANGELOG.md, LICENSE, LICENSE.txt $hot
-            Copy-Item docs/release/HOTFIX_README.txt "$hot/README - Hotfix.txt"
-            Compress-Archive -Path $hot -DestinationPath $zip
+            $listed = Get-Content docs/release/HOTFIX_FILES.txt | Where-Object { $_.Trim() -and -not $_.StartsWith('#') }
+            if (-not $listed) { Write-Output "::error::docs/release/HOTFIX_FILES.txt lists no files"; exit 1 }
+            foreach ($rel in $listed) {
+              $rel = $rel.Trim()
+              $from = Join-Path package/Fallout4MultiplexerRenewed $rel
+              if (-not (Test-Path $from -PathType Leaf)) { Write-Output "::error::$rel is not in the package"; exit 1 }
+              $to = Join-Path $hot $rel
+              New-Item -ItemType Directory -Force -Path (Split-Path $to) | Out-Null
+              Copy-Item $from $to
+            }
+            Compress-Archive -Path "$hot/*" -DestinationPath $zip
+            "Hotfix: {0} file(s): {1}" -f $listed.Count, ($listed -join ', ')
           } else {
             Compress-Archive -Path package/Fallout4MultiplexerRenewed/* -DestinationPath $zip
           }
