@@ -8,6 +8,7 @@
 #include "engine/CompilationResult.hpp"
 #include "engine/Exporter.hpp"
 #include "engine/Pipeline.hpp"
+#include "engine/AutoMerger.hpp"
 #include "util/Json.hpp"
 #include "engine/OverwrittenChanges.hpp"
 #include "engine/SwitchBack.hpp"
@@ -2105,6 +2106,67 @@ TEST(new_light_outputs_leave_room_to_grow)
     writePlugin(data / "ModK.esp", {"Fallout4.esm"}, keywords(1800)); // 248 free
     CHECK(lightOf(cfg, &noted));
     CHECK(!noted);
+}
+
+// Records one plugin name in a script finds (a constant such as GetPluginName(), or one name kept in a
+// variable) must be in one output: the rewritten name points at one plugin. The owner's ghoulification,
+// MUTATION and REPUTATION stayed out because their lookups landed in Dummy_Plugin_02 and Dummy_Plugin_04.
+// Here allocation rules would split ModK's keyword and form list; grouped, both go to the later output.
+TEST(lookups_through_one_name_share_an_output)
+{
+    auto root = buildInstall("sameoutput");
+    auto data = root / "Game" / "Data";
+    writePlugin(data / "ModK.esp", {"Fallout4.esm"},
+                {record("KYWD", 0x01000800, {zs("EDID", "ModK_Keyword")}),
+                 record("FLST", 0x01000801, {zs("EDID", "ModK_Item"), u32("LNAM", 0x00000800)})});
+    writeFile(root / "plugins.txt", "*ModA.esp\n*ModB.esp\n*ModC.esp\n*ModK.esp\n");
+    auto cfg = configFor(root);
+    cfg.compile.outputCount = 3;
+    cfg.compile.strategy = AllocationStrategy::UserDefined;
+    cfg.compile.rules = {{"KYWD", 1}, {"FLST", 2}};
+    auto outputsOf = [&](bool grouped) {
+        Pipeline p(cfg);
+        p.scan();
+        auto& s = p.session();
+        const auto k = s.findPlugin("ModK.esp")->index;
+        // What the reference scan records for two lookups through one constant (GetPluginName()).
+        for (uint32_t id : {0x800u, 0x801u}) {
+            PluginReference r;
+            r.plugin = k;
+            r.assetPath = "scripts\\modk\\program.pex";
+            r.format = "PEX";
+            r.cls = ReferenceClass::Rewritable;
+            r.hasFormId = true;
+            r.formId = id;
+            r.text = "ModK:Program.GetPluginName";
+            r.context = "Game.GetFormFromFile(" + formatFormId(id) + ") through the constant";
+            s.nameReferences.push_back(r);
+        }
+        const auto groups = AutoMerger::sameOutputGroups(s);
+        CHECK_EQ(groups.size(), size_t(1));
+        CHECK(!groups.empty() && groups[0].size() == 2);
+        // Only the grouping is under test: without a script to rewrite, the references go again (they would
+        // keep ModK out with the Auto-Merger off) and the groups are given as the pipeline gives them.
+        s.nameReferences.resize(s.nameReferences.size() - 2);
+        p.analyse();
+        if (grouped)
+            for (const auto& g : groups) {
+                auto& keys = p.config().compile.sameOutputGroups.emplace_back();
+                for (const auto& key : g)
+                    keys.push_back(key.packed());
+            }
+        CHECK(p.compile());
+        std::map<std::string, std::string> where;
+        for (const auto& m : p.compiledOutput()->mappings)
+            where[m.editorId] = m.outputPlugin;
+        return where;
+    };
+    // Without the Auto-Merger's groups the rules split them; with them both are in the later output.
+    auto split = outputsOf(false);
+    CHECK(split["ModK_Keyword"] != split["ModK_Item"]);
+    auto together = outputsOf(true);
+    CHECK_EQ(together["ModK_Keyword"], together["ModK_Item"]);
+    CHECK_EQ(together["ModK_Item"], split["ModK_Item"]);
 }
 
 TEST(rebuilds_keep_the_formids_of_the_build_in_use)

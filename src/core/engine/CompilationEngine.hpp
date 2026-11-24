@@ -101,6 +101,9 @@ struct CompileOptions {
     // Advanced Users Auto-Merger (opt-in): compile plugins whose names appear in scripts or configs
     // when every such file can be relinked, and write relinked copies into the output (AutoMerger).
     bool autoMerge = false;
+    // Records that must share an output plugin (FormKey::packed()): those one plugin name in a script finds
+    // (AutoMerger::sameOutputGroups). Set by the pipeline with the Auto-Merger on.
+    std::vector<std::vector<uint64_t>> sameOutputGroups;
 
     std::string author = "Fallout 4 Multiplexer Renewed";
     std::filesystem::path previousFormMap; // reuse FormIDs from an earlier compilation

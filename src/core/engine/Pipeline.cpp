@@ -863,6 +863,12 @@ bool Pipeline::compile(ProgressSink& progress)
     std::string loadersOff; // why archive loaders are not used, for the validation report
     const std::string outputMod = loaderMod(&loadersOff);
     options.archiveLoaders = !outputMod.empty();
+    if (options.autoMerge) // with it off, nothing is rewritten and no group is needed
+        for (const auto& g : AutoMerger::sameOutputGroups(*session_)) {
+            auto& keys = options.sameOutputGroups.emplace_back();
+            for (const auto& k : g)
+                keys.push_back(k.packed());
+        }
     // The F4SE archive loader: the archive list is not limited to what the game reads of the INI.
     std::string archiveLoaderOff;
     if (config_.f4seArchiveLoader) {

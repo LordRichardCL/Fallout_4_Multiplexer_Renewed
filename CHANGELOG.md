@@ -7,6 +7,20 @@ Release policy (alpha):
 - Each entry has a **Tested** line: build verified, confirmed in game, or not yet.
 - Anything not yet confirmed in game stays off by default (Advanced preset).
 
+## 0.2.0-alpha-hotfix2 (24 Nov 2026) — Hotfix 2 for 0.2.0-alpha (includes Hotfix 1)
+
+**Install:** extract `Fallout4MultiplexerRenewed-v0.2.0-alpha-hotfix2-windows-x64.zip` over the 0.2.0-alpha folder and replace the files. It includes everything in Hotfix 1, so it is the only hotfix to install. The app shows "v0.2.0 alpha · Hotfix 2". Then scan, compile and export again.
+
+**Tested:** automated tests; the fixes come from the owner's build of 24 Nov 2026, where these plugins stayed in the load order. Not yet a new build on the real load order.
+
+Fixed
+- **Plugins whose scripts find their records through one name** (a function such as `GetPluginName()`, or one name kept in a variable) stayed in the load order when the build put those records into two outputs: the rewritten name can point at only one (ghoulification.esm, MUTATION.esm and REPUTATION.esm on the owner's load order). With the Auto-Merger on, the compiler now keeps every record one such name finds in the same output plugin.
+- **ACHR/REFR XHLP** (a health value, a float) was undescribed: Respawnable Legendary Bosses.esp's 3500.0 looked like a FormID and kept the plugin out. xEdit's Fallout 4 definitions do not list it either; it is now read as a number.
+- When a subrecord's bytes are undescribed, the finding now gives the decoder's reason (for example why an OMOD DATA layout did not fit), so the layout can be completed from the report alone.
+
+Package
+- The download now includes `LICENSE` (the project's licence) and `LICENSE.txt` (the Mozilla Public License 2.0 notice for xEdit), in both the full package and the hotfix zip.
+
 ## 0.2.0-alpha-hotfix1 (24 Nov 2026) — Hotfix 1 for 0.2.0-alpha
 
 **Install:** extract `Fallout4MultiplexerRenewed-v0.2.0-alpha-hotfix1-windows-x64.zip` over the 0.2.0-alpha folder and replace the files (only `Fallout4MultiplexerRenewed.exe` and `fo4mx.exe` change). The app shows "v0.2.0 alpha · Hotfix 1". Then scan, compile and export again, install the new output package as before, and start a new game or load a save made with the build.

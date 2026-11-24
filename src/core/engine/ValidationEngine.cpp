@@ -284,11 +284,17 @@ ValidationReport ValidationEngine::validate(const Session& session, const Compil
                             v.pass();
                             continue;
                         }
+                        // What the decoder said about this subrecord (a layout that did not fit, and why).
+                        std::string decoder;
+                        for (const auto& is : e.issues)
+                            if (is.sub == s.sig && decoder.find(is.message) == std::string::npos)
+                                decoder += (decoder.empty() ? "" : "; ") + is.message;
                         v.fail(Severity::Error, "Undescribed Data",
                                label + " " + s.sig.str() + " +" + std::to_string(b) + ".." + std::to_string(en) +
                                    ": bytes the record definitions do not describe (kept exactly as " +
                                    (s.origin < session.plugins.size() ? session.pluginName(s.origin) : std::string("written")) +
-                                   " wrote them, never rewritten); " + why +
+                                   " wrote them, never rewritten" + (decoder.empty() ? "" : "; decoder: " + decoder) +
+                                   "); " + why +
                                    ". Whether they hold a FormID is unknown, so they cannot be shown to be safe to move "
                                    "and the record is not compiled",
                                op.name, fid);

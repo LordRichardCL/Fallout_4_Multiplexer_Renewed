@@ -2140,6 +2140,16 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
         for (auto v : comp)
             out.records[v].output = out.records[v].patch ? patchOutput[v] : o;
     }
+    // Records one plugin name in a script must find (Auto-Merger): kept in one output like a cluster, the
+    // latest output any of them needs.
+    for (const auto& g : options.sameOutputGroups) {
+        std::vector<uint32_t> members;
+        for (uint64_t k : g)
+            if (auto it = out.indexByKey.find(FormKey::unpack(k)); it != out.indexByKey.end() && !out.records[it->second].patch)
+                members.push_back(it->second);
+        if (members.size() > 1)
+            worldClusters.push_back(std::move(members));
+    }
     // A placed reference that links to a new reference in a later output moves there, and its whole
     // cluster (its cell, its worldspace, everything in them) with it; repeat until nothing moves.
     for (bool moved = !worldClusters.empty(); moved;) {

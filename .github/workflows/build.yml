@@ -150,7 +150,7 @@ jobs:
           $crt = Get-ChildItem "$env:VCToolsRedistDir/x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
           if (-not $crt) { Write-Output "::error::Visual C++ runtime folder not found under $env:VCToolsRedistDir"; exit 1 }
           Copy-Item "$($crt.FullName)/msvcp140.dll", "$($crt.FullName)/vcruntime140.dll", "$($crt.FullName)/vcruntime140_1.dll" $out
-          Copy-Item README.md, CHANGELOG.md, docs -Destination $out -Recurse
+          Copy-Item README.md, CHANGELOG.md, LICENSE, LICENSE.txt, docs -Destination $out -Recurse
           $files = Get-ChildItem $out -Recurse -File
           "Package: {0} files, {1:N1} MB" -f $files.Count, (($files | Measure-Object Length -Sum).Sum / 1MB)
       - name: Smoke test the package
@@ -182,7 +182,7 @@ jobs:
             # A hotfix replaces only the programs of the release it fixes: extracted over that release's folder.
             $hot = "hotfix/Fallout4MultiplexerRenewed"
             New-Item -ItemType Directory -Force -Path $hot | Out-Null
-            Copy-Item package/Fallout4MultiplexerRenewed/Fallout4MultiplexerRenewed.exe, package/Fallout4MultiplexerRenewed/fo4mx.exe, CHANGELOG.md $hot
+            Copy-Item package/Fallout4MultiplexerRenewed/Fallout4MultiplexerRenewed.exe, package/Fallout4MultiplexerRenewed/fo4mx.exe, CHANGELOG.md, LICENSE, LICENSE.txt $hot
             Copy-Item docs/release/HOTFIX_README.txt "$hot/README - Hotfix.txt"
             Compress-Archive -Path $hot -DestinationPath $zip
           } else {

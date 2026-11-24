@@ -89,6 +89,12 @@ public:
     // Groups the classified references (Session::nameReferences) per file.
     static AutoMergeReport analyse(const Session& session);
 
+    // Records that one plugin name in a script must find in the same output: the records looked up through a
+    // constant (a function such as GetPluginName returning the name) and those looked up through one name kept
+    // in a variable. The rewritten name can point at only one output, so the compiler keeps each group in one
+    // output plugin; otherwise the copy fails its check and the plugin stays in the load order.
+    static std::vector<std::vector<FormKey>> sameOutputGroups(const Session& session);
+
     // Plans and checks the copies for a compilation. Returns the plugins whose files failed a check,
     // with the reason: they must be kept out and the compilation run again.
     // A file already in `outputDir` that the manifest does not list as an earlier copy fails the plan.

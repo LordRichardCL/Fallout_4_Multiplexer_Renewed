@@ -676,6 +676,19 @@ TEST(catalogue_text_and_number_fields_described_from_xedit)
     CHECK(!value.heuristic.empty());
 }
 
+// ACHR/REFR XHLP: a health value (float). Respawnable Legendary Bosses.esp writes 3500.0 (455AC000), which as a
+// FormID named "the plugin itself" past its masters and kept the plugin out (owner's build of 24 Nov 2026).
+// xEdit's Fallout 4 definitions do not list it; it holds no FormID.
+TEST(placed_reference_health_xhlp_is_a_number)
+{
+    const auto& d = RecordDefinitions::get();
+    for (const char* rec : {"ACHR", "REFR"}) {
+        const auto l = decodeLayout(d, Signature::fromString(rec),
+                                    {Subrecord(Signature::fromString("XHLP"), std::vector<uint8_t>{0x00, 0xC0, 0x5A, 0x45})});
+        CHECK(l.heuristic.empty() && l.probableSlots.empty() && l.formIdSlots.empty());
+    }
+}
+
 // Partial structs whose value layer is xEdit's complete layout, FormID members at exactly the decoder's slots:
 // the bytes between the slots are numbers xEdit names, so they are described up to the layout's size. Bytes
 // past it (another form version) stay undescribed. All 20,008 such records in the owner's outputs (WEAP

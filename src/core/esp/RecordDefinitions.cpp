@@ -1709,6 +1709,7 @@ void buildOldGen(RecordDefinitions& d)
             .field("XRGD", noRefs())   // ragdoll bones
             .field("XRGB", noRefs())
             .field("XHLT", noRefs())
+            .field("XHLP", noRefs())   // health (float; e.g. 455AC000 = 3500.0 on an ACHR)
             .field("XEMI", formId())   // emittance
             .field("XMBR", formId())   // multibound reference
             .field("XIS2", noRefs())

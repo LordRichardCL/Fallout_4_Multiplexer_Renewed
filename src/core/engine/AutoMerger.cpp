@@ -454,6 +454,32 @@ std::unordered_map<std::string, std::vector<std::string>> AutoMerger::readManife
     return out;
 }
 
+std::vector<std::vector<FormKey>> AutoMerger::sameOutputGroups(const Session& session)
+{
+    std::map<std::pair<PluginIndex, std::string>, std::set<FormKey>> byConstant; // (plugin, constant)
+    std::map<std::pair<std::string, size_t>, std::set<FormKey>> byName;          // (script, name in the strings)
+    for (const auto& r : session.nameReferences) {
+        if (!r.hasFormId || r.cls != ReferenceClass::Rewritable || r.plugin >= session.plugins.size())
+            continue;
+        const uint32_t mask = session.plugins[r.plugin].isLight() ? 0xFFF : 0xFFFFFF;
+        const FormKey key{r.plugin, r.formId & mask};
+        if (!session.findGroup(key))
+            continue; // no record: left as it was
+        if (readsConstant(r))
+            byConstant[{r.plugin, r.text}].insert(key);
+        else if (r.format == "PEX")
+            byName[{r.assetPath, r.pexStringOffset}].insert(key);
+    }
+    std::vector<std::vector<FormKey>> out;
+    for (const auto& [k, keys] : byConstant)
+        if (keys.size() > 1)
+            out.emplace_back(keys.begin(), keys.end());
+    for (const auto& [k, keys] : byName)
+        if (keys.size() > 1)
+            out.emplace_back(keys.begin(), keys.end());
+    return out;
+}
+
 AutoMergeReport AutoMerger::analyse(const Session& session)
 {
     AutoMergeReport report;
