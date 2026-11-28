@@ -42,6 +42,7 @@ endif()
 if(FO4MX_BUILD_RECORDER AND WIN32)
     add_subdirectory(src/recorder)
     add_subdirectory(src/archiveloader)
+    add_subdirectory(src/loadmonitor)
 endif()
 
 if(FO4MX_BUILD_TESTS)

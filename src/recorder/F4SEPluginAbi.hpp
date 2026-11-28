@@ -18,6 +18,8 @@ constexpr PluginHandle kPluginHandleInvalid = 0xFFFFFFFF;
 enum : std::uint32_t {
     kInterfaceInvalid = 0,
     kInterfaceMessaging = 1,
+    kInterfaceScaleform = 2, // the Load Monitor only
+    kInterfacePapyrus = 3,   // the Load Monitor only
 };
 
 // Version numbers as F4SE packs them: major << 24 | minor << 16 | build << 4 | sub.
@@ -72,6 +74,22 @@ struct F4SEMessagingInterface {
     bool (*RegisterListener)(PluginHandle listener, const char* sender, EventCallback handler);
     bool (*Dispatch)(PluginHandle sender, std::uint32_t messageType, void* data, std::uint32_t dataLen,
                      const char* receiver);
+};
+
+// Only the first two members, which are the same in F4SE 0.6.23 and 0.7.x (PluginAPI.h). F4SE calls a
+// registered Papyrus callback once, from its hook on the game's native-function registration, after the
+// virtual machine is created; a registered Scaleform callback once for every menu movie the game creates.
+// The Load Monitor only notes that the callbacks ran: it never reads the VM or the movie.
+struct F4SEPapyrusInterface {
+    using RegisterFunctions = bool (*)(void* vm);
+    std::uint32_t interfaceVersion;
+    bool (*Register)(RegisterFunctions callback);
+};
+
+struct F4SEScaleformInterface {
+    using RegisterCallback = bool (*)(void* view, void* value);
+    std::uint32_t interfaceVersion;
+    bool (*Register)(const char* name, RegisterCallback callback);
 };
 
 // Read by F4SE 0.7.x from the exported F4SEPlugin_Version symbol.

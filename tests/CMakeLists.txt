@@ -6,6 +6,7 @@ add_executable(fo4mx_tests
     test_merge.cpp
     test_pipeline.cpp
     test_provenance.cpp
+    test_loadmonitor.cpp
 )
 target_link_libraries(fo4mx_tests PRIVATE fo4mx_core)
 target_include_directories(fo4mx_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

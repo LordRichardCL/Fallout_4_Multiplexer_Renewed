@@ -139,6 +139,8 @@ jobs:
           Copy-Item build/windows-msvc/src/recorder/MultiplexerDiagnosticRecorder.dll $out
           # The F4SE archive loader: Multiplexer ships it in the package when the setting is on.
           Copy-Item build/windows-msvc/src/archiveloader/MultiplexerArchiveLoader.dll $out
+          # The optional Load Monitor (F4SE plugin, observation only): the user copies it to Data\F4SE\Plugins.
+          Copy-Item build/windows-msvc/src/loadmonitor/MultiplexerLoadMonitor.dll $out
           # Editor IDs of the base-game masters, for the Definition Check's cross-check (optional).
           Copy-Item resources/Fallout4_reference_editorids.bin $out
           Copy-Item build/windows-msvc/vcpkg_installed/x64-windows/bin/*.dll $out

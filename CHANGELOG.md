@@ -9,6 +9,13 @@ Release policy (alpha):
 - Each entry has a **Tested** line: build verified, confirmed in game, or not yet.
 - Anything not yet confirmed in game stays off by default (Advanced preset).
 
+## Unreleased
+
+Added
+- **Fallout 4 Multiplexer Load Monitor** (`MultiplexerLoadMonitor.dll`, v0.1), an optional F4SE plugin that only observes. It shows and logs which stage of start-up or a load the game is in, and the file it was last seen opening or reading. Its sources are F4SE's messages, F4SE's Papyrus and Scaleform callbacks, and observing wrappers of the game's own file imports; it changes nothing. A small overlay in the game window's corner shows the stage, the current and previous item, and how long it has been on the current item. A watchdog notes silences in the log. The last observed operation is not a confirmed cause of a hang. See [docs/LOAD_MONITOR.md](docs/LOAD_MONITOR.md).
+
+**Tested:** unit tests for its core; the DLL compiles without warnings. Not yet run in game.
+
 ## 0.2.0-alpha-hotfix3 (27 Nov 2026) — Hotfix 3 for 0.2.0-alpha (includes Hotfixes 1 and 2)
 
 **Install:** close the app, extract `Fallout4MultiplexerRenewed-v0.2.0-alpha-hotfix3-windows-x64.zip` over the 0.2.0-alpha folder and replace the files. It holds only `Fallout4MultiplexerRenewed.exe` and `fo4mx.exe`. Hotfix 2's licence files are not in it: install Hotfix 2 first if you have not (or skip them; the programs are the same either way). The app shows "v0.2.0 alpha · Hotfix 3". Then scan, compile and export again.
