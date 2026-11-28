@@ -17,6 +17,7 @@ Release policy (alpha):
 
 Fixed
 - **OMOD DATA with bytes past its own layout** (CombatRifle Receivers.esp: `mod_CombatRifle_Receiver_10mm` has 7 zero bytes after its last property). The whole subrecord used to stay undescribed, and its property count, read as a FormID, kept the plugin in the load order. Now the described part keeps its references and only the extra bytes stay undescribed; zero bytes cannot name a record, so the plugin compiles. Extra bytes that could name a record still keep it out.
+- **Worldspace cell offset tables (OFST)** were copied into the output plugin unchanged. The table lists where each cell sits in the plugin file it was saved in, so in an output it points at the wrong place. It is now written as zeros (no offsets), as Bethesda's DLC and Creation Club plugins write it in their own worldspace overrides; the game then finds the cells itself. The overrides of the Commonwealth and Diamond City in the owner's build already had zeros; this covers mods that add a worldspace with its own table (Penns Woods has none).
 
 ## 0.2.0-alpha-hotfix2 (24 Nov 2026) — Hotfix 2 for 0.2.0-alpha (includes Hotfix 1)
 

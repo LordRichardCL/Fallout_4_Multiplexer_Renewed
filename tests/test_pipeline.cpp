@@ -4028,7 +4028,8 @@ TEST(new_cells_and_worldspaces_compile)
                 {record("CELL", 0x01000800, {zs("EDID", "NewVault")}),
                  record("REFR", 0x01000801, {zs("EDID", "VaultDoor"), u32("NAME", 0x800)}, P),
                  record("REFR", 0x01000802, {zs("EDID", "VaultClutter"), u32("NAME", 0x800)}),
-                 record("WRLD", 0x01000810, {zs("EDID", "NewWorld")}),
+                 // OFST: positions of the worldspace's cells in ModW.esp's own file.
+                 record("WRLD", 0x01000810, {zs("EDID", "NewWorld"), raw("OFST", {0x97, 0x0D, 0x02, 0x06, 0xC6, 0x0C, 0x02, 0x06})}),
                  record("CELL", 0x01000811, {zs("EDID", "NewWorldPersistent")}, P),
                  record("ACHR", 0x01000812, {zs("EDID", "NewGuard"), u32("NAME", 0x800)}, P),
                  record("CELL", 0x01000813, {zs("EDID", "NewOutside"), raw("XCLC", gridBytes(-2, 5))}),
@@ -4087,6 +4088,11 @@ TEST(new_cells_and_worldspaces_compile)
             CHECK(out.resolve(r, r.placement.parent) == out.identity(*outside));
         }
     CHECK(land);
+    // The cell offset table pointed into ModW.esp: in the output it is zeros (no offsets), its length kept.
+    const auto* ofst = world->record.find(Signature("OFST"));
+    CHECK(ofst != nullptr);
+    if (ofst)
+        CHECK(ofst->data == std::vector<uint8_t>(8, 0));
     // Never light with new cells, although few enough records for ESL.
     for (const auto& f : result.pluginFiles)
         if (pathToUtf8(f.filename()) == vault->plugin)

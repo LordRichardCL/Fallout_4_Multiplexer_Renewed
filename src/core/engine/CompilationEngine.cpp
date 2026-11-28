@@ -2493,6 +2493,20 @@ CompiledOutput CompilationEngine::compile(Session& session, const CompileOptions
                     }
                 }
             }
+            // A worldspace's OFST is a table of positions in the plugin file it was saved in: copied into an
+            // output it would point at the wrong bytes. Written as zeros, as Bethesda's DLC and Creation Club
+            // plugins write it in their overrides (no offsets: the game finds the cells itself).
+            if (e.sig == Signature("WRLD"))
+                for (auto& sr : rec.subrecords)
+                    if (sr.signature == Signature("OFST") &&
+                        std::any_of(sr.data.begin(), sr.data.end(), [](uint8_t b) { return b != 0; })) {
+                        std::fill(sr.data.begin(), sr.data.end(), uint8_t(0));
+                        addIssue(Severity::Info, "World Offsets",
+                                 session.formLabel(e.key) + ": its cell offset table (OFST) points into " +
+                                     session.pluginName(e.winner == kInvalidPlugin ? e.key.origin : e.winner) +
+                                     "; written as zeros (no offsets), as the official DLC overrides write it",
+                                 e.key, op.name);
+                    }
             op.built.push_back(std::move(rec));
             op.placements.push_back(placement);
         }
