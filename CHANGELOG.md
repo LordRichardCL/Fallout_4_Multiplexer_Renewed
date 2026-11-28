@@ -9,6 +9,15 @@ Release policy (alpha):
 - Each entry has a **Tested** line: build verified, confirmed in game, or not yet.
 - Anything not yet confirmed in game stays off by default (Advanced preset).
 
+## 0.2.0-alpha-hotfix3 (27 Nov 2026) — Hotfix 3 for 0.2.0-alpha (includes Hotfixes 1 and 2)
+
+**Install:** close the app, extract `Fallout4MultiplexerRenewed-v0.2.0-alpha-hotfix3-windows-x64.zip` over the 0.2.0-alpha folder and replace the files. It holds only `Fallout4MultiplexerRenewed.exe` and `fo4mx.exe`. Hotfix 2's licence files are not in it: install Hotfix 2 first if you have not (or skip them; the programs are the same either way). The app shows "v0.2.0 alpha · Hotfix 3". Then scan, compile and export again.
+
+**Tested:** automated tests, and the owner's own files run through the app's code: every OMOD record of CombatRifle Receivers.esp decodes, the one with extra bytes keeps only those 7 zero bytes undescribed; Respawnable Legendary Bosses.esp's 43 placed NPCs decode completely; ghoulification.esm with its Program and HUDFramework scripts gives exactly one group (GHUL_Program and GHUL_HUDFramework, the two quests the 24 Nov build put into different outputs). Not yet a new build on the real load order.
+
+Fixed
+- **OMOD DATA with bytes past its own layout** (CombatRifle Receivers.esp: `mod_CombatRifle_Receiver_10mm` has 7 zero bytes after its last property). The whole subrecord used to stay undescribed, and its property count, read as a FormID, kept the plugin in the load order. Now the described part keeps its references and only the extra bytes stay undescribed; zero bytes cannot name a record, so the plugin compiles. Extra bytes that could name a record still keep it out.
+
 ## 0.2.0-alpha-hotfix2 (24 Nov 2026) — Hotfix 2 for 0.2.0-alpha (includes Hotfix 1)
 
 **Install:** close the app, extract `Fallout4MultiplexerRenewed-v0.2.0-alpha-hotfix2-windows-x64.zip` over the 0.2.0-alpha folder and replace the files. It holds only what changed: `Fallout4MultiplexerRenewed.exe`, `fo4mx.exe`, `LICENSE` and `LICENSE.txt`. It includes everything in Hotfix 1, so it is the only hotfix to install. The app shows "v0.2.0 alpha · Hotfix 2". Then scan, compile and export again, install the new output package as before, and check the MCM menus in game.

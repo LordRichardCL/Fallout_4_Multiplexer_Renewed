@@ -695,8 +695,15 @@ private:
             r.skip(static_cast<size_t>(itemCount) * 8);
             includes(r, i, includeCount);
             objectModProperties(r, i, propertyCount);
-            if (!r.atEnd())
-                throw FormatError(std::to_string(r.remaining()) + " trailing bytes");
+            // Bytes past the layout its own counts describe (CombatRifle Receivers.esp: 7 zero bytes after the
+            // last property): the described part keeps its slots, only those bytes stay undescribed (the
+            // validation lets them move only when they cannot name a record, e.g. all zero).
+            if (!r.atEnd()) {
+                issue(Severity::Info, sr.signature,
+                      "OMOD data: " + std::to_string(r.remaining()) + " bytes past the layout its counts describe "
+                      "(kept undescribed)");
+                heuristic(i, static_cast<uint32_t>(r.position()), static_cast<uint32_t>(sr.data.size()));
+            }
         } catch (const FormatError& e) {
             out_.formIdSlots.resize(slotsBefore);
             issue(Severity::Warning, sr.signature, std::string("OMOD data not decoded: ") + e.what());

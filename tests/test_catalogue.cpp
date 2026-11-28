@@ -721,3 +721,52 @@ TEST(partial_structs_with_complete_layouts_are_described)
     CHECK(!expl.valuesComplete);
     CHECK(!(expl.plain.size() == 1 && expl.plain[0].first == 0 && expl.plain[0].second == expl.valueSize));
 }
+
+// OMOD DATA with bytes past the layout its own counts describe: CombatRifle Receivers.esp's
+// mod_CombatRifle_Receiver_10mm holds 5 properties and then 7 zero bytes (171 bytes, the counts describe 164).
+// The whole subrecord used to stay undescribed, and its property count read as a FormID kept the plugin out.
+// Now the described part keeps its FormID slots and only the extra bytes stay undescribed.
+TEST(omod_data_with_bytes_past_its_layout_keeps_the_described_part)
+{
+    const auto& d = RecordDefinitions::get();
+    auto data = [](size_t trailing, uint8_t fill) {
+        std::vector<uint8_t> b;
+        auto u32 = [&](uint32_t v) {
+            for (int k = 0; k < 4; ++k)
+                b.push_back(static_cast<uint8_t>(v >> (8 * k)));
+        };
+        u32(0);                                // includes
+        u32(1);                                // properties
+        b.insert(b.end(), {0, 0});             // two bools
+        b.insert(b.end(), {'W', 'E', 'A', 'P'}); // form type
+        b.insert(b.end(), {0, 0});             // max rank, level tier scaled offset
+        u32(0x00024004);                       // attach point keyword
+        u32(1);                                // attach parent slots
+        u32(0x0005D4D7);
+        u32(0);                                // items
+        // One property: value type 4 (a form) at +0, its form at +12.
+        std::vector<uint8_t> prop(24, 0);
+        prop[0] = 4;
+        prop[12] = 0x9F;
+        prop[13] = 0x24;
+        prop[14] = 0x02;
+        b.insert(b.end(), prop.begin(), prop.end());
+        b.insert(b.end(), trailing, fill);
+        return b;
+    };
+    const Signature omod("OMOD");
+    // Exactly the described size: everything described, three FormID slots.
+    auto exact = decodeLayout(d, omod, {Subrecord(Signature("DATA"), data(0, 0))});
+    CHECK(exact.heuristic.empty());
+    CHECK_EQ(exact.formIdSlots.size(), size_t(3));
+    // Seven bytes past it: the same slots, only those bytes undescribed.
+    auto longer = decodeLayout(d, omod, {Subrecord(Signature("DATA"), data(7, 0))});
+    CHECK_EQ(longer.formIdSlots.size(), size_t(3));
+    CHECK_EQ(longer.heuristic.size(), size_t(1));
+    if (!longer.heuristic.empty()) {
+        CHECK_EQ(longer.heuristic[0].begin, uint32_t(56));
+        CHECK_EQ(longer.heuristic[0].end, uint32_t(63));
+    }
+    // Fewer than four: no FormID fits, nothing to report.
+    CHECK(decodeLayout(d, omod, {Subrecord(Signature("DATA"), data(3, 0xFF))}).heuristic.empty());
+}

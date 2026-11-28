@@ -7,7 +7,7 @@ project(Fallout4MultiplexerRenewed
 
 # The hotfix of this version the build is (0: the release itself). A hotfix replaces only the programs of the
 # release it fixes; CI packages it on a "v<version>-hotfix<N>" tag.
-set(FO4MX_HOTFIX 2)
+set(FO4MX_HOTFIX 3)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
